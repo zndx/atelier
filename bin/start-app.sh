@@ -23,6 +23,17 @@ else
   HOST="0.0.0.0"
 fi
 
+# Start Qdrant if binary is present (CAI deployment)
+if [ -x qdrant/qdrant ]; then
+  echo "Starting Qdrant on ports 6333/6334..."
+  mkdir -p .app/qdrant/storage
+  QDRANT__STORAGE__STORAGE_PATH=.app/qdrant/storage \
+  QDRANT__SERVICE__HTTP_PORT=6333 \
+  QDRANT__SERVICE__GRPC_PORT=6334 \
+  qdrant/qdrant &
+  sleep 2
+fi
+
 # Start gRPC server (background)
 echo "Starting gRPC server on port 50051..."
 uv run python -m atelier.server &

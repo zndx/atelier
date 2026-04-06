@@ -219,6 +219,7 @@ devenv.local.yaml
 
 # Atelier
 .app/
+qdrant/
 ui/dist/
 ui/node_modules/
 docs/book/

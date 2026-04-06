@@ -23,4 +23,8 @@ subprocess.run(
 )
 print("Node.js dependencies installed and UI built")
 
+# Install Qdrant binary
+subprocess.run(["bash", "scripts/install_qdrant.sh"], check=True)
+print("Qdrant installed")
+
 print("All dependencies installed successfully.")
