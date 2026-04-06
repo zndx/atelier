@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@electric-sql/pglite": "^0.4.0",
-    "@electric-sql/pglite-socket": "^0.0.13"
+    "@electric-sql/pglite": "0.3.8",
+    "@electric-sql/pglite-socket": "0.0.13"
   }
 }
