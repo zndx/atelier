@@ -85,6 +85,21 @@ Workflow: `just resolve-config` → `just preflight` → `devenv up`
 - `bin/start-app.sh` — Production service orchestrator
 - `scripts/startup_app.py` — CAI entry point (restart loop)
 
+## BDD Testing (behave)
+
+Feature files in `features/` organized by domain: infra, gateway, deployment, agent.
+Domain step definitions live in `<domain>/step_defs/` (not `steps/`) to avoid
+behave auto-discovery conflicts. Re-exported via `features/steps/__init__.py`.
+**Important:** Never name a features/ subdirectory after a stdlib module (e.g., `platform`).
+
+Tier system controls what runs:
+- `just bdd` — tier-0 only (pure Python, no services needed)
+- `just bdd-full` — tier-0 + tier-1 (requires devenv stack)
+- `@tier-cai` scenarios are documentation-only; skipped locally
+
+CAI Runtime Profile (`features/deployment/runtime_profile.feature`) validates
+deployment readiness without CAI access. Run before every push.
+
 ## Branch Convention
 
 - Main branch: `trunk`

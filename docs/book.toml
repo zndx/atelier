@@ -1,12 +1,11 @@
 [book]
 authors = ["Ryan Hill"]
 language = "en"
-multilingual = false
 src = "src"
 title = "Atelier"
 
 [preprocessor.d2]
 [preprocessor.mermaid]
-[preprocessor.katex]
+# katex preprocessor disabled (0.9.4 incompatible with mdbook 0.5.2)
 
 [output.html]

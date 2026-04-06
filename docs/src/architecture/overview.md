@@ -22,7 +22,9 @@ agents: Claude Agent SDK {
   tooltip: "Keystone agents\nAdaptive workflows"
 }
 
-db: SQLite State DB
+db: PostgreSQL {
+  tooltip: "devenv: PG 16 + pgvector\nCAI: PGlite (Node.js)"
+}
 
 ui -> gateway: REST /api/*
 gateway -> grpc: gRPC :50051

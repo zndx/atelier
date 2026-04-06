@@ -82,6 +82,18 @@ proto:
 test:
     uv run pytest
 
+# Run BDD scenarios (tier-0 only by default)
+bdd *ARGS:
+    ATELIER_BDD_TIER=0 uv run behave features/ {{ARGS}}
+
+# Run BDD with full stack (tier-0 + tier-1, requires devenv services)
+bdd-full *ARGS:
+    ATELIER_BDD_TIER=1 uv run behave features/ {{ARGS}}
+
+# Run only deployment runtime profile
+bdd-runtime:
+    ATELIER_BDD_TIER=0 uv run behave features/deployment/runtime_profile.feature
+
 # ── Documentation ─────────────────────────────────────────────────
 
 # Build mdbook docs
