@@ -5,5 +5,7 @@
 set -eox pipefail
 
 pip3 install -e .
+bash scripts/install_node.sh
+source scripts/load_nvm.sh
 cd scripts && npm install && cd ..
 cd ui && npm install && npm run build

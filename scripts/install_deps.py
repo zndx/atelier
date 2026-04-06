@@ -33,10 +33,18 @@ subprocess.run(
     check=True,
 )
 
+# Install Node.js via nvm (RAG Studio pattern)
+print("\n--- Installing Node.js ---")
+subprocess.run(["bash", "scripts/install_node.sh"], check=True)
+print("Node.js installed")
+
+# Source nvm so npm is on PATH for subsequent commands
+nvm_prefix = "source scripts/load_nvm.sh && "
+
 # Install PGlite server dependencies
 print("\n--- Installing PGlite ---")
 subprocess.run(
-    ["bash", "-c", "cd scripts && npm install"],
+    ["bash", "-c", nvm_prefix + "cd scripts && npm install"],
     check=True,
 )
 print("PGlite dependencies installed")
@@ -44,7 +52,7 @@ print("PGlite dependencies installed")
 # Install Node.js dependencies and build React frontend
 print("\n--- Building React UI ---")
 subprocess.run(
-    ["bash", "-c", "cd ui && npm install && npm run build"],
+    ["bash", "-c", nvm_prefix + "cd ui && npm install && npm run build"],
     check=True,
 )
 print("Node.js dependencies installed and UI built")

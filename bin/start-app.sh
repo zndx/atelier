@@ -26,6 +26,11 @@ fi
 # Ensure pip-installed tools are on PATH
 export PATH="$HOME/.local/bin:$PATH"
 
+# Load nvm so node/npm are available (installed by install_deps.py)
+if [ -f scripts/load_nvm.sh ]; then
+  source scripts/load_nvm.sh
+fi
+
 # Activate virtualenv if present (local dev with uv sync)
 if [ -f .venv/bin/activate ]; then
   echo "Activating virtualenv..."
