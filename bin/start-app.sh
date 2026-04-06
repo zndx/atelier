@@ -1,7 +1,7 @@
 #!/bin/bash
 # Atelier application orchestrator.
 # Starts gRPC server (background) + HTTP gateway (foreground).
-# Used by CML startup script and local production-like testing.
+# Used by CAI startup script and local production-like testing.
 set -eo pipefail
 
 cleanup() { pkill -P $$ 2>/dev/null || true; }
@@ -16,11 +16,22 @@ trap cleanup EXIT
 
 PORT=${1:-${CDSW_APP_PORT:-8090}}
 
-# CML's reverse proxy expects 127.0.0.1; local dev needs 0.0.0.0
+# CAI's reverse proxy expects 127.0.0.1; local dev needs 0.0.0.0
 if [ -n "$CDSW_APP_PORT" ]; then
   HOST="127.0.0.1"
 else
   HOST="0.0.0.0"
+fi
+
+# Ensure uv/pip-installed tools are on PATH (pip3 install puts them in ~/.local/bin)
+export PATH="$HOME/.local/bin:$PATH"
+
+# Prefer uv run, fall back to direct python if uv isn't available
+if command -v uv &>/dev/null; then
+  RUN="uv run"
+else
+  echo "Warning: uv not found, using python directly"
+  RUN="python -m"
 fi
 
 # Start Qdrant if binary is present (CAI deployment)
@@ -36,10 +47,14 @@ fi
 
 # Start gRPC server (background)
 echo "Starting gRPC server on port 50051..."
-uv run python -m atelier.server &
+$RUN atelier.server &
 
 sleep 3
 
 # Start HTTP gateway serving React build + REST-to-gRPC bridge
 echo "Starting HTTP gateway on $HOST:$PORT..."
-uv run uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
+if [ "$RUN" = "uv run" ]; then
+  uv run uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
+else
+  python -m uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
+fi

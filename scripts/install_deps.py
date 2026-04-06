@@ -1,15 +1,20 @@
-"""Install Atelier dependencies in CML environment."""
+"""Install Atelier dependencies in CAI environment."""
 
 import os
 import subprocess
+import sys
 
 root_dir = "/home/cdsw"
 if os.getenv("IS_COMPOSABLE", ""):
     root_dir = "/home/cdsw/atelier"
 os.chdir(root_dir)
 
+# Ensure ~/.local/bin is on PATH (where pip3 install --user puts binaries)
+local_bin = os.path.join(os.path.expanduser("~"), ".local", "bin")
+os.environ["PATH"] = local_bin + ":" + os.environ.get("PATH", "")
+
 # Ensure uv is available
-subprocess.run(["pip3", "install", "uv"], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "uv"], check=True)
 print("uv installed")
 
 # Install Python dependencies
