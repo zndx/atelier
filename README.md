@@ -79,23 +79,27 @@ There are two ways to deploy Atelier on Cloudera AI (CML): as an **AMP** (automa
 
 ### Option 1: AMP Deployment (Recommended)
 
-AMPs (Applied ML Prototypes) use `.project-metadata.yaml` to automate the full setup.
+AMPs (Applied ML Prototypes) use `.project-metadata.yaml` to automate the full setup. Atelier follows the modern `create_job`/`run_job` pattern (same as RAG Studio) — install jobs persist in the CML project and can be re-run from the **Jobs** tab without redeploying the AMP.
 
 1. In the CML UI, go to **AMPs** or create a new Project from Git URL
 2. Enter the repository URL: `https://github.com/zndx/atelier`
-3. CML parses `.project-metadata.yaml` and presents the defined tasks
-4. Run the tasks in order:
-   - **Install Dependencies** — installs uv, Python deps, Node.js deps, builds React, downloads Qdrant binary
-   - **Atelier** (start_application) — launches Qdrant, gRPC server (with embedded PostgreSQL via pgserver), and HTTP gateway on `CDSW_APP_PORT`
-5. Access the application at `https://atelier.<CDSW_DOMAIN>`
+3. CML parses `.project-metadata.yaml` and runs the tasks in order:
+
+| Step | Type | What it does |
+|------|------|-------------|
+| Install Dependencies | `create_job` + `run_job` | `pip install -e .` into system Python, `npm run build` for React UI, downloads Qdrant binary |
+| Atelier | `start_application` | Launches Qdrant, gRPC server (with pgserver), and HTTP gateway on `CDSW_APP_PORT` |
+
+4. Access the application at `https://atelier.<CDSW_DOMAIN>`
+
+> **Re-running install:** If dependencies need refreshing, go to **Jobs > Install Dependencies > Run** — no AMP redeploy required.
 
 ### Option 2: Manual Application Deployment
 
 1. Create a new CML Project from Git URL: `https://github.com/zndx/atelier`
 2. Open a **Session** (Python 3.10 kernel) and run:
    ```bash
-   !pip3 install uv
-   !uv sync --frozen
+   !pip3 install -e .
    !cd ui && npm install && npm run build
    !bash scripts/install_qdrant.sh
    ```
@@ -119,7 +123,6 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude Agent SDK | (none) |
-| `UV_HTTP_TIMEOUT` | uv HTTP request timeout in ms | 60000 |
 | `ATELIER_DB_URL` | PostgreSQL connection URI (overrides pgserver) | auto (pgserver) |
 | `QDRANT_HOST` | Qdrant hostname | localhost |
 | `QDRANT_PORT` | Qdrant HTTP port | 6333 |

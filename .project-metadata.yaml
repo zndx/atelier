@@ -13,10 +13,6 @@ environment_variables:
     default: ""
     description: "Anthropic API key for Claude Agent SDK"
     required: false
-  UV_HTTP_TIMEOUT:
-    default: "60000"
-    description: "UV HTTP request timeout in milliseconds"
-    required: false
 
 runtimes:
   - editor: PBJ Workbench
@@ -24,13 +20,21 @@ runtimes:
     edition: Standard
 
 tasks:
-  - type: run_session
+  - type: create_job
     name: Install Dependencies
+    entity_label: install_deps
     script: scripts/install_deps.py
-    short_summary: Install Python and Node.js dependencies
+    arguments: None
+    short_summary: Install Python packages, build React UI, download Qdrant binary.
     kernel: python3
     cpu: 2
-    memory: 4
+    memory: 8
+    environment:
+      TASK_TYPE: CREATE/RUN_JOB
+
+  - type: run_job
+    entity_label: install_deps
+    short_summary: Running install dependencies job.
 
   - type: start_application
     name: Atelier
