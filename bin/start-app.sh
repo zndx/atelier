@@ -30,7 +30,26 @@ export PATH="$HOME/.local/bin:$PATH"
 if [ -f .venv/bin/activate ]; then
   echo "Activating virtualenv..."
   source .venv/bin/activate
+elif [ -d .venv ]; then
+  echo "ERROR: .venv exists but has no bin/activate — corrupt virtualenv"
+  exit 1
+else
+  # No venv — install deps inline (handles case where Install task didn't run)
+  echo "No .venv found, installing dependencies..."
+  pip3 install uv 2>/dev/null || true
+  if command -v uv &>/dev/null; then
+    uv sync --frozen
+    source .venv/bin/activate
+  else
+    # Last resort: install directly into system python
+    echo "uv not available, installing with pip..."
+    pip3 install -e .
+    pip3 install uvicorn[standard]
+  fi
 fi
+
+echo "Python: $(which python)"
+echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 || echo 'NOT FOUND')"
 
 # Start Qdrant if binary is present (CAI deployment)
 if [ -x qdrant/qdrant ]; then
