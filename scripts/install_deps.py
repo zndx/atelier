@@ -1,4 +1,9 @@
-"""Install Atelier dependencies in CAI environment."""
+"""Install Atelier dependencies in CAI environment.
+
+Installs directly into system Python (no virtualenv) so that the
+Application session can find packages without venv activation.
+This matches the pattern used by RAG Studio and Fine Tuning Studio.
+"""
 
 import os
 import subprocess
@@ -9,16 +14,10 @@ if os.getenv("IS_COMPOSABLE", ""):
     root_dir = "/home/cdsw/atelier"
 os.chdir(root_dir)
 
-# Ensure ~/.local/bin is on PATH (where pip3 install --user puts binaries)
-local_bin = os.path.join(os.path.expanduser("~"), ".local", "bin")
-os.environ["PATH"] = local_bin + ":" + os.environ.get("PATH", "")
+pip = [sys.executable, "-m", "pip"]
 
-# Ensure uv is available
-subprocess.run([sys.executable, "-m", "pip", "install", "uv"], check=True)
-print("uv installed")
-
-# Install Python dependencies
-subprocess.run(["uv", "sync", "--frozen"], check=True)
+# Install Python package + dependencies into system Python
+subprocess.run([*pip, "install", "-e", "."], check=True)
 print("Python dependencies installed")
 
 # Install Node.js dependencies and build React frontend
