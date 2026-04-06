@@ -46,17 +46,26 @@ class AtelierDao:
         finally:
             session.close()
 
-    def list_datasets(self) -> list:
-        """Return all registered datasets."""
+    def list_datasets(self) -> list[dict]:
+        """Return all registered datasets as dicts."""
         from atelier.db.model import Dataset
         with self.get_session() as session:
-            return session.query(Dataset).all()
+            rows = session.query(Dataset).all()
+            return [
+                {"id": r.id, "name": r.name, "parquet_path": r.parquet_path,
+                 "description": r.description, "row_count": r.row_count}
+                for r in rows
+            ]
 
-    def get_dataset(self, dataset_id: str):
-        """Return a dataset by ID, or None."""
+    def get_dataset(self, dataset_id: str) -> dict | None:
+        """Return a dataset by ID as dict, or None."""
         from atelier.db.model import Dataset
         with self.get_session() as session:
-            return session.query(Dataset).filter_by(id=dataset_id).first()
+            r = session.query(Dataset).filter_by(id=dataset_id).first()
+            if r is None:
+                return None
+            return {"id": r.id, "name": r.name, "parquet_path": r.parquet_path,
+                    "description": r.description, "row_count": r.row_count}
 
     def upsert_dataset(self, dataset_id: str, name: str,
                        parquet_path: str, description: str = "",
@@ -68,11 +77,11 @@ class AtelierDao:
             if ds is None:
                 ds = Dataset(
                     id=dataset_id, name=name, parquet_path=parquet_path,
-                    description=description, row_count=str(row_count),
+                    description=description, row_count=row_count,
                 )
                 session.add(ds)
             else:
                 ds.name = name
                 ds.parquet_path = parquet_path
                 ds.description = description
-                ds.row_count = str(row_count)
+                ds.row_count = row_count

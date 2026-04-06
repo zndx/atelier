@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models for Atelier state."""
 
-from sqlalchemy import Column, String, Text
+from sqlalchemy import BigInteger, Column, String, Text
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -29,4 +29,4 @@ class Dataset(Base):
     name = Column(String, nullable=True)
     parquet_path = Column(String, nullable=True)
     description = Column(Text, nullable=True)
-    row_count = Column(String, nullable=True)
+    row_count = Column(BigInteger, nullable=True)

@@ -37,11 +37,11 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
         return atelier_pb2.ListDatasetsResponse(
             datasets=[
                 atelier_pb2.ClassificationDataset(
-                    id=ds.id,
-                    name=ds.name or "",
-                    parquet_path=ds.parquet_path or "",
-                    description=ds.description or "",
-                    row_count=int(ds.row_count or 0),
+                    id=ds["id"],
+                    name=ds["name"] or "",
+                    parquet_path=ds["parquet_path"] or "",
+                    description=ds["description"] or "",
+                    row_count=int(ds["row_count"] or 0),
                 )
                 for ds in datasets
             ]

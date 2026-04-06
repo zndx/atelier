@@ -68,6 +68,42 @@ if [ -x qdrant/qdrant ]; then
   sleep 2
 fi
 
+# Run database migrations
+echo "Running database migrations..."
+python -c "
+from atelier.config import load_config
+import subprocess, sys
+db_url = load_config().db_url.replace('+psycopg', '')
+result = subprocess.run(
+    ['dbmate', '--url', db_url, '--migrations-dir', 'db/migrations', '--no-dump-schema', 'up'],
+    capture_output=True, text=True
+)
+if result.returncode == 0:
+    print('Migrations applied')
+else:
+    # dbmate may not be installed (CAI); fall back to direct SQL
+    print(f'dbmate not available ({result.stderr.strip()}), skipping migrations')
+"
+
+# Seed datasets if parquet exists but DB is empty
+echo "Checking dataset seed..."
+python -c "
+from atelier.db.dao import AtelierDao
+from pathlib import Path
+dao = AtelierDao()
+existing = dao.list_datasets()
+if not existing and Path('data/gittables_sample.parquet').exists():
+    dao.upsert_dataset(
+        'gittables-sample', 'GitTables CTA Benchmark',
+        'data/gittables_sample.parquet',
+        '2517 columns from GitTables with 122 DBpedia instance labels',
+        2517,
+    )
+    print('Seeded gittables-sample dataset')
+else:
+    print(f'Seed check: {len(existing)} datasets already registered')
+"
+
 # Start gRPC server (background)
 echo "Starting gRPC server on port 50051..."
 python -m atelier.server &

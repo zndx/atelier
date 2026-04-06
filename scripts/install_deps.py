@@ -24,7 +24,7 @@ print(f"Working directory: {os.getcwd()}")
 
 # Install Python package + dependencies into system Python
 print("\n--- Installing Python dependencies ---")
-subprocess.run([*pip, "install", "-e", "."], check=True)
+subprocess.run([*pip, "install", "-e", ".[viz]"], check=True)
 print("Python dependencies installed")
 
 # Verify atelier is importable
@@ -61,5 +61,20 @@ print("Node.js dependencies installed and UI built")
 print("\n--- Installing Qdrant ---")
 subprocess.run(["bash", "scripts/install_qdrant.sh"], check=True)
 print("Qdrant installed")
+
+# Prepare GitTables visualization parquet if source is available
+gittables_source = os.environ.get("GITTABLES_EVAL_PARQUET", "")
+if gittables_source and os.path.exists(gittables_source):
+    print("\n--- Preparing GitTables visualization parquet ---")
+    subprocess.run(
+        [sys.executable, "scripts/prepare_gittables_sample.py",
+         "--input", gittables_source],
+        check=True,
+    )
+    print("GitTables parquet prepared")
+elif os.path.exists("data/gittables_sample.parquet"):
+    print("\n--- GitTables parquet already exists, skipping preparation ---")
+else:
+    print("\n--- Skipping GitTables preparation (set GITTABLES_EVAL_PARQUET to enable) ---")
 
 print("\n=== All dependencies installed successfully ===")
