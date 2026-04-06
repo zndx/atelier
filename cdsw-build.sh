@@ -5,4 +5,5 @@
 set -eox pipefail
 
 pip3 install -e .
+cd scripts && npm install && cd ..
 cd ui && npm install && npm run build

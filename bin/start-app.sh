@@ -41,6 +41,17 @@ fi
 echo "Python: $(which python)"
 echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 || echo 'NOT FOUND')"
 
+# Start PGlite if no external database configured
+if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
+  echo "Starting PGlite on port 5432..."
+  mkdir -p .app/pgdata
+  PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=5432 \
+    node scripts/pglite-server.mjs &
+  sleep 3
+  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+  echo "PGlite ready: $ATELIER_DB_URL"
+fi
+
 # Start Qdrant if binary is present (CAI deployment)
 if [ -x qdrant/qdrant ]; then
   echo "Starting Qdrant on ports 6333/6334..."

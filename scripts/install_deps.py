@@ -33,6 +33,14 @@ subprocess.run(
     check=True,
 )
 
+# Install PGlite server dependencies
+print("\n--- Installing PGlite ---")
+subprocess.run(
+    ["bash", "-c", "cd scripts && npm install"],
+    check=True,
+)
+print("PGlite dependencies installed")
+
 # Install Node.js dependencies and build React frontend
 print("\n--- Building React UI ---")
 subprocess.run(

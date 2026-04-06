@@ -21,7 +21,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 - **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules.
 - **HTTP Gateway** (`src/atelier/gateway.py`) — FastAPI bridging REST→gRPC, serves compiled React in production.
 - **React Frontend** (`ui/`) — Vite + React 19 + Ant Design + @xyflow/react. Dev server on :3000 proxies /api to :8090.
-- **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port 5533) for local dev; `pgserver` (pip-installed embedded PG) for CAI.
+- **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port 5533) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) for CAI when no external PG is available.
 - **Qdrant** — Vector store. devenv `pkgs.qdrant` process for local dev; binary download for CAI.
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
 - **Submodules** — `external/embedding-atlas` (fork), `external/hermes-agent` (fork). Dev-only, not used in CAI deployment.
@@ -79,7 +79,7 @@ Workflow: `just resolve-config` → `just preflight` → `devenv up`
 - `src/atelier/service.py` — gRPC servicer (router)
 - `src/atelier/gateway.py` — FastAPI HTTP gateway
 - `src/atelier/config.py` — Config loading, materialization, validation
-- `src/atelier/db/bootstrap.py` — pgserver lifecycle + migration runner for CAI
+- `src/atelier/db/bootstrap.py` — Migration runner for CAI (dbmate-compatible)
 - `db/migrations/` — dbmate-compatible SQL migrations
 - `.project-metadata.yaml` — CAI AMP deployment metadata
 - `bin/start-app.sh` — Production service orchestrator

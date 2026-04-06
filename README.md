@@ -87,8 +87,8 @@ AMPs (Applied ML Prototypes) use `.project-metadata.yaml` to automate the full s
 
 | Step | Type | What it does |
 |------|------|-------------|
-| Install Dependencies | `create_job` + `run_job` | `pip install -e .` into system Python, `npm run build` for React UI, downloads Qdrant binary |
-| Atelier | `start_application` | Launches Qdrant, gRPC server (with pgserver), and HTTP gateway on `CDSW_APP_PORT` |
+| Install Dependencies | `create_job` + `run_job` | `pip install -e .` into system Python, PGlite npm deps, `npm run build` for React UI, downloads Qdrant binary |
+| Atelier | `start_application` | Launches PGlite, Qdrant, gRPC server, and HTTP gateway on `CDSW_APP_PORT` |
 
 4. Access the application at `https://atelier.<CDSW_DOMAIN>`
 
@@ -114,7 +114,7 @@ AMPs (Applied ML Prototypes) use `.project-metadata.yaml` to automate the full s
 ### Entry Point
 
 The entry point for both methods is **`scripts/startup_app.py`**:
-- Starts Qdrant (background), gRPC with pgserver auto-bootstrap + migrations (background), FastAPI gateway (foreground)
+- Starts PGlite (background, if no `ATELIER_DB_URL` set), Qdrant (background), gRPC with auto-migrations (background), FastAPI gateway (foreground)
 - Binds to `127.0.0.1:$CDSW_APP_PORT` (CML's reverse proxy handles external routing)
 - Wraps execution in a restart loop for resilience
 
@@ -131,7 +131,7 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 
 | Component | Local (devenv) | CML |
 |-----------|---------------|-----|
-| PostgreSQL | `services.postgres` (PG 16 + pgvector, port 5533) | pgserver (pip-installed embedded PG) |
+| PostgreSQL | `services.postgres` (PG 16 + pgvector, port 5533) | PGlite (Node.js process, WASM PG + pgvector) |
 | Qdrant | `pkgs.qdrant` (devenv process) | Binary download from GitHub releases |
 | Migrations | `just migrate` (dbmate CLI) | Auto-applied on startup via SQLAlchemy |
 | Node.js | pnpm (via devenv) | npm (CML base image) |
@@ -142,7 +142,7 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 - **gRPC Core Service** — Proto-first API (port 50051)
 - **FastAPI HTTP Gateway** — Serves React build + bridges REST to gRPC
 - **React Frontend** — Ant Design UI with XYFlow canvas for agent workflows
-- **PostgreSQL** — State persistence (devenv or pgserver embedded)
+- **PostgreSQL** — State persistence (devenv or PGlite on CAI)
 - **Qdrant** — Vector store for embedding search
 - **Claude Agent SDK** — Keystone agents for classification orchestration
 - **embedding-atlas** — Interactive parquet visualization

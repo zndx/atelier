@@ -14,16 +14,11 @@ log = logging.getLogger(__name__)
 
 
 def _bootstrap_db(cfg):
-    """Bootstrap embedded PostgreSQL + migrations on CAI when no DB URL is configured."""
-    if os.environ.get("ATELIER_DB_URL"):
-        return  # Explicit URL set — nothing to bootstrap
-
+    """Run database migrations on CAI. PGlite is started externally by start-app.sh."""
     if cfg.is_cml:
-        from atelier.db.bootstrap import ensure_database, run_migrations
-        db_url = ensure_database()
-        cfg.db_url = db_url
-        run_migrations(db_url)
-        log.info("Embedded PostgreSQL bootstrapped for CML: %s", db_url)
+        from atelier.db.bootstrap import run_migrations
+        run_migrations(cfg.db_url)
+        log.info("Migrations applied: %s", cfg.db_url)
 
 
 def serve(blocking: bool = True) -> grpc.Server:

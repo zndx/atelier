@@ -222,4 +222,5 @@ devenv.local.yaml
 qdrant/
 ui/dist/
 ui/node_modules/
+scripts/node_modules/
 docs/book/
