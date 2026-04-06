@@ -23,15 +23,13 @@ else
   HOST="0.0.0.0"
 fi
 
-# Ensure uv/pip-installed tools are on PATH (pip3 install puts them in ~/.local/bin)
+# Ensure pip-installed tools are on PATH
 export PATH="$HOME/.local/bin:$PATH"
 
-# Prefer uv run, fall back to direct python if uv isn't available
-if command -v uv &>/dev/null; then
-  RUN="uv run"
-else
-  echo "Warning: uv not found, using python directly"
-  RUN="python -m"
+# Activate virtualenv if present (created by uv sync during install)
+if [ -f .venv/bin/activate ]; then
+  echo "Activating virtualenv..."
+  source .venv/bin/activate
 fi
 
 # Start Qdrant if binary is present (CAI deployment)
@@ -47,14 +45,10 @@ fi
 
 # Start gRPC server (background)
 echo "Starting gRPC server on port 50051..."
-$RUN atelier.server &
+python -m atelier.server &
 
 sleep 3
 
 # Start HTTP gateway serving React build + REST-to-gRPC bridge
 echo "Starting HTTP gateway on $HOST:$PORT..."
-if [ "$RUN" = "uv run" ]; then
-  uv run uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
-else
-  python -m uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
-fi
+python -m uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
