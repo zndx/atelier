@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "atelier"
+version = "0.1.0"
+description = "Agentic classification workbench for Cloudera AI"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "grpcio>=1.65.0",
+    "grpcio-tools>=1.65.0",
+    "protobuf>=5.27.0",
+    "pyhocon>=0.3.61",
+    "sqlalchemy>=2.0.0",
+    "uvicorn[standard]>=0.30.0",
+    "fastapi>=0.115.0",
+]
+
+[project.optional-dependencies]
+agents = [
+    "claude-agent-sdk>=0.1.0",
+    "anthropic>=0.84.0",
+]
+viz = [
+    "pyarrow>=18.0.0",
+    "pandas>=2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27.0",
+    "autopep8>=2.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atelier"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
