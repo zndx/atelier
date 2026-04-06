@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "grpcio>=1.65.0",
     "grpcio-tools>=1.65.0",
-    "protobuf>=5.27.0,<6",
+    "protobuf>=5.27.0",
     "pyhocon>=0.3.61",
     "sqlalchemy>=2.0.0",
     "psycopg[binary]>=3.2.0",
