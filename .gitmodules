@@ -1,0 +1,6 @@
+[submodule "external/embedding-atlas"]
+	path = external/embedding-atlas
+	url = git@github.com:rch/oss-embedding-atlas.git
+[submodule "external/hermes-agent"]
+	path = external/hermes-agent
+	url = git@github.com:zndx/oss-hermes-agent.git
