@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package atelier;
+
+// ── Health ────────────────────────────────────────────────────────
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+}
+
+// ── Agents ────────────────────────────────────────────────────────
+
+message AgentMetadata {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string role = 4;
+  repeated string tool_ids = 5;
+}
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+  repeated AgentMetadata agents = 1;
+}
+
+message GetAgentRequest {
+  string id = 1;
+}
+
+message GetAgentResponse {
+  AgentMetadata agent = 1;
+}
+
+// ── Classification Datasets ───────────────────────────────────────
+
+message ClassificationDataset {
+  string id = 1;
+  string name = 2;
+  string parquet_path = 3;
+  string description = 4;
+  int64 row_count = 5;
+}
+
+message ListDatasetsRequest {}
+
+message ListDatasetsResponse {
+  repeated ClassificationDataset datasets = 1;
+}
+
+// ── Service ───────────────────────────────────────────────────────
+
+service Atelier {
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse) {}
+  rpc ListAgents (ListAgentsRequest) returns (ListAgentsResponse) {}
+  rpc GetAgent (GetAgentRequest) returns (GetAgentResponse) {}
+  rpc ListDatasets (ListDatasetsRequest) returns (ListDatasetsResponse) {}
+}
