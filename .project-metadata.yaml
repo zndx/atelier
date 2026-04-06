@@ -1,0 +1,44 @@
+name: Atelier
+description: |
+  Agentic classification workbench powered by the Claude Agent SDK
+  with interactive embedding visualization and adaptive keystone-agent
+  orchestration for Cloudera AI.
+author: "Cloudera Inc."
+date: "2026-04-05"
+specification_version: 1.0
+prototype_version: 0.1.0
+
+environment_variables:
+  ANTHROPIC_API_KEY:
+    default: ""
+    description: "Anthropic API key for Claude Agent SDK"
+    required: false
+  UV_HTTP_TIMEOUT:
+    default: "60000"
+    description: "UV HTTP request timeout in milliseconds"
+    required: false
+
+runtimes:
+  - editor: PBJ Workbench
+    kernel: Python 3.10
+    edition: Standard
+
+tasks:
+  - type: run_session
+    name: Install Dependencies
+    script: scripts/install_deps.py
+    short_summary: Install Python and Node.js dependencies
+    kernel: python3
+    cpu: 2
+    memory: 4
+
+  - type: start_application
+    name: Atelier
+    subdomain: atelier
+    script: scripts/startup_app.py
+    short_summary: Start Atelier gRPC service and web UI
+    bypass_authentication: false
+    cpu: 2
+    memory: 4
+    environment_variables:
+      TASK_TYPE: START_APPLICATION

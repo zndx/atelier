@@ -1,0 +1,19 @@
+name: Atelier
+
+entries:
+  - title: Atelier
+    label: atelier
+    short_description: |
+      Agentic classification workbench with Claude Agent SDK and embedding-atlas visualization.
+    long_description: |
+      Atelier is an agentic classification workbench built on the Cloudera AI platform.
+      It leverages the Claude Agent SDK for adaptive keystone-agent orchestration and
+      embedding-atlas for interactive visualization of classification results.
+    tags:
+      - AI
+      - Agents
+      - Classification
+    git_url: "https://github.com/zndx/atelier"
+    git_ref: "trunk"
+    is_prototype: true
+    is_new: true
