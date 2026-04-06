@@ -45,3 +45,34 @@ class AtelierDao:
             raise
         finally:
             session.close()
+
+    def list_datasets(self) -> list:
+        """Return all registered datasets."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            return session.query(Dataset).all()
+
+    def get_dataset(self, dataset_id: str):
+        """Return a dataset by ID, or None."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            return session.query(Dataset).filter_by(id=dataset_id).first()
+
+    def upsert_dataset(self, dataset_id: str, name: str,
+                       parquet_path: str, description: str = "",
+                       row_count: int = 0):
+        """Insert or update a dataset record."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            ds = session.query(Dataset).filter_by(id=dataset_id).first()
+            if ds is None:
+                ds = Dataset(
+                    id=dataset_id, name=name, parquet_path=parquet_path,
+                    description=description, row_count=str(row_count),
+                )
+                session.add(ds)
+            else:
+                ds.name = name
+                ds.parquet_path = parquet_path
+                ds.description = description
+                ds.row_count = str(row_count)

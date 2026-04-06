@@ -1,6 +1,8 @@
 import { ConfigProvider, theme } from "antd";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
+import EmbeddingsViewer from "./pages/EmbeddingsViewer";
 
 function App() {
   return (
@@ -13,9 +15,26 @@ function App() {
         },
       }}
     >
-      <Layout>
-        <Landing />
-      </Layout>
+      <BrowserRouter>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <Layout>
+                <Landing />
+              </Layout>
+            }
+          />
+          <Route
+            path="/embeddings/:datasetId"
+            element={
+              <Layout>
+                <EmbeddingsViewer />
+              </Layout>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
     </ConfigProvider>
   );
 }

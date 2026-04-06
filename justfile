@@ -62,6 +62,14 @@ migrate-down:
 migrate-status:
     dbmate --url "$(uv run python -c 'from atelier.config import load_config; print(load_config().db_url.replace("+psycopg", ""))')" --migrations-dir db/migrations status
 
+# Seed database with sample datasets
+seed:
+    uv run python -c "from atelier.db.dao import AtelierDao; dao = AtelierDao(); dao.upsert_dataset('gittables-sample', 'GitTables CTA Benchmark', 'data/gittables_sample.parquet', '2517 columns from GitTables with 122 DBpedia instance labels as controlled vocabulary', 2517); print('Seeded gittables-sample dataset')"
+
+# Prepare GitTables visualization parquet from signals eval output
+prepare-gittables input:
+    uv run python scripts/prepare_gittables_sample.py --input {{input}}
+
 # ── Build ─────────────────────────────────────────────────────────
 
 # Install all dependencies

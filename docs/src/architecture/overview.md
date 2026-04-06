@@ -7,7 +7,7 @@ direction: down
 
 ui: React Frontend {
   canvas: XYFlow Agent Canvas
-  atlas: embedding-atlas Viewer
+  embeddings: Embeddings Viewer
 }
 
 gateway: FastAPI HTTP Gateway {

@@ -9,3 +9,4 @@ from features.infra.step_defs.config_steps import *  # noqa: F401,F403
 from features.infra.step_defs.health_steps import *  # noqa: F401,F403
 from features.deployment.step_defs.runtime_steps import *  # noqa: F401,F403
 from features.deployment.step_defs.amp_steps import *  # noqa: F401,F403
+from features.deployment.step_defs.naming_steps import *  # noqa: F401,F403

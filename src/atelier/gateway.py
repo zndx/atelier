@@ -16,6 +16,8 @@ from atelier.proto import atelier_pb2
 
 app = FastAPI(title="Atelier", version="0.1.0")
 
+_project_root = Path(__file__).resolve().parent.parent.parent
+
 _client: AtelierClient | None = None
 
 
@@ -62,12 +64,37 @@ async def list_datasets():
             {
                 "id": d.id,
                 "name": d.name,
+                "description": d.description,
                 "parquet_path": d.parquet_path,
                 "row_count": d.row_count,
             }
             for d in resp.datasets
         ]
     }
+
+
+@app.get("/api/datasets/{dataset_id}/data")
+async def get_dataset_data(dataset_id: str):
+    """Serve a dataset's parquet file for the Embeddings Viewer."""
+    from fastapi.responses import Response
+
+    client = _get_client()
+    resp = client.stub.ListDatasets(atelier_pb2.ListDatasetsRequest())
+    dataset = next((d for d in resp.datasets if d.id == dataset_id), None)
+    if dataset is None:
+        return Response(status_code=404, content="Dataset not found")
+
+    parquet_path = Path(dataset.parquet_path)
+    if not parquet_path.is_absolute():
+        parquet_path = _project_root / parquet_path
+    if not parquet_path.exists():
+        return Response(status_code=404, content="Parquet file not found")
+
+    return FileResponse(
+        str(parquet_path),
+        media_type="application/octet-stream",
+        filename=f"{dataset_id}.parquet",
+    )
 
 
 # ── Serve React build (production) ───────────────────────────────

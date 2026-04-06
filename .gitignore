@@ -224,3 +224,5 @@ ui/dist/
 ui/node_modules/
 scripts/node_modules/
 docs/book/
+data/*.parquet
+data/*.json

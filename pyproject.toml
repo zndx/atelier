@@ -28,6 +28,8 @@ agents = [
 viz = [
     "pyarrow>=18.0.0",
     "pandas>=2.2.0",
+    "sentence-transformers>=3.0.0",
+    "umap-learn>=0.5.0",
 ]
 
 [dependency-groups]

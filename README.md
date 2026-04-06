@@ -1,6 +1,6 @@
 # Atelier
 
-Agentic classification workbench for Cloudera AI. Combines the Claude Agent SDK for adaptive keystone-agent orchestration with embedding-atlas for interactive visualization of classification results produced by the [signals](https://github.com/rch/signals) pipeline.
+Agentic classification workbench for Cloudera AI. Combines the Claude Agent SDK for adaptive keystone-agent orchestration with an Embeddings Viewer for interactive visualization of classification results produced by the [signals](https://github.com/rch/signals) pipeline.
 
 ## Development Environment
 
@@ -67,7 +67,7 @@ The `.env` file is loaded automatically via `dotenv.enable = true`. Copy `.env.e
 
 ### Git submodules
 
-The `external/` directory contains development reference submodules (embedding-atlas, hermes-agent). These are for local development only and are **not required** for deployment.
+The `external/` directory contains development reference submodules ([embedding-atlas](https://github.com/apple/embedding-atlas), hermes-agent). These are for local development only and are **not required** for deployment.
 
 ```bash
 git submodule update --init --recursive   # Optional: fetch submodule sources
@@ -145,7 +145,7 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 - **PostgreSQL** — State persistence (devenv or PGlite on CAI)
 - **Qdrant** — Vector store for embedding search
 - **Claude Agent SDK** — Keystone agents for classification orchestration
-- **embedding-atlas** — Interactive parquet visualization
+- **Embeddings Viewer** — Interactive parquet visualization (powered by [embedding-atlas](https://github.com/apple/embedding-atlas))
 - **HOCON Configuration** — Single source of truth with env var substitution
 
 ## Documentation

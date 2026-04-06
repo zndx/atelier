@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Prepare a GitTables visualization-ready parquet for the Embeddings Viewer.
+
+Reads the signals pipeline's gittables_eval.parquet (which already contains
+classification results, DST evidence fusion, and SAGE importance), computes
+sentence-transformer embeddings + UMAP projection, and outputs a parquet
+compatible with embedding-atlas.
+
+Usage:
+    # From signals eval output (recommended)
+    uv run python scripts/prepare_gittables_sample.py \
+        --input ~/local/src/cldr/signals/build/gittables_eval.parquet
+
+    # Or from raw columns parquet (download first via signals scripts)
+    uv run python scripts/prepare_gittables_sample.py \
+        --input ~/local/src/cldr/signals/build/datasets/gittables/gittables_columns.parquet
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(
+        description="Prepare GitTables visualization parquet for Embeddings Viewer",
+    )
+    p.add_argument(
+        "--input", required=True,
+        help="Input parquet (signals gittables_eval.parquet or gittables_columns.parquet)",
+    )
+    p.add_argument(
+        "--output", default="data/gittables_sample.parquet",
+        help="Output parquet path (default: data/gittables_sample.parquet)",
+    )
+    p.add_argument(
+        "--model", default="all-MiniLM-L6-v2",
+        help="Sentence transformer model (default: all-MiniLM-L6-v2)",
+    )
+    args = p.parse_args(argv)
+
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not input_path.exists():
+        print(f"Error: {input_path} not found", file=sys.stderr)
+        print("Run the signals pipeline first, or use --input to point to "
+              "an existing gittables parquet.", file=sys.stderr)
+        return 1
+
+    import numpy as np
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    # ── Load input ───────────────────────────────────────────────
+    print(f"Reading {input_path}...")
+    table = pq.read_table(str(input_path))
+    columns = set(table.column_names)
+    n_rows = table.num_rows
+    print(f"  {n_rows} rows, {len(columns)} columns")
+
+    # Detect input type: eval parquet (has belief/plausibility) or raw columns
+    is_eval = "belief" in columns and "tag_label" in columns
+
+    # ── Build embedding texts ────────────────────────────────────
+    if "embedding_text" in columns:
+        # Eval parquet already has rich embedding text
+        texts = table.column("embedding_text").to_pylist()
+        print("  Using existing embedding_text column")
+    else:
+        # Raw columns — build from column_name + sample_values
+        col_names = table.column("column_name").to_pylist()
+        samples = table.column("sample_values").to_pylist()
+        texts = []
+        for name, sv in zip(col_names, samples):
+            import json
+            vals = json.loads(sv) if sv else []
+            parts = [f"column: {name}"]
+            if vals:
+                parts.append(f"values: {', '.join(vals[:3])}")
+            texts.append(" | ".join(parts))
+        print("  Built embedding text from column_name + sample_values")
+
+    # ── Compute embeddings ───────────────────────────────────────
+    print(f"Computing embeddings with {args.model}...")
+    from sentence_transformers import SentenceTransformer
+
+    model = SentenceTransformer(args.model)
+    embeddings = model.encode(texts, show_progress_bar=True, batch_size=256)
+    print(f"  Shape: {embeddings.shape}")
+
+    # ── UMAP projection ──────────────────────────────────────────
+    print("Running UMAP projection...")
+    import umap
+
+    reducer = umap.UMAP(
+        n_components=2,
+        n_neighbors=15,
+        min_dist=0.1,
+        metric="cosine",
+        random_state=42,
+    )
+    projection = reducer.fit_transform(embeddings)
+    x = projection[:, 0].astype(np.float32)
+    y = projection[:, 1].astype(np.float32)
+
+    # ── Build output table ───────────────────────────────────────
+    print(f"Writing {output_path}...")
+
+    out_columns = {
+        "id": pa.array([f"col_{i:05d}" for i in range(n_rows)], type=pa.string()),
+        "x": pa.array(x, type=pa.float32()),
+        "y": pa.array(y, type=pa.float32()),
+        "text": pa.array(texts, type=pa.string()),
+    }
+
+    # Category: use gt_code (ground truth) if available, else tag_label
+    if "gt_code" in columns:
+        out_columns["category"] = table.column("gt_code")
+    elif "tag_label" in columns:
+        out_columns["category"] = table.column("tag_label")
+    elif "column_type" in columns:
+        out_columns["category"] = table.column("column_type")
+
+    # Carry forward useful columns from the eval parquet
+    for col in ["source_table", "column_name", "sample_values", "column_kind"]:
+        if col in columns:
+            out_columns[col] = table.column(col)
+
+    # DST evidence fusion columns (the rich classification data)
+    if is_eval:
+        for col in ["tag_label", "confidence", "belief", "plausibility",
+                     "uncertainty_gap", "conflict", "needs_clarification",
+                     "ml_tag_label", "ml_confidence", "correct", "ml_correct"]:
+            if col in columns:
+                out_columns[col] = table.column(col)
+
+    out_table = pa.table(out_columns)
+    pq.write_table(out_table, str(output_path))
+
+    # ── Summary ──────────────────────────────────────────────────
+    if "category" in out_columns:
+        cats = out_columns["category"].to_pylist()
+        unique_cats = set(cats)
+        from collections import Counter
+        print(f"\nWrote {output_path}")
+        print(f"  Rows: {n_rows}")
+        print(f"  Categories: {len(unique_cats)}")
+        print(f"  Top categories:")
+        for cat, count in Counter(cats).most_common(10):
+            print(f"    {cat}: {count}")
+    else:
+        print(f"\nWrote {output_path} ({n_rows} rows)")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

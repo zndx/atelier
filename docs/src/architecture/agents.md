@@ -6,7 +6,7 @@ Keystone agents are defined using the Claude Agent SDK and orchestrate the class
 
 - **Classifier** — Drives the classification pipeline against a taxonomy
 - **Evidence Fuser** — Combines signals from multiple evidence sources using Dempster-Shafer theory
-- **Visualization Director** — Curates embedding-atlas views for different personas
+- **Visualization Director** — Curates Embeddings Viewer layouts for different personas
 
 ## Evolution
 

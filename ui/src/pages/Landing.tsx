@@ -6,6 +6,7 @@ import {
   ExperimentOutlined,
 } from "@ant-design/icons";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 const { Title, Paragraph } = Typography;
 
@@ -14,14 +15,33 @@ interface HealthStatus {
   version: string;
 }
 
+interface DatasetInfo {
+  id: string;
+  name: string;
+  description: string;
+  row_count: number;
+}
+
 function Landing() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [agents, setAgents] = useState<unknown[]>([]);
+  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
 
   useEffect(() => {
     fetch("/api/health")
       .then((r) => r.json())
       .then(setHealth)
       .catch(() => setHealth(null));
+
+    fetch("/api/agents")
+      .then((r) => r.json())
+      .then((data) => setAgents(data.agents || []))
+      .catch(() => setAgents([]));
+
+    fetch("/api/datasets")
+      .then((r) => r.json())
+      .then((data) => setDatasets(data.datasets || []))
+      .catch(() => setDatasets([]));
   }, []);
 
   return (
@@ -53,7 +73,7 @@ function Landing() {
           <Card>
             <Statistic
               title="Keystone Agents"
-              value={0}
+              value={agents.length}
               prefix={<ExperimentOutlined />}
             />
           </Card>
@@ -62,7 +82,7 @@ function Landing() {
           <Card>
             <Statistic
               title="Datasets"
-              value={0}
+              value={datasets.length}
               prefix={<DotChartOutlined />}
             />
           </Card>
@@ -73,6 +93,11 @@ function Landing() {
               title="Workflows"
               value={0}
               prefix={<ClusterOutlined />}
+              suffix={
+                <Tag color="default" style={{ marginLeft: 8, fontSize: 11 }}>
+                  planned
+                </Tag>
+              }
             />
           </Card>
         </Col>
@@ -94,15 +119,26 @@ function Landing() {
         </Col>
         <Col xs={24} md={8}>
           <Card
-            title="Atlas Viewer"
+            title="Embeddings Viewer"
             extra={<DotChartOutlined />}
             hoverable
             style={{ height: "100%" }}
           >
             <Paragraph type="secondary">
-              Interactive embedding visualization powered by embedding-atlas.
-              Explore classification results from the signals pipeline.
+              Interactive visualization of classification embeddings.
+              Explore results from the signals pipeline.
             </Paragraph>
+            {datasets.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                {datasets.map((ds) => (
+                  <Link key={ds.id} to={`/embeddings/${ds.id}`}>
+                    <Tag color="blue" style={{ cursor: "pointer", marginBottom: 4 }}>
+                      {ds.name} ({ds.row_count} rows)
+                    </Tag>
+                  </Link>
+                ))}
+              </div>
+            )}
           </Card>
         </Col>
         <Col xs={24} md={8}>
@@ -116,6 +152,9 @@ function Landing() {
               XYFlow canvas illustrating relationships between keystone agents
               and their evolution over time.
             </Paragraph>
+            <Tag color="default" style={{ marginTop: 8 }}>
+              Planned
+            </Tag>
           </Card>
         </Col>
       </Row>

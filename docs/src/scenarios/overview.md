@@ -6,7 +6,7 @@ These aren't just tests. They're the design context that connects architectural 
 
 ## Active Domains
 
-**24 scenarios across 8 features, 2 domains.**
+**30 scenarios across 10 features, 2 domains.**
 
 ### Infrastructure (infra)
 
@@ -29,12 +29,14 @@ CAI deployment modalities and the runtime profile that catches failures before p
 | AMP lifecycle | `@amp` | 0 + cai | 5 | `.project-metadata.yaml` structure, task patterns, install + start |
 | Application modality | `@application` | 0 + 1 | 3 | HOST binding logic, full local stack startup |
 | Studio modality | `@studio` | 0 | 2 | `IS_COMPOSABLE` root directory routing |
+| Embeddings Viewer integration | `@embeddings` | 0 | 4 | npm dependency, page component, React Router, preparation script |
+| Naming conventions | `@naming` | 0 | 2 | User-facing surfaces say "Embeddings Viewer", no Apache Atlas confusion |
 
 ### By Tier
 
 | Tier | Requires | Scenarios | Pass locally |
 |------|----------|-----------|--------------|
-| 0 | Python only | 18 | Yes |
+| 0 | Python only | 24 | Yes |
 | 1 | devenv stack | 4 | Yes (with `devenv up`) |
 | cai | Live CAI session | 2 | Skipped (documentation-only) |
 
@@ -46,7 +48,7 @@ HTTP gateway and gRPC health checks. Will cover REST-to-gRPC bridge correctness,
 
 ### Agent (stub)
 
-Claude Agent SDK orchestration. Will cover keystone agent lifecycle, classification workflow execution, and embedding-atlas integration.
+Claude Agent SDK orchestration. Will cover keystone agent lifecycle, classification workflow execution, and Embeddings Viewer integration.
 
 ## Why BDD for a Deployment Platform?
 
