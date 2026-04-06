@@ -12,6 +12,7 @@
     gh
     jq
     just
+    ripgrep
 
     # Kerberos / Security
     krb5
