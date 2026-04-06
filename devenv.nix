@@ -32,6 +32,7 @@
 
     # Database
     dbmate
+    qdrant
 
     # Documentation
     mdbook
@@ -64,11 +65,28 @@
     pnpm.enable = true;
   };
 
+  # PostgreSQL 16 with pgvector
+  services.postgres = {
+    enable = true;
+    package = pkgs.postgresql_16;
+    port = 5533;
+    listen_addresses = "127.0.0.1";
+    extensions = extensions: [ extensions.pgvector ];
+    initialDatabases = [{ name = "atelier"; }];
+  };
+
   # Process management: `devenv up` starts all services
   processes = {
     grpc-server.exec = "uv run python -m atelier.server";
     gateway.exec = "uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port 8090";
     vite-dev.exec = "cd ui && pnpm dev";
+    qdrant.exec = ''
+      mkdir -p $DEVENV_STATE/qdrant
+      QDRANT__STORAGE__STORAGE_PATH=$DEVENV_STATE/qdrant/storage \
+      QDRANT__SERVICE__HTTP_PORT=6333 \
+      QDRANT__SERVICE__GRPC_PORT=6334 \
+      ${pkgs.qdrant}/bin/qdrant
+    '';
   };
 
   scripts.hello.exec = ''

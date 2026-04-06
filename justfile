@@ -48,6 +48,20 @@ gateway:
     env -i $(cat build/config/atelier.env 2>/dev/null | xargs) PATH="$$PATH" \
         uv run uvicorn atelier.gateway:app --reload --host 0.0.0.0 --port 8090
 
+# ── Database ─────────────────────────────────────────────────────
+
+# Run dbmate migrations against the configured database
+migrate:
+    dbmate --url "$(uv run python -c 'from atelier.config import load_config; print(load_config().db_url.replace("+psycopg", ""))')" --migrations-dir db/migrations up
+
+# Rollback last migration
+migrate-down:
+    dbmate --url "$(uv run python -c 'from atelier.config import load_config; print(load_config().db_url.replace("+psycopg", ""))')" --migrations-dir db/migrations down
+
+# Show migration status
+migrate-status:
+    dbmate --url "$(uv run python -c 'from atelier.config import load_config; print(load_config().db_url.replace("+psycopg", ""))')" --migrations-dir db/migrations status
+
 # ── Build ─────────────────────────────────────────────────────────
 
 # Install all dependencies

@@ -50,6 +50,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "agents.model": ("agent_model", str),
     "agents.permission_mode": ("agent_permission_mode", str),
     "db.url": ("db_url", str),
+    "qdrant.host": ("qdrant_host", str),
+    "qdrant.http_port": ("qdrant_http_port", int),
+    "qdrant.grpc_port": ("qdrant_grpc_port", int),
     "data.parquet_dir": ("parquet_dir", str),
     "cml.project_id": ("cml_project_id", str),
     "cml.domain": ("cml_domain", str),
@@ -67,6 +70,12 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "CDSW_" + _field[4:].upper()
     elif _field == "gateway_port":
         _env = "ATELIER_GATEWAY_PORT"
+    elif _field == "qdrant_host":
+        _env = "QDRANT_HOST"
+    elif _field == "qdrant_http_port":
+        _env = "QDRANT_PORT"
+    elif _field == "qdrant_grpc_port":
+        _env = "QDRANT_GRPC_PORT"
     _FIELD_TO_ENV[_field] = _env
 
 
@@ -89,7 +98,12 @@ class AtelierConfig:
     agent_permission_mode: str = "dontAsk"
 
     # Database
-    db_url: str = "sqlite+pysqlite:///.app/state.db"
+    db_url: str = "postgresql+psycopg://localhost:5533/atelier"
+
+    # Qdrant
+    qdrant_host: str = "localhost"
+    qdrant_http_port: int = 6333
+    qdrant_grpc_port: int = 6334
 
     # Data
     parquet_dir: str = "build/data"
