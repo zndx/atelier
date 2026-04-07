@@ -16,6 +16,30 @@ trap cleanup EXIT
 
 PORT=${1:-${CDSW_APP_PORT:-8090}}
 
+# ── Service readiness helpers ────────────────────────────────────
+
+wait_for_service() {
+    local name="$1" check_cmd="$2" timeout="${3:-30}" interval="${4:-2}"
+    local deadline=$((SECONDS + timeout))
+    echo "Waiting for $name..."
+    while [ $SECONDS -lt $deadline ]; do
+        if eval "$check_cmd" > /dev/null 2>&1; then
+            echo "$name ready"
+            return 0
+        fi
+        sleep "$interval"
+    done
+    echo "ERROR: $name not healthy after ${timeout}s" >&2
+    return 1
+}
+
+wait_for_pg() {
+    local db_url="$1" timeout="${2:-30}"
+    wait_for_service "PostgreSQL" \
+        "python -c \"from sqlalchemy import create_engine, text; e = create_engine('$db_url'); c = e.connect(); c.execute(text('SELECT 1')); c.close(); e.dispose()\"" \
+        "$timeout"
+}
+
 # CAI's reverse proxy expects 127.0.0.1; local dev needs 0.0.0.0
 if [ -n "$CDSW_APP_PORT" ]; then
   HOST="127.0.0.1"
@@ -25,6 +49,12 @@ fi
 
 # Ensure pip-installed tools are on PATH
 export PATH="$HOME/.local/bin:$PATH"
+
+# Hydrate HOCON config from current environment into build artifacts.
+# AMP: env vars come from CML platform (.project-metadata.yaml environment_variables).
+# Local: env vars come from the calling shell.
+python bin/resolve-config.py
+set -a && source build/config/atelier.env && set +a
 
 # Load nvm so node/npm are available (installed by install_deps.py)
 if [ -f scripts/load_nvm.sh ]; then
@@ -52,9 +82,8 @@ if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   mkdir -p .app/pgdata
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=5432 \
     node scripts/pglite-server.mjs &
-  sleep 3
   export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
-  echo "PGlite ready: $ATELIER_DB_URL"
+  wait_for_pg "$ATELIER_DB_URL" 30
 fi
 
 # Start Qdrant if binary is present (CAI deployment)
@@ -65,7 +94,7 @@ if [ -x qdrant/qdrant ]; then
   QDRANT__SERVICE__HTTP_PORT=6333 \
   QDRANT__SERVICE__GRPC_PORT=6334 \
   qdrant/qdrant &
-  sleep 2
+  wait_for_service "Qdrant" "curl -sf http://localhost:6333/healthz" 30
 fi
 
 # Run database migrations
@@ -133,7 +162,9 @@ else:
 echo "Starting gRPC server on port 50051..."
 python -m atelier.server &
 
-sleep 3
+wait_for_service "gRPC server" \
+    "python -c \"import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)\"" \
+    30
 
 # Start HTTP gateway serving React build + REST-to-gRPC bridge
 echo "Starting HTTP gateway on $HOST:$PORT..."

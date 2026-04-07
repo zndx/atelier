@@ -2,23 +2,36 @@
 #
 # HOCON (config/base.conf) is the single source of truth for all config.
 # Environment variables are captured by HOCON, not read directly by code.
-#
+
 # Workflow:
 #   1. cp .env.example .env && edit .env
-#   2. just resolve-config    (materializes build/config/atelier.env)
-#   3. just preflight          (validates all required keys)
-#   4. just up / just test / just proto ...
+#   2. devenv shell             (loads .env, provides toolchain)
+#   3. just resolve-config      (hydrates HOCON from current env)
+#   4. just preflight           (validates materialized config)
+#   5. just up / just test / just proto ...
 
 # ── Config management ─────────────────────────────────────────────
 
-# Resolve HOCON config + env vars to build/config/atelier.env
+# Hydrate HOCON config from current environment into build artifacts
 resolve-config:
-    uv run python -c "from atelier.config import load_config, materialize_config; materialize_config(load_config(), 'build/config/atelier.env')"
-    @echo "Resolved config -> build/config/atelier.env"
+    uv run python bin/resolve-config.py
 
-# Validate materialized config has all required keys
+# Validate materialized config (structured deny/warn checks)
 preflight:
-    uv run python -c "from atelier.config import validate_materialized_config; errs = validate_materialized_config(); [print(f'  ERROR: {e}') for e in errs]; exit(1) if errs else print('Preflight OK')"
+    @uv run python -c "\
+    from atelier.preflight import run_preflight; \
+    from atelier.config import load_config; \
+    r = run_preflight(load_config()); \
+    [print(f'  [pass] {c.name}: {c.message}') for c in r.checks if c.status == 'pass']; \
+    [print(f'  [WARN] {c.name}: {c.message}') for c in r.warnings]; \
+    [print(f'  [DENY] {c.name}: {c.message}') for c in r.denies]; \
+    [print(f'         -> {c.remediation}') for c in r.denies if c.remediation]; \
+    exit(0 if r.ok else 1); \
+    "
+
+# Run conftest policy checks against materialized config JSON
+policy:
+    conftest test build/config/atelier.json --policy policy/environment/ --all-namespaces
 
 # Show resolved config
 show-config:
