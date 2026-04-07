@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/Layout.tsx","./src/pages/EmbeddingsViewer.tsx","./src/pages/Landing.tsx"],"version":"5.8.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/Layout.tsx","./src/pages/EmbeddingsViewer.tsx","./src/pages/Landing.tsx","./src/pages/Status.tsx"],"version":"5.8.3"}

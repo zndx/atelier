@@ -221,6 +221,7 @@ devenv.local.yaml
 .app/
 qdrant/
 ui/dist/
+ui/public/ghostty/
 ui/node_modules/
 scripts/node_modules/
 docs/book/
