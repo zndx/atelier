@@ -15,7 +15,7 @@ interface DatasetInfo {
   row_count: number;
 }
 
-export default function EmbeddingsViewer() {
+export default function Embeddings() {
   const { datasetId } = useParams<{ datasetId: string }>();
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [coordinator] = useState(() => new Coordinator());
@@ -71,7 +71,7 @@ export default function EmbeddingsViewer() {
 
         if (!cancelled) setReady(true);
       } catch (e) {
-        console.error("EmbeddingsViewer init error:", e);
+        console.error("Embeddings init error:", e);
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     }

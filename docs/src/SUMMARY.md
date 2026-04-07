@@ -9,7 +9,7 @@
 - [System Overview](./architecture/overview.md)
 - [Deployment](./architecture/deployment.md)
 - [Keystone Agents](./architecture/agents.md)
-- [Embeddings Viewer](./architecture/embeddings.md)
+- [Embeddings](./architecture/embeddings.md)
 - [gRPC Service](./architecture/grpc.md)
 
 # Scenarios

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Atelier is an agentic classification workbench for Cloudera AI (CAI). It combines a gRPC core service, React frontend (with XYFlow canvas + Embeddings Viewer), and Claude Agent SDK orchestration. Deploys as a CAI Application from `https://github.com/zndx/atelier`.
+Atelier is an agentic classification workbench for Cloudera AI (CAI). It combines a gRPC core service, React frontend (with XYFlow canvas + Embeddings), and Claude Agent SDK orchestration. Deploys as a CAI Application from `https://github.com/zndx/atelier`.
 
 ## Naming: CAI vs CML vs CDSW
 

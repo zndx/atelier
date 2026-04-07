@@ -1,6 +1,6 @@
 @deployment @embeddings
-Feature: Embeddings Viewer integration
-  Validates that the Embeddings Viewer is properly integrated
+Feature: Embeddings integration
+  Validates that the Embeddings page is properly integrated
   with the React frontend and can render parquet datasets.
 
   @tier-0
@@ -9,8 +9,8 @@ Feature: Embeddings Viewer integration
     Then it declares dependency "embedding-atlas"
 
   @tier-0
-  Scenario: Embeddings Viewer page component exists
-    Then the file "ui/src/pages/EmbeddingsViewer.tsx" exists
+  Scenario: Embeddings page component exists
+    Then the file "ui/src/pages/Embeddings.tsx" exists
 
   @tier-0
   Scenario: React Router is configured

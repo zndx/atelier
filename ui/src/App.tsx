@@ -4,7 +4,8 @@ import { Suspense, lazy } from "react";
 import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
 
-const EmbeddingsViewer = lazy(() => import("./pages/EmbeddingsViewer"));
+const Embeddings = lazy(() => import("./pages/Embeddings"));
+const Status = lazy(() => import("./pages/Status"));
 
 function App() {
   return (
@@ -28,6 +29,29 @@ function App() {
             }
           />
           <Route
+            path="/status"
+            element={
+              <Layout>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        height: "calc(100vh - 128px)",
+                      }}
+                    >
+                      <Spin size="large" />
+                    </div>
+                  }
+                >
+                  <Status />
+                </Suspense>
+              </Layout>
+            }
+          />
+          <Route
             path="/embeddings/:datasetId"
             element={
               <Layout fullHeight>
@@ -45,7 +69,7 @@ function App() {
                     </div>
                   }
                 >
-                  <EmbeddingsViewer />
+                  <Embeddings />
                 </Suspense>
               </Layout>
             }

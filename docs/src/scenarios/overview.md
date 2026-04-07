@@ -29,8 +29,8 @@ CAI deployment modalities and the runtime profile that catches failures before p
 | AMP lifecycle | `@amp` | 0 + cai | 5 | `.project-metadata.yaml` structure, task patterns, install + start |
 | Application modality | `@application` | 0 + 1 | 3 | HOST binding logic, full local stack startup |
 | Studio modality | `@studio` | 0 | 2 | `IS_COMPOSABLE` root directory routing |
-| Embeddings Viewer integration | `@embeddings` | 0 | 4 | npm dependency, page component, React Router, preparation script |
-| Naming conventions | `@naming` | 0 | 2 | User-facing surfaces say "Embeddings Viewer", no Apache Atlas confusion |
+| Embeddings integration | `@embeddings` | 0 | 4 | npm dependency, page component, React Router, preparation script |
+| Naming conventions | `@naming` | 0 | 2 | User-facing surfaces say "Embeddings", no Apache Atlas confusion |
 
 ### By Tier
 
@@ -48,7 +48,7 @@ HTTP gateway and gRPC health checks. Will cover REST-to-gRPC bridge correctness,
 
 ### Agent (stub)
 
-Claude Agent SDK orchestration. Will cover keystone agent lifecycle, classification workflow execution, and Embeddings Viewer integration.
+Claude Agent SDK orchestration. Will cover keystone agent lifecycle, classification workflow execution, and Embeddings integration.
 
 ## Why BDD for a Deployment Platform?
 

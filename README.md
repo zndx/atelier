@@ -1,6 +1,6 @@
 # Atelier
 
-Agentic classification workbench for Cloudera AI. Combines the Claude Agent SDK for adaptive keystone-agent orchestration with an Embeddings Viewer for interactive visualization of classification results produced by the [signals](https://github.com/rch/signals) pipeline.
+Agentic classification workbench for Cloudera AI. Combines the Claude Agent SDK for adaptive keystone-agent orchestration with an Embeddings for interactive visualization of classification results produced by the [signals](https://github.com/rch/signals) pipeline.
 
 ## Development Environment
 
@@ -145,7 +145,7 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 - **PostgreSQL** — State persistence (devenv or PGlite on CAI)
 - **Qdrant** — Vector store for embedding search
 - **Claude Agent SDK** — Keystone agents for classification orchestration
-- **Embeddings Viewer** — Interactive parquet visualization (powered by [embedding-atlas](https://github.com/apple/embedding-atlas))
+- **Embeddings** — Interactive parquet visualization (powered by [embedding-atlas](https://github.com/apple/embedding-atlas))
 - **HOCON Configuration** — Single source of truth with env var substitution
 
 ## Documentation

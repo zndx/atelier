@@ -2,7 +2,7 @@
 Feature: Agent SDK smoke test
   Verify the Claude Agent SDK integration is wired end-to-end.
 
-  @tier-0
+  @tier-1
   Scenario: Keystone agents are seeded
     Given the database is bootstrapped
     Then at least 3 agents are registered

@@ -4,11 +4,11 @@ entries:
   - title: Atelier
     label: atelier
     short_description: |
-      Agentic classification workbench with Claude Agent SDK and Embeddings Viewer.
+      Agentic classification workbench with Claude Agent SDK and Embeddings.
     long_description: |
       Atelier is an agentic classification workbench built on the Cloudera AI platform.
       It leverages the Claude Agent SDK for adaptive keystone-agent orchestration and
-      Interactive Embeddings Viewer for exploring classification results.
+      Interactive Embeddings for exploring classification results.
     tags:
       - AI
       - Agents

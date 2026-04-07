@@ -29,6 +29,7 @@ Preflight:
 from __future__ import annotations
 
 import dataclasses
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -106,7 +107,7 @@ class AtelierConfig:
 
     # Claude Agent SDK
     anthropic_api_key: str | None = None
-    agent_model: str = "claude-sonnet-4-5-20250929"
+    agent_model: str = "claude-opus-4-6"
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     aws_region: str | None = None
@@ -143,6 +144,48 @@ class AtelierConfig:
     def is_cml(self) -> bool:
         """True when running inside Cloudera ML."""
         return self.cml_project_id is not None
+
+    @property
+    def anthropic_model_id(self) -> str:
+        """The agent_model normalized to a plain Anthropic model ID."""
+        return extract_anthropic_model_id(self.agent_model)
+
+    @property
+    def model_family(self) -> str | None:
+        """The model family tier (opus/sonnet/haiku) or None."""
+        return extract_model_family(self.anthropic_model_id)
+
+
+# ── Model ID extraction ─────────────────────────────────────────
+
+
+def extract_anthropic_model_id(raw: str) -> str:
+    """Extract a plain Anthropic model ID from a Bedrock ARN or model identifier.
+
+    Handles:
+    - Full ARN: arn:aws:bedrock:...:inference-profile/us.anthropic.claude-opus-4-6-v1
+    - Bedrock model ID: us.anthropic.claude-opus-4-6-v1
+    - On-demand: anthropic.claude-3-5-sonnet-20241022-v2:0
+    - Plain Anthropic ID: claude-opus-4-6 (passthrough)
+    """
+    model_part = raw
+    # Strip ARN prefix → everything after the last /
+    if raw.startswith("arn:aws:bedrock:"):
+        model_part = raw.rsplit("/", 1)[-1]
+    # Strip regional/vendor prefix: (us.|eu.)anthropic. or bare anthropic.
+    model_part = re.sub(r"^(?:[\w.-]+\.)?anthropic\.", "", model_part)
+    # Strip Bedrock version suffix: -v1, -v2:0, etc.
+    model_part = re.sub(r"-v\d+(?::\d+)?$", "", model_part)
+    return model_part
+
+
+def extract_model_family(model_id: str) -> str | None:
+    """Extract the model family from an Anthropic model ID.
+
+    Returns "opus", "sonnet", "haiku", or None.
+    """
+    match = re.search(r"(opus|sonnet|haiku)", model_id)
+    return match.group(1) if match else None
 
 
 # ── HOCON loading ────────────────────────────────────────────────
@@ -255,28 +298,56 @@ def materialize_config(
     return output_path
 
 
+_SECRET_FIELDS = frozenset({
+    "anthropic_api_key",
+    "aws_access_key_id",
+    "aws_secret_access_key",
+    "aws_session_token",
+})
+
+
+def materialize_config_json(
+    cfg: AtelierConfig,
+    output_path: str | Path,
+) -> Path:
+    """Write resolved config as JSON for conftest policy validation.
+
+    Secrets are redacted (set values become ``"***set***"``).
+    Includes derived booleans: ``has_anthropic``, ``has_bedrock``, ``is_cml``.
+
+    Returns:
+        The output path.
+    """
+    import json
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data: dict[str, Any] = {}
+    for f in dataclasses.fields(cfg):
+        val = getattr(cfg, f.name)
+        if val is None:
+            continue
+        env_name = _FIELD_TO_ENV.get(f.name, f"ATELIER_{f.name.upper()}")
+        if f.name in _SECRET_FIELDS:
+            data[env_name] = "***set***"
+        elif isinstance(val, bool):
+            data[env_name] = val
+        else:
+            data[env_name] = val
+
+    # Derived booleans for policy rules
+    data["has_anthropic"] = cfg.has_anthropic
+    data["has_bedrock"] = cfg.has_bedrock
+    data["is_cml"] = cfg.is_cml
+
+    output_path.write_text(json.dumps(data, indent=2, default=str) + "\n")
+    return output_path
+
+
 # ── Preflight validation ─────────────────────────────────────────
 
-# Keys that must be present and non-empty in the materialized config
-REQUIRED_KEYS: list[str] = [
-    "ATELIER_GRPC_PORT",
-    "ATELIER_GATEWAY_PORT",
-]
-
 _MATERIALIZED_PATH = _PROJECT_ROOT / "build" / "config" / "atelier.env"
-
-
-def _parse_env_file(path: Path) -> dict[str, str]:
-    """Parse a flat key=value env file into a dict."""
-    result: dict[str, str] = {}
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            result[key.strip()] = value.strip()
-    return result
 
 
 def validate_materialized_config(
@@ -285,24 +356,14 @@ def validate_materialized_config(
     """Validate the materialized config file for completeness.
 
     Returns a list of error strings. Empty list means valid.
+    Delegates to :func:`atelier.preflight.run_preflight` for structured checks.
 
     Args:
         path: Path to the materialized env file. Defaults to
             build/config/atelier.env.
     """
-    path = Path(path) if path else _MATERIALIZED_PATH
-    errors: list[str] = []
+    from atelier.preflight import run_preflight
 
-    if not path.exists():
-        errors.append(
-            f"{path} does not exist. Run 'just resolve-config' first."
-        )
-        return errors
-
-    env = _parse_env_file(path)
-
-    for key in REQUIRED_KEYS:
-        if key not in env or not env[key]:
-            errors.append(f"Missing required config key: {key}")
-
-    return errors
+    env_path = Path(path) if path else _MATERIALIZED_PATH
+    result = run_preflight(load_config(), env_path=env_path)
+    return [c.message for c in result.denies]

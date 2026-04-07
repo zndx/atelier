@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a GitTables visualization-ready parquet for the Embeddings Viewer.
+"""Prepare a GitTables visualization-ready parquet for the Embeddings.
 
 Reads the signals pipeline's gittables_eval.parquet (which already contains
 classification results, DST evidence fusion, and SAGE importance), computes
@@ -25,7 +25,7 @@ from pathlib import Path
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        description="Prepare GitTables visualization parquet for Embeddings Viewer",
+        description="Prepare GitTables visualization parquet for Embeddings",
     )
     p.add_argument(
         "--input", required=True,

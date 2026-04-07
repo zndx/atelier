@@ -1,6 +1,6 @@
-# Embeddings Viewer
+# Embeddings
 
-The Embeddings Viewer provides interactive visualization of classification results. It renders 2D projections of embedding vectors, allowing users to explore clusters, search data points, and cross-filter by metadata columns.
+The Embeddings page provides interactive visualization of classification results. It renders 2D projections of embedding vectors, allowing users to explore clusters, search data points, and cross-filter by metadata columns.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ The viewer runs entirely in the browser. DuckDB WASM loads parquet data locally 
 
 ## Parquet Schema
 
-The Embeddings Viewer expects parquet files with these columns:
+The Embeddings page expects parquet files with these columns:
 
 | Column | Type | Required | Description |
 |--------|------|----------|-------------|
@@ -65,11 +65,11 @@ just seed
 
 The preparation script computes sentence-transformer embeddings and UMAP 2D projections. The resulting parquet includes DST evidence fusion columns (belief, plausibility, uncertainty gap) when derived from the signals evaluation output.
 
-## Naming: Embeddings Viewer vs Apache Atlas
+## Naming: Embeddings vs Apache Atlas
 
-The Embeddings Viewer is powered by Apple's `embedding-atlas` library. This is **unrelated to Apache Atlas**, the Cloudera metadata governance catalog used by the [signals](https://github.com/rch/signals) pipeline.
+The Embeddings page is powered by Apple's `embedding-atlas` library. This is **unrelated to Apache Atlas**, the Cloudera metadata governance catalog used by the [signals](https://github.com/rch/signals) pipeline.
 
-- **Embeddings Viewer** (Atelier) — Interactive scatter plot of classification embeddings
+- **Embeddings** (Atelier) — Interactive scatter plot of classification embeddings
 - **Apache Atlas** (Cloudera/signals) — Metadata governance catalog on port 21000
 
-To avoid confusion, all user-facing surfaces use "Embeddings Viewer". The `embedding-atlas` library name appears only in developer documentation and `package.json`.
+To avoid confusion, all user-facing surfaces use "Embeddings". The `embedding-atlas` library name appears only in developer documentation and `package.json`.

@@ -11,6 +11,7 @@ convention. Never access os.environ directly.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -133,6 +134,7 @@ def run_smoke_test(cfg: AtelierConfig) -> dict:
     """Run a minimal Claude Agent SDK query to prove the pipeline works.
 
     Uses the SDK's query() function with max_turns=1 and a trivial prompt.
+    Handles both sync and async calling contexts.
 
     Returns:
         {"success": True, "duration_ms": ..., "session_id": ..., ...} or
@@ -144,12 +146,20 @@ def run_smoke_test(cfg: AtelierConfig) -> dict:
         loop = None
 
     if loop and loop.is_running():
-        # Already inside an event loop (e.g. behave, FastAPI) — run in a
-        # new thread to avoid "cannot call asyncio.run() from a running loop".
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, _run_smoke_test_async(cfg)).result()
+        # Already inside an event loop (e.g. FastAPI, behave).
+        # Schedule the coroutine on the running loop and return a future.
+        # The caller (gateway) must await the result.
+        raise _NeedsAsync()
     return asyncio.run(_run_smoke_test_async(cfg))
+
+
+class _NeedsAsync(Exception):
+    """Sentinel: caller should use run_smoke_test_async() instead."""
+
+
+async def run_smoke_test_async(cfg: AtelierConfig) -> dict:
+    """Async version for use inside an event loop (FastAPI endpoints)."""
+    return await _run_smoke_test_async(cfg)
 
 
 async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
@@ -200,4 +210,85 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
         "success": True,
         "reply": " ".join(texts).strip(),
         **result_meta,
+    }
+
+
+# ── Model discovery ─────────────────────────────────────────────
+
+_model_cache: tuple[float, dict] | None = None
+_CACHE_TTL = 3600  # 1 hour
+
+
+def check_model_upgrade(cfg: AtelierConfig) -> dict:
+    """Check if a newer model is available in the same family.
+
+    Requires ``has_anthropic`` (``models.list()`` needs direct API key).
+    Results are cached for 1 hour.
+    """
+    global _model_cache
+
+    if _model_cache is not None:
+        cached_at, cached_result = _model_cache
+        if time.monotonic() - cached_at < _CACHE_TTL:
+            return {**cached_result, "cached": True}
+
+    result = _do_model_discovery(cfg)
+    _model_cache = (time.monotonic(), result)
+    return {**result, "cached": False}
+
+
+def _do_model_discovery(cfg: AtelierConfig) -> dict:
+    """Perform model discovery (uncached)."""
+    from atelier.config import extract_anthropic_model_id, extract_model_family
+
+    current_id = extract_anthropic_model_id(cfg.agent_model)
+    family = extract_model_family(current_id)
+    is_arn = cfg.agent_model.startswith("arn:") or "anthropic." in cfg.agent_model
+
+    base = {
+        "current_model": current_id,
+        "current_family": family,
+        "source": "bedrock_arn" if is_arn else "direct",
+    }
+
+    if not cfg.has_anthropic:
+        return {**base, "upgrade_available": False, "reason": "no_anthropic_key"}
+
+    if family is None:
+        return {**base, "upgrade_available": False, "reason": "unknown_family"}
+
+    try:
+        client = _build_anthropic_client(cfg)
+        page = client.models.list(limit=100)
+    except Exception as e:
+        return {**base, "upgrade_available": False, "reason": "api_error", "error": str(e)}
+
+    # Filter to same family, sort by created_at descending
+    family_models = [
+        m for m in page.data
+        if extract_model_family(m.id) == family
+    ]
+    family_models.sort(key=lambda m: m.created_at, reverse=True)
+
+    if not family_models:
+        return {**base, "upgrade_available": False, "reason": "no_family_models"}
+
+    latest = family_models[0]
+
+    if latest.id == current_id:
+        return {**base, "upgrade_available": False, "reason": "already_latest"}
+
+    # Check if latest is actually newer
+    current_info = next((m for m in page.data if m.id == current_id), None)
+    if current_info and latest.created_at <= current_info.created_at:
+        return {**base, "upgrade_available": False, "reason": "already_latest"}
+
+    return {
+        **base,
+        "upgrade_available": True,
+        "latest_model": latest.id,
+        "latest_display_name": latest.display_name,
+        "latest_created_at": latest.created_at.isoformat()
+        if hasattr(latest.created_at, "isoformat")
+        else str(latest.created_at),
     }

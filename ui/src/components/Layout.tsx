@@ -7,7 +7,7 @@ const { Text } = Typography;
 
 interface LayoutProps {
   children: ReactNode;
-  /** Lock to viewport height, hide footer — for full-bleed pages like the Embeddings Viewer. */
+  /** Lock to viewport height, hide footer — for full-bleed pages like Embeddings. */
   fullHeight?: boolean;
 }
 

@@ -1,18 +1,24 @@
-import { Card, Col, Row, Statistic, Tag, Typography } from "antd";
+import { Card, Col, Row, Spin, Statistic, Tag, Typography } from "antd";
 import {
-  ApiOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
   ClusterOutlined,
+  CodeOutlined,
   DotChartOutlined,
   ExperimentOutlined,
 } from "@ant-design/icons";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+
+const Terminal = lazy(() => import("../components/Terminal"));
 
 const { Title, Paragraph } = Typography;
 
-interface HealthStatus {
-  status: string;
-  version: string;
+interface StatusSummary {
+  grpc: { ok: boolean; version?: string };
+  postgres: { ok: boolean };
+  qdrant: { ok: boolean };
+  connected: boolean;
 }
 
 interface DatasetInfo {
@@ -23,15 +29,15 @@ interface DatasetInfo {
 }
 
 function Landing() {
-  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [status, setStatus] = useState<StatusSummary | null>(null);
   const [agents, setAgents] = useState<unknown[]>([]);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
 
   useEffect(() => {
-    fetch("/api/health")
+    fetch("/api/status")
       .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setHealth(null));
+      .then(setStatus)
+      .catch(() => setStatus(null));
 
     fetch("/api/agents")
       .then((r) => r.json())
@@ -55,19 +61,29 @@ function Landing() {
 
       <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
         <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="Service Status"
-              value={health ? "Online" : "Offline"}
-              prefix={<ApiOutlined />}
-              valueStyle={{ color: health ? "#52c41a" : "#ff4d4f" }}
-            />
-            {health && (
-              <Tag color="blue" style={{ marginTop: 8 }}>
-                v{health.version}
-              </Tag>
-            )}
-          </Card>
+          <Link to="/status">
+            <Card hoverable>
+              <Statistic
+                title="Service Status"
+                value={status?.connected ? "Connected" : "Disconnected"}
+                prefix={
+                  status?.connected ? (
+                    <CheckCircleOutlined />
+                  ) : (
+                    <CloseCircleOutlined />
+                  )
+                }
+                valueStyle={{
+                  color: status?.connected ? "#52c41a" : "#ff4d4f",
+                }}
+              />
+              {status?.grpc?.version && (
+                <Tag color="blue" style={{ marginTop: 8 }}>
+                  v{status.grpc.version}
+                </Tag>
+              )}
+            </Card>
+          </Link>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
@@ -119,7 +135,7 @@ function Landing() {
         </Col>
         <Col xs={24} md={12} lg={8}>
           <Card
-            title="Embeddings Viewer"
+            title="Embeddings"
             extra={<DotChartOutlined />}
             hoverable
             style={{ height: "100%" }}
@@ -155,6 +171,52 @@ function Landing() {
             <Tag color="default" style={{ marginTop: 8 }}>
               Planned
             </Tag>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
+        <Col span={24}>
+          <Card
+            title={
+              <span>
+                <CodeOutlined style={{ marginRight: 8 }} />
+                Terminal
+              </span>
+            }
+            extra={
+              <Tag
+                color="geekblue"
+                style={{ margin: 0, fontSize: 11 }}
+              >
+                Claude Agent SDK
+              </Tag>
+            }
+            styles={{
+              body: {
+                padding: 0,
+                background: "#0d1117",
+                borderRadius: "0 0 6px 6px",
+              },
+            }}
+          >
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    height: 340,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "#0d1117",
+                  }}
+                >
+                  <Spin />
+                </div>
+              }
+            >
+              <Terminal style={{ height: 340 }} />
+            </Suspense>
           </Card>
         </Col>
       </Row>

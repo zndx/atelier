@@ -24,8 +24,8 @@ Disambiguation note added to `docs/src/architecture/embeddings.md`.
 | File | Purpose |
 |------|---------|
 | `scripts/prepare_gittables_sample.py` | Reads signals eval parquet, computes sentence-transformer embeddings + UMAP 2D projection, outputs visualization-ready parquet |
-| `ui/src/pages/EmbeddingsViewer.tsx` | React page: DuckDB WASM + Mosaic coordinator + EmbeddingAtlas component |
-| `features/deployment/embeddings_viewer.feature` | 4 tier-0 scenarios: npm dep, page component, React Router, preparation script |
+| `ui/src/pages/Embeddings.tsx` | React page: DuckDB WASM + Mosaic coordinator + EmbeddingAtlas component (renamed from EmbeddingsViewer.tsx) |
+| `features/deployment/embeddings.feature` | 4 tier-0 scenarios: npm dep, page component, React Router, preparation script (renamed from embeddings_viewer.feature) |
 | `features/deployment/naming_audit.feature` | 2 tier-0 scenarios: no Apache Atlas confusion in UI/docs |
 | `features/deployment/step_defs/naming_steps.py` | Step defs for file search and content matching |
 | `docs/src/architecture/embeddings.md` | Architecture page with d2 diagram, parquet schema, GitTables description |
