@@ -138,6 +138,17 @@ def run_smoke_test(cfg: AtelierConfig) -> dict:
         {"success": True, "duration_ms": ..., "session_id": ..., ...} or
         {"success": False, "error": "..."}
     """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # Already inside an event loop (e.g. behave, FastAPI) — run in a
+        # new thread to avoid "cannot call asyncio.run() from a running loop".
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _run_smoke_test_async(cfg)).result()
     return asyncio.run(_run_smoke_test_async(cfg))
 
 
