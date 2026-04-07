@@ -27,10 +27,31 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
         )
 
     def ListAgents(self, request, context):
-        return atelier_pb2.ListAgentsResponse(agents=[])
+        agents = self.dao.list_agents()
+        return atelier_pb2.ListAgentsResponse(
+            agents=[
+                atelier_pb2.AgentMetadata(
+                    id=a["id"],
+                    name=a["name"] or "",
+                    description=a["description"] or "",
+                    role=a["role"] or "",
+                )
+                for a in agents
+            ]
+        )
 
     def GetAgent(self, request, context):
-        return atelier_pb2.GetAgentResponse()
+        agent = self.dao.get_agent(request.id)
+        if agent is None:
+            return atelier_pb2.GetAgentResponse()
+        return atelier_pb2.GetAgentResponse(
+            agent=atelier_pb2.AgentMetadata(
+                id=agent["id"],
+                name=agent["name"] or "",
+                description=agent["description"] or "",
+                role=agent["role"] or "",
+            )
+        )
 
     def ListDatasets(self, request, context):
         datasets = self.dao.list_datasets()

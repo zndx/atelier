@@ -9,10 +9,29 @@ specification_version: 1.0
 prototype_version: 0.1.0
 
 environment_variables:
+  AWS_ACCESS_KEY_ID:
+    default: ""
+    description: >-
+      AWS access key for Bedrock inference. Production default for CAI deployments.
+  AWS_SECRET_ACCESS_KEY:
+    default: ""
+    description: >-
+      AWS secret key for Bedrock inference.
+  AWS_REGION:
+    default: "us-east-1"
+    description: >-
+      AWS region for Bedrock inference.
+  ATELIER_AGENT_MODEL:
+    default: ""
+    description: >-
+      Model ID or Bedrock inference profile ARN. Example:
+      arn:aws:bedrock:us-east-1:440464140575:inference-profile/us.anthropic.claude-opus-4-6-v1
   ANTHROPIC_API_KEY:
     default: ""
-    description: "Anthropic API key for Claude Agent SDK"
-    required: false
+    description: >-
+      Direct Anthropic API key. Provides overwatch capability for onboarding
+      and configuration assistance, or serves as primary provider when preferred.
+      Can coexist with Bedrock credentials — both are validated at startup.
 
 runtimes:
   - editor: PBJ Workbench

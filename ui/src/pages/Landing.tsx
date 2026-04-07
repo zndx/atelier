@@ -104,7 +104,7 @@ function Landing() {
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={12} lg={8}>
           <Card
             title="Agents"
             extra={<ExperimentOutlined />}
@@ -117,7 +117,7 @@ function Landing() {
             </Paragraph>
           </Card>
         </Col>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={12} lg={8}>
           <Card
             title="Embeddings Viewer"
             extra={<DotChartOutlined />}
@@ -141,7 +141,7 @@ function Landing() {
             )}
           </Card>
         </Col>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={12} lg={8}>
           <Card
             title="Workflows"
             extra={<ClusterOutlined />}

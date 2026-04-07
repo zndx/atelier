@@ -1,8 +1,10 @@
-import { ConfigProvider, theme } from "antd";
+import { ConfigProvider, Spin, theme } from "antd";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Suspense, lazy } from "react";
 import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
-import EmbeddingsViewer from "./pages/EmbeddingsViewer";
+
+const EmbeddingsViewer = lazy(() => import("./pages/EmbeddingsViewer"));
 
 function App() {
   return (
@@ -28,8 +30,23 @@ function App() {
           <Route
             path="/embeddings/:datasetId"
             element={
-              <Layout>
-                <EmbeddingsViewer />
+              <Layout fullHeight>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        height: "calc(100vh - 128px)",
+                      }}
+                    >
+                      <Spin size="large" />
+                    </div>
+                  }
+                >
+                  <EmbeddingsViewer />
+                </Suspense>
               </Layout>
             }
           />

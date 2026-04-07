@@ -104,6 +104,31 @@ else:
     print(f'Seed check: {len(existing)} datasets already registered')
 "
 
+# Seed keystone agents if DB is empty
+echo "Checking agent seed..."
+python -c "
+from atelier.db.dao import AtelierDao
+dao = AtelierDao()
+existing = dao.list_agents()
+if not existing:
+    agents = [
+        ('classifier', 'Column Classifier',
+         'Zero-shot classification of table columns using LLM reasoning',
+         'classifier'),
+        ('evidence-fuser', 'Evidence Fuser',
+         'Combines LLM, embedding, and SVM evidence via Dempster-Shafer fusion',
+         'evidence_fuser'),
+        ('viz-director', 'Visualization Director',
+         'Curates embedding projections and manages interactive exploration',
+         'visualization_director'),
+    ]
+    for aid, name, desc, role in agents:
+        dao.upsert_agent(aid, name, desc, role)
+    print(f'Seeded {len(agents)} keystone agents')
+else:
+    print(f'Seed check: {len(existing)} agents already registered')
+"
+
 # Start gRPC server (background)
 echo "Starting gRPC server on port 50051..."
 python -m atelier.server &

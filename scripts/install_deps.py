@@ -41,6 +41,26 @@ print("Node.js installed")
 # Source nvm so npm is on PATH for subsequent commands
 nvm_prefix = "source scripts/load_nvm.sh && "
 
+# Ensure git submodules are initialized (CAI clones may skip submodules)
+print("\n--- Initializing git submodules ---")
+subprocess.run(["git", "submodule", "update", "--init", "--recursive"], check=True)
+print("Submodules initialized")
+
+# Build embedding-atlas from fork submodule
+print("\n--- Building embedding-atlas from fork ---")
+subprocess.run(
+    ["bash", "-c", nvm_prefix + " && ".join([
+        "cd external/embedding-atlas",
+        "npm install",
+        "npm run package -w @embedding-atlas/utils",
+        "npm run package -w @embedding-atlas/component",
+        "npm run package -w @embedding-atlas/viewer",
+        "npm run package -w embedding-atlas",
+    ])],
+    check=True,
+)
+print("embedding-atlas built from fork")
+
 # Install PGlite server dependencies
 print("\n--- Installing PGlite ---")
 subprocess.run(

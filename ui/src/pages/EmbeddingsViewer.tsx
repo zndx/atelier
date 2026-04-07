@@ -17,60 +17,72 @@ interface DatasetInfo {
 
 export default function EmbeddingsViewer() {
   const { datasetId } = useParams<{ datasetId: string }>();
-  const [coordinator, setCoordinator] = useState<Coordinator | null>(null);
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
+  const [coordinator] = useState(() => new Coordinator());
+  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!datasetId) return;
+    let cancelled = false;
 
     async function initialize() {
       try {
-        // Fetch dataset metadata
+        // 1. Initialize DuckDB via Mosaic wasmConnector
+        setStatus("Initializing DuckDB...");
+        const connector = wasmConnector();
+        coordinator.databaseConnector(connector);
+
+        // 2. Fetch dataset metadata
+        setStatus("Fetching dataset metadata...");
         const resp = await fetch("/api/datasets");
         const data = await resp.json();
         const ds = data.datasets.find(
           (d: DatasetInfo) => d.id === datasetId
         );
-
         if (!ds) {
-          setError(`Dataset "${datasetId}" not found`);
-          setLoading(false);
+          if (!cancelled) setError(`Dataset "${datasetId}" not found`);
           return;
         }
-        setDataset(ds);
+        if (!cancelled) setDataset(ds);
 
-        // Initialize DuckDB WASM via Mosaic
-        const wasm = await wasmConnector();
-        const coord = new Coordinator();
-        coord.databaseConnector(wasm);
-
-        // Fetch parquet and load into DuckDB
+        // 3. Fetch parquet bytes on main thread (goes through Vite proxy)
+        if (!cancelled) setStatus(`Downloading ${ds.row_count.toLocaleString()} rows...`);
         const parquetResp = await fetch(`/api/datasets/${datasetId}/data`);
         if (!parquetResp.ok) {
-          setError("Failed to fetch parquet data");
-          setLoading(false);
+          if (!cancelled) setError(`Failed to fetch parquet: HTTP ${parquetResp.status}`);
           return;
         }
-        const buffer = await parquetResp.arrayBuffer();
+        const buffer = new Uint8Array(await parquetResp.arrayBuffer());
 
-        // Register the parquet buffer as a table
-        await coord.exec(
-          `CREATE TABLE dataset AS SELECT * FROM read_parquet('buffer')`,
-          { buffer: new Uint8Array(buffer) }
+        // 4. Register parquet bytes into DuckDB virtual filesystem
+        if (!cancelled) setStatus("Loading data into DuckDB...");
+        const db = await connector.getDuckDB();
+        const conn = await connector.getConnection();
+        const tempFile = "import.parquet";
+        await db.registerFileBuffer(tempFile, buffer);
+
+        // 5. Create table with synthetic id column
+        await conn.query(
+          `CREATE TABLE dataset AS SELECT row_number() OVER () AS id, * FROM '${tempFile}'`
         );
+        await db.dropFile(tempFile);
 
-        setCoordinator(coord);
-        setLoading(false);
+        if (!cancelled) setReady(true);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        setLoading(false);
+        console.error("EmbeddingsViewer init error:", e);
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     }
 
     initialize();
-  }, [datasetId]);
+
+    return () => {
+      cancelled = true;
+      coordinator.clear();
+    };
+  }, [datasetId, coordinator]);
 
   if (error) {
     return (
@@ -85,44 +97,52 @@ export default function EmbeddingsViewer() {
     );
   }
 
-  if (loading || !coordinator) {
+  if (!ready) {
     return (
       <div
         style={{
+          flex: 1,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          height: "calc(100vh - 128px)",
           gap: 16,
         }}
       >
         <Spin size="large" />
-        <Paragraph type="secondary">
-          Loading {dataset?.name || datasetId}...
-        </Paragraph>
+        <Paragraph type="secondary">{status}</Paragraph>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 128px)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          flex: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "8px 8px",
+        }}
+      >
         <Link to="/">
           <Button icon={<ArrowLeftOutlined />} size="small">
             Back
           </Button>
         </Link>
-        <Title level={4} style={{ margin: 0 }}>
+        <Title level={5} style={{ margin: 0 }}>
           {dataset?.name || datasetId}
         </Title>
-        {dataset?.description && (
-          <Paragraph type="secondary" style={{ margin: 0 }}>
-            {dataset.description}
-          </Paragraph>
-        )}
       </div>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, minHeight: 0 }}>
         <EmbeddingAtlas
           coordinator={coordinator}
           data={{

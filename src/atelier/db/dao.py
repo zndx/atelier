@@ -85,3 +85,44 @@ class AtelierDao:
                 ds.parquet_path = parquet_path
                 ds.description = description
                 ds.row_count = row_count
+
+    # ── Agent operations ──────────────────────────────────────────
+
+    def list_agents(self) -> list[dict]:
+        """Return all registered agents as dicts."""
+        from atelier.db.model import Agent
+        with self.get_session() as session:
+            rows = session.query(Agent).all()
+            return [
+                {"id": r.id, "name": r.name, "description": r.description,
+                 "role": r.role, "tool_ids": r.tool_ids}
+                for r in rows
+            ]
+
+    def get_agent(self, agent_id: str) -> dict | None:
+        """Return an agent by ID as dict, or None."""
+        from atelier.db.model import Agent
+        with self.get_session() as session:
+            r = session.query(Agent).filter_by(id=agent_id).first()
+            if r is None:
+                return None
+            return {"id": r.id, "name": r.name, "description": r.description,
+                    "role": r.role, "tool_ids": r.tool_ids}
+
+    def upsert_agent(self, agent_id: str, name: str, description: str = "",
+                     role: str = "", tool_ids: str = "[]"):
+        """Insert or update an agent record."""
+        from atelier.db.model import Agent
+        with self.get_session() as session:
+            agent = session.query(Agent).filter_by(id=agent_id).first()
+            if agent is None:
+                agent = Agent(
+                    id=agent_id, name=name, description=description,
+                    role=role, tool_ids=tool_ids,
+                )
+                session.add(agent)
+            else:
+                agent.name = name
+                agent.description = description
+                agent.role = role
+                agent.tool_ids = tool_ids

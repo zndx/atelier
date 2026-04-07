@@ -48,6 +48,10 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "gateway.port": ("gateway_port", int),
     "agents.api_key": ("anthropic_api_key", str),
     "agents.model": ("agent_model", str),
+    "agents.aws_access_key_id": ("aws_access_key_id", str),
+    "agents.aws_secret_access_key": ("aws_secret_access_key", str),
+    "agents.aws_region": ("aws_region", str),
+    "agents.aws_session_token": ("aws_session_token", str),
     "agents.permission_mode": ("agent_permission_mode", str),
     "db.url": ("db_url", str),
     "qdrant.host": ("qdrant_host", str),
@@ -66,6 +70,14 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
     # Special cases: preserve standard env var names
     if _field == "anthropic_api_key":
         _env = "ANTHROPIC_API_KEY"
+    elif _field == "aws_access_key_id":
+        _env = "AWS_ACCESS_KEY_ID"
+    elif _field == "aws_secret_access_key":
+        _env = "AWS_SECRET_ACCESS_KEY"
+    elif _field == "aws_region":
+        _env = "AWS_REGION"
+    elif _field == "aws_session_token":
+        _env = "AWS_SESSION_TOKEN"
     elif _field.startswith("cml_"):
         _env = "CDSW_" + _field[4:].upper()
     elif _field == "gateway_port":
@@ -95,7 +107,21 @@ class AtelierConfig:
     # Claude Agent SDK
     anthropic_api_key: str | None = None
     agent_model: str = "claude-sonnet-4-5-20250929"
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_region: str | None = None
+    aws_session_token: str | None = None
     agent_permission_mode: str = "dontAsk"
+
+    @property
+    def has_anthropic(self) -> bool:
+        """True when a direct Anthropic API key is configured."""
+        return bool(self.anthropic_api_key)
+
+    @property
+    def has_bedrock(self) -> bool:
+        """True when AWS Bedrock credentials are configured."""
+        return bool(self.aws_access_key_id and self.aws_secret_access_key)
 
     # Database
     db_url: str = "postgresql+psycopg://localhost:5533/atelier"

@@ -97,6 +97,35 @@ async def get_dataset_data(dataset_id: str):
     )
 
 
+# ── Agent SDK endpoints ────────────────────────────────────────────
+
+
+@app.post("/api/agents/validate-credentials")
+async def validate_credentials():
+    """Validate all configured LLM provider credentials."""
+    try:
+        from atelier.agents import validate_credentials as _validate
+    except ImportError:
+        return {"any_valid": False, "error": "agents extra not installed (pip install atelier[agents])"}
+
+    from atelier.config import load_config
+    cfg = load_config()
+    return _validate(cfg)
+
+
+@app.post("/api/agents/smoke-test")
+async def agent_smoke_test():
+    """Run a minimal Claude Agent SDK query to prove the pipeline works."""
+    try:
+        from atelier.agents import run_smoke_test as _smoke
+    except ImportError:
+        return {"success": False, "error": "agents extra not installed (pip install atelier[agents])"}
+
+    from atelier.config import load_config
+    cfg = load_config()
+    return _smoke(cfg)
+
+
 # ── Serve React build (production) ───────────────────────────────
 
 _ui_dist = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"
@@ -114,4 +143,7 @@ if _ui_dist.exists():
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         """Serve the React SPA for all non-API routes."""
+        if full_path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
         return FileResponse(str(_ui_dist / "index.html"))

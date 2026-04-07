@@ -72,9 +72,17 @@ prepare-gittables input:
 
 # ── Build ─────────────────────────────────────────────────────────
 
+# Build embedding-atlas from submodule fork
+build-embedding-atlas:
+    cd external/embedding-atlas && npm install && \
+    npm run package -w @embedding-atlas/utils && \
+    npm run package -w @embedding-atlas/component && \
+    npm run package -w @embedding-atlas/viewer && \
+    npm run package -w embedding-atlas
+
 # Install all dependencies
 install:
-    uv sync && cd ui && pnpm install
+    uv sync && just build-embedding-atlas && cd ui && pnpm install
 
 # Build React frontend
 build-ui:
