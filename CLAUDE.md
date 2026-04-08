@@ -24,7 +24,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 - **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port 5533) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) for CAI when no external PG is available.
 - **Qdrant** — Vector store. devenv `pkgs.qdrant` process for local dev; binary download for CAI.
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
-- **Submodules** — `external/embedding-atlas` (fork), `external/hermes-agent` (fork). Dev-only, not used in CAI deployment.
+- **Submodules** — `external/embedding-atlas` ([fork](https://github.com/rch/oss-embedding-atlas) with important modifications, used in both dev and CAI deployment — pre-built dist/ committed to the fork), `external/hermes-agent` (fork, dev-only reference).
 
 ## Development (devenv-first)
 

@@ -67,15 +67,18 @@ The `.env` file is loaded automatically via `dotenv.enable = true`. Copy `.env.e
 
 ### Git submodules
 
-The `external/` directory contains development reference submodules ([embedding-atlas](https://github.com/apple/embedding-atlas), hermes-agent). These are for local development only and are **not required** for deployment.
+The `external/` directory contains forked submodules:
+
+- **[embedding-atlas](https://github.com/rch/oss-embedding-atlas)** — Fork of Apple's embedding-atlas with important modifications for Atelier's Embeddings page. Pre-built dist/ is committed to the fork so CAI deployment doesn't need the full build toolchain (Emscripten, Rust, uv). Required for both dev and deployment.
+- **hermes-agent** — Reference fork, dev-only.
 
 ```bash
-git submodule update --init --recursive   # Optional: fetch submodule sources
+git submodule update --init --recursive   # Required: embedding-atlas fork (pre-built dist/)
 ```
 
 ## Deploying to Cloudera AI
 
-There are two ways to deploy Atelier on Cloudera AI (CML): as an **AMP** (automated) or as a manual **Application**. devenv is not used in CML — the deployment scripts handle all infrastructure (pgserver for embedded PostgreSQL, Qdrant binary download). Git submodules are not cloned and not needed.
+There are two ways to deploy Atelier on Cloudera AI (CML): as an **AMP** (automated) or as a manual **Application**. devenv is not used in CML — the deployment scripts handle all infrastructure (PGlite for embedded PostgreSQL, Qdrant binary download). The embedding-atlas submodule is cloned during install (pre-built dist/ committed to the fork); hermes-agent is not needed.
 
 ### Option 1: AMP Deployment (Recommended)
 
@@ -135,7 +138,7 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 | Qdrant | `pkgs.qdrant` (devenv process) | Binary download from GitHub releases |
 | Migrations | `just migrate` (dbmate CLI) | Auto-applied on startup via SQLAlchemy |
 | Node.js | pnpm (via devenv) | npm (CML base image) |
-| Git submodules | Available for development | Not cloned, not needed |
+| Git submodules | Available for development | embedding-atlas cloned (pre-built dist/); hermes-agent not needed |
 
 ## Architecture
 

@@ -46,20 +46,17 @@ print("\n--- Initializing git submodules ---")
 subprocess.run(["git", "submodule", "update", "--init", "--recursive"], check=True)
 print("Submodules initialized")
 
-# Build embedding-atlas from fork submodule
-print("\n--- Building embedding-atlas from fork ---")
-subprocess.run(
-    ["bash", "-c", nvm_prefix + " && ".join([
-        "cd external/embedding-atlas",
-        "npm install",
-        "npm run package -w @embedding-atlas/utils",
-        "npm run package -w @embedding-atlas/component",
-        "npm run package -w @embedding-atlas/viewer",
-        "npm run package -w embedding-atlas",
-    ])],
-    check=True,
-)
-print("embedding-atlas built from fork")
+# Verify embedding-atlas fork has pre-built dist/
+# The fork (external/embedding-atlas) carries committed dist/ artifacts so
+# we don't need to run the full workspace build chain on CAI (which requires
+# uv, Emscripten, Rust/wasm-bindgen — none available on bare runtimes).
+ea_dist = os.path.join("external", "embedding-atlas", "packages", "embedding-atlas", "dist", "react.js")
+if os.path.exists(ea_dist):
+    print("\n--- embedding-atlas fork: pre-built dist/ present ---")
+else:
+    print("\n--- WARNING: embedding-atlas dist/ not found; UI build may fail ---")
+    print(f"    Expected: {ea_dist}")
+    print("    Run the full build locally and commit dist/ to the fork.")
 
 # Install PGlite server dependencies
 print("\n--- Installing PGlite ---")
