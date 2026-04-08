@@ -50,13 +50,7 @@ fi
 # Ensure pip-installed tools are on PATH
 export PATH="$HOME/.local/bin:$PATH"
 
-# Hydrate HOCON config from current environment into build artifacts.
-# AMP: env vars come from CML platform (.project-metadata.yaml environment_variables).
-# Local: env vars come from the calling shell.
-python bin/resolve-config.py
-set -a && source build/config/atelier.env && set +a
-
-# Load nvm so node/npm are available (installed by install_deps.py)
+# Load nvm so node/npm are available (needed by PGlite below)
 if [ -f scripts/load_nvm.sh ]; then
   source scripts/load_nvm.sh
 fi
@@ -75,6 +69,10 @@ fi
 
 echo "Python: $(which python)"
 echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 || echo 'NOT FOUND')"
+
+# ── Start infrastructure BEFORE config resolution ────────────────
+# PGlite and Qdrant must start first so their URLs are in the
+# environment when HOCON ${?VAR} substitution runs.
 
 # Start PGlite if no external database configured
 if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
@@ -96,6 +94,10 @@ if [ -x qdrant/qdrant ]; then
   qdrant/qdrant &
   wait_for_service "Qdrant" "curl -sf http://localhost:6333/healthz" 30
 fi
+
+# ── Resolve config (infra URLs now in environment) ───────────────
+python bin/resolve-config.py
+set -a && source build/config/atelier.env && set +a
 
 # Run database migrations (SQLAlchemy-based, dbmate-compatible)
 echo "Running database migrations..."
