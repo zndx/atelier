@@ -38,8 +38,14 @@ print("\n--- Installing Node.js ---")
 subprocess.run(["bash", "scripts/install_node.sh"], check=True)
 print("Node.js installed")
 
-# Source nvm so npm is on PATH for subsequent commands
+# Source nvm so npm is on PATH for subsequent commands.
+# load_nvm.sh deliberately suppresses errors from .bashrc — verify node is available.
 nvm_prefix = "source scripts/load_nvm.sh && "
+print("\n--- Verifying Node.js is on PATH ---")
+subprocess.run(
+    ["bash", "-c", nvm_prefix + "node --version && npm --version"],
+    check=True,
+)
 
 # Ensure git submodules are initialized (CAI clones may skip submodules)
 print("\n--- Initializing git submodules ---")
