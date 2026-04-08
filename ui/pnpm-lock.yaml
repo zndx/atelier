@@ -24,8 +24,8 @@ importers:
         specifier: ^5.25.0
         version: 5.29.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       embedding-atlas:
-        specifier: file:../external/embedding-atlas/packages/embedding-atlas
-        version: file:../external/embedding-atlas/packages/embedding-atlas(@uwdata/mosaic-core@0.23.1)(@uwdata/mosaic-spec@0.23.1)(@uwdata/mosaic-sql@0.23.0)(@uwdata/vgplot@0.23.1)(react@19.2.4)
+        specifier: file:../external/embedding-atlas-0.18.1.tgz
+        version: file:../external/embedding-atlas-0.18.1.tgz(@uwdata/mosaic-core@0.23.1)(@uwdata/mosaic-spec@0.23.1)(@uwdata/mosaic-sql@0.23.0)(@uwdata/vgplot@0.23.1)(react@19.2.4)
       react:
         specifier: ^19.1.0
         version: 19.2.4
@@ -906,8 +906,9 @@ packages:
   electron-to-chromium@1.5.331:
     resolution: {integrity: sha512-IbxXrsTlD3hRodkLnbxAPP4OuJYdWCeM3IOdT+CpcMoIwIoDfCmRpEtSPfwBXxVkg9xmBeY7Lz2Eo2TDn/HC3Q==}
 
-  embedding-atlas@file:../external/embedding-atlas/packages/embedding-atlas:
-    resolution: {directory: ../external/embedding-atlas/packages/embedding-atlas, type: directory}
+  embedding-atlas@file:../external/embedding-atlas-0.18.1.tgz:
+    resolution: {integrity: sha512-j0lxmjMJY7oYpR80rU2ZYBP5txtuPH867JVw3eLXJu+1f3gS2xAVQFhnkASaDcFMeHUEMLptp6SSJM8ZFuJhyA==, tarball: file:../external/embedding-atlas-0.18.1.tgz}
+    version: 0.18.1
     peerDependencies:
       '@uwdata/mosaic-core': '>=0.19.0'
       '@uwdata/mosaic-spec': '>=0.19.0'
@@ -2362,7 +2363,7 @@ snapshots:
 
   electron-to-chromium@1.5.331: {}
 
-  embedding-atlas@file:../external/embedding-atlas/packages/embedding-atlas(@uwdata/mosaic-core@0.23.1)(@uwdata/mosaic-spec@0.23.1)(@uwdata/mosaic-sql@0.23.0)(@uwdata/vgplot@0.23.1)(react@19.2.4):
+  embedding-atlas@file:../external/embedding-atlas-0.18.1.tgz(@uwdata/mosaic-core@0.23.1)(@uwdata/mosaic-spec@0.23.1)(@uwdata/mosaic-sql@0.23.0)(@uwdata/vgplot@0.23.1)(react@19.2.4):
     dependencies:
       '@uwdata/mosaic-core': 0.23.1
       '@uwdata/mosaic-spec': 0.23.1
