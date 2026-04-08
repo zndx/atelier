@@ -97,21 +97,14 @@ if [ -x qdrant/qdrant ]; then
   wait_for_service "Qdrant" "curl -sf http://localhost:6333/healthz" 30
 fi
 
-# Run database migrations
+# Run database migrations (SQLAlchemy-based, dbmate-compatible)
 echo "Running database migrations..."
 python -c "
+import logging
+logging.basicConfig(level=logging.INFO)
 from atelier.config import load_config
-import subprocess, sys
-db_url = load_config().db_url.replace('+psycopg', '')
-result = subprocess.run(
-    ['dbmate', '--url', db_url, '--migrations-dir', 'db/migrations', '--no-dump-schema', 'up'],
-    capture_output=True, text=True
-)
-if result.returncode == 0:
-    print('Migrations applied')
-else:
-    # dbmate may not be installed (CAI); fall back to direct SQL
-    print(f'dbmate not available ({result.stderr.strip()}), skipping migrations')
+from atelier.db.bootstrap import run_migrations
+run_migrations(load_config().db_url)
 "
 
 # Seed datasets if parquet exists but DB is empty
