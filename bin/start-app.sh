@@ -134,6 +134,8 @@ if not result.ok:
 
 # Run database migrations (SQLAlchemy-based, dbmate-compatible)
 echo "Running database migrations..."
+echo "  DB URL: ${ATELIER_DB_URL:-<not set>}"
+echo "  psycopg: $(python -c 'import psycopg; print(psycopg.__version__); import importlib; print("binary" if importlib.util.find_spec("psycopg_binary") else "pure-python")' 2>&1)"
 python -c "
 import logging
 logging.basicConfig(level=logging.INFO)
