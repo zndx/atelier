@@ -75,12 +75,14 @@ echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 ||
 # environment when HOCON ${?VAR} substitution runs.
 
 # Start PGlite if no external database configured
+# Port 5440 avoids conflict with CAI's platform Postgres on 5432.
 if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
-  echo "Starting PGlite on port 5432..."
+  PGLITE_PORT=5440
+  echo "Starting PGlite on port $PGLITE_PORT..."
   mkdir -p .app/pgdata
-  PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=5432 \
+  PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
     node scripts/pglite-server.mjs &
-  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable"
   wait_for_pg "$ATELIER_DB_URL" 30
 fi
 
