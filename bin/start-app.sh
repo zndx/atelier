@@ -78,6 +78,9 @@ echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 ||
 # Port 5440 avoids conflict with CAI's platform Postgres on 5432.
 if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   PGLITE_PORT=5440
+  # Kill orphaned PGlite from a previous crash loop before binding
+  pkill -f "pglite-server.mjs" 2>/dev/null || true
+  sleep 1
   echo "Starting PGlite on port $PGLITE_PORT..."
   mkdir -p .app/pgdata
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
