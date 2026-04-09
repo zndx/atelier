@@ -32,23 +32,24 @@ kill_stale_processes
 
 wait_for_service() {
     local name="$1" check_cmd="$2" timeout="${3:-30}" interval="${4:-2}"
-    local deadline=$((SECONDS + timeout))
+    local deadline=$((SECONDS + timeout)) last_err=""
     echo "Waiting for $name..."
     while [ $SECONDS -lt $deadline ]; do
-        if eval "$check_cmd" > /dev/null 2>&1; then
+        if last_err=$(eval "$check_cmd" 2>&1); then
             echo "$name ready"
             return 0
         fi
         sleep "$interval"
     done
     echo "ERROR: $name not healthy after ${timeout}s" >&2
+    [ -n "$last_err" ] && echo "  last error: $last_err" >&2
     return 1
 }
 
-wait_for_pg() {
-    local db_url="$1" timeout="${2:-30}"
-    wait_for_service "PostgreSQL" \
-        "python -c \"from sqlalchemy import create_engine, text; e = create_engine('$db_url'); c = e.connect(); c.execute(text('SELECT 1')); c.close(); e.dispose()\"" \
+wait_for_port() {
+    local name="$1" host="$2" port="$3" timeout="${4:-30}"
+    wait_for_service "$name" \
+        "python -c \"import socket; s = socket.create_connection(('$host', $port), timeout=2); s.close()\"" \
         "$timeout"
 }
 
@@ -94,9 +95,8 @@ if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   mkdir -p .app/pgdata
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
     node scripts/pglite-server.mjs &
-  local_db_url="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable"
-  wait_for_pg "$local_db_url" 30
-  export ATELIER_DB_URL="$local_db_url"
+  wait_for_port "PostgreSQL" "127.0.0.1" "$PGLITE_PORT" 30
+  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable"
 fi
 
 # Start Qdrant if binary is present (CAI deployment)
