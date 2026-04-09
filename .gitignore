@@ -217,8 +217,9 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 
-# Atelier
+# Atelier — runtime / build artifacts
 .app/
+.qdrant-initialized
 qdrant/
 ui/dist/
 ui/public/ghostty/

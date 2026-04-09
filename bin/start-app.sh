@@ -16,6 +16,18 @@ trap cleanup EXIT
 
 PORT=${1:-${CDSW_APP_PORT:-8090}}
 
+# ── Kill stale processes from previous crash loops ───────────────
+
+kill_stale_processes() {
+    echo "Cleaning up stale processes..."
+    pkill -f "pglite-server.mjs" 2>/dev/null || true
+    pkill -f "qdrant/qdrant" 2>/dev/null || true
+    pkill -f "atelier.server" 2>/dev/null || true
+    pkill -f "atelier.gateway" 2>/dev/null || true
+    sleep 2
+}
+kill_stale_processes
+
 # ── Service readiness helpers ────────────────────────────────────
 
 wait_for_service() {
@@ -78,15 +90,13 @@ echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 ||
 # Port 5440 avoids conflict with CAI's platform Postgres on 5432.
 if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   PGLITE_PORT=5440
-  # Kill orphaned PGlite from a previous crash loop before binding
-  pkill -f "pglite-server.mjs" 2>/dev/null || true
-  sleep 1
   echo "Starting PGlite on port $PGLITE_PORT..."
   mkdir -p .app/pgdata
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
     node scripts/pglite-server.mjs &
-  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable"
-  wait_for_pg "$ATELIER_DB_URL" 30
+  local_db_url="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable"
+  wait_for_pg "$local_db_url" 30
+  export ATELIER_DB_URL="$local_db_url"
 fi
 
 # Start Qdrant if binary is present (CAI deployment)
@@ -102,7 +112,25 @@ fi
 
 # ── Resolve config (infra URLs now in environment) ───────────────
 python bin/resolve-config.py
-set -a && source build/config/atelier.env && set +a
+while IFS='=' read -r key value; do
+  [[ -z "$key" || "$key" =~ ^# ]] && continue
+  export "$key=$value"
+done < build/config/atelier.env
+
+# ── Preflight validation ──────────────────────────────────────────
+echo "Running preflight validation..."
+python -c "
+import sys
+from atelier.config import load_config
+from atelier.preflight import run_preflight
+result = run_preflight(load_config())
+for c in result.checks:
+    tag = {'pass': 'PASS', 'warn': 'WARN', 'deny': 'DENY'}[c.status]
+    print(f'  [{tag}] {c.name}: {c.message}')
+if not result.ok:
+    print('Preflight failed — cannot start.', file=sys.stderr)
+    sys.exit(1)
+"
 
 # Run database migrations (SQLAlchemy-based, dbmate-compatible)
 echo "Running database migrations..."
