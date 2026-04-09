@@ -255,6 +255,29 @@ async def terminal_ws(websocket: WebSocket):
         pass
 
 
+# ── Orchestration WebSocket ────────────────────────────────────────
+
+
+@app.websocket("/ws/orchestration")
+async def orchestration_ws(websocket: WebSocket):
+    """Live orchestration events for the XYFlow canvas.
+
+    Placeholder — sends a greeting and keeps the connection alive.
+    Future: stream agent_spawned, agent_active, artifact_produced events
+    as Claude orchestrates keystone agents via the SDK.
+    """
+    await websocket.accept()
+    await websocket.send_json({
+        "type": "topology_reset",
+        "message": "Orchestration channel connected.",
+    })
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+
+
 # ── Serve React build (production) ───────────────────────────────
 
 _ui_dist = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"

@@ -6,6 +6,7 @@ import Landing from "./pages/Landing";
 
 const Embeddings = lazy(() => import("./pages/Embeddings"));
 const Status = lazy(() => import("./pages/Status"));
+const Workflows = lazy(() => import("./pages/Workflows"));
 
 function App() {
   return (
@@ -47,6 +48,29 @@ function App() {
                   }
                 >
                   <Status />
+                </Suspense>
+              </Layout>
+            }
+          />
+          <Route
+            path="/workflows"
+            element={
+              <Layout fullHeight>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        height: "calc(100vh - 128px)",
+                      }}
+                    >
+                      <Spin size="large" />
+                    </div>
+                  }
+                >
+                  <Workflows />
                 </Suspense>
               </Layout>
             }

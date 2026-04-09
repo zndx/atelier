@@ -217,6 +217,9 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 
+# Atelier — override global ignores for UI source
+!ui/src/lib/
+
 # Atelier — runtime / build artifacts
 .app/
 .qdrant-initialized

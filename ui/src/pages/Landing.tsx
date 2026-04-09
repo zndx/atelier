@@ -104,18 +104,20 @@ function Landing() {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="Workflows"
-              value={0}
-              prefix={<ClusterOutlined />}
-              suffix={
-                <Tag color="default" style={{ marginLeft: 8, fontSize: 11 }}>
-                  planned
-                </Tag>
-              }
-            />
-          </Card>
+          <Link to="/workflows">
+            <Card hoverable>
+              <Statistic
+                title="Workflows"
+                value="Canvas"
+                prefix={<ClusterOutlined />}
+                suffix={
+                  <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>
+                    preview
+                  </Tag>
+                }
+              />
+            </Card>
+          </Link>
         </Col>
       </Row>
 
@@ -158,20 +160,22 @@ function Landing() {
           </Card>
         </Col>
         <Col xs={24} md={12} lg={8}>
-          <Card
-            title="Workflows"
-            extra={<ClusterOutlined />}
-            hoverable
-            style={{ height: "100%" }}
-          >
-            <Paragraph type="secondary">
-              XYFlow canvas illustrating relationships between keystone agents
-              and their evolution over time.
-            </Paragraph>
-            <Tag color="default" style={{ marginTop: 8 }}>
-              Planned
-            </Tag>
-          </Card>
+          <Link to="/workflows">
+            <Card
+              title="Workflows"
+              extra={<ClusterOutlined />}
+              hoverable
+              style={{ height: "100%" }}
+            >
+              <Paragraph type="secondary">
+                Orchestration canvas — situational awareness for Claude's
+                dynamic keystone agent coordination.
+              </Paragraph>
+              <Tag color="blue" style={{ marginTop: 8 }}>
+                Preview
+              </Tag>
+            </Card>
+          </Link>
         </Col>
       </Row>
 
