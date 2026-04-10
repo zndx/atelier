@@ -20,6 +20,7 @@ app = FastAPI(title="Atelier", version="0.1.0")
 _project_root = Path(__file__).resolve().parent.parent.parent
 
 _client: AtelierClient | None = None
+_engine = None  # Cached SQLAlchemy engine for /api/status health checks
 
 
 def _get_client() -> AtelierClient:
@@ -29,20 +30,53 @@ def _get_client() -> AtelierClient:
     return _client
 
 
+def _get_status_engine():
+    """Return a cached SQLAlchemy engine for /api/status health checks.
+
+    Creating a new engine per request hits a pglite-socket@0.0.13 bug where
+    rapid connect/disconnect cycles cause "server closed the connection
+    unexpectedly". Reusing a pooled engine with pool_pre_ping lets us both
+    detect stale connections and avoid the setup-loop hazard.
+    """
+    global _engine
+    if _engine is None:
+        from sqlalchemy import create_engine
+        from atelier.config import load_config
+        _engine = create_engine(
+            load_config().db_url,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=2,
+            max_overflow=0,
+            connect_args={"connect_timeout": 5},
+        )
+    return _engine
+
+
 # ── REST → gRPC bridge ────────────────────────────────────────────
 
 
+# NOTE: endpoints below are declared `def` (not `async def`) so FastAPI runs
+# them in its threadpool. The gRPC stub calls are synchronous blocking
+# operations; running them on the event loop would serialize every request
+# and hang the gateway if any one call stalls.
+
+
 @app.get("/api/health")
-async def health():
+def health():
     client = _get_client()
-    resp = client.stub.HealthCheck(atelier_pb2.HealthCheckRequest())
+    resp = client.stub.HealthCheck(
+        atelier_pb2.HealthCheckRequest(), timeout=5
+    )
     return {"status": resp.status, "version": resp.version}
 
 
 @app.get("/api/agents")
-async def list_agents():
+def list_agents():
     client = _get_client()
-    resp = client.stub.ListAgents(atelier_pb2.ListAgentsRequest())
+    resp = client.stub.ListAgents(
+        atelier_pb2.ListAgentsRequest(), timeout=5
+    )
     return {
         "agents": [
             {
@@ -58,7 +92,7 @@ async def list_agents():
 
 
 @app.get("/api/skills")
-async def list_skills():
+def list_skills():
     """Return skill definitions from .claude/commands/ markdown files."""
     commands_dir = _project_root / ".claude" / "commands"
     skills = []
@@ -85,7 +119,7 @@ async def list_skills():
 
 
 @app.get("/api/skills/{skill_id}")
-async def get_skill(skill_id: str):
+def get_skill(skill_id: str):
     """Return a single skill's markdown content."""
     from fastapi.responses import Response
 
@@ -105,9 +139,11 @@ async def get_skill(skill_id: str):
 
 
 @app.get("/api/datasets")
-async def list_datasets():
+def list_datasets():
     client = _get_client()
-    resp = client.stub.ListDatasets(atelier_pb2.ListDatasetsRequest())
+    resp = client.stub.ListDatasets(
+        atelier_pb2.ListDatasetsRequest(), timeout=5
+    )
     return {
         "datasets": [
             {
@@ -123,12 +159,14 @@ async def list_datasets():
 
 
 @app.get("/api/datasets/{dataset_id}/data")
-async def get_dataset_data(dataset_id: str):
+def get_dataset_data(dataset_id: str):
     """Serve a dataset's parquet file for the Embeddings page."""
     from fastapi.responses import Response
 
     client = _get_client()
-    resp = client.stub.ListDatasets(atelier_pb2.ListDatasetsRequest())
+    resp = client.stub.ListDatasets(
+        atelier_pb2.ListDatasetsRequest(), timeout=5
+    )
     dataset = next((d for d in resp.datasets if d.id == dataset_id), None)
     if dataset is None:
         return Response(status_code=404, content="Dataset not found")
@@ -150,8 +188,15 @@ async def get_dataset_data(dataset_id: str):
 
 
 @app.get("/api/status")
-async def status():
-    """Aggregated infrastructure health for the operator dashboard."""
+def status():
+    """Aggregated infrastructure health for the operator dashboard.
+
+    Declared as ``def`` (not ``async def``) so FastAPI runs it in a
+    threadpool. All three probes below are synchronous blocking calls;
+    running them on the event loop would freeze every other request
+    when one backend is slow — which on CAI triggers the platform's
+    health check to declare the app dead and restart it.
+    """
     import time
     import urllib.request
 
@@ -160,34 +205,35 @@ async def status():
     cfg = load_config()
     checks: dict = {}
 
-    # gRPC server
+    # gRPC server — timeout prevents hang on stale channel
     try:
         t0 = time.monotonic()
         client = _get_client()
-        resp = client.stub.HealthCheck(atelier_pb2.HealthCheckRequest())
+        resp = client.stub.HealthCheck(
+            atelier_pb2.HealthCheckRequest(), timeout=5
+        )
         ms = int((time.monotonic() - t0) * 1000)
         checks["grpc"] = {"ok": True, "version": resp.version, "latency_ms": ms}
     except Exception as e:
         checks["grpc"] = {"ok": False, "error": str(e)}
 
-    # PostgreSQL
+    # PostgreSQL — reuse cached engine (pool_pre_ping handles stale conns)
     try:
         t0 = time.monotonic()
-        from sqlalchemy import create_engine, text
-        engine = create_engine(cfg.db_url)
+        from sqlalchemy import text
+        engine = _get_status_engine()
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        engine.dispose()
         ms = int((time.monotonic() - t0) * 1000)
         checks["postgres"] = {"ok": True, "latency_ms": ms}
     except Exception as e:
         checks["postgres"] = {"ok": False, "error": str(e)}
 
-    # Qdrant
+    # Qdrant — short timeout
     try:
         t0 = time.monotonic()
         url = f"http://{cfg.qdrant_host}:{cfg.qdrant_http_port}/healthz"
-        urllib.request.urlopen(url, timeout=5)
+        urllib.request.urlopen(url, timeout=3)
         ms = int((time.monotonic() - t0) * 1000)
         checks["qdrant"] = {"ok": True, "latency_ms": ms}
     except Exception as e:
@@ -223,8 +269,13 @@ async def status():
 
 
 @app.post("/api/agents/validate-credentials")
-async def validate_credentials():
-    """Validate all configured LLM provider credentials."""
+def validate_credentials():
+    """Validate all configured LLM provider credentials.
+
+    Synchronous (runs in threadpool) — the validation does blocking
+    network calls to Anthropic/Bedrock which must not block the event
+    loop.
+    """
     try:
         from atelier.agents import validate_credentials as _validate
     except ImportError:
@@ -258,7 +309,7 @@ async def agent_smoke_test():
 
 
 @app.get("/api/agents/model-discovery")
-async def model_discovery():
+def model_discovery():
     """Check for model upgrades via the Anthropic Models API."""
     try:
         from atelier.agents import check_model_upgrade

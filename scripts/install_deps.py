@@ -22,9 +22,11 @@ pip = [sys.executable, "-m", "pip"]
 print(f"Python: {sys.executable} ({sys.version})")
 print(f"Working directory: {os.getcwd()}")
 
-# Install Python package + dependencies into system Python
+# Install Python package + dependencies into system Python.
+# [viz] = pyarrow, pandas, sentence-transformers, umap (embedding pipeline)
+# [agents] = claude-agent-sdk, anthropic (Terminal + smoke test + validation)
 print("\n--- Installing Python dependencies ---")
-subprocess.run([*pip, "install", "-e", ".[viz]"], check=True)
+subprocess.run([*pip, "install", "-e", ".[viz,agents]"], check=True)
 print("Python dependencies installed")
 
 # Verify atelier is importable
