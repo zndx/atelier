@@ -66,15 +66,51 @@ else:
 
 # Install Claude Code CLI (required by claude-agent-sdk at runtime)
 # Pin to the version the SDK was built against for compatibility.
+#
+# On CAI, `nvm use default` doesn't reliably propagate nvm's node bin
+# directory into fresh bash subprocesses, so `claude` ends up installed
+# at $NVM_DIR/versions/node/<ver>/bin/claude but isn't on PATH later.
+# Symlink it into ~/.local/bin (which bin/start-app.sh puts on PATH)
+# so the Agent SDK can find it at runtime.
 print("\n--- Installing Claude Code CLI ---")
 subprocess.run(
     ["bash", "-c", nvm_prefix + "npm install -g @anthropic-ai/claude-code@2.1.92"],
     check=True,
 )
-subprocess.run(
-    ["bash", "-c", nvm_prefix + "claude --version"],
-    check=True,
-)
+
+# Locate the installed binary via `npm prefix -g` (works regardless of
+# whether nvm's bin dir is on PATH in later shells).
+npm_prefix_g = subprocess.run(
+    ["bash", "-c", nvm_prefix + "npm prefix -g"],
+    capture_output=True, text=True, check=True,
+).stdout.strip()
+claude_src = os.path.join(npm_prefix_g, "bin", "claude")
+
+if not os.path.exists(claude_src):
+    # Fallback: search NVM_DIR for the binary (handles prefix quirks).
+    found = subprocess.run(
+        ["bash", "-c", 'find "$HOME/.nvm" -type f -name claude 2>/dev/null | head -1'],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    if found:
+        claude_src = found
+
+if not os.path.exists(claude_src):
+    raise RuntimeError(
+        f"claude binary not found after npm install -g "
+        f"(looked at {npm_prefix_g}/bin/claude and under ~/.nvm)"
+    )
+
+local_bin = os.path.expanduser("~/.local/bin")
+os.makedirs(local_bin, exist_ok=True)
+claude_dst = os.path.join(local_bin, "claude")
+if os.path.islink(claude_dst) or os.path.exists(claude_dst):
+    os.remove(claude_dst)
+os.symlink(claude_src, claude_dst)
+print(f"Symlinked {claude_src} -> {claude_dst}")
+
+# Verify through the symlink — this is the path start-app.sh will use.
+subprocess.run([claude_dst, "--version"], check=True)
 print("Claude Code CLI installed")
 
 # Install PGlite server dependencies
