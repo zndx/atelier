@@ -7,6 +7,7 @@ export interface AgentInfo {
   name: string;
   description: string;
   role: string;
+  tool_ids: string[];
 }
 
 // ── Node data payloads ──────────────────────────────────────────

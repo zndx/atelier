@@ -64,6 +64,19 @@ else:
     print(f"    Expected: {ea_dist}")
     print("    Run the full build locally and commit dist/ to the fork.")
 
+# Install Claude Code CLI (required by claude-agent-sdk at runtime)
+# Pin to the version the SDK was built against for compatibility.
+print("\n--- Installing Claude Code CLI ---")
+subprocess.run(
+    ["bash", "-c", nvm_prefix + "npm install -g @anthropic-ai/claude-code@2.1.92"],
+    check=True,
+)
+subprocess.run(
+    ["bash", "-c", nvm_prefix + "claude --version"],
+    check=True,
+)
+print("Claude Code CLI installed")
+
 # Install PGlite server dependencies
 print("\n--- Installing PGlite ---")
 subprocess.run(

@@ -82,6 +82,7 @@ fi
 
 echo "Python: $(which python)"
 echo "Packages: $(python -c 'import atelier; print(atelier.__version__)' 2>&1 || echo 'NOT FOUND')"
+echo "Claude CLI: $(which claude 2>/dev/null && claude --version 2>/dev/null || echo 'NOT FOUND — Agent SDK will fail')"
 
 # ── Start infrastructure BEFORE config resolution ────────────────
 # PGlite and Qdrant must start first so their URLs are in the
@@ -96,7 +97,10 @@ if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
     node scripts/pglite-server.mjs &
   wait_for_port "PostgreSQL" "127.0.0.1" "$PGLITE_PORT" 30
-  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable"
+  # gssencmode=disable: psycopg sends GSSAPI negotiation before auth handshake;
+  # PGlite doesn't speak that protocol. Without this, migrations fail with:
+  # "received invalid response to GSSAPI negotiation: R"
+  export ATELIER_DB_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:${PGLITE_PORT}/postgres?sslmode=disable&gssencmode=disable"
 fi
 
 # Start Qdrant if binary is present (CAI deployment)
@@ -172,17 +176,20 @@ existing = dao.list_agents()
 if not existing:
     agents = [
         ('classifier', 'Column Classifier',
-         'Zero-shot classification of table columns using LLM reasoning',
-         'classifier'),
+         'Extracts 12 discrete features per column and runs cosine, CatBoost, and SVM classifiers with regex pattern detection',
+         'classifier',
+         '[\"extract-features\", \"run-classifiers\", \"detect-patterns\"]'),
         ('evidence-fuser', 'Evidence Fuser',
-         'Combines LLM, embedding, and SVM evidence via Dempster-Shafer fusion',
-         'evidence_fuser'),
+         'Converts 5 evidence sources into Dempster-Shafer mass functions, fuses via conjunctive combination, and diagnoses conflicts',
+         'evidence_fuser',
+         '[\"build-mass-functions\", \"apply-dempster-rule\", \"diagnose-conflicts\"]'),
         ('viz-director', 'Visualization Director',
-         'Curates embedding projections and manages interactive exploration',
-         'visualization_director'),
+         'Computes SAGE/SHAP feature explanations and prepares Atlas-compatible embedding projections',
+         'visualization_director',
+         '[\"compute-sage-importance\", \"generate-shap-explanations\", \"prepare-atlas-projection\"]'),
     ]
-    for aid, name, desc, role in agents:
-        dao.upsert_agent(aid, name, desc, role)
+    for aid, name, desc, role, tools in agents:
+        dao.upsert_agent(aid, name, desc, role, tools)
     print(f'Seeded {len(agents)} keystone agents')
 else:
     print(f'Seed check: {len(existing)} agents already registered')

@@ -5,14 +5,17 @@ from behave import given, when, then
 
 KEYSTONE_AGENTS = [
     ("classifier", "Column Classifier",
-     "Zero-shot classification of table columns using LLM reasoning",
-     "classifier"),
+     "Extracts 12 discrete features per column and runs cosine, CatBoost, and SVM classifiers with regex pattern detection",
+     "classifier",
+     '["extract-features", "run-classifiers", "detect-patterns"]'),
     ("evidence-fuser", "Evidence Fuser",
-     "Combines LLM, embedding, and SVM evidence via Dempster-Shafer fusion",
-     "evidence_fuser"),
+     "Converts 5 evidence sources into Dempster-Shafer mass functions, fuses via conjunctive combination, and diagnoses conflicts",
+     "evidence_fuser",
+     '["build-mass-functions", "apply-dempster-rule", "diagnose-conflicts"]'),
     ("viz-director", "Visualization Director",
-     "Curates embedding projections and manages interactive exploration",
-     "visualization_director"),
+     "Computes SAGE/SHAP feature explanations and prepares Atlas-compatible embedding projections",
+     "visualization_director",
+     '["compute-sage-importance", "generate-shap-explanations", "prepare-atlas-projection"]'),
 ]
 
 
@@ -21,8 +24,8 @@ def step_db_bootstrapped(context):
     from atelier.db.dao import AtelierDao
     context.dao = AtelierDao()
     if not context.dao.list_agents():
-        for aid, name, desc, role in KEYSTONE_AGENTS:
-            context.dao.upsert_agent(aid, name, desc, role)
+        for aid, name, desc, role, tools in KEYSTONE_AGENTS:
+            context.dao.upsert_agent(aid, name, desc, role, tools)
 
 
 @then("at least {count:d} agents are registered")

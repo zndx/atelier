@@ -2,13 +2,17 @@ import { Card, Col, Row, Spin, Statistic, Tag, Typography } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  BookOutlined,
   ClusterOutlined,
   CodeOutlined,
+  DatabaseOutlined,
   DotChartOutlined,
   ExperimentOutlined,
+  ToolOutlined,
 } from "@ant-design/icons";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import type { AgentInfo } from "../types/canvas";
 
 const Terminal = lazy(() => import("../components/Terminal"));
 
@@ -30,7 +34,7 @@ interface DatasetInfo {
 
 function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
-  const [agents, setAgents] = useState<unknown[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
 
   useEffect(() => {
@@ -49,6 +53,20 @@ function Landing() {
       .then((data) => setDatasets(data.datasets || []))
       .catch(() => setDatasets([]));
   }, []);
+
+  const skillCount = useMemo(
+    () => agents.reduce((n, a) => n + (a.tool_ids?.length || 0), 0),
+    [agents],
+  );
+
+  // Entities = tables (datasets) + columns (row_count per dataset).
+  // Aligns with Apache Atlas where both hive_table and hive_column are
+  // first-class entity types that can be independently tagged with Terms.
+  const entityCount = useMemo(
+    () =>
+      datasets.reduce((n, d) => n + (d.row_count || 0), 0) + datasets.length,
+    [datasets],
+  );
 
   return (
     <>
@@ -88,52 +106,47 @@ function Landing() {
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title="Keystone Agents"
-              value={agents.length}
-              prefix={<ExperimentOutlined />}
+              title="Skills"
+              value={skillCount}
+              prefix={<ToolOutlined />}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title="Datasets"
-              value={datasets.length}
-              prefix={<DotChartOutlined />}
+              title="Entities"
+              value={entityCount}
+              prefix={<DatabaseOutlined />}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Link to="/workflows">
-            <Card hoverable>
-              <Statistic
-                title="Workflows"
-                value="Canvas"
-                prefix={<ClusterOutlined />}
-                suffix={
-                  <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>
-                    preview
-                  </Tag>
-                }
-              />
-            </Card>
-          </Link>
+          <Card>
+            <Statistic
+              title="Terms"
+              value={46}
+              prefix={<BookOutlined />}
+            />
+          </Card>
         </Col>
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
         <Col xs={24} md={12} lg={8}>
-          <Card
-            title="Agents"
-            extra={<ExperimentOutlined />}
-            hoverable
-            style={{ height: "100%" }}
-          >
-            <Paragraph type="secondary">
-              Define and orchestrate keystone agents using the Claude Agent SDK.
-              Agents adapt as classification workflows evolve.
-            </Paragraph>
-          </Card>
+          <Link to="/agents">
+            <Card
+              title="Agents"
+              extra={<ExperimentOutlined />}
+              hoverable
+              style={{ height: "100%" }}
+            >
+              <Paragraph type="secondary">
+                Define and orchestrate keystone agents using the Claude Agent SDK.
+                Agents adapt as classification workflows evolve.
+              </Paragraph>
+            </Card>
+          </Link>
         </Col>
         <Col xs={24} md={12} lg={8}>
           <Card

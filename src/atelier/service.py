@@ -4,6 +4,8 @@ Follows the Fine Tuning Studio pattern: the servicer is a thin router.
 All business logic lives in separate modules.
 """
 
+import json
+
 from atelier.db.dao import AtelierDao
 from atelier.proto import atelier_pb2, atelier_pb2_grpc
 
@@ -35,6 +37,7 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                     name=a["name"] or "",
                     description=a["description"] or "",
                     role=a["role"] or "",
+                    tool_ids=json.loads(a["tool_ids"] or "[]"),
                 )
                 for a in agents
             ]
@@ -50,6 +53,7 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                 name=agent["name"] or "",
                 description=agent["description"] or "",
                 role=agent["role"] or "",
+                tool_ids=json.loads(agent["tool_ids"] or "[]"),
             )
         )
 

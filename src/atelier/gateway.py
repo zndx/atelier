@@ -50,10 +50,58 @@ async def list_agents():
                 "name": a.name,
                 "description": a.description,
                 "role": a.role,
+                "tool_ids": list(a.tool_ids),
             }
             for a in resp.agents
         ]
     }
+
+
+@app.get("/api/skills")
+async def list_skills():
+    """Return skill definitions from .claude/commands/ markdown files."""
+    commands_dir = _project_root / ".claude" / "commands"
+    skills = []
+    if commands_dir.is_dir():
+        for md_file in sorted(commands_dir.glob("*.md")):
+            content = md_file.read_text()
+            # First line is the title (# Title)
+            lines = content.strip().splitlines()
+            title = lines[0].lstrip("# ").strip() if lines else md_file.stem
+            # Second non-empty line is the description
+            description = ""
+            for line in lines[1:]:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    description = stripped
+                    break
+            skills.append({
+                "id": md_file.stem,
+                "title": title,
+                "description": description,
+                "content": content,
+            })
+    return {"skills": skills}
+
+
+@app.get("/api/skills/{skill_id}")
+async def get_skill(skill_id: str):
+    """Return a single skill's markdown content."""
+    from fastapi.responses import Response
+
+    md_file = _project_root / ".claude" / "commands" / f"{skill_id}.md"
+    if not md_file.exists():
+        return Response(status_code=404, content="Skill not found")
+    content = md_file.read_text()
+    lines = content.strip().splitlines()
+    title = lines[0].lstrip("# ").strip() if lines else skill_id
+    description = ""
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            description = stripped
+            break
+    return {"id": skill_id, "title": title, "description": description, "content": content}
 
 
 @app.get("/api/datasets")
