@@ -163,6 +163,8 @@ async def run_smoke_test_async(cfg: AtelierConfig) -> dict:
 
 
 async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
+    from pathlib import Path
+
     from claude_agent_sdk import (
         query,
         ClaudeAgentOptions,
@@ -175,12 +177,20 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
     if not env:
         return {"success": False, "error": "No credentials configured for any provider"}
 
+    # Project root contains .claude/commands/ — explicit cwd + setting_sources
+    # ensures the SDK discovers our 9 keystone skills at runtime. Without
+    # setting_sources, the SDK defaults to None and silently skips filesystem
+    # slash commands.
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+
     options = ClaudeAgentOptions(
         allowed_tools=[],
         permission_mode="dontAsk",
         model=cfg.agent_model,
         max_turns=1,
         max_budget_usd=0.05,
+        cwd=str(project_root),
+        setting_sources=["project"],
         env=env,
     )
 

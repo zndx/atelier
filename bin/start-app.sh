@@ -167,32 +167,30 @@ else:
     print(f'Seed check: {len(existing)} datasets already registered')
 "
 
-# Seed keystone agents if DB is empty
-echo "Checking agent seed..."
+# Seed / refresh keystone agents. upsert_agent is idempotent, so we always
+# run it — this keeps descriptions and tool_ids in sync with the code after
+# re-deploys (the previous `if not existing` guard left stale rows behind).
+echo "Seeding keystone agents..."
 python -c "
 from atelier.db.dao import AtelierDao
 dao = AtelierDao()
-existing = dao.list_agents()
-if not existing:
-    agents = [
-        ('classifier', 'Column Classifier',
-         'Extracts 12 discrete features per column and runs cosine, CatBoost, and SVM classifiers with regex pattern detection',
-         'classifier',
-         '[\"extract-features\", \"run-classifiers\", \"detect-patterns\"]'),
-        ('evidence-fuser', 'Evidence Fuser',
-         'Converts 5 evidence sources into Dempster-Shafer mass functions, fuses via conjunctive combination, and diagnoses conflicts',
-         'evidence_fuser',
-         '[\"build-mass-functions\", \"apply-dempster-rule\", \"diagnose-conflicts\"]'),
-        ('viz-director', 'Visualization Director',
-         'Computes SAGE/SHAP feature explanations and prepares Atlas-compatible embedding projections',
-         'visualization_director',
-         '[\"compute-sage-importance\", \"generate-shap-explanations\", \"prepare-atlas-projection\"]'),
-    ]
-    for aid, name, desc, role, tools in agents:
-        dao.upsert_agent(aid, name, desc, role, tools)
-    print(f'Seeded {len(agents)} keystone agents')
-else:
-    print(f'Seed check: {len(existing)} agents already registered')
+agents = [
+    ('classifier', 'Column Classifier',
+     'Extracts 12 discrete features per column and runs cosine, CatBoost, and SVM classifiers with regex pattern detection',
+     'classifier',
+     '[\"extract-features\", \"run-classifiers\", \"detect-patterns\"]'),
+    ('evidence-fuser', 'Evidence Fuser',
+     'Converts 5 evidence sources into Dempster-Shafer mass functions, fuses via conjunctive combination, and diagnoses conflicts',
+     'evidence_fuser',
+     '[\"build-mass-functions\", \"apply-dempster-rule\", \"diagnose-conflicts\"]'),
+    ('viz-director', 'Visualization Director',
+     'Computes SAGE/SHAP feature explanations and prepares Atlas-compatible embedding projections',
+     'visualization_director',
+     '[\"compute-sage-importance\", \"generate-shap-explanations\", \"prepare-atlas-projection\"]'),
+]
+for aid, name, desc, role, tools in agents:
+    dao.upsert_agent(aid, name, desc, role, tools)
+print(f'Upserted {len(agents)} keystone agents')
 "
 
 # Start gRPC server (background)

@@ -206,6 +206,8 @@ class TerminalSession:
         yield _text(f"{_DIM}thinking...{_RESET}")
 
         try:
+            from pathlib import Path
+
             from claude_agent_sdk import (
                 query,
                 ClaudeAgentOptions,
@@ -219,12 +221,18 @@ class TerminalSession:
             cfg = load_config()
             env = _build_sdk_env(cfg)
 
+            # Load project-level .claude/commands so the interactive session
+            # exposes our 9 keystone skills as slash commands.
+            project_root = Path(__file__).resolve().parent.parent.parent
+
             options = ClaudeAgentOptions(
                 allowed_tools=[],
                 permission_mode="dontAsk",
                 model=cfg.agent_model,
                 max_turns=5,
                 max_budget_usd=0.25,
+                cwd=str(project_root),
+                setting_sources=["project"],
                 env=env,
             )
 

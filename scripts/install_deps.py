@@ -121,10 +121,16 @@ subprocess.run(
 )
 print("PGlite dependencies installed")
 
-# Install Node.js dependencies and build React frontend
+# Install Node.js dependencies and build React frontend.
+# NODE_OPTIONS --max-old-space-size=4096 gives vite enough heap to bundle
+# the Embeddings page (2.9 MB pre-gzip). Default heap on some CAI runtimes
+# can be ~512 MB and OOM during terser minify.
 print("\n--- Building React UI ---")
 subprocess.run(
-    ["bash", "-c", nvm_prefix + "cd ui && npm install && npm run build"],
+    ["bash", "-c",
+     nvm_prefix
+     + "export NODE_OPTIONS='--max-old-space-size=4096' && "
+     + "cd ui && npm install && npm run build"],
     check=True,
 )
 print("Node.js dependencies installed and UI built")
