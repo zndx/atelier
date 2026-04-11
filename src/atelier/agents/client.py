@@ -245,6 +245,15 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
     # slash commands.
     project_root = Path(__file__).resolve().parent.parent.parent.parent
 
+    # Capture real stderr from the CLI subprocess. Without this callback,
+    # claude-agent-sdk constructs ProcessError with a placeholder string
+    # ("Check stderr output for details") because the child's stderr is
+    # inherited, not piped. With the callback we get actionable errors.
+    stderr_lines: list[str] = []
+
+    def _capture_stderr(line: str) -> None:
+        stderr_lines.append(line)
+
     options = ClaudeAgentOptions(
         allowed_tools=[],
         permission_mode="dontAsk",
@@ -254,6 +263,7 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
         cwd=str(project_root),
         setting_sources=["project"],
         env=env,
+        stderr=_capture_stderr,
     )
 
     texts: list[str] = []
@@ -276,12 +286,18 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
                     "total_cost_usd": message.total_cost_usd,
                 }
     except Exception as e:
-        # Try to surface subprocess stderr — claude-agent-sdk raises
-        # CLIError with .stderr attached, but the message omits it.
-        detail = str(e)
-        stderr = getattr(e, "stderr", None)
-        if stderr:
-            detail = f"{detail}\n\nstderr:\n{stderr}"
+        # Compose the most actionable error possible: exception type and
+        # message, process exit code if available, and the tail of the
+        # captured stderr lines. We deliberately ignore ProcessError.stderr
+        # (a hardcoded placeholder inside the SDK) in favor of lines we
+        # collected via the stderr callback above.
+        exit_code = getattr(e, "exit_code", None)
+        detail = f"{type(e).__name__}: {e}"
+        if exit_code is not None:
+            detail += f" (exit {exit_code})"
+        if stderr_lines:
+            tail = stderr_lines[-20:]
+            detail += "\n\nstderr:\n" + "\n".join(tail)
         provider = "bedrock" if env.get("CLAUDE_CODE_USE_BEDROCK") else "anthropic"
         return {
             "success": False,

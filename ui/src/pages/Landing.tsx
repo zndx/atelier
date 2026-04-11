@@ -2,6 +2,7 @@ import { Card, Col, Row, Spin, Statistic, Tag, Typography } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  WarningOutlined,
   BookOutlined,
   ClusterOutlined,
   CodeOutlined,
@@ -23,6 +24,7 @@ interface StatusSummary {
   postgres: { ok: boolean };
   qdrant: { ok: boolean };
   connected: boolean;
+  degraded?: boolean;
 }
 
 interface DatasetInfo {
@@ -83,22 +85,47 @@ function Landing() {
             <Card hoverable>
               <Statistic
                 title="Service Status"
-                value={status?.connected ? "Connected" : "Disconnected"}
+                value={
+                  status?.connected
+                    ? status.degraded
+                      ? "Degraded"
+                      : "Connected"
+                    : "Disconnected"
+                }
                 prefix={
                   status?.connected ? (
-                    <CheckCircleOutlined />
+                    status.degraded ? (
+                      <WarningOutlined />
+                    ) : (
+                      <CheckCircleOutlined />
+                    )
                   ) : (
                     <CloseCircleOutlined />
                   )
                 }
                 valueStyle={{
-                  color: status?.connected ? "#52c41a" : "#ff4d4f",
+                  color: status?.connected
+                    ? status.degraded
+                      ? "#faad14"
+                      : "#52c41a"
+                    : "#ff4d4f",
                 }}
               />
               {status?.grpc?.version && (
                 <Tag color="blue" style={{ marginTop: 8 }}>
                   v{status.grpc.version}
                 </Tag>
+              )}
+              {status?.degraded && (
+                <div style={{ marginTop: 4, fontSize: 11, color: "#8c8c8c" }}>
+                  {[
+                    status.postgres?.ok ? null : "postgres",
+                    status.qdrant?.ok ? null : "qdrant",
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}{" "}
+                  unreachable
+                </div>
               )}
             </Card>
           </Link>

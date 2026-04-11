@@ -300,12 +300,21 @@ def status():
         "model_discovery": model_discovery,
     }
 
-    connected = all(
+    # "connected" = gRPC reachable. gRPC is the only strict dealbreaker;
+    # the frontend cannot function without it. Postgres and Qdrant can
+    # flake transiently (PGlite wedges, Qdrant cold-start), but that
+    # shouldn't mark the whole app as disconnected on the Landing page.
+    # We separately compute "degraded" so the dashboard can show a more
+    # useful state than a binary badge.
+    grpc_ok = checks.get("grpc", {}).get("ok", False)
+    all_ok = all(
         checks.get(svc, {}).get("ok", False)
         for svc in ("grpc", "postgres", "qdrant")
     )
+    connected = grpc_ok
+    degraded = grpc_ok and not all_ok
 
-    return {**checks, "connected": connected}
+    return {**checks, "connected": connected, "degraded": degraded}
 
 
 # ── Agent SDK endpoints ────────────────────────────────────────────
