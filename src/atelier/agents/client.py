@@ -152,19 +152,15 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
         if cfg.aws_region:
             env["AWS_DEFAULT_REGION"] = cfg.aws_region
 
-        # ── Bedrock safety flags ─────────────────────────────────
+        # ── Bedrock sub-model pins ───────────────────────────────
         # The CLI internally uses haiku-sized models for tool search
         # and sonnet-sized models for subagent dispatch. Its direct-API
         # defaults do NOT resolve on Bedrock; without these pins,
         # internal calls fail silently and interactive sessions (with
-        # tools, max_turns>1) hang or crash.
-        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-        env["ENABLE_TOOL_SEARCH"] = "false"
-
-        # Sub-model overrides. If the operator has configured Bedrock
-        # model IDs for haiku/sonnet/subagent, pass them through; else
-        # fall back to the primary model so internal calls at least go
-        # to a known-good endpoint (oversized is better than broken).
+        # tools, max_turns>1) hang or crash. If the operator hasn't
+        # pinned per-size Bedrock model IDs, fall back to the primary
+        # model so internal calls at least go to a known-good endpoint
+        # (oversized is better than broken).
         env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = (
             cfg.agent_default_sonnet_model or cfg.agent_model
         )
@@ -174,6 +170,24 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
         env["CLAUDE_CODE_SUBAGENT_MODEL"] = (
             cfg.agent_subagent_model or cfg.agent_model
         )
+
+    # ── CLI feature flags ────────────────────────────────────────
+    # Precedence: explicit cfg value > provider-specific default.
+    # On Bedrock, experimental betas / tool search are safe to disable
+    # by default because they dispatch to direct-API sub-models that
+    # won't resolve. On direct Anthropic we leave them untouched so
+    # the CLI's native behavior wins.
+    disable_betas = cfg.agent_disable_experimental_betas
+    if disable_betas is None and prefer_bedrock and cfg.has_bedrock:
+        disable_betas = "1"
+    if disable_betas is not None:
+        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = disable_betas
+
+    tool_search = cfg.agent_enable_tool_search
+    if tool_search is None and prefer_bedrock and cfg.has_bedrock:
+        tool_search = "false"
+    if tool_search is not None:
+        env["ENABLE_TOOL_SEARCH"] = tool_search
 
     return env
 

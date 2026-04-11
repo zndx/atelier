@@ -50,6 +50,17 @@ environment_variables:
     description: >-
       Bedrock model ID / ARN for CLI subagent dispatch. Leave blank to fall
       back to ATELIER_AGENT_MODEL.
+  CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS:
+    default: ""
+    description: >-
+      Disable experimental CLI betas (e.g. tool search). Defaults to "1"
+      on the Bedrock path since those betas dispatch to direct-API
+      sub-models. Leave blank to accept the provider default.
+  ENABLE_TOOL_SEARCH:
+    default: ""
+    description: >-
+      Enable the CLI's tool-search beta. Defaults to "false" on the
+      Bedrock path. Leave blank to accept the provider default.
 
 runtimes:
   - editor: PBJ Workbench

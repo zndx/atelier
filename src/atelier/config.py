@@ -57,6 +57,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "agents.default_sonnet_model": ("agent_default_sonnet_model", str),
     "agents.default_haiku_model": ("agent_default_haiku_model", str),
     "agents.subagent_model": ("agent_subagent_model", str),
+    "agents.disable_experimental_betas": ("agent_disable_experimental_betas", str),
+    "agents.enable_tool_search": ("agent_enable_tool_search", str),
     "db.url": ("db_url", str),
     "qdrant.host": ("qdrant_host", str),
     "qdrant.http_port": ("qdrant_http_port", int),
@@ -88,6 +90,10 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
     elif _field == "agent_subagent_model":
         _env = "CLAUDE_CODE_SUBAGENT_MODEL"
+    elif _field == "agent_disable_experimental_betas":
+        _env = "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"
+    elif _field == "agent_enable_tool_search":
+        _env = "ENABLE_TOOL_SEARCH"
     elif _field.startswith("cml_"):
         _env = "CDSW_" + _field[4:].upper()
     elif _field == "gateway_port":
@@ -128,6 +134,10 @@ class AtelierConfig:
     agent_default_sonnet_model: str | None = None
     agent_default_haiku_model: str | None = None
     agent_subagent_model: str | None = None
+    # CLI feature flags — passed through to the SDK env when set.
+    # None = rely on provider-specific defaults in _build_sdk_env.
+    agent_disable_experimental_betas: str | None = None
+    agent_enable_tool_search: str | None = None
 
     @property
     def has_anthropic(self) -> bool:
