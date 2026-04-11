@@ -35,15 +35,34 @@ function WorkflowsInner() {
   const fetchAndLayout = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // Tolerant JSON parser: backend plain-text 500s ("Internal Server
+    // Error") would otherwise bubble up as "Unexpected token 'I'" and
+    // hide the real failure.
+    const safeJson = async (r: Response): Promise<any | null> => {
+      try {
+        const text = await r.text();
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { error: text };
+        }
+      } catch {
+        return null;
+      }
+    };
     try {
       const [agentsResp, statusResp] = await Promise.all([
-        fetch("/api/agents").then((r) => r.json()),
+        fetch("/api/agents").then(safeJson),
         fetch("/api/status")
-          .then((r) => r.json())
+          .then(safeJson)
           .catch(() => null),
       ]);
 
-      const agentList: AgentInfo[] = agentsResp.agents || [];
+      if (agentsResp?.error) {
+        throw new Error(agentsResp.error);
+      }
+      const agentList: AgentInfo[] = agentsResp?.agents || [];
       const model =
         statusResp?.config?.agent_model || "Claude (Agent SDK)";
 

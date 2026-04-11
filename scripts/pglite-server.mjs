@@ -11,6 +11,19 @@ import { PGLiteSocketServer } from '@electric-sql/pglite-socket'
 const DATA_DIR = process.env.PGLITE_DATA_DIR || '.app/pgdata'
 const PORT = parseInt(process.env.PGLITE_PORT || '5432', 10)
 
+// Log unhandled errors so crashes leave a trail in the gateway log
+// instead of the process silently disappearing and leaving connect()
+// attempts to time out.
+process.on('unhandledRejection', (reason) => {
+  console.error('[pglite] unhandledRejection:', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[pglite] uncaughtException:', err)
+  // Crashing loudly is better than hanging — start-app.sh's
+  // wait_for_port / supervisor will restart us.
+  process.exit(1)
+})
+
 const db = await PGlite.create({
   dataDir: DATA_DIR,
   extensions: { vector },
@@ -23,8 +36,12 @@ console.log(`PGlite listening on 127.0.0.1:${PORT}, data at ${DATA_DIR}`)
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
-    await server.stop()
-    await db.close()
+    try {
+      await server.stop()
+      await db.close()
+    } catch (err) {
+      console.error(`[pglite] error during ${sig} shutdown:`, err)
+    }
     process.exit(0)
   })
 }

@@ -30,6 +30,12 @@ def _get_client() -> AtelierClient:
     return _client
 
 
+def _reset_client() -> None:
+    """Drop the cached gRPC client so the next call opens a fresh channel."""
+    global _client
+    _client = None
+
+
 def _get_status_engine():
     """Return a cached SQLAlchemy engine for /api/status health checks.
 
@@ -53,6 +59,24 @@ def _get_status_engine():
     return _engine
 
 
+def _reset_status_engine() -> None:
+    """Drop the cached engine so the next call rebuilds the pool."""
+    global _engine
+    if _engine is not None:
+        try:
+            _engine.dispose()
+        except Exception:
+            pass
+    _engine = None
+
+
+def _error_envelope(detail: str, *, status: int = 503) -> "JSONResponse":
+    """Return a JSON error envelope so the frontend never has to parse
+    ``Internal Server Error`` as JSON."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=status, content={"error": detail})
+
+
 # ── REST → gRPC bridge ────────────────────────────────────────────
 
 
@@ -64,19 +88,30 @@ def _get_status_engine():
 
 @app.get("/api/health")
 def health():
-    client = _get_client()
-    resp = client.stub.HealthCheck(
-        atelier_pb2.HealthCheckRequest(), timeout=5
-    )
-    return {"status": resp.status, "version": resp.version}
+    try:
+        client = _get_client()
+        resp = client.stub.HealthCheck(
+            atelier_pb2.HealthCheckRequest(), timeout=5
+        )
+        return {"status": resp.status, "version": resp.version}
+    except Exception as exc:
+        _reset_client()
+        return _error_envelope(f"gRPC health check failed: {exc}")
 
 
 @app.get("/api/agents")
 def list_agents():
-    client = _get_client()
-    resp = client.stub.ListAgents(
-        atelier_pb2.ListAgentsRequest(), timeout=5
-    )
+    try:
+        client = _get_client()
+        resp = client.stub.ListAgents(
+            atelier_pb2.ListAgentsRequest(), timeout=5
+        )
+    except Exception as exc:
+        # Surface as JSON envelope so the Workflows page (which calls
+        # .json() on the response) can render the error instead of
+        # blowing up with "Unexpected token 'I', 'Internal S'...".
+        _reset_client()
+        return _error_envelope(f"ListAgents failed: {exc}")
     return {
         "agents": [
             {
@@ -140,10 +175,14 @@ def get_skill(skill_id: str):
 
 @app.get("/api/datasets")
 def list_datasets():
-    client = _get_client()
-    resp = client.stub.ListDatasets(
-        atelier_pb2.ListDatasetsRequest(), timeout=5
-    )
+    try:
+        client = _get_client()
+        resp = client.stub.ListDatasets(
+            atelier_pb2.ListDatasetsRequest(), timeout=5
+        )
+    except Exception as exc:
+        _reset_client()
+        return _error_envelope(f"ListDatasets failed: {exc}")
     return {
         "datasets": [
             {
@@ -215,9 +254,12 @@ def status():
         ms = int((time.monotonic() - t0) * 1000)
         checks["grpc"] = {"ok": True, "version": resp.version, "latency_ms": ms}
     except Exception as e:
+        _reset_client()
         checks["grpc"] = {"ok": False, "error": str(e)}
 
-    # PostgreSQL — reuse cached engine (pool_pre_ping handles stale conns)
+    # PostgreSQL — reuse cached engine (pool_pre_ping handles stale conns).
+    # On failure, dispose the pool so the next call rebuilds from scratch;
+    # this breaks us out of pglite-socket@0.0.13 wedge states.
     try:
         t0 = time.monotonic()
         from sqlalchemy import text
@@ -227,6 +269,7 @@ def status():
         ms = int((time.monotonic() - t0) * 1000)
         checks["postgres"] = {"ok": True, "latency_ms": ms}
     except Exception as e:
+        _reset_status_engine()
         checks["postgres"] = {"ok": False, "error": str(e)}
 
     # Qdrant — short timeout

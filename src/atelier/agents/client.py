@@ -113,8 +113,20 @@ validate_api_key = validate_credentials
 def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
     """Build environment dict for ClaudeAgentOptions.
 
-    Passes all available credentials — they don't conflict.
-    The SDK / CLI resolves which provider to use based on model format.
+    Passes all available credentials — they don't conflict at the SDK
+    layer. BUT the underlying ``claude`` CLI does NOT auto-detect
+    Bedrock from model format; it requires the explicit
+    ``CLAUDE_CODE_USE_BEDROCK=1`` flag, otherwise it tries to use a
+    (nonexistent) login session and returns "Not logged in · Please
+    run /login" with exit code 1.
+
+    Provider selection rules:
+    - If the model is a Bedrock ARN OR only bedrock creds are present,
+      set ``CLAUDE_CODE_USE_BEDROCK=1``.
+    - If only ``ANTHROPIC_API_KEY`` is present, leave the flag unset
+      (CLI defaults to direct API).
+    - When both are configured, prefer the direct API unless the model
+      is explicitly a Bedrock ARN — that's the production signal.
     """
     env: dict[str, str] = {}
     if cfg.anthropic_api_key:
@@ -127,6 +139,19 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
         env["AWS_REGION"] = cfg.aws_region
     if cfg.aws_session_token:
         env["AWS_SESSION_TOKEN"] = cfg.aws_session_token
+
+    model_is_bedrock = (
+        cfg.agent_model.startswith("arn:")
+        or "anthropic." in cfg.agent_model
+    )
+    prefer_bedrock = model_is_bedrock or (cfg.has_bedrock and not cfg.has_anthropic)
+    if prefer_bedrock and cfg.has_bedrock:
+        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        # The CLI expects AWS_REGION; make sure it's set even if cfg used
+        # a different name (some providers use AWS_DEFAULT_REGION).
+        if cfg.aws_region:
+            env["AWS_DEFAULT_REGION"] = cfg.aws_region
+
     return env
 
 
@@ -214,7 +239,19 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
                     "total_cost_usd": message.total_cost_usd,
                 }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        # Try to surface subprocess stderr — claude-agent-sdk raises
+        # CLIError with .stderr attached, but the message omits it.
+        detail = str(e)
+        stderr = getattr(e, "stderr", None)
+        if stderr:
+            detail = f"{detail}\n\nstderr:\n{stderr}"
+        provider = "bedrock" if env.get("CLAUDE_CODE_USE_BEDROCK") else "anthropic"
+        return {
+            "success": False,
+            "error": detail,
+            "provider": provider,
+            "model": cfg.agent_model,
+        }
 
     return {
         "success": True,
