@@ -105,7 +105,41 @@ class TerminalSession:
         return [_text("".join(lines))]
 
     async def feed(self, data: str) -> AsyncIterator[dict]:
-        """Process terminal input character-by-character."""
+        """Process terminal input.
+
+        Single-char input is handled interactively (echo, line buffer,
+        Enter-to-submit). Multi-char input is treated as a paste:
+        internal newlines become literal content instead of separate
+        submits. If the paste ends with a newline we auto-submit the
+        combined buffer; otherwise we append it and wait for Enter so
+        the user can edit before sending.
+        """
+        # ── Paste fast-path ──────────────────────────────────────
+        # ghostty-web (and xterm.js) deliver pasted content as a
+        # single onData() frame. When data has length > 1 and contains
+        # a line break we preserve the multi-line structure rather
+        # than dispatching on each \n like we do for interactive input.
+        if len(data) > 1 and ("\n" in data or "\r" in data):
+            normalized = data.replace("\r\n", "\n").replace("\r", "\n")
+            trailing_newline = normalized.endswith("\n")
+            # Strip only the trailing newline — keep internal \n intact.
+            body = normalized[:-1] if trailing_newline else normalized
+            self._line_buffer.append(body)
+
+            # Echo with CR+LF so the terminal renders the paste the
+            # same way an interactive user would see it.
+            yield _text(body.replace("\n", "\r\n"))
+
+            if trailing_newline:
+                line = "".join(self._line_buffer).strip()
+                self._line_buffer.clear()
+                yield _text("\r\n")
+                if line:
+                    async for frame in self._dispatch(line):
+                        yield frame
+                yield _text(_PROMPT)
+            return
+
         for ch in data:
             if ch in ("\r", "\n"):
                 line = "".join(self._line_buffer).strip()
@@ -225,9 +259,17 @@ class TerminalSession:
             # exposes our 9 keystone skills as slash commands.
             project_root = Path(__file__).resolve().parent.parent.parent
 
+            # ``bypassPermissions`` is the CLI's explicit "allow all
+            # tools, never prompt" mode. ``dontAsk`` nominally means
+            # the same thing but the CAI-deployed CLI (2.1.92) still
+            # gates Bash in non-interactive print mode — the user
+            # sees "I don't have Bash permissions" in the response.
+            # The web terminal is an authenticated operator surface
+            # so full bypass is appropriate; no human is around to
+            # approve individual tool calls anyway.
             options = ClaudeAgentOptions(
                 allowed_tools=[],
-                permission_mode="dontAsk",
+                permission_mode="bypassPermissions",
                 model=cfg.agent_model,
                 max_turns=5,
                 max_budget_usd=0.25,
