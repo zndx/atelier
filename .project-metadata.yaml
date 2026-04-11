@@ -61,6 +61,14 @@ environment_variables:
     description: >-
       Enable the CLI's tool-search beta. Defaults to "false" on the
       Bedrock path. Leave blank to accept the provider default.
+  ATELIER_DATA_CONNECTIONS:
+    default: ""
+    description: >-
+      Comma-separated list of CAI Data Platform connection names available
+      in this workspace (as shown in the CAI Data Connections UI). The
+      Atelier Status page exposes these in a dropdown for ad-hoc
+      connectivity tests via cml.data_v1. Example:
+      "default-impala,prod-hive,dev-virtual-warehouse"
 
 runtimes:
   - editor: PBJ Workbench

@@ -6,12 +6,16 @@ import {
   Col,
   Descriptions,
   Row,
+  Select,
+  Space,
   Spin,
+  Table,
   Tag,
   Typography,
 } from "antd";
 import {
   ArrowLeftOutlined,
+  DatabaseOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
@@ -80,6 +84,19 @@ interface SmokeResult {
   error?: string;
 }
 
+type CellValue = string | number | boolean | null;
+
+interface DataConnectionResult {
+  ok: boolean;
+  connection: string;
+  query?: string;
+  row_count?: number;
+  columns?: string[];
+  rows?: CellValue[][];
+  latency_ms?: number;
+  error?: string;
+}
+
 function StatusBadge({ ok }: { ok: boolean }) {
   return ok ? (
     <Badge status="success" text="Healthy" />
@@ -98,6 +115,13 @@ export default function Status() {
   const [smoke, setSmoke] = useState<SmokeResult | null>(null);
   const [smokeLoading, setSmokeLoading] = useState(false);
 
+  const [connections, setConnections] = useState<string[]>([]);
+  const [selectedConn, setSelectedConn] = useState<string | undefined>();
+  const [connResult, setConnResult] = useState<DataConnectionResult | null>(
+    null,
+  );
+  const [connLoading, setConnLoading] = useState(false);
+
   const fetchStatus = () => {
     setLoading(true);
     fetch("/api/status")
@@ -109,6 +133,16 @@ export default function Status() {
 
   useEffect(() => {
     fetchStatus();
+    fetch("/api/data-connections")
+      .then((r) => r.json())
+      .then((data) => {
+        const list: string[] = Array.isArray(data?.connections)
+          ? data.connections
+          : [];
+        setConnections(list);
+        if (list.length > 0) setSelectedConn(list[0]);
+      })
+      .catch(() => setConnections([]));
   }, []);
 
   const runCredentialCheck = () => {
@@ -134,6 +168,24 @@ export default function Status() {
       .then(setSmoke)
       .catch((e) => setSmoke({ success: false, error: String(e) }))
       .finally(() => setSmokeLoading(false));
+  };
+
+  const runConnectionTest = () => {
+    if (!selectedConn) return;
+    setConnLoading(true);
+    fetch(`/api/data-connections/${encodeURIComponent(selectedConn)}/test`, {
+      method: "POST",
+    })
+      .then((r) => r.json())
+      .then(setConnResult)
+      .catch((e) =>
+        setConnResult({
+          ok: false,
+          connection: selectedConn,
+          error: String(e),
+        }),
+      )
+      .finally(() => setConnLoading(false));
   };
 
   return (
@@ -365,6 +417,88 @@ export default function Status() {
                 Click "Run" to execute a smoke test.
               </Text>
             )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* ── CAI Data Platform ────────────────────────── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <Card
+            title="CAI Data Platform"
+            extra={
+              <Space>
+                <Select
+                  value={selectedConn}
+                  onChange={setSelectedConn}
+                  style={{ minWidth: 240 }}
+                  placeholder="Select connection"
+                  options={connections.map((c) => ({ label: c, value: c }))}
+                  disabled={!connections.length}
+                  size="small"
+                />
+                <Button
+                  icon={<DatabaseOutlined />}
+                  onClick={runConnectionTest}
+                  loading={connLoading}
+                  disabled={!selectedConn}
+                  size="small"
+                >
+                  Test
+                </Button>
+              </Space>
+            }
+          >
+            <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+              Runs <Text code>show databases</Text> against the selected CAI
+              Data Connection via <Text code>cml.data_v1</Text>.
+            </Paragraph>
+            {connections.length === 0 && (
+              <Text type="secondary">
+                No connections configured. Set{" "}
+                <Text code>ATELIER_DATA_CONNECTIONS</Text> (comma-separated) at
+                deploy time.
+              </Text>
+            )}
+            {connResult && connResult.ok ? (
+              <>
+                <Descriptions
+                  column={2}
+                  size="small"
+                  style={{ marginBottom: 12 }}
+                >
+                  <Descriptions.Item label="Status">
+                    <Tag color="green">Success</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Rows">
+                    {connResult.row_count}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Latency">
+                    {connResult.latency_ms}ms
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Query">
+                    <Text code>{connResult.query}</Text>
+                  </Descriptions.Item>
+                </Descriptions>
+                <Table
+                  size="small"
+                  pagination={false}
+                  dataSource={(connResult.rows ?? []).map((row, i) => ({
+                    key: i,
+                    ...Object.fromEntries(
+                      (connResult.columns ?? []).map((c, j) => [c, row[j]]),
+                    ),
+                  }))}
+                  columns={(connResult.columns ?? []).map((c) => ({
+                    title: c,
+                    dataIndex: c,
+                    key: c,
+                  }))}
+                />
+              </>
+            ) : connResult ? (
+              <Text type="danger">{connResult.error}</Text>
+            ) : null}
           </Card>
         </Col>
       </Row>

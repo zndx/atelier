@@ -376,6 +376,32 @@ def model_discovery():
         return {"upgrade_available": False, "reason": "error", "error": str(exc)}
 
 
+# ── CAI Data Platform ──────────────────────────────────────────────
+
+
+@app.get("/api/data-connections")
+def list_data_connections():
+    """Return the HOCON-configured CAI Data Platform connection names."""
+    try:
+        from atelier.config import load_config
+        from atelier.data.connections import list_connections
+        cfg = load_config()
+        return {"connections": list_connections(cfg)}
+    except Exception as exc:
+        return _error_envelope(f"list_data_connections failed: {exc}")
+
+
+@app.post("/api/data-connections/{name}/test")
+def test_data_connection(name: str):
+    """Run ``show databases`` against the named CAI connection via cml.data_v1."""
+    try:
+        from atelier.config import load_config
+        from atelier.data.connections import test_connection
+        return test_connection(load_config(), name)
+    except Exception as exc:
+        return _error_envelope(f"test_data_connection failed: {exc}")
+
+
 # ── Terminal WebSocket ─────────────────────────────────────────────
 
 

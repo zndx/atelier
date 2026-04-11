@@ -67,6 +67,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "cml.project_id": ("cml_project_id", str),
     "cml.domain": ("cml_domain", str),
     "cml.engine_id": ("cml_engine_id", str),
+    "cml.data_connections": ("cml_data_connections", str),
 }
 
 # Reverse: field_name → ENV var name
@@ -94,6 +95,9 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"
     elif _field == "agent_enable_tool_search":
         _env = "ENABLE_TOOL_SEARCH"
+    elif _field == "cml_data_connections":
+        # Not a platform-provided var — this is our own knob.
+        _env = "ATELIER_DATA_CONNECTIONS"
     elif _field.startswith("cml_"):
         _env = "CDSW_" + _field[4:].upper()
     elif _field == "gateway_port":
@@ -164,11 +168,17 @@ class AtelierConfig:
     cml_project_id: str | None = None
     cml_domain: str | None = None
     cml_engine_id: str | None = None
+    cml_data_connections: str = ""
 
     @property
     def is_cml(self) -> bool:
         """True when running inside Cloudera ML."""
         return self.cml_project_id is not None
+
+    @property
+    def cml_data_connection_names(self) -> list[str]:
+        """Parsed list of CAI Data Platform connection names."""
+        return [s.strip() for s in self.cml_data_connections.split(",") if s.strip()]
 
     @property
     def anthropic_model_id(self) -> str:
