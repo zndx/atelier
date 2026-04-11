@@ -32,6 +32,24 @@ environment_variables:
       Direct Anthropic API key. Provides overwatch capability for onboarding
       and configuration assistance, or serves as primary provider when preferred.
       Can coexist with Bedrock credentials — both are validated at startup.
+  ANTHROPIC_DEFAULT_SONNET_MODEL:
+    default: ""
+    description: >-
+      Bedrock model ID / ARN for Sonnet-sized internal dispatches. Required
+      when using Bedrock; the Claude CLI's built-in default is a direct-API
+      model name that does not resolve on Bedrock. Leave blank to fall back
+      to ATELIER_AGENT_MODEL.
+  ANTHROPIC_DEFAULT_HAIKU_MODEL:
+    default: ""
+    description: >-
+      Bedrock model ID / ARN for Haiku-sized internal dispatches (tool
+      search, summarization). Required when using Bedrock. Leave blank
+      to fall back to ATELIER_AGENT_MODEL.
+  CLAUDE_CODE_SUBAGENT_MODEL:
+    default: ""
+    description: >-
+      Bedrock model ID / ARN for CLI subagent dispatch. Leave blank to fall
+      back to ATELIER_AGENT_MODEL.
 
 runtimes:
   - editor: PBJ Workbench

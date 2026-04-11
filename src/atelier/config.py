@@ -54,6 +54,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "agents.aws_region": ("aws_region", str),
     "agents.aws_session_token": ("aws_session_token", str),
     "agents.permission_mode": ("agent_permission_mode", str),
+    "agents.default_sonnet_model": ("agent_default_sonnet_model", str),
+    "agents.default_haiku_model": ("agent_default_haiku_model", str),
+    "agents.subagent_model": ("agent_subagent_model", str),
     "db.url": ("db_url", str),
     "qdrant.host": ("qdrant_host", str),
     "qdrant.http_port": ("qdrant_http_port", int),
@@ -79,6 +82,12 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "AWS_REGION"
     elif _field == "aws_session_token":
         _env = "AWS_SESSION_TOKEN"
+    elif _field == "agent_default_sonnet_model":
+        _env = "ANTHROPIC_DEFAULT_SONNET_MODEL"
+    elif _field == "agent_default_haiku_model":
+        _env = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+    elif _field == "agent_subagent_model":
+        _env = "CLAUDE_CODE_SUBAGENT_MODEL"
     elif _field.startswith("cml_"):
         _env = "CDSW_" + _field[4:].upper()
     elif _field == "gateway_port":
@@ -113,6 +122,12 @@ class AtelierConfig:
     aws_region: str | None = None
     aws_session_token: str | None = None
     agent_permission_mode: str = "dontAsk"
+    # Sub-model overrides for Bedrock/LiteLLM — claude CLI dispatches
+    # internal calls to haiku/sonnet-sized models and its direct-API
+    # defaults do not resolve on Bedrock.
+    agent_default_sonnet_model: str | None = None
+    agent_default_haiku_model: str | None = None
+    agent_subagent_model: str | None = None
 
     @property
     def has_anthropic(self) -> bool:

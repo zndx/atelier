@@ -152,6 +152,29 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
         if cfg.aws_region:
             env["AWS_DEFAULT_REGION"] = cfg.aws_region
 
+        # ── Bedrock safety flags ─────────────────────────────────
+        # The CLI internally uses haiku-sized models for tool search
+        # and sonnet-sized models for subagent dispatch. Its direct-API
+        # defaults do NOT resolve on Bedrock; without these pins,
+        # internal calls fail silently and interactive sessions (with
+        # tools, max_turns>1) hang or crash.
+        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+        env["ENABLE_TOOL_SEARCH"] = "false"
+
+        # Sub-model overrides. If the operator has configured Bedrock
+        # model IDs for haiku/sonnet/subagent, pass them through; else
+        # fall back to the primary model so internal calls at least go
+        # to a known-good endpoint (oversized is better than broken).
+        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = (
+            cfg.agent_default_sonnet_model or cfg.agent_model
+        )
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = (
+            cfg.agent_default_haiku_model or cfg.agent_model
+        )
+        env["CLAUDE_CODE_SUBAGENT_MODEL"] = (
+            cfg.agent_subagent_model or cfg.agent_model
+        )
+
     return env
 
 
