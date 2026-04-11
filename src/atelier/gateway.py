@@ -5,6 +5,7 @@ It serves the compiled React build from ui/dist/ and proxies /api/*
 requests to the co-located gRPC server.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -407,15 +408,35 @@ def test_data_connection(name: str):
 
 @app.websocket("/ws/terminal")
 async def terminal_ws(websocket: WebSocket):
-    """Interactive terminal session backed by the Claude Agent SDK."""
+    """Interactive terminal session backed by the Claude Agent SDK.
+
+    The read loop is kept concurrent with any in-flight SDK query by
+    routing output through an async ``send`` callback registered on
+    the session. ``handle_input`` returns as soon as it schedules the
+    SDK query as a background task, so the next ``receive_text()``
+    fires immediately and Ctrl-C bytes from the client can cancel
+    the task in flight — the same pause/redirect UX as the Claude
+    Code CLI.
+    """
     await websocket.accept()
 
     from atelier.terminal import TerminalSession
 
     session = TerminalSession()
 
+    # Serialize websocket writes across the read loop and the
+    # background SDK-query task. ``WebSocket.send_json`` is not
+    # reentrant — concurrent sends corrupt the frame stream.
+    send_lock = asyncio.Lock()
+
+    async def send(frame: dict) -> None:
+        async with send_lock:
+            await websocket.send_json(frame)
+
+    session.set_emit(send)
+
     for frame in session.welcome():
-        await websocket.send_json(frame)
+        await send(frame)
 
     try:
         while True:
@@ -426,10 +447,11 @@ async def terminal_ws(websocket: WebSocket):
                 continue
 
             if frame.get("type") == "input":
-                async for out in session.feed(frame.get("data", "")):
-                    await websocket.send_json(out)
+                await session.handle_input(frame.get("data", ""))
     except WebSocketDisconnect:
         pass
+    finally:
+        await session.shutdown()
 
 
 # ── Orchestration WebSocket ────────────────────────────────────────

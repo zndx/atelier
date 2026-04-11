@@ -1,18 +1,33 @@
 """Terminal REPL — line-buffered session bridging to the Claude Agent SDK.
 
 Each WebSocket connection gets a TerminalSession. Input is buffered
-character-by-character; on Enter the completed line is dispatched to the
-SDK via ``query()``. Tokens stream back as ``{"type": "text"}`` frames.
+character-by-character; on Enter the completed line is dispatched to
+the SDK via ``query()`` as a *background task*. Ctrl-C cancels the
+running task, giving operators Claude Code-style pause/redirect mid
+query.
 
-Graceful degradation: if the SDK is not installed or no credentials are
-configured, the terminal still renders and responds to local commands.
+Graceful degradation: if the SDK is not installed or no credentials
+are configured, the terminal still renders and responds to local
+commands.
+
+Architecture note
+-----------------
+Frames are emitted via an async callback registered by the gateway
+(``set_emit``) rather than via an async generator. This matters
+because the websocket read loop must stay concurrent with any
+in-flight SDK query — if the read loop were blocked iterating an
+``async for`` over the session, Ctrl-C bytes from the client would
+never reach us until the query completed. With the callback pattern,
+``handle_input`` is a regular async method that kicks off a task and
+returns immediately, so the next ``receive_text()`` fires right away
+and subsequent Ctrl-C can cancel the task in flight.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import AsyncIterator
+from typing import Awaitable, Callable
 
 # ANSI helpers
 _GREEN = "\x1b[32m"
@@ -32,8 +47,11 @@ _HELP_TEXT = f"""\r
   {_WHITE}clear{_RESET}     {_DIM}Clear the screen{_RESET}
 
 {_DIM}Anything else is sent to the Claude Agent SDK as a prompt.{_RESET}
-{_DIM}Responses stream back in real time. Ctrl-C to interrupt.{_RESET}
+{_DIM}Press Ctrl-C to interrupt a running query.{_RESET}
 """
+
+
+EmitFn = Callable[[dict], Awaitable[None]]
 
 
 def _text(data: str) -> dict:
@@ -46,9 +64,36 @@ class TerminalSession:
     def __init__(self) -> None:
         self._line_buffer: list[str] = []
         self._session_id = str(uuid.uuid4())
-        self._busy = False
         self._sdk_available: bool | None = None
         self._creds_available: bool | None = None
+        self._emit: EmitFn | None = None
+        self._current_task: asyncio.Task | None = None
+
+    # ── Gateway wiring ───────────────────────────────────────────
+
+    def set_emit(self, emit: EmitFn) -> None:
+        """Register the async callback used to push frames to the client."""
+        self._emit = emit
+
+    @property
+    def _busy(self) -> bool:
+        return self._current_task is not None and not self._current_task.done()
+
+    async def _send(self, data: str) -> None:
+        if self._emit is not None:
+            await self._emit(_text(data))
+
+    async def shutdown(self) -> None:
+        """Cancel any in-flight query and wait for it to unwind."""
+        if self._busy:
+            assert self._current_task is not None
+            self._current_task.cancel()
+            try:
+                await self._current_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    # ── SDK / credential probes ──────────────────────────────────
 
     def _check_sdk(self) -> bool:
         if self._sdk_available is None:
@@ -76,18 +121,18 @@ class TerminalSession:
         except Exception:
             return "unknown"
 
+    # ── Welcome banner ───────────────────────────────────────────
+
     def welcome(self) -> list[dict]:
-        """Generate welcome banner frames."""
+        """Generate welcome banner frames (caller emits synchronously)."""
         has_sdk = self._check_sdk()
         has_creds = self._check_creds()
         model = self._get_model_name() if has_sdk else ""
 
         lines = ["\r\n"]
-
-        # Header
         lines.append(f"  {_BOLD}{_WHITE}Atelier Terminal{_RESET}\r\n")
         lines.append(f"  {_DIM}Claude Agent SDK \u2022 Interactive session{_RESET}\r\n")
-        lines.append(f"  {_DIM}\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500{_RESET}\r\n")
+        lines.append(f"  {_DIM}\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500{_RESET}\r\n")
 
         if not has_sdk:
             lines.append(f"  {_RED}\u2717{_RESET} SDK not installed ")
@@ -104,93 +149,141 @@ class TerminalSession:
         lines.append(f"\r\n{_PROMPT}")
         return [_text("".join(lines))]
 
-    async def feed(self, data: str) -> AsyncIterator[dict]:
+    # ── Input handling ───────────────────────────────────────────
+
+    async def handle_input(self, data: str) -> None:
         """Process terminal input.
 
-        Single-char input is handled interactively (echo, line buffer,
-        Enter-to-submit). Multi-char input is treated as a paste:
-        internal newlines become literal content instead of separate
-        submits. If the paste ends with a newline we auto-submit the
-        combined buffer; otherwise we append it and wait for Enter so
-        the user can edit before sending.
+        Returns immediately after scheduling any SDK query, so the
+        websocket read loop can pick up the next frame (including
+        ^C) without waiting for the query to finish.
+
+        While a query is running, only Ctrl-C is accepted — all
+        other input is silently dropped so interleaved SDK output
+        doesn't fight with a half-typed next prompt.
         """
         # ── Paste fast-path ──────────────────────────────────────
         # ghostty-web (and xterm.js) deliver pasted content as a
-        # single onData() frame. When data has length > 1 and contains
-        # a line break we preserve the multi-line structure rather
-        # than dispatching on each \n like we do for interactive input.
+        # single onData() frame. When data has length > 1 and
+        # contains a line break we preserve the multi-line structure
+        # rather than dispatching on each \n like we do for
+        # interactive input.
         if len(data) > 1 and ("\n" in data or "\r" in data):
+            if self._busy:
+                await self._send(
+                    f"\r\n{_DIM}(busy \u2014 press Ctrl-C to interrupt){_RESET}\r\n"
+                )
+                return
             normalized = data.replace("\r\n", "\n").replace("\r", "\n")
             trailing_newline = normalized.endswith("\n")
             # Strip only the trailing newline — keep internal \n intact.
             body = normalized[:-1] if trailing_newline else normalized
             self._line_buffer.append(body)
-
             # Echo with CR+LF so the terminal renders the paste the
             # same way an interactive user would see it.
-            yield _text(body.replace("\n", "\r\n"))
-
+            await self._send(body.replace("\n", "\r\n"))
             if trailing_newline:
                 line = "".join(self._line_buffer).strip()
                 self._line_buffer.clear()
-                yield _text("\r\n")
+                await self._send("\r\n")
                 if line:
-                    async for frame in self._dispatch(line):
-                        yield frame
-                yield _text(_PROMPT)
+                    await self._dispatch(line)
+                else:
+                    await self._send(_PROMPT)
             return
 
         for ch in data:
+            if ch == "\x03":  # Ctrl-C — always handled, even while busy
+                if self._busy:
+                    assert self._current_task is not None
+                    # Cancellation propagates into the SDK query
+                    # coroutine; the task wrapper emits the
+                    # interrupted notice and restores the prompt.
+                    self._current_task.cancel()
+                else:
+                    self._line_buffer.clear()
+                    await self._send(f"^C\r\n{_PROMPT}")
+                continue
+
+            if self._busy:
+                # While a query is running, silently drop other
+                # input. Otherwise keystrokes would interleave with
+                # SDK output and confuse the user. They can type
+                # their next prompt after Ctrl-C.
+                continue
+
             if ch in ("\r", "\n"):
                 line = "".join(self._line_buffer).strip()
                 self._line_buffer.clear()
-                yield _text("\r\n")
-
+                await self._send("\r\n")
                 if line:
-                    async for frame in self._dispatch(line):
-                        yield frame
-
-                yield _text(_PROMPT)
+                    await self._dispatch(line)
+                else:
+                    await self._send(_PROMPT)
 
             elif ch in ("\x7f", "\x08"):  # Backspace
                 if self._line_buffer:
                     self._line_buffer.pop()
-                    yield _text("\x08 \x08")
-
-            elif ch == "\x03":  # Ctrl-C
-                if self._busy:
-                    self._busy = False
-                    yield _text(f"^C\r\n{_DIM}(interrupted){_RESET}\r\n{_PROMPT}")
-                else:
-                    self._line_buffer.clear()
-                    yield _text(f"^C\r\n{_PROMPT}")
+                    await self._send("\x08 \x08")
 
             elif ch >= " " or ch == "\t":  # Printable
                 self._line_buffer.append(ch)
-                yield _text(ch)
+                await self._send(ch)
 
-    async def _dispatch(self, line: str) -> AsyncIterator[dict]:
-        """Dispatch a completed line."""
+    # ── Dispatch ─────────────────────────────────────────────────
+
+    async def _dispatch(self, line: str) -> None:
+        """Dispatch a completed line.
+
+        Local commands (help/clear/status) run inline and restore the
+        prompt themselves. SDK queries are scheduled as background
+        tasks via ``_run_query_task`` so the websocket read loop can
+        keep receiving Ctrl-C bytes mid-query.
+        """
         cmd = line.lower().strip()
 
         if cmd == "help":
-            yield _text(_HELP_TEXT)
+            await self._send(_HELP_TEXT)
+            await self._send(_PROMPT)
             return
 
         if cmd == "clear":
-            yield _text("\x1b[2J\x1b[H")  # Clear screen + cursor home
+            await self._send("\x1b[2J\x1b[H")  # Clear screen + cursor home
+            await self._send(_PROMPT)
             return
 
         if cmd == "status":
-            async for frame in self._status():
-                yield frame
+            await self._status()
+            await self._send(_PROMPT)
             return
 
-        # Everything else goes to the SDK
-        async for frame in self._query_sdk(line):
-            yield frame
+        # Everything else goes to the SDK as a background task.
+        self._current_task = asyncio.create_task(self._run_query_task(line))
 
-    async def _status(self) -> AsyncIterator[dict]:
+    async def _run_query_task(self, line: str) -> None:
+        """Wrapper that runs the SDK query and always restores the prompt.
+
+        Splitting this out from ``_query_sdk`` keeps the cancel/prompt
+        logic in a single finally block regardless of how the query
+        terminates (success, exception, or cancellation).
+        """
+        try:
+            await self._query_sdk(line)
+        except asyncio.CancelledError:
+            try:
+                await self._send(f"\r\n{_DIM}(interrupted){_RESET}\r\n")
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                await self._send(_PROMPT)
+            except Exception:
+                pass
+
+    # ── Status command ───────────────────────────────────────────
+
+    async def _status(self) -> None:
         """Show SDK and credential status."""
         has_sdk = self._check_sdk()
         has_creds = self._check_creds()
@@ -199,7 +292,7 @@ class TerminalSession:
         cred_icon = f"{_GREEN}\u2713{_RESET}" if has_creds else f"{_RED}\u2717{_RESET}"
 
         lines = [f"\r\n  {_BOLD}{_WHITE}Status{_RESET}\r\n"]
-        lines.append(f"  {_DIM}\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500{_RESET}\r\n")
+        lines.append(f"  {_DIM}\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500{_RESET}\r\n")
         lines.append(f"  {sdk_icon} SDK         {'installed' if has_sdk else 'not installed'}\r\n")
         lines.append(f"  {cred_icon} Credentials {'configured' if has_creds else 'not configured'}\r\n")
 
@@ -218,26 +311,44 @@ class TerminalSession:
             pass
 
         lines.append(f"  \u2022 Session     {_DIM}{self._session_id[:8]}...{_RESET}\r\n")
-        yield _text("".join(lines))
+        await self._send("".join(lines))
 
-    async def _query_sdk(self, prompt: str) -> AsyncIterator[dict]:
-        """Send prompt to Claude Agent SDK and stream response."""
+    # ── SDK query ────────────────────────────────────────────────
+
+    async def _query_sdk(self, prompt: str) -> None:
+        """Send prompt to Claude Agent SDK and stream response.
+
+        Runs inside the background task spawned by ``_dispatch``.
+        Emits frames via ``self._send``. Cancellation propagates from
+        ``_run_query_task`` — no manual busy-flag check is needed.
+        """
         if not self._check_sdk():
-            yield _text(
+            await self._send(
                 f"{_RED}SDK not available.{_RESET} "
                 f"{_DIM}Install with: pip install atelier[agents]{_RESET}\r\n"
             )
             return
 
         if not self._check_creds():
-            yield _text(
+            await self._send(
                 f"{_RED}No credentials configured.{_RESET} "
                 f"{_DIM}Set ANTHROPIC_API_KEY or AWS credentials.{_RESET}\r\n"
             )
             return
 
-        self._busy = True
-        yield _text(f"{_DIM}thinking...{_RESET}")
+        await self._send(f"{_DIM}thinking...{_RESET}")
+
+        # Capture CLI stderr so we can actually tell the operator *why*
+        # the subprocess died. Without this callback, claude-agent-sdk
+        # lets the child's stderr drain to the parent process's stderr
+        # and constructs ProcessError with a placeholder string
+        # ("Check stderr output for details") — the operator sees the
+        # placeholder and has no idea what happened. With the callback,
+        # we accumulate real lines and surface them on failure.
+        stderr_lines: list[str] = []
+
+        def _capture_stderr(line: str) -> None:
+            stderr_lines.append(line)
 
         try:
             from pathlib import Path
@@ -255,41 +366,43 @@ class TerminalSession:
             cfg = load_config()
             env = _build_sdk_env(cfg)
 
-            # Load project-level .claude/commands so the interactive session
-            # exposes our 9 keystone skills as slash commands.
+            # Load project-level .claude/commands so the interactive
+            # session exposes our 9 keystone skills as slash commands.
             project_root = Path(__file__).resolve().parent.parent.parent
 
             # ``bypassPermissions`` is the CLI's explicit "allow all
-            # tools, never prompt" mode. ``dontAsk`` nominally means
-            # the same thing but the CAI-deployed CLI (2.1.92) still
-            # gates Bash in non-interactive print mode — the user
-            # sees "I don't have Bash permissions" in the response.
-            # The web terminal is an authenticated operator surface
-            # so full bypass is appropriate; no human is around to
-            # approve individual tool calls anyway.
+            # tools, never prompt" mode. The web terminal is an
+            # authenticated operator surface so full bypass is
+            # appropriate; no human is around to approve individual
+            # tool calls anyway.
+            #
+            # No budget/turn caps on the interactive terminal — this
+            # is an authenticated operator surface. A nominal 1250
+            # USD budget is high enough to be effectively unlimited
+            # for a single session; ``max_turns=None`` disables the
+            # turn gate so tool-heavy prompts don't trip a default.
             options = ClaudeAgentOptions(
                 allowed_tools=[],
                 permission_mode="bypassPermissions",
                 model=cfg.agent_model,
-                max_turns=5,
-                max_budget_usd=0.25,
+                max_turns=None,
+                max_budget_usd=1250.0,
                 cwd=str(project_root),
                 setting_sources=["project"],
                 env=env,
+                stderr=_capture_stderr,
             )
 
-            # Clear "thinking..." line
-            yield _text("\r\x1b[K")
+            # Clear the "thinking..." line.
+            await self._send("\r\x1b[K")
 
             async for message in query(prompt=prompt, options=options):
-                if not self._busy:
-                    break  # Ctrl-C interrupted
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
-                            # Convert LF to CR+LF for terminal display
+                            # Convert LF to CR+LF for terminal display.
                             text = block.text.replace("\n", "\r\n")
-                            yield _text(text)
+                            await self._send(text)
                 elif isinstance(message, ResultMessage):
                     cost = getattr(message, "total_cost_usd", None)
                     duration = getattr(message, "duration_ms", None)
@@ -299,13 +412,29 @@ class TerminalSession:
                     if cost is not None:
                         meta_parts.append(f"${cost:.4f}")
                     if meta_parts:
-                        yield _text(
+                        await self._send(
                             f"\r\n{_DIM}({', '.join(meta_parts)}){_RESET}\r\n"
                         )
 
         except asyncio.CancelledError:
-            yield _text(f"\r\n{_DIM}(cancelled){_RESET}\r\n")
+            # Let _run_query_task handle the user-facing notice so
+            # the cancellation text lives in exactly one place.
+            raise
         except Exception as e:
-            yield _text(f"\r\n{_RED}Error: {e}{_RESET}\r\n")
-        finally:
-            self._busy = False
+            # Surface the raw exception plus any stderr lines we
+            # captured. ProcessError.exit_code is useful; its
+            # ``stderr`` attribute is a hardcoded placeholder so we
+            # ignore it in favor of our callback-collected lines.
+            exit_code = getattr(e, "exit_code", None)
+            header = f"Error: {type(e).__name__}: {e}"
+            if exit_code is not None:
+                header += f" (exit {exit_code})"
+            await self._send(f"\r\n{_RED}{header}{_RESET}\r\n")
+            if stderr_lines:
+                # Show the last ~20 lines — enough for actionable
+                # signal without flooding the terminal on runaway
+                # stderr.
+                tail = stderr_lines[-20:]
+                await self._send(f"{_DIM}stderr:{_RESET}\r\n")
+                for line in tail:
+                    await self._send(f"{_DIM}  {line}{_RESET}\r\n")
