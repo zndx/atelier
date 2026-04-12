@@ -40,6 +40,11 @@ _WHITE = "\x1b[97m"
 
 _PROMPT = f"{_CYAN}\u25b8{_RESET} "
 
+# Braille dots spinner frames — the same clockwise orbit used by
+# Claude Code's thinking indicator (rattles `Dots` preset).
+_SPINNER_FRAMES = ("\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f")
+_SPINNER_INTERVAL = 0.08  # 80ms per frame
+
 _HELP_TEXT = f"""\r
 {_BOLD}Commands{_RESET}
   {_WHITE}help{_RESET}      {_DIM}Show this message{_RESET}
@@ -313,6 +318,41 @@ class TerminalSession:
         lines.append(f"  \u2022 Session     {_DIM}{self._session_id[:8]}...{_RESET}\r\n")
         await self._send("".join(lines))
 
+    # ── Spinner ───────────────────────────────────────────────────
+
+    async def _animate_spinner(
+        self, label: str, stop: asyncio.Event
+    ) -> None:
+        """Cycle braille spinner frames until *stop* is set.
+
+        Each frame overwrites the current line via ``\\r … \\x1b[K``.
+        The caller signals *stop* when real content arrives; the
+        method then clears the spinner line and returns.
+        """
+        i = 0
+        n = len(_SPINNER_FRAMES)
+        try:
+            while not stop.is_set():
+                frame = _SPINNER_FRAMES[i % n]
+                await self._send(
+                    f"\r{_CYAN}{frame}{_RESET} {_DIM}{label}{_RESET}\x1b[K"
+                )
+                i += 1
+                try:
+                    await asyncio.wait_for(
+                        stop.wait(), timeout=_SPINNER_INTERVAL
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                await self._send("\r\x1b[K")
+            except Exception:
+                pass
+
     # ── SDK query ────────────────────────────────────────────────
 
     async def _query_sdk(self, prompt: str) -> None:
@@ -336,7 +376,12 @@ class TerminalSession:
             )
             return
 
-        await self._send(f"{_DIM}thinking...{_RESET}")
+        # Animated thinking spinner — cycles braille dots until the
+        # first SDK message arrives, then clears the line.
+        stop_spinner = asyncio.Event()
+        spinner_task: asyncio.Task | None = asyncio.create_task(
+            self._animate_spinner("thinking...", stop_spinner)
+        )
 
         # Capture CLI stderr so we can actually tell the operator *why*
         # the subprocess died. Without this callback, claude-agent-sdk
@@ -349,6 +394,16 @@ class TerminalSession:
 
         def _capture_stderr(line: str) -> None:
             stderr_lines.append(line)
+
+        async def _stop_spinner() -> None:
+            nonlocal spinner_task
+            if spinner_task is not None and not stop_spinner.is_set():
+                stop_spinner.set()
+                try:
+                    await spinner_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                spinner_task = None
 
         try:
             from pathlib import Path
@@ -393,10 +448,11 @@ class TerminalSession:
                 stderr=_capture_stderr,
             )
 
-            # Clear the "thinking..." line.
-            await self._send("\r\x1b[K")
-
             async for message in query(prompt=prompt, options=options):
+                # Stop the spinner on the first message of any type.
+                if spinner_task is not None:
+                    await _stop_spinner()
+
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
@@ -438,3 +494,7 @@ class TerminalSession:
                 await self._send(f"{_DIM}stderr:{_RESET}\r\n")
                 for line in tail:
                     await self._send(f"{_DIM}  {line}{_RESET}\r\n")
+        finally:
+            # Always clean up the spinner — catches early import
+            # errors, cancellation, and any unexpected exit path.
+            await _stop_spinner()
