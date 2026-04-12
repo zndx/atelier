@@ -33,9 +33,10 @@ Assignment) that distributes belief across the frame of discernment:
 |--------|------|----------|--------|
 | Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | M0 |
 | Pattern detection | 8 regex detectors | 0.10 | M0 |
-| Name matching | Column name ↔ category label/abbrev | varies | M0 |
-| CatBoost | Gradient boosted trees | 0.15 | M1 stub |
-| SVM | TF-IDF + LinearSVC | 0.20 | M1 stub |
+| Name matching | Column name ↔ label/abbrev/common_names | varies | M0 |
+| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | M1 stub |
+| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | M1 stub |
+| LLM | Claude Agent SDK structured classification | 0.10 | M1 planned |
 
 The **discount** controls how much mass goes to Θ (total ignorance). Higher
 discount = more conservative = wider belief intervals.
@@ -121,17 +122,18 @@ build/
 
 ### Controlled Vocabulary
 
-Loaded from hive `default.annotations` (296 rows, 10 columns):
+Loaded from hive `default.annotations` (11 columns):
 
 | Column | Maps to | Purpose |
 |--------|---------|---------|
-| `id` | code | Hierarchical dot-notation identifier |
-| `ontology` | label group | Sensitivity tier |
-| `annotation` | label | Tag name |
-| `definition` | description | Human-readable text |
-| `common_names` | abbrev | Pipe-separated aliases |
-| `deprecated` | filter | "yes" = exclude |
-| `non_corp`, `emp_contractor`, `individual`, `corp` | sensitivity | Per-role ratings |
+| `id` | `code` | Hierarchical dot-notation identifier |
+| `ontology` | `label` | Human-readable category name |
+| `annotation` | `abbrev` | Formal code / mnemonic |
+| `definition` | `description` | Human-readable definition text |
+| `common_names` | `common_names` | Pipe/comma-separated aliases |
+| `specifics` | (embedding text) | Examples and context |
+| `non_corp`, `emp_contractor`, `individual`, `corp` | `sensitivity` | Per-role ratings (0-4) |
+| `deprecated` | (filter) | "yes" = exclude |
 
 ## API
 
@@ -146,12 +148,29 @@ Loaded from hive `default.annotations` (296 rows, 10 columns):
 - `GetFSMStatus()` → FSMStatusResponse
 - `StartClassification()` → StartClassificationResponse
 
+## HierarchicalClassification
+
+The pipeline wraps each column result in a `HierarchicalClassification` object
+(ported from signals) that enables post-hoc hierarchy navigation:
+
+- `belief_at(code)` — query Bel at any hierarchy level (leaf or internal)
+- `plausibility_at(code)` — query Pl at any level
+- `interval_at(code)` — `(Bel, Pl)` tuple
+- `uncertainty_gap` — `Pl - Bel` for the predicted category
+- `needs_clarification` — True when `uncertainty_gap > 0.3` or `conflict > 0.2`
+- `from_combined_evidence()` — factory method: filters vacuous sources, combines
+  via Dempster's rule, ranks by pignistic probability
+
+Confidence is **pignistic probability** `BetP(singleton)`, the decision-theoretic
+transform that distributes multi-element focal set mass equally among members.
+
 ## Milestones
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
 | **M0** | Cosine + pattern + name match, FSM, pipeline E2E | Done |
-| M1 | CatBoost + SVM, synthetic data via Agent SDK | Planned |
-| M2 | Bootstrap convergence loop, LLM sweep → ML validation | Planned |
+| **M0.5** | Schema fix, pignistic probability, HierarchicalClassification | Done |
+| M1 | CatBoost + SVM + LLM, synthetic data, 6 evidence sources | Planned |
+| M2 | Bootstrap convergence loop, LLM sweep ↔ ML validation | Planned |
 | M3 | SAGE importance, SHAP explanations, adaptive discounting | Planned |
 | M4 | Production scaling, async pipeline, Qdrant index | Planned |

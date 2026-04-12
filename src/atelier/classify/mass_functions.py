@@ -162,12 +162,14 @@ def name_match_to_mass(
     """Convert column name matching into a mass function.
 
     Matching levels:
-    - Exact match: 0.7 singleton + 0.3 Theta
-    - Abbreviation match: 0.5 singleton + 0.5 Theta
+    - Exact label match: 0.7 singleton + 0.3 Theta
+    - Formal code (abbrev) match: 0.5 singleton + 0.5 Theta
+    - Common name alias match: 0.5 singleton + 0.5 Theta
     - Word overlap match: 0.3 singleton + 0.7 Theta
     - No match: vacuous (1.0 Theta)
     """
     col_words = column_name.replace("_", " ").lower().strip()
+    col_compact = col_words.replace(" ", "")
     col_word_set = set(col_words.split())
 
     best_code: str | None = None
@@ -180,15 +182,34 @@ def name_match_to_mass(
         cat_words = _camel_to_words(cat.label).replace("(", "").replace(")", "").strip()
         cat_abbrev = cat.abbrev.lower().strip()
 
+        # Exact label match ("email address" == "email address")
         if col_words == cat_words:
             if 0.7 > best_mass:
                 best_code = cat.code
                 best_mass = 0.7
-        elif cat_abbrev and col_words.replace(" ", "") == cat_abbrev:
+        # Formal code match ("pan" == "pan", "ssn" == "ssn")
+        elif cat_abbrev and col_compact == cat_abbrev:
             if 0.5 > best_mass:
                 best_code = cat.code
                 best_mass = 0.5
+        # Common name alias match ("credit card" in "Credit Card|CC|DPAN")
+        elif hasattr(cat, "common_names") and cat.common_names:
+            aliases = [a.strip().lower() for a in cat.common_names.split("|")]
+            if not aliases or not aliases[0]:
+                aliases = [a.strip().lower() for a in cat.common_names.split(",")]
+            if col_words in aliases or col_compact in aliases:
+                if 0.5 > best_mass:
+                    best_code = cat.code
+                    best_mass = 0.5
+            else:
+                # Word overlap from label
+                cat_word_set = set(cat_words.split())
+                if len(cat_word_set) > 1 and cat_word_set.issubset(col_word_set):
+                    if 0.3 > best_mass:
+                        best_code = cat.code
+                        best_mass = 0.3
         else:
+            # Word overlap from label
             cat_word_set = set(cat_words.split())
             if len(cat_word_set) > 1 and cat_word_set.issubset(col_word_set):
                 if 0.3 > best_mass:

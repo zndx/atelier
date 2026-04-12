@@ -250,3 +250,153 @@ class FrameOfDiscernment:
     def vacuous(self) -> BeliefAssignment:
         """Return the vacuous mass function (all mass on Theta)."""
         return BeliefAssignment(masses={self.theta: 1.0})
+
+
+@dataclass(frozen=True)
+class HierarchicalClassification:
+    """Classification result with Dempster-Shafer belief intervals.
+
+    Wraps a combined BeliefAssignment with hierarchy navigation methods
+    so consumers can query belief at any level of the taxonomy.
+    """
+
+    category: object  # ReferenceCategory — kept generic to avoid circular import
+    confidence: float  # pignistic probability of the predicted category
+    evidence: str  # human-readable evidence summary
+    sensitivity_code: str | None = None
+
+    # DST fields
+    belief_assignment: BeliefAssignment | None = None
+    conflict: float = 0.0
+    source_masses: dict[str, BeliefAssignment] = field(default_factory=dict)
+
+    # References for hierarchy navigation (not serialized)
+    _frame: FrameOfDiscernment | None = field(default=None, repr=False, compare=False)
+    _category_set: object | None = field(default=None, repr=False, compare=False)
+
+    def belief_at(self, code: str) -> float:
+        """Bel(code) — belief that the column is this category."""
+        if self.belief_assignment is None:
+            return 0.0
+        if self._frame is not None:
+            if code in self._frame.singletons:
+                return self.belief_assignment.belief(self._frame.singletons[code])
+            if code in self._frame.internal_nodes:
+                return self.belief_assignment.belief(self._frame.internal_nodes[code])
+        # Fallback: construct a focal element from descendants
+        if self._category_set is not None and hasattr(self._category_set, "descendants"):
+            desc = self._category_set.descendants(code)
+            return self.belief_assignment.belief(FocalElement(desc))
+        return self.belief_assignment.belief(FocalElement(frozenset({code})))
+
+    def plausibility_at(self, code: str) -> float:
+        """Pl(code) — plausibility that the column is this category."""
+        if self.belief_assignment is None:
+            return 0.0
+        if self._frame is not None:
+            if code in self._frame.singletons:
+                return self.belief_assignment.plausibility(self._frame.singletons[code])
+            if code in self._frame.internal_nodes:
+                return self.belief_assignment.plausibility(self._frame.internal_nodes[code])
+        if self._category_set is not None and hasattr(self._category_set, "descendants"):
+            desc = self._category_set.descendants(code)
+            return self.belief_assignment.plausibility(FocalElement(desc))
+        return self.belief_assignment.plausibility(FocalElement(frozenset({code})))
+
+    def interval_at(self, code: str) -> tuple[float, float]:
+        """Return (Bel, Pl) at code."""
+        return (self.belief_at(code), self.plausibility_at(code))
+
+    @property
+    def uncertainty_gap(self) -> float:
+        """Pl - Bel for the predicted category."""
+        if self.belief_assignment is None or self._frame is None:
+            return 0.0
+        code = self.category.code
+        return self.plausibility_at(code) - self.belief_at(code)
+
+    @property
+    def needs_clarification(self) -> bool:
+        """True when uncertainty gap > 0.3 or conflict > 0.2."""
+        return self.uncertainty_gap > 0.3 or self.conflict > 0.2
+
+    @classmethod
+    def from_combined_evidence(
+        cls,
+        source_masses: dict[str, BeliefAssignment],
+        frame: FrameOfDiscernment,
+        category_set,
+        sensitivity_code: str | None = None,
+    ) -> HierarchicalClassification:
+        """Combine source masses via Dempster's rule, find best category.
+
+        Filters out vacuous sources, combines the rest, ranks singletons
+        by pignistic probability, and builds a rich evidence string.
+        """
+        # Filter out vacuous sources
+        non_vacuous = [
+            ba for name, ba in source_masses.items()
+            if len(ba.masses) > 1 or (len(ba.masses) == 1 and frame.theta not in ba.masses)
+        ]
+
+        if not non_vacuous:
+            combined = frame.vacuous()
+            conflict = 0.0
+        else:
+            try:
+                combined, conflict = combine_multiple(non_vacuous)
+            except ValueError:
+                combined = frame.vacuous()
+                conflict = 1.0
+
+        # Find best category via pignistic probability
+        best_code = None
+        best_betp = -1.0
+        for code, singleton in frame.singletons.items():
+            betp = combined.pignistic_probability(singleton)
+            if betp > best_betp:
+                best_betp = betp
+                best_code = code
+
+        if best_code is None:
+            raise ValueError("No singletons in frame")
+
+        cat = category_set.by_code.get(best_code)
+        if cat is None and hasattr(category_set, "all_by_code"):
+            cat = category_set.all_by_code.get(best_code)
+
+        # Build evidence string
+        source_parts = []
+        for name, ba in source_masses.items():
+            best_mass = max(
+                (m for fe, m in ba.masses.items() if len(fe.codes) == 1),
+                default=0.0,
+            )
+            source_parts.append(f"{name}={best_mass:.3f}")
+
+        bel = combined.belief(frame.singleton(best_code))
+        pl = combined.plausibility(frame.singleton(best_code))
+
+        confusable_parts: list[str] = []
+        for fe, m in combined.masses.items():
+            if len(fe.codes) == 2 and m > 0.05 and fe.label:
+                confusable_parts.append(f"{fe.label}={m:.2f}")
+
+        evidence = (
+            f"dst({', '.join(source_parts)}) → {cat.label} "
+            f"[Bel={bel:.2f}, Pl={pl:.2f}, K={conflict:.2f}]"
+        )
+        if confusable_parts:
+            evidence += f" [confusable: {', '.join(confusable_parts)}]"
+
+        return cls(
+            category=cat,
+            confidence=round(best_betp, 3),
+            evidence=evidence,
+            sensitivity_code=sensitivity_code,
+            belief_assignment=combined,
+            conflict=round(conflict, 4),
+            source_masses=source_masses,
+            _frame=frame,
+            _category_set=category_set,
+        )

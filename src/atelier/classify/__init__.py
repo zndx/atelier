@@ -13,6 +13,7 @@ Public API::
     result = run_pipeline(cfg, use_mock=True)
 """
 
+from atelier.classify.belief import HierarchicalClassification
 from atelier.classify.fsm import AgentFSM, FSMRun, FSMState
 from atelier.classify.pipeline import run_classification_pipeline
 

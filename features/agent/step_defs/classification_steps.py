@@ -183,6 +183,68 @@ def step_top_singleton(context, code):
     assert best_code == code, f"Top singleton is {best_code}, expected {code}"
 
 
+# ── Pignistic Probability ────────────────────────────────────────────
+
+
+@then('the pignistic probability for "{code}" should exceed {threshold:g}')
+def step_check_pignistic(context, code, threshold):
+    betp = context.bpa.pignistic_probability(context.frame.singleton(code))
+    assert betp > float(threshold), f"BetP({code}) = {betp} <= {threshold}"
+
+
+# ── HierarchicalClassification ──────────────────────────────────────
+
+
+@when("I build a HierarchicalClassification from combined evidence")
+def step_build_hc(context):
+    from atelier.classify.belief import HierarchicalClassification
+    source_masses = {"source1": context.source1, "source2": context.source2}
+    context.hc = HierarchicalClassification.from_combined_evidence(
+        source_masses=source_masses,
+        frame=context.frame,
+        category_set=context.category_set,
+    )
+
+
+@then('belief at leaf "{code}" should be positive')
+def step_hc_leaf_belief(context, code):
+    bel = context.hc.belief_at(code)
+    assert bel > 0, f"Belief at {code} = {bel}"
+
+
+@then('belief at parent "{code}" should be at least as high as at "{leaf}"')
+def step_hc_parent_belief(context, code, leaf):
+    bel_parent = context.hc.belief_at(code)
+    bel_leaf = context.hc.belief_at(leaf)
+    assert bel_parent >= bel_leaf - 1e-9, (
+        f"Parent belief {bel_parent} < leaf belief {bel_leaf}"
+    )
+
+
+@then("the classification should report whether clarification is needed")
+def step_hc_needs_clarification(context):
+    # Just verify the property is accessible and returns a bool
+    result = context.hc.needs_clarification
+    assert isinstance(result, bool), f"needs_clarification returned {type(result)}"
+
+
+# ── Schema Mapping Validation ────────────────────────────────────────
+
+
+@then('category "{code}" label should be "{expected}"')
+def step_check_label(context, code, expected):
+    cat = context.category_set.all_by_code.get(code)
+    assert cat is not None, f"Category {code} not found"
+    assert cat.label == expected, f"Label is '{cat.label}', expected '{expected}'"
+
+
+@then('category "{code}" abbrev should be "{expected}"')
+def step_check_abbrev(context, code, expected):
+    cat = context.category_set.all_by_code.get(code)
+    assert cat is not None, f"Category {code} not found"
+    assert cat.abbrev == expected, f"Abbrev is '{cat.abbrev}', expected '{expected}'"
+
+
 # ── Pipeline ─────────────────────────────────────────────────────────
 
 

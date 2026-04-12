@@ -13,7 +13,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from atelier.classify.belief import FrameOfDiscernment, combine_multiple
+from atelier.classify.belief import (
+    FrameOfDiscernment,
+    HierarchicalClassification,
+)
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
 from atelier.classify.mass_functions import (
@@ -224,7 +227,11 @@ def _classify_column(
     *,
     use_cosine: bool = True,
 ) -> dict[str, Any]:
-    """Classify a single column using available evidence sources."""
+    """Classify a single column using available evidence sources.
+
+    Uses HierarchicalClassification.from_combined_evidence() for proper
+    pignistic probability ranking and belief interval computation.
+    """
     features = extract_features(
         column_name=col.name,
         column_type=col.column_type,
@@ -235,21 +242,18 @@ def _classify_column(
         null_count=col.null_count,
     )
 
-    # Collect evidence sources
-    assignments = []
-    evidence_sources: dict[str, Any] = {}
+    # Collect named evidence sources
+    source_masses: dict[str, Any] = {}
 
     # 1. Name matching
     name_mass = name_match_to_mass(col.name, frame, category_set)
     if not _is_vacuous(name_mass):
-        assignments.append(name_mass)
-        evidence_sources["name_match"] = _mass_summary(name_mass)
+        source_masses["name_match"] = name_mass
 
     # 2. Pattern detection
     pattern_mass = pattern_to_mass(features.pattern_signals, frame)
     if not _is_vacuous(pattern_mass):
-        assignments.append(pattern_mass)
-        evidence_sources["pattern"] = _mass_summary(pattern_mass)
+        source_masses["pattern"] = pattern_mass
 
     # 3. Cosine similarity (if available)
     if use_cosine:
@@ -257,44 +261,37 @@ def _classify_column(
             from atelier.classify.embedding import classify_cosine as _cosine
             similarities = _cosine(features, category_set)
             cosine_mass = cosine_to_mass(similarities, frame)
-            assignments.append(cosine_mass)
-            evidence_sources["cosine"] = _mass_summary(cosine_mass)
+            source_masses["cosine"] = cosine_mass
         except Exception:
             pass
 
-    # Fuse evidence
-    if not assignments:
+    # Fuse evidence via HierarchicalClassification
+    if not source_masses:
         return _empty_classification(col, features)
 
-    if len(assignments) == 1:
-        combined = assignments[0]
-        conflict = 0.0
-    else:
-        combined, conflict = combine_multiple(assignments)
+    hc = HierarchicalClassification.from_combined_evidence(
+        source_masses=source_masses,
+        frame=frame,
+        category_set=category_set,
+    )
 
-    # Extract predictions
-    best_code, best_mass = _best_singleton(combined, frame)
-    bel = combined.belief(frame.singleton(best_code)) if best_code else 0.0
-    pl = combined.plausibility(frame.singleton(best_code)) if best_code else 0.0
-
-    best_label = ""
-    if best_code:
-        cat = category_set.by_code.get(best_code)
-        if cat:
-            best_label = cat.label
+    best_code = hc.category.code
+    bel, pl = hc.interval_at(best_code)
 
     return {
         "table_name": col.table_name,
         "column_name": col.name,
         "column_type": col.column_type,
         "predicted_code": best_code,
-        "predicted_label": best_label,
-        "confidence": round(best_mass, 4) if best_mass else 0.0,
+        "predicted_label": hc.category.label,
+        "confidence": hc.confidence,
         "belief": round(bel, 4),
         "plausibility": round(pl, 4),
         "uncertainty": round(pl - bel, 4),
-        "conflict": round(conflict, 4),
-        "evidence_sources": evidence_sources,
+        "conflict": hc.conflict,
+        "needs_clarification": hc.needs_clarification,
+        "evidence": hc.evidence,
+        "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
         "pattern_signals": features.pattern_signals,
         "ground_truth": col.ground_truth,
         "is_correct": (
@@ -331,17 +328,6 @@ def _is_vacuous(assignment) -> bool:
         fe = next(iter(assignment.masses))
         return len(fe.codes) > 1  # Theta has all codes
     return False
-
-
-def _best_singleton(assignment, frame) -> tuple[str | None, float]:
-    """Find the singleton with highest mass in a BeliefAssignment."""
-    best_code = None
-    best_mass = 0.0
-    for fe, m in assignment.masses.items():
-        if len(fe.codes) == 1 and m > best_mass:
-            best_code = next(iter(fe.codes))
-            best_mass = m
-    return best_code, best_mass
 
 
 def _mass_summary(assignment) -> dict[str, float]:
@@ -405,6 +391,8 @@ def _write_parquet(
             "plausibility": c["plausibility"],
             "uncertainty": c["uncertainty"],
             "conflict": c["conflict"],
+            "needs_clarification": c.get("needs_clarification", False),
+            "evidence": c.get("evidence", ""),
             "ground_truth": c["ground_truth"] or "",
             "is_correct": c["is_correct"] if c["is_correct"] is not None else False,
             "pattern_signals": ", ".join(c.get("pattern_signals", [])),

@@ -54,6 +54,25 @@ Feature: Dempster-Shafer classification pipeline
     When I advance to "DISCOVERING"
     Then the state should be "DISCOVERING"
 
+  Scenario: Pignistic probability distributes Theta mass fairly
+    Given a frame of discernment from the vocabulary
+    When I create a belief assignment with mass 0.6 on "1.1.1.1" and 0.4 on theta
+    Then the pignistic probability for "1.1.1.1" should exceed 0.6
+
+  Scenario: HierarchicalClassification navigates belief at parent level
+    Given a frame of discernment from the vocabulary
+    And two independent evidence sources both supporting "1.1.1.1"
+    When I build a HierarchicalClassification from combined evidence
+    Then belief at leaf "1.1.1.1" should be positive
+    And belief at parent "1.1.1" should be at least as high as at "1.1.1.1"
+    And the classification should report whether clarification is needed
+
+  Scenario: Mock annotations map ontology to label and annotation to formal code
+    Then category "1.1.1.1" label should be "Email Address"
+    And category "1.1.1.1" abbrev should be "EMAIL"
+    And category "1.1.3.1" label should be "Payment Card Number"
+    And category "1.1.3.1" abbrev should be "PAN"
+
   Scenario: FSM rejects invalid transitions
     Given a fresh AgentFSM in "IDLE" state
     When I attempt to advance to "FUSING"

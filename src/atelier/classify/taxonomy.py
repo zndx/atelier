@@ -24,10 +24,11 @@ class ReferenceCategory:
     """A single category in the controlled vocabulary."""
 
     code: str           # Hierarchical dot-notation: "0", "0.1", "1.1.1.1.1.1.1"
-    label: str          # Annotation label: "Payment Card Number"
+    label: str          # Human-readable name: "Payment Card Number" (from ontology)
     embedding_text: str  # Pre-built text for the embedding model
-    abbrev: str = ""    # Common names / abbreviations
+    abbrev: str = ""    # Formal code / mnemonic: "PAN" (from annotation)
     description: str = ""
+    common_names: str = ""  # Pipe-separated aliases: "Credit Card|CC|DPAN"
     taxonomy: str = "annotations"
     parent_code: str | None = None
     # Sensitivity ratings per data subject role
@@ -242,12 +243,13 @@ def _build_category_set_from_records(
 ) -> CategorySet:
     """Build a CategorySet from annotation records.
 
-    Expected record keys (from hive default.annotations):
+    Expected record keys (from hive default.annotations — 11 columns):
     - id: hierarchical code ("0", "0.1", "1.1.1.1.1.1.1")
-    - ontology: sensitivity tier / parent grouping
-    - annotation: the tag label
+    - ontology: human-readable label ("Payment Card Number")
+    - annotation: formal code / mnemonic ("PAN", "CVV2", "SALARY")
     - definition: description text
     - common_names: pipe-separated aliases
+    - specifics: examples and additional context (optional)
     - non_corp, emp_contractor, individual, corp: sensitivity ratings
     - deprecated: "yes"/"no" filter flag
     """
@@ -277,16 +279,27 @@ def _build_category_set_from_records(
         annotation = str(row.get("annotation", "")).strip()
         definition = str(row.get("definition", "")).strip()
         common_names = str(row.get("common_names", "")).strip()
+        specifics = str(row.get("specifics", "")).strip()
 
-        # Build embedding text
-        label = annotation or ontology
-        parts = [label.lower().replace("_", " ")]
-        if ontology and ontology != annotation:
-            parts.append(ontology)
+        # ontology = human label ("Payment Card Number")
+        # annotation = formal code / mnemonic ("PAN")
+        label = ontology or annotation
+        formal_code = annotation
+
+        # Build embedding text (matches signals pattern)
+        words_label = re.sub(
+            r"[^a-z0-9 ]", "",
+            label.lower().replace("/", " ").replace("(", "").replace(")", ""),
+        ).strip()
+        parts = [words_label, label]
+        if formal_code and formal_code != label:
+            parts.append(formal_code)
         if definition:
             parts.append(definition)
         if common_names:
             parts.append(common_names)
+        if specifics:
+            parts.append(specifics[:150])
         embedding_text = " | ".join(parts)
 
         # Derive parent_code from dot notation
@@ -305,7 +318,8 @@ def _build_category_set_from_records(
             code=row_id,
             label=label,
             embedding_text=embedding_text,
-            abbrev=common_names,
+            abbrev=formal_code,
+            common_names=common_names,
             description=definition,
             taxonomy="annotations",
             parent_code=parent_code,
@@ -329,12 +343,14 @@ def _build_category_set_from_records(
 
         ontology = str(row.get("ontology", "")).strip()
         annotation = str(row.get("annotation", "")).strip()
+        label = ontology or annotation or f"Level_{row_id}"
         id_parts = row_id.rsplit(".", 1)
         parent_code = id_parts[0] if len(id_parts) > 1 else None
         parent_refs.append(ReferenceCategory(
             code=row_id,
-            label=annotation or ontology or f"Level_{row_id}",
-            embedding_text=annotation or ontology or row_id,
+            label=label,
+            embedding_text=label,
+            abbrev=annotation,
             taxonomy="annotations",
             parent_code=parent_code,
         ))
@@ -374,10 +390,10 @@ def save_annotations_json(
     for cat in cats:
         rec = {
             "id": cat.code,
-            "ontology": cat.label if cat.parent_code else "",
-            "annotation": cat.label,
+            "ontology": cat.label,        # human-readable label
+            "annotation": cat.abbrev,      # formal code / mnemonic
             "definition": cat.description,
-            "common_names": cat.abbrev,
+            "common_names": cat.common_names,
             "deprecated": "no",
         }
         if cat.sensitivity:
