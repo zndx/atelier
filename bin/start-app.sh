@@ -53,6 +53,101 @@ wait_for_port() {
         "$timeout"
 }
 
+# ── Proof-of-progress readiness probe ──────────────────────────────
+# Instead of a fixed 30s timeout, we use a progress-based approach:
+# as long as PGlite is producing observable work (new stdout lines,
+# data directory file changes), the deadline extends. If nothing
+# changes for STALL_TIMEOUT seconds, we declare it stuck and fail.
+#
+# Progress signals checked each iteration:
+#   1. PGlite stdout (piped to .app/pglite.log) — new log lines
+#   2. Data directory (.app/pgdata/) — new/modified files
+#   3. TCP port reachable — socket server bound
+#   4. SQL connectivity — SELECT 1 succeeds (final gate)
+
+wait_for_pglite() {
+    local port="$1" stall_timeout="${2:-10}" max_timeout="${3:-120}"
+    local log_file=".app/pglite.log"
+    local deadline=$((SECONDS + max_timeout))
+    local last_progress=$SECONDS
+    local last_log_lines=0
+    local last_file_count=0
+
+    echo "Waiting for PGlite (proof-of-progress, stall=${stall_timeout}s, max=${max_timeout}s)..."
+
+    while [ $SECONDS -lt $deadline ]; do
+        # ── Check progress signals ────────────────────────────
+        local progressed=false
+
+        # Signal 1: new log output
+        if [ -f "$log_file" ]; then
+            local current_lines
+            current_lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+            if [ "$current_lines" -gt "$last_log_lines" ]; then
+                # Show new lines for operator visibility
+                tail -n $((current_lines - last_log_lines)) "$log_file" | while IFS= read -r line; do
+                    echo "  [pglite] $line"
+                done
+                last_log_lines=$current_lines
+                progressed=true
+            fi
+        fi
+
+        # Signal 2: data directory file changes
+        if [ -d ".app/pgdata" ]; then
+            local current_files
+            current_files=$(find .app/pgdata -type f 2>/dev/null | wc -l)
+            if [ "$current_files" -gt "$last_file_count" ]; then
+                echo "  [progress] pgdata: $current_files files (was $last_file_count)"
+                last_file_count=$current_files
+                progressed=true
+            fi
+        fi
+
+        # Signal 3+4: TCP + SQL (the final gate)
+        if python -c "
+import socket, sys
+try:
+    s = socket.create_connection(('127.0.0.1', $port), timeout=2)
+    s.close()
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+            # Port is open — try SQL connectivity
+            if python -c "
+from sqlalchemy import create_engine, text
+e = create_engine(
+    'postgresql+psycopg://postgres:postgres@127.0.0.1:$port/postgres?sslmode=disable&gssencmode=disable',
+    connect_args={'connect_timeout': 3},
+)
+with e.connect() as c:
+    c.execute(text('SELECT 1'))
+e.dispose()
+" 2>/dev/null; then
+                echo "PostgreSQL ready (SQL verified)"
+                return 0
+            else
+                echo "  [progress] port open, SQL not yet ready"
+                progressed=true
+            fi
+        fi
+
+        # ── Stall detection ───────────────────────────────────
+        if [ "$progressed" = true ]; then
+            last_progress=$SECONDS
+        elif [ $((SECONDS - last_progress)) -ge "$stall_timeout" ]; then
+            echo "ERROR: PGlite stalled — no progress for ${stall_timeout}s" >&2
+            [ -f "$log_file" ] && echo "  last log:" >&2 && tail -3 "$log_file" >&2
+            return 1
+        fi
+
+        sleep 1
+    done
+
+    echo "ERROR: PGlite not ready after ${max_timeout}s (hard ceiling)" >&2
+    return 1
+}
+
 # CAI's reverse proxy expects 127.0.0.1; local dev needs 0.0.0.0
 if [ -n "$CDSW_APP_PORT" ]; then
   HOST="127.0.0.1"
@@ -95,8 +190,18 @@ if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   echo "Starting PGlite on port $PGLITE_PORT..."
   mkdir -p .app/pgdata
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
-    node scripts/pglite-server.mjs &
-  wait_for_port "PostgreSQL" "127.0.0.1" "$PGLITE_PORT" 30
+    node scripts/pglite-server.mjs > .app/pglite.log 2>&1 &
+  PGLITE_PID=$!
+
+  wait_for_pglite "$PGLITE_PORT" 10 120
+
+  # Verify process is still alive after probe passed
+  if ! kill -0 "$PGLITE_PID" 2>/dev/null; then
+    echo "ERROR: PGlite process died during startup" >&2
+    cat .app/pglite.log >&2
+    exit 1
+  fi
+
   # gssencmode=disable: psycopg sends GSSAPI negotiation before auth handshake;
   # PGlite doesn't speak that protocol. Without this, migrations fail with:
   # "received invalid response to GSSAPI negotiation: R"

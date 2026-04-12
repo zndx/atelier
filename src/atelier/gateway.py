@@ -55,7 +55,7 @@ def _get_status_engine():
             pool_recycle=300,
             pool_size=2,
             max_overflow=0,
-            connect_args={"connect_timeout": 5},
+            connect_args={"connect_timeout": 10},
         )
     return _engine
 
@@ -258,20 +258,31 @@ def status():
         _reset_client()
         checks["grpc"] = {"ok": False, "error": str(e)}
 
-    # PostgreSQL — reuse cached engine (pool_pre_ping handles stale conns).
-    # On failure, dispose the pool so the next call rebuilds from scratch;
-    # this breaks us out of pglite-socket@0.0.13 wedge states.
-    try:
-        t0 = time.monotonic()
-        from sqlalchemy import text
-        engine = _get_status_engine()
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        ms = int((time.monotonic() - t0) * 1000)
-        checks["postgres"] = {"ok": True, "latency_ms": ms}
-    except Exception as e:
+    # PostgreSQL — retry with backoff. PGlite can have transient
+    # stalls (pglite-socket@0.0.13 wedge); one timeout shouldn't
+    # flip the status card amber. Three attempts with 1s backoff.
+    pg_ok = False
+    pg_err = None
+    for attempt in range(3):
+        try:
+            t0 = time.monotonic()
+            from sqlalchemy import text
+            engine = _get_status_engine()
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            ms = int((time.monotonic() - t0) * 1000)
+            checks["postgres"] = {"ok": True, "latency_ms": ms}
+            pg_ok = True
+            break
+        except Exception as e:
+            pg_err = e
+            if attempt < 2:
+                time.sleep(1)
+                _reset_status_engine()
+
+    if not pg_ok:
         _reset_status_engine()
-        checks["postgres"] = {"ok": False, "error": str(e)}
+        checks["postgres"] = {"ok": False, "error": str(pg_err)}
 
     # Qdrant — short timeout
     try:

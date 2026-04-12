@@ -28,7 +28,9 @@ const db = await PGlite.create({
   dataDir: DATA_DIR,
   extensions: { vector },
 })
+console.log(`[pglite] database initialized, data at ${DATA_DIR}`)
 await db.exec('CREATE EXTENSION IF NOT EXISTS vector;')
+console.log(`[pglite] pgvector extension ready`)
 
 const server = new PGLiteSocketServer({ db, port: PORT, host: '127.0.0.1' })
 await server.start()
