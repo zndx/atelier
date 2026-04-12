@@ -11,6 +11,7 @@
 - [Keystone Agents](./architecture/agents.md)
 - [Embeddings](./architecture/embeddings.md)
 - [gRPC Service](./architecture/grpc.md)
+- [Classification Pipeline](./architecture/classification.md)
 
 # Scenarios
 

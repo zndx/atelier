@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from src.atelier.proto import atelier_pb2 as src_dot_atelier_dot_proto_dot_atelier__pb2
+from atelier.proto import atelier_pb2 as atelier_dot_proto_dot_atelier__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
@@ -38,23 +38,33 @@ class AtelierStub(object):
         """
         self.HealthCheck = channel.unary_unary(
                 '/atelier.Atelier/HealthCheck',
-                request_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.HealthCheckRequest.SerializeToString,
-                response_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.HealthCheckResponse.FromString,
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.HealthCheckRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
         self.ListAgents = channel.unary_unary(
                 '/atelier.Atelier/ListAgents',
-                request_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListAgentsRequest.SerializeToString,
-                response_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListAgentsResponse.FromString,
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.ListAgentsRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.ListAgentsResponse.FromString,
                 _registered_method=True)
         self.GetAgent = channel.unary_unary(
                 '/atelier.Atelier/GetAgent',
-                request_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.SerializeToString,
-                response_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.FromString,
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.FromString,
                 _registered_method=True)
         self.ListDatasets = channel.unary_unary(
                 '/atelier.Atelier/ListDatasets',
-                request_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.SerializeToString,
-                response_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListDatasetsResponse.FromString,
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.ListDatasetsResponse.FromString,
+                _registered_method=True)
+        self.GetFSMStatus = channel.unary_unary(
+                '/atelier.Atelier/GetFSMStatus',
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.FSMStatusRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.FSMStatusResponse.FromString,
+                _registered_method=True)
+        self.StartClassification = channel.unary_unary(
+                '/atelier.Atelier/StartClassification',
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.StartClassificationRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.StartClassificationResponse.FromString,
                 _registered_method=True)
 
 
@@ -87,28 +97,50 @@ class AtelierServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetFSMStatus(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StartClassification(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AtelierServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'HealthCheck': grpc.unary_unary_rpc_method_handler(
                     servicer.HealthCheck,
-                    request_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.HealthCheckRequest.FromString,
-                    response_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.HealthCheckResponse.SerializeToString,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.HealthCheckRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.HealthCheckResponse.SerializeToString,
             ),
             'ListAgents': grpc.unary_unary_rpc_method_handler(
                     servicer.ListAgents,
-                    request_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListAgentsRequest.FromString,
-                    response_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListAgentsResponse.SerializeToString,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.ListAgentsRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.ListAgentsResponse.SerializeToString,
             ),
             'GetAgent': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAgent,
-                    request_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.FromString,
-                    response_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.SerializeToString,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.SerializeToString,
             ),
             'ListDatasets': grpc.unary_unary_rpc_method_handler(
                     servicer.ListDatasets,
-                    request_deserializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.FromString,
-                    response_serializer=src_dot_atelier_dot_proto_dot_atelier__pb2.ListDatasetsResponse.SerializeToString,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.ListDatasetsResponse.SerializeToString,
+            ),
+            'GetFSMStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetFSMStatus,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.FSMStatusRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.FSMStatusResponse.SerializeToString,
+            ),
+            'StartClassification': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartClassification,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.StartClassificationRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.StartClassificationResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -138,8 +170,8 @@ class Atelier(object):
             request,
             target,
             '/atelier.Atelier/HealthCheck',
-            src_dot_atelier_dot_proto_dot_atelier__pb2.HealthCheckRequest.SerializeToString,
-            src_dot_atelier_dot_proto_dot_atelier__pb2.HealthCheckResponse.FromString,
+            atelier_dot_proto_dot_atelier__pb2.HealthCheckRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.HealthCheckResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -165,8 +197,8 @@ class Atelier(object):
             request,
             target,
             '/atelier.Atelier/ListAgents',
-            src_dot_atelier_dot_proto_dot_atelier__pb2.ListAgentsRequest.SerializeToString,
-            src_dot_atelier_dot_proto_dot_atelier__pb2.ListAgentsResponse.FromString,
+            atelier_dot_proto_dot_atelier__pb2.ListAgentsRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.ListAgentsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -192,8 +224,8 @@ class Atelier(object):
             request,
             target,
             '/atelier.Atelier/GetAgent',
-            src_dot_atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.SerializeToString,
-            src_dot_atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.FromString,
+            atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -219,8 +251,62 @@ class Atelier(object):
             request,
             target,
             '/atelier.Atelier/ListDatasets',
-            src_dot_atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.SerializeToString,
-            src_dot_atelier_dot_proto_dot_atelier__pb2.ListDatasetsResponse.FromString,
+            atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.ListDatasetsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetFSMStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/atelier.Atelier/GetFSMStatus',
+            atelier_dot_proto_dot_atelier__pb2.FSMStatusRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.FSMStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartClassification(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/atelier.Atelier/StartClassification',
+            atelier_dot_proto_dot_atelier__pb2.StartClassificationRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.StartClassificationResponse.FromString,
             options,
             channel_credentials,
             insecure,

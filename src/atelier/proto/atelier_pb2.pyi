@@ -77,3 +77,45 @@ class ListDatasetsResponse(_message.Message):
     DATASETS_FIELD_NUMBER: _ClassVar[int]
     datasets: _containers.RepeatedCompositeFieldContainer[ClassificationDataset]
     def __init__(self, datasets: _Optional[_Iterable[_Union[ClassificationDataset, _Mapping]]] = ...) -> None: ...
+
+class FSMStatusRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class FSMStatusResponse(_message.Message):
+    __slots__ = ("run_id", "state", "started_at", "updated_at", "progress_json", "error")
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    STARTED_AT_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_JSON_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    run_id: str
+    state: str
+    started_at: str
+    updated_at: str
+    progress_json: str
+    error: str
+    def __init__(self, run_id: _Optional[str] = ..., state: _Optional[str] = ..., started_at: _Optional[str] = ..., updated_at: _Optional[str] = ..., progress_json: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class StartClassificationRequest(_message.Message):
+    __slots__ = ("connection_name", "database", "sample_size", "use_mock")
+    CONNECTION_NAME_FIELD_NUMBER: _ClassVar[int]
+    DATABASE_FIELD_NUMBER: _ClassVar[int]
+    SAMPLE_SIZE_FIELD_NUMBER: _ClassVar[int]
+    USE_MOCK_FIELD_NUMBER: _ClassVar[int]
+    connection_name: str
+    database: str
+    sample_size: int
+    use_mock: bool
+    def __init__(self, connection_name: _Optional[str] = ..., database: _Optional[str] = ..., sample_size: _Optional[int] = ..., use_mock: bool = ...) -> None: ...
+
+class StartClassificationResponse(_message.Message):
+    __slots__ = ("run_id", "started", "error")
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    STARTED_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    run_id: str
+    started: bool
+    error: str
+    def __init__(self, run_id: _Optional[str] = ..., started: bool = ..., error: _Optional[str] = ...) -> None: ...

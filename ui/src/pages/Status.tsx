@@ -97,6 +97,150 @@ interface DataConnectionResult {
   error?: string;
 }
 
+interface FSMStatus {
+  id?: string;
+  state: string;
+  started_at?: string;
+  updated_at?: string;
+  progress?: Record<string, unknown>;
+  error?: string | null;
+  result_path?: string | null;
+}
+
+const FSM_STATE_COLORS: Record<string, string> = {
+  IDLE: "default",
+  LOADING_VOCAB: "processing",
+  DISCOVERING: "processing",
+  SAMPLING: "processing",
+  GENERATING_SYNTH: "processing",
+  TRAINING: "processing",
+  CLASSIFYING: "processing",
+  FUSING: "processing",
+  EVALUATING: "processing",
+  CONVERGED: "success",
+  ERROR: "error",
+};
+
+function ClassificationPipelineCard() {
+  const [fsm, setFsm] = useState<FSMStatus | null>(null);
+  const [fsmLoading, setFsmLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  const fetchFSM = () => {
+    setFsmLoading(true);
+    fetch("/api/fsm/status")
+      .then((r) => r.json())
+      .then(setFsm)
+      .catch(() => setFsm(null))
+      .finally(() => setFsmLoading(false));
+  };
+
+  useEffect(() => {
+    fetchFSM();
+    const interval = setInterval(fetchFSM, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const startPipeline = () => {
+    setStarting(true);
+    fetch("/api/fsm/start", { method: "POST" })
+      .then((r) => r.json())
+      .then(() => {
+        setTimeout(fetchFSM, 500);
+      })
+      .catch(() => {})
+      .finally(() => setStarting(false));
+  };
+
+  const state = fsm?.state ?? "IDLE";
+  const isRunning = !["IDLE", "CONVERGED", "ERROR"].includes(state);
+  const progress = fsm?.progress ?? {};
+
+  return (
+    <Card
+      title="Classification Pipeline"
+      extra={
+        <Space>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={fetchFSM}
+            loading={fsmLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+          <Button
+            type="primary"
+            onClick={startPipeline}
+            loading={starting}
+            disabled={isRunning}
+            size="small"
+          >
+            {isRunning ? "Running..." : "Start Classification"}
+          </Button>
+        </Space>
+      }
+    >
+      <Descriptions column={2} size="small" bordered>
+        <Descriptions.Item label="State">
+          <Tag color={FSM_STATE_COLORS[state] ?? "default"}>{state}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="Run ID">
+          <Text code>{fsm?.id ?? "—"}</Text>
+        </Descriptions.Item>
+        {progress.categories_loaded != null && (
+          <Descriptions.Item label="Categories">
+            {String(progress.categories_loaded)}
+          </Descriptions.Item>
+        )}
+        {progress.tables_discovered != null && (
+          <Descriptions.Item label="Tables">
+            {String(progress.tables_discovered)}
+          </Descriptions.Item>
+        )}
+        {progress.columns_sampled != null && (
+          <Descriptions.Item label="Columns Sampled">
+            {String(progress.columns_sampled)}
+          </Descriptions.Item>
+        )}
+        {progress.columns_classified != null && (
+          <Descriptions.Item label="Classified">
+            {String(progress.columns_classified)}
+          </Descriptions.Item>
+        )}
+        {progress.accuracy != null && (
+          <Descriptions.Item label="Accuracy">
+            <Tag color={Number(progress.accuracy) > 0.7 ? "green" : "orange"}>
+              {(Number(progress.accuracy) * 100).toFixed(1)}%
+            </Tag>
+          </Descriptions.Item>
+        )}
+        {progress.avg_confidence != null && (
+          <Descriptions.Item label="Avg Confidence">
+            {Number(progress.avg_confidence).toFixed(3)}
+          </Descriptions.Item>
+        )}
+        {progress.avg_conflict != null && (
+          <Descriptions.Item label="Avg Conflict">
+            {Number(progress.avg_conflict).toFixed(3)}
+          </Descriptions.Item>
+        )}
+      </Descriptions>
+      {fsm?.error && (
+        <div style={{ marginTop: 12 }}>
+          <Text type="danger">{fsm.error}</Text>
+        </div>
+      )}
+      {fsm?.result_path && state === "CONVERGED" && (
+        <div style={{ marginTop: 12 }}>
+          <Text type="secondary">Results: </Text>
+          <Text code>{fsm.result_path}</Text>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function StatusBadge({ ok }: { ok: boolean }) {
   return ok ? (
     <Badge status="success" text="Healthy" />
@@ -313,6 +457,13 @@ export default function Status() {
               <Spin />
             )}
           </Card>
+        </Col>
+      </Row>
+
+      {/* ── Classification Pipeline ─────────────────── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <ClassificationPipelineCard />
         </Col>
       </Row>
 

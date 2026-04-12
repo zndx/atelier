@@ -51,6 +51,32 @@ message ListDatasetsResponse {
   repeated ClassificationDataset datasets = 1;
 }
 
+// ── Classification FSM ───────────────────────────────────────────
+
+message FSMStatusRequest {}
+
+message FSMStatusResponse {
+  string run_id = 1;
+  string state = 2;
+  string started_at = 3;
+  string updated_at = 4;
+  string progress_json = 5;
+  string error = 6;
+}
+
+message StartClassificationRequest {
+  string connection_name = 1;
+  string database = 2;
+  int32 sample_size = 3;
+  bool use_mock = 4;
+}
+
+message StartClassificationResponse {
+  string run_id = 1;
+  bool started = 2;
+  string error = 3;
+}
+
 // ── Service ───────────────────────────────────────────────────────
 
 service Atelier {
@@ -58,4 +84,6 @@ service Atelier {
   rpc ListAgents (ListAgentsRequest) returns (ListAgentsResponse) {}
   rpc GetAgent (GetAgentRequest) returns (GetAgentResponse) {}
   rpc ListDatasets (ListDatasetsRequest) returns (ListDatasetsResponse) {}
+  rpc GetFSMStatus (FSMStatusRequest) returns (FSMStatusResponse) {}
+  rpc StartClassification (StartClassificationRequest) returns (StartClassificationResponse) {}
 }

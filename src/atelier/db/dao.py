@@ -126,3 +126,51 @@ class AtelierDao:
                 agent.description = description
                 agent.role = role
                 agent.tool_ids = tool_ids
+
+    # ── FSM operations ───────────────────────────────────────────
+
+    def upsert_fsm_run(self, run_id: str, state: str, started_at: str,
+                       updated_at: str, config: str = "", progress: str = "",
+                       error: str | None = None, result_path: str | None = None):
+        """Insert or update an FSM run record."""
+        from atelier.db.model import FSMRun
+        with self.get_session() as session:
+            run = session.query(FSMRun).filter_by(id=run_id).first()
+            if run is None:
+                run = FSMRun(
+                    id=run_id, state=state, config=config,
+                    progress=progress, error=error, result_path=result_path,
+                )
+                session.add(run)
+            else:
+                run.state = state
+                run.progress = progress
+                run.error = error
+                run.result_path = result_path
+
+    def get_fsm_run(self, run_id: str) -> dict | None:
+        """Return an FSM run by ID as dict, or None."""
+        from atelier.db.model import FSMRun
+        with self.get_session() as session:
+            r = session.query(FSMRun).filter_by(id=run_id).first()
+            if r is None:
+                return None
+            return {"id": r.id, "state": r.state,
+                    "started_at": str(r.started_at or ""),
+                    "updated_at": str(r.updated_at or ""),
+                    "config": r.config, "progress": r.progress,
+                    "error": r.error, "result_path": r.result_path}
+
+    def list_fsm_runs(self) -> list[dict]:
+        """Return all FSM runs as dicts."""
+        from atelier.db.model import FSMRun
+        with self.get_session() as session:
+            rows = session.query(FSMRun).order_by(FSMRun.started_at.desc()).all()
+            return [
+                {"id": r.id, "state": r.state,
+                 "started_at": str(r.started_at or ""),
+                 "updated_at": str(r.updated_at or ""),
+                 "config": r.config, "progress": r.progress,
+                 "error": r.error, "result_path": r.result_path}
+                for r in rows
+            ]

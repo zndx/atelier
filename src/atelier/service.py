@@ -71,3 +71,61 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                 for ds in datasets
             ]
         )
+
+    def GetFSMStatus(self, request, context):
+        from atelier.classify import get_fsm_status
+        status = get_fsm_status()
+        if status is None:
+            return atelier_pb2.FSMStatusResponse(
+                state="IDLE", progress_json="{}"
+            )
+        return atelier_pb2.FSMStatusResponse(
+            run_id=status.get("id", ""),
+            state=status.get("state", "IDLE"),
+            started_at=status.get("started_at", ""),
+            updated_at=status.get("updated_at", ""),
+            progress_json=json.dumps(status.get("progress", {})),
+            error=status.get("error") or "",
+        )
+
+    def StartClassification(self, request, context):
+        import threading
+        from atelier.classify import get_fsm, run_pipeline
+        from atelier.config import load_config
+
+        cfg = load_config()
+        fsm = get_fsm(self.dao)
+
+        # Check if already running
+        current = fsm.get_status()
+        if current and current.state not in ("IDLE", "CONVERGED", "ERROR"):
+            return atelier_pb2.StartClassificationResponse(
+                run_id=current.id,
+                started=False,
+                error=f"Pipeline already running in state {current.state.value}",
+            )
+
+        run = fsm.start_run(config={
+            "connection_name": request.connection_name or None,
+            "database": request.database or "default",
+            "sample_size": request.sample_size or 50,
+            "use_mock": request.use_mock,
+        })
+
+        def _background():
+            from atelier.classify.pipeline import run_classification_pipeline
+            run_classification_pipeline(
+                cfg, fsm,
+                connection_name=request.connection_name or None,
+                database=request.database or "default",
+                sample_size=request.sample_size or 50,
+                use_mock=request.use_mock,
+            )
+
+        t = threading.Thread(target=_background, daemon=True)
+        t.start()
+
+        return atelier_pb2.StartClassificationResponse(
+            run_id=run.id,
+            started=True,
+        )

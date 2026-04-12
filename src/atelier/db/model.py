@@ -1,7 +1,8 @@
 """SQLAlchemy ORM models for Atelier state."""
 
-from sqlalchemy import BigInteger, Column, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Float, String, Text
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.sql import func
 
 
 class Base(DeclarativeBase):
@@ -30,3 +31,49 @@ class Dataset(Base):
     parquet_path = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     row_count = Column(BigInteger, nullable=True)
+
+
+class FSMRun(Base):
+    """Classification pipeline run state."""
+
+    __tablename__ = "fsm_runs"
+
+    id = Column(String, primary_key=True, nullable=False)
+    state = Column(String, nullable=False, default="IDLE")
+    started_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now())
+    config = Column(Text, nullable=True)       # JSON
+    progress = Column(Text, nullable=True)     # JSON
+    error = Column(Text, nullable=True)
+    result_path = Column(Text, nullable=True)
+
+
+class ClassificationRun(Base):
+    """Per-column classification result."""
+
+    __tablename__ = "classification_runs"
+
+    id = Column(String, primary_key=True, nullable=False)
+    fsm_run_id = Column(String, nullable=True)
+    table_name = Column(String, nullable=False)
+    column_name = Column(String, nullable=False)
+    predicted_code = Column(String, nullable=True)
+    predicted_label = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    belief = Column(Float, nullable=True)
+    plausibility = Column(Float, nullable=True)
+    conflict = Column(Float, nullable=True)
+    evidence_sources = Column(Text, nullable=True)  # JSON
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class Vocabulary(Base):
+    """Cached controlled vocabulary metadata."""
+
+    __tablename__ = "vocabularies"
+
+    id = Column(String, primary_key=True, nullable=False)
+    source = Column(String, nullable=False)
+    loaded_at = Column(DateTime, server_default=func.now())
+    category_count = Column(BigInteger, nullable=True)
+    categories = Column(Text, nullable=True)  # JSON

@@ -280,14 +280,22 @@ python -c "
 from atelier.db.dao import AtelierDao
 dao = AtelierDao()
 agents = [
+    ('sampler', 'Metadata Sampler',
+     'Discovers tables and samples column metadata from production databases via CAI Data Platform connections',
+     'sampler',
+     '[\"sample-metadata\", \"discover-tables\", \"load-annotations\"]'),
     ('classifier', 'Column Classifier',
      'Extracts 12 discrete features per column and runs cosine, CatBoost, and SVM classifiers with regex pattern detection',
      'classifier',
-     '[\"extract-features\", \"run-classifiers\", \"detect-patterns\"]'),
+     '[\"extract-features\", \"run-classifiers\", \"detect-patterns\", \"classify-columns\"]'),
     ('evidence-fuser', 'Evidence Fuser',
      'Converts 5 evidence sources into Dempster-Shafer mass functions, fuses via conjunctive combination, and diagnoses conflicts',
      'evidence_fuser',
      '[\"build-mass-functions\", \"apply-dempster-rule\", \"diagnose-conflicts\"]'),
+    ('synth-generator', 'Synthetic Generator',
+     'Creates deterministic synthetic training tables with representative column data for classifier training',
+     'synth_generator',
+     '[\"generate-synth-tables\", \"load-annotations\"]'),
     ('viz-director', 'Visualization Director',
      'Computes SAGE/SHAP feature explanations and prepares Atlas-compatible embedding projections',
      'visualization_director',

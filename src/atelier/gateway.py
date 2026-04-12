@@ -465,6 +465,70 @@ async def terminal_ws(websocket: WebSocket):
         await session.shutdown()
 
 
+# ── Classification FSM ─────────────────────────────────────────────
+
+
+@app.get("/api/fsm/status")
+def fsm_status():
+    """Return current classification pipeline FSM state."""
+    try:
+        from atelier.classify import get_fsm_status
+        status = get_fsm_status()
+        if status is None:
+            return {"state": "IDLE", "progress": {}}
+        return status
+    except Exception as exc:
+        return _error_envelope(f"FSM status failed: {exc}")
+
+
+@app.post("/api/fsm/start")
+def fsm_start():
+    """Start a classification pipeline run.
+
+    Synchronous (runs in threadpool) — the pipeline itself runs in
+    a background thread, but the start call blocks briefly to create
+    the run and return the run_id.
+    """
+    import threading
+    try:
+        from atelier.classify import get_fsm
+        from atelier.classify.pipeline import run_classification_pipeline
+        from atelier.config import load_config
+
+        cfg = load_config()
+        fsm = get_fsm()
+
+        # Check if already running
+        current = fsm.get_status()
+        if current and current.state.value not in ("IDLE", "CONVERGED", "ERROR"):
+            return {"run_id": current.id, "started": False,
+                    "error": f"Already running: {current.state.value}"}
+
+        run = fsm.start_run(config={"use_mock": True})
+
+        def _background():
+            run_classification_pipeline(cfg, fsm, use_mock=True)
+
+        t = threading.Thread(target=_background, daemon=True)
+        t.start()
+
+        return {"run_id": run.id, "started": True}
+    except Exception as exc:
+        return _error_envelope(f"FSM start failed: {exc}")
+
+
+@app.get("/api/fsm/runs")
+def fsm_runs():
+    """List past classification pipeline runs."""
+    try:
+        from atelier.classify import get_fsm
+        fsm = get_fsm()
+        runs = fsm.list_runs()
+        return {"runs": [r.to_dict() for r in runs]}
+    except Exception as exc:
+        return _error_envelope(f"FSM runs failed: {exc}")
+
+
 # ── Orchestration WebSocket ────────────────────────────────────────
 
 

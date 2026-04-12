@@ -12,9 +12,11 @@ import {
 } from "antd";
 import {
   ArrowLeftOutlined,
+  CloudServerOutlined,
   DashboardOutlined,
   DotChartOutlined,
   ExperimentOutlined,
+  FunnelPlotOutlined,
   MergeCellsOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -50,6 +52,18 @@ const ROLE_THEME: Record<string, RoleTheme> = {
     color: "#722ed1",
     bg: "#f9f0ff",
     label: "Viz Director",
+  },
+  sampler: {
+    icon: <FunnelPlotOutlined />,
+    color: "#fa8c16",
+    bg: "#fff7e6",
+    label: "Sampler",
+  },
+  synth_generator: {
+    icon: <CloudServerOutlined />,
+    color: "#13c2c2",
+    bg: "#e6fffb",
+    label: "Synth Generator",
   },
 };
 
@@ -176,10 +190,11 @@ export default function Agents() {
 
       <Title level={2}>Keystone Agents</Title>
       <Paragraph type="secondary">
-        Atelier's classification pipeline is driven by three keystone agents,
-        each specialized for a distinct phase of the workflow. Agents are
-        optimized using GEPA (Pareto-optimal prompt evolution) and Agent
-        Lightning APO (automatic prompt optimization with textual gradients).
+        Atelier's classification pipeline is driven by keystone agents,
+        each specialized for a distinct phase of the Dempster-Shafer
+        evidence fusion workflow. Agents are optimized using GEPA
+        (Pareto-optimal prompt evolution) and Agent Lightning APO
+        (automatic prompt optimization with textual gradients).
       </Paragraph>
 
       <Row gutter={[16, 16]} style={{ marginTop: 24 }}>

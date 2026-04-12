@@ -68,6 +68,12 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "cml.domain": ("cml_domain", str),
     "cml.engine_id": ("cml_engine_id", str),
     "cml.data_connections": ("cml_data_connections", str),
+    "classify.connection_name": ("classify_connection_name", str),
+    "classify.database": ("classify_database", str),
+    "classify.sample_size": ("classify_sample_size", int),
+    "classify.tables_limit": ("classify_tables_limit", int),
+    "classify.embedding_model": ("classify_embedding_model", str),
+    "classify.auto_start": ("classify_auto_start", bool),
 }
 
 # Reverse: field_name → ENV var name
@@ -163,6 +169,14 @@ class AtelierConfig:
 
     # Data
     parquet_dir: str = "build/data"
+
+    # Classification pipeline
+    classify_connection_name: str = ""
+    classify_database: str = "default"
+    classify_sample_size: int = 50
+    classify_tables_limit: int = 100
+    classify_embedding_model: str = "all-MiniLM-L6-v2"
+    classify_auto_start: bool = False
 
     # CML
     cml_project_id: str | None = None
