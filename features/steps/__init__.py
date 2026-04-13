@@ -14,4 +14,7 @@ from features.deployment.step_defs.naming_steps import *  # noqa: F401,F403
 from features.agent.step_defs.agent_steps import *  # noqa: F401,F403
 from features.agent.step_defs.classification_steps import *  # noqa: F401,F403
 from features.agent.step_defs.bootstrap_steps import *  # noqa: F401,F403
+from features.agent.step_defs.backend_steps import *  # noqa: F401,F403
+from features.agent.step_defs.synth_steps import *  # noqa: F401,F403
+from features.agent.step_defs.ml_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_steps import *  # noqa: F401,F403

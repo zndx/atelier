@@ -1,0 +1,123 @@
+"""Lazy-loading inference wrappers for CatBoost and SVM classifiers.
+
+Loads model files from configured paths on first use. When model files
+are not present, predict functions return None (graceful degradation).
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_catboost = None
+_catboost_loaded = False
+_svm = None
+_svm_loaded = False
+
+
+def get_catboost(model_path: str | Path | None = None):
+    """Lazy-load CatBoost model. Returns None if not available."""
+    global _catboost, _catboost_loaded
+    if _catboost_loaded:
+        return _catboost
+
+    _catboost_loaded = True
+    path = Path(model_path) if model_path else Path("build/models/catboost.cbm")
+    if not path.exists():
+        logger.debug("CatBoost model not found at %s, skipping", path)
+        return None
+
+    try:
+        from atelier.classify.catboost_classifier import CatBoostColumnClassifier
+        _catboost = CatBoostColumnClassifier.load(path)
+        return _catboost
+    except Exception as e:
+        logger.warning("Failed to load CatBoost model: %s", e)
+        return None
+
+
+def get_svm(model_path: str | Path | None = None):
+    """Lazy-load SVM model. Returns None if not available."""
+    global _svm, _svm_loaded
+    if _svm_loaded:
+        return _svm
+
+    _svm_loaded = True
+    path = Path(model_path) if model_path else Path("build/models/svm.pkl")
+    if not path.exists():
+        logger.debug("SVM model not found at %s, skipping", path)
+        return None
+
+    try:
+        from atelier.classify.svm_classifier import SVMClassifier
+        _svm = SVMClassifier.load(path)
+        return _svm
+    except Exception as e:
+        logger.warning("Failed to load SVM model: %s", e)
+        return None
+
+
+def predict_catboost(features, category_set) -> tuple[dict[str, float], dict[str, float]] | None:
+    """Get CatBoost probabilities + variance for a single column.
+
+    Args:
+        features: ColumnFeatures from extract_features().
+        category_set: Category set for embedding context.
+
+    Returns:
+        (proba, variance) dicts, or None if model not loaded.
+    """
+    model = get_catboost()
+    if model is None:
+        return None
+
+    from atelier.classify.embedding import embed_texts
+    import numpy as np
+
+    text = features.to_embedding_text()
+    embedding = np.array(embed_texts([text]))
+
+    proba = model.predict_proba_single(embedding[0])
+
+    try:
+        variance_list = model.virtual_ensemble_variance(embedding)
+        variance = variance_list[0] if variance_list else {}
+    except Exception:
+        variance = {}
+
+    return proba, variance
+
+
+def predict_svm(features) -> dict[str, float] | None:
+    """Get SVM probabilities for a single column.
+
+    Args:
+        features: ColumnFeatures from extract_features().
+
+    Returns:
+        {code: probability} dict, or None if model not loaded.
+    """
+    model = get_svm()
+    if model is None:
+        return None
+
+    from atelier.classify.svm_classifier import build_svm_text
+
+    text = build_svm_text(
+        features.column_name_humanized,
+        features.column_type,
+        features.sample_values_text.split(", ") if features.sample_values_text else None,
+    )
+
+    return model.predict_proba_single(text)
+
+
+def reset():
+    """Reset cached models (useful for testing)."""
+    global _catboost, _catboost_loaded, _svm, _svm_loaded
+    _catboost = None
+    _catboost_loaded = False
+    _svm = None
+    _svm_loaded = False

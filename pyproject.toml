@@ -30,6 +30,14 @@ agents = [
 llm = [
     "openai>=1.0.0",
 ]
+bedrock = [
+    "boto3>=1.34.0",
+]
+ml = [
+    "catboost>=1.2.0",
+    "scikit-learn>=1.4.0",
+    "joblib>=1.3.0",
+]
 viz = [
     "pyarrow>=18.0.0",
     "pandas>=2.2.0",

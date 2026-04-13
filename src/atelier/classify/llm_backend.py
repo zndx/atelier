@@ -3,6 +3,8 @@
 Provides a unified interface for LLM-based column classification:
 - Anthropic (Claude) via the anthropic SDK
 - OpenAI-compatible (vLLM/GLM-4.7) via the openai SDK
+- Cerebras (GLM-4.7 via OpenAI-compatible API)
+- AWS Bedrock (Claude via the Converse API)
 
 Each backend converts batch column metadata into structured
 classification responses with token tracking for cost estimation.
@@ -22,6 +24,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ── Cerebras constants ──────────────────────────────────────────
+
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+CEREBRAS_DEFAULT_MODEL = "zai-glm-4.7"
 
 
 # ── Response types ───────────────────────────────────────────────
@@ -61,7 +68,7 @@ class LLMResponse:
 class LLMBackendConfig:
     """Configuration for LLM backend."""
 
-    backend: str = "openai_compatible"  # "anthropic" | "openai_compatible"
+    backend: str = "openai_compatible"  # "anthropic" | "openai_compatible" | "cerebras" | "bedrock"
     api_key: str | None = None
     model: str = "glm-4.7"
     base_url: str | None = None  # e.g. "http://localhost:8000/v1"
@@ -71,6 +78,11 @@ class LLMBackendConfig:
     max_retries: int = 3
     retry_delay: float = 2.0
     disable_reasoning: bool = False
+    # AWS Bedrock credentials (used only by "bedrock" backend)
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_region: str | None = None
+    aws_session_token: str | None = None
 
 
 def config_from_atelier(cfg) -> LLMBackendConfig:
@@ -85,6 +97,10 @@ def config_from_atelier(cfg) -> LLMBackendConfig:
         batch_size=cfg.classify_llm_columns_per_call,
         max_retries=cfg.classify_llm_max_retries,
         disable_reasoning=cfg.classify_llm_disable_reasoning,
+        aws_access_key_id=cfg.aws_access_key_id,
+        aws_secret_access_key=cfg.aws_secret_access_key,
+        aws_region=cfg.aws_region,
+        aws_session_token=cfg.aws_session_token,
     )
 
 
@@ -477,6 +493,109 @@ class OpenAICompatibleBackend(LLMBackend):
             return False
 
 
+# ── Bedrock backend ─────────────────────────────────────────────
+
+
+class BedrockBackend(LLMBackend):
+    """Backend using AWS Bedrock Converse API."""
+
+    def __init__(self, config: LLMBackendConfig) -> None:
+        super().__init__(config)
+        self._client = None
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+
+        try:
+            import boto3
+        except ImportError:
+            raise ImportError(
+                "boto3 package required for Bedrock. Install with: uv add boto3"
+            )
+
+        if not self._config.aws_access_key_id or not self._config.aws_secret_access_key:
+            raise ValueError(
+                "AWS credentials required for Bedrock backend. "
+                "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+            )
+
+        session = boto3.Session(
+            aws_access_key_id=self._config.aws_access_key_id,
+            aws_secret_access_key=self._config.aws_secret_access_key,
+            aws_session_token=self._config.aws_session_token,
+            region_name=self._config.aws_region or "us-east-1",
+        )
+        self._client = session.client("bedrock-runtime")
+        return self._client
+
+    def classify_batch(
+        self,
+        samples: list,
+        system_prompt: str,
+        revisit_context: dict[str, dict] | None = None,
+        table_name: str | None = None,
+    ) -> LLMResponse:
+        client = self._get_client()
+        user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
+        expected_names = [s.name for s in samples]
+
+        response = client.converse(
+            modelId=self._config.model,
+            system=[{"text": system_prompt}],
+            messages=[{
+                "role": "user",
+                "content": [{"text": user_prompt}],
+            }],
+            inferenceConfig={
+                "maxTokens": self._config.max_tokens,
+                "temperature": self._config.temperature,
+            },
+        )
+
+        text = response["output"]["message"]["content"][0]["text"].strip()
+        classifications = _parse_classifications(text, expected_names)
+        usage = response.get("usage", {})
+
+        finish_reason = response.get("stopReason", "end_turn")
+        input_tokens = usage.get("inputTokens", 0)
+        output_tokens = usage.get("outputTokens", 0)
+
+        if finish_reason == "max_tokens":
+            logger.warning(
+                "Bedrock response TRUNCATED: %d chars, in=%d, out=%d, max_tokens=%d",
+                len(text), input_tokens, output_tokens, self._config.max_tokens,
+            )
+        else:
+            logger.info(
+                "Bedrock response: %d chars, finish=%s, in=%d, out=%d",
+                len(text), finish_reason, input_tokens, output_tokens,
+            )
+
+        return LLMResponse(
+            classifications=classifications,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=self._config.model,
+            finish_reason=finish_reason,
+        )
+
+    def health_check(self) -> bool:
+        try:
+            client = self._get_client()
+            response = client.converse(
+                modelId=self._config.model,
+                messages=[{
+                    "role": "user",
+                    "content": [{"text": "ping"}],
+                }],
+                inferenceConfig={"maxTokens": 10},
+            )
+            return "output" in response
+        except Exception:
+            return False
+
+
 # ── Factory ──────────────────────────────────────────────────────
 
 
@@ -489,9 +608,25 @@ def create_backend(config: LLMBackendConfig) -> LLMBackend:
         return AnthropicBackend(config)
     if config.backend == "openai_compatible":
         return OpenAICompatibleBackend(config)
+    if config.backend == "cerebras":
+        cerebras_config = LLMBackendConfig(
+            backend="cerebras",
+            api_key=config.api_key,
+            model=config.model if config.model != "glm-4.7" else CEREBRAS_DEFAULT_MODEL,
+            base_url=config.base_url or CEREBRAS_BASE_URL,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            batch_size=config.batch_size,
+            max_retries=config.max_retries,
+            retry_delay=config.retry_delay,
+            disable_reasoning=config.disable_reasoning,
+        )
+        return OpenAICompatibleBackend(cerebras_config)
+    if config.backend == "bedrock":
+        return BedrockBackend(config)
     raise ValueError(
         f"Unknown LLM backend: {config.backend!r}. "
-        f"Use 'anthropic' or 'openai_compatible'."
+        f"Use 'anthropic', 'openai_compatible', 'cerebras', or 'bedrock'."
     )
 
 

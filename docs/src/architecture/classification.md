@@ -34,9 +34,9 @@ Assignment) that distributes belief across the frame of discernment:
 | Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | M0 |
 | Pattern detection | 8 regex detectors | 0.10 | M0 |
 | Name matching | Column name ↔ label/abbrev/common_names | varies | M0 |
-| LLM | OpenAI-compatible / Anthropic structured classification | 0.10 | M1 |
-| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | stub |
-| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | stub |
+| LLM | OpenAI-compatible / Anthropic / Bedrock / Cerebras | 0.10 | M1 |
+| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | M2 |
+| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | M2 |
 
 The **discount** controls how much mass goes to Θ (total ignorance). Higher
 discount = more conservative = wider belief intervals.
@@ -96,15 +96,19 @@ State transitions are persisted to PostgreSQL. The Status page polls
 src/atelier/classify/
 ├── __init__.py          # Public API: run_pipeline(), run_bootstrap(), get_fsm_status()
 ├── belief.py            # DST core: BeliefAssignment, FocalElement, dempster_combine()
-├── mass_functions.py    # Evidence→mass converters (4 active + 2 stubs)
+├── mass_functions.py    # Evidence→mass converters (6 active)
 ├── features.py          # 12 features + 8 pattern detectors
 ├── taxonomy.py          # ReferenceCategory, HierarchicalCategorySet
 ├── embedding.py         # Sentence-transformer cosine classifier
-├── llm_backend.py       # LLM backend abstraction (Anthropic, OpenAI-compatible)
+├── llm_backend.py       # LLM backend factory (Anthropic, OpenAI-compat, Bedrock, Cerebras)
 ├── bootstrap.py         # Bootstrap convergence loop (LLM sweep + ML validation)
 ├── sampler.py           # Hive metadata sampling + mock fixtures
-├── synth.py             # Synthetic data generation (future)
-├── pipeline.py          # Single-pass ML orchestration
+├── synth.py             # Synthetic data generation (17 category generators)
+├── svm_classifier.py    # Dual TF-IDF + LinearSVC + Platt scaling
+├── catboost_classifier.py # CatBoost with virtual ensemble uncertainty
+├── ml_train.py          # Training orchestrator (synth → models)
+├── ml_inference.py      # Lazy-loading inference wrappers
+├── pipeline.py          # Single-pass ML orchestration (6 evidence sources)
 ├── fsm.py               # AgentFSM state machine
 └── fixtures/
     ├── mock_annotations.json  # 24-category mock vocabulary
@@ -211,6 +215,10 @@ CLASSIFYING → FUSING → EVALUATING → CONVERGED.
 - **`OpenAICompatibleBackend`**: For vLLM, GLM-4.7, and any endpoint
   implementing the OpenAI chat completions API. Default backend.
 - **`AnthropicBackend`**: For Claude via the Anthropic SDK.
+- **`BedrockBackend`**: For AWS Bedrock (production default on CAI).
+  Uses `boto3` Converse API with `modelId`-based routing.
+- **`CerebrasBackend`**: OpenAI-compatible with Cerebras-specific defaults
+  (`base_url=https://api.cerebras.ai/v1`, `model=zai-glm-4.7`).
 - **`create_backend_from_cfg(cfg)`**: Factory that reads HOCON config
   to select and configure the appropriate backend.
 
@@ -248,6 +256,6 @@ Environment variable overrides follow the standard pattern:
 | **M0** | Cosine + pattern + name match, FSM, pipeline E2E | Done |
 | **M0.5** | Schema fix, pignistic probability, HierarchicalClassification | Done |
 | **M1** | LLM evidence source, bootstrap convergence loop, LLM↔ML validation | Done |
-| M2 | CatBoost + SVM + synthetic data, 6 evidence sources | Planned |
+| **M2** | CatBoost + SVM + synthetic data, 6 evidence sources, Bedrock/Cerebras backends | Done |
 | M3 | SAGE importance, SHAP explanations, adaptive discounting | Planned |
 | M4 | Production scaling, async pipeline, Qdrant index | Planned |

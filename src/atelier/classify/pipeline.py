@@ -20,9 +20,11 @@ from atelier.classify.belief import (
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
 from atelier.classify.mass_functions import (
+    catboost_to_mass,
     cosine_to_mass,
     name_match_to_mass,
     pattern_to_mass,
+    svm_to_mass,
 )
 from atelier.classify.sampler import (
     ColumnSample,
@@ -264,6 +266,29 @@ def _classify_column(
             source_masses["cosine"] = cosine_mass
         except Exception:
             pass
+
+    # 4. CatBoost (if model available)
+    try:
+        from atelier.classify.ml_inference import predict_catboost
+        cb_result = predict_catboost(features, category_set)
+        if cb_result:
+            proba, variance = cb_result
+            cb_mass = catboost_to_mass(proba, frame, variance)
+            if not _is_vacuous(cb_mass):
+                source_masses["catboost"] = cb_mass
+    except Exception:
+        pass
+
+    # 5. SVM (if model available)
+    try:
+        from atelier.classify.ml_inference import predict_svm
+        svm_proba = predict_svm(features)
+        if svm_proba:
+            svm_mass = svm_to_mass(svm_proba, frame)
+            if not _is_vacuous(svm_mass):
+                source_masses["svm"] = svm_mass
+    except Exception:
+        pass
 
     # Fuse evidence via HierarchicalClassification
     if not source_masses:

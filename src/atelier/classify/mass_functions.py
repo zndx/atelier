@@ -3,8 +3,8 @@
 Each converter transforms a specific evidence source into a BeliefAssignment
 (mass function) compatible with Dempster's rule of combination.
 
-Ported from signals/src/sigint/mass_functions.py — 3 of 5 sources implemented
-in M0 (cosine, pattern, name_match). CatBoost and SVM return vacuous (stubs).
+Six evidence sources: cosine similarity (M0), pattern detection (M0),
+name matching (M0), LLM classification (M1), CatBoost (M2), SVM (M2).
 """
 
 from __future__ import annotations
@@ -281,7 +281,7 @@ def llm_to_mass(
     return BeliefAssignment(masses=masses)
 
 
-# ── Stubs for future ML classifiers ─────────────────────────────────
+# ── ML classifiers (CatBoost + SVM) ─────────────────────────────────
 
 
 def catboost_to_mass(
@@ -289,8 +289,37 @@ def catboost_to_mass(
     frame: FrameOfDiscernment,
     virtual_ensembles_variance: dict[str, float] | None = None,
 ) -> BeliefAssignment:
-    """Stub — returns vacuous assignment."""
-    return frame.vacuous()
+    """Convert CatBoost predicted probabilities to a DST mass function.
+
+    Uses adaptive discounting driven by virtual ensemble variance:
+    high variance (uncertain) → larger discount → more mass on Theta.
+
+    Args:
+        proba: {category_code: probability} from CatBoost.
+        frame: Frame of discernment.
+        virtual_ensembles_variance: Optional {code: variance} from
+            CatBoost virtual ensembles for uncertainty quantification.
+    """
+    if not proba:
+        return frame.vacuous()
+
+    # Adaptive discount from virtual ensemble variance
+    if virtual_ensembles_variance:
+        avg_var = sum(virtual_ensembles_variance.values()) / len(virtual_ensembles_variance)
+        discount = min(0.5, 0.1 + avg_var * 1.6)
+    else:
+        discount = 0.15
+
+    masses: dict[FocalElement, float] = {}
+    evidence_mass = 1.0 - discount
+    for code, prob in proba.items():
+        if code in frame.singletons and prob > 1e-15:
+            masses[frame.singleton(code)] = prob * evidence_mass
+
+    assigned = sum(masses.values())
+    masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
+    masses = _redistribute_confusable_mass(masses, frame)
+    return BeliefAssignment(masses=masses)
 
 
 def svm_to_mass(
@@ -298,5 +327,26 @@ def svm_to_mass(
     frame: FrameOfDiscernment,
     discount: float = 0.20,
 ) -> BeliefAssignment:
-    """Stub — returns vacuous assignment."""
-    return frame.vacuous()
+    """Convert SVM calibrated probabilities to a DST mass function.
+
+    Uses a fixed discount (higher than LLM/CatBoost) because SVM
+    Platt-scaled probabilities are less well-calibrated.
+
+    Args:
+        proba: {category_code: probability} from calibrated SVM.
+        frame: Frame of discernment.
+        discount: Fixed discount (default 0.20).
+    """
+    if not proba:
+        return frame.vacuous()
+
+    masses: dict[FocalElement, float] = {}
+    evidence_mass = 1.0 - discount
+    for code, prob in proba.items():
+        if code in frame.singletons and prob > 1e-15:
+            masses[frame.singleton(code)] = prob * evidence_mass
+
+    assigned = sum(masses.values())
+    masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
+    masses = _redistribute_confusable_mass(masses, frame)
+    return BeliefAssignment(masses=masses)

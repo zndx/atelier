@@ -74,6 +74,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.tables_limit": ("classify_tables_limit", int),
     "classify.embedding_model": ("classify_embedding_model", str),
     "classify.auto_start": ("classify_auto_start", bool),
+    # ML classifier model paths
+    "classify.catboost_model_path": ("classify_catboost_model_path", str),
+    "classify.svm_model_path": ("classify_svm_model_path", str),
     # LLM backend for classification
     "classify.llm.backend": ("classify_llm_backend", str),
     "classify.llm.api_key": ("classify_llm_api_key", str),
@@ -193,6 +196,10 @@ class AtelierConfig:
     classify_tables_limit: int = 100
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_auto_start: bool = False
+
+    # ML classifier model paths
+    classify_catboost_model_path: str = "build/models/catboost.cbm"
+    classify_svm_model_path: str = "build/models/svm.pkl"
 
     # Classification LLM backend
     classify_llm_backend: str = "openai_compatible"
