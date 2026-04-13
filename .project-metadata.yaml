@@ -61,6 +61,30 @@ environment_variables:
     description: >-
       Enable the CLI's tool-search beta. Defaults to "false" on the
       Bedrock path. Leave blank to accept the provider default.
+  ANTHROPIC_SUBAGENT_MODEL:
+    default: ""
+    description: >-
+      Model ID for classification subagent work (structured output). Backend
+      type is inferred from format: Bedrock ARN/ID (arn:... or
+      us.anthropic.*) uses invoke_model; plain Anthropic ID (claude-sonnet-*)
+      uses direct Messages API. Required when ATELIER_LLM_API_KEY is not set.
+      Example (Bedrock): us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      Example (direct): claude-sonnet-4-5-20250929
+  ATELIER_CLASSIFY_CONNECTION:
+    default: ""
+    description: >-
+      CAI Data Platform connection name for Hive metadata discovery. Must
+      match a connection registered in the workspace Data Connections UI.
+  ATELIER_CLASSIFY_DATABASE:
+    default: "default"
+    description: >-
+      Hive database to classify. Tables are discovered via the connection
+      specified in ATELIER_CLASSIFY_CONNECTION.
+  ATELIER_CLASSIFY_AUTO_START:
+    default: "false"
+    description: >-
+      Set to "true" to automatically start the classification pipeline when
+      the gateway boots. Otherwise, start manually from the UI or API.
   ATELIER_DATA_CONNECTIONS:
     default: ""
     description: >-
