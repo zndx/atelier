@@ -48,6 +48,7 @@ interface ModelDiscovery {
 interface ConfigInfo {
   has_anthropic: boolean;
   has_bedrock: boolean;
+  has_classify_llm: boolean;
   agent_model: string;
   qdrant_host: string;
   qdrant_http_port: number;
@@ -115,6 +116,8 @@ const FSM_STATE_COLORS: Record<string, string> = {
   LOADING_VOCAB: "processing",
   DISCOVERING: "processing",
   SAMPLING: "processing",
+  LLM_SWEEP: "processing",
+  VALIDATING: "processing",
   GENERATING_SYNTH: "processing",
   TRAINING: "processing",
   CLASSIFYING: "processing",
@@ -124,7 +127,7 @@ const FSM_STATE_COLORS: Record<string, string> = {
   ERROR: "error",
 };
 
-function ClassificationPipelineCard() {
+function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boolean }) {
   const [fsm, setFsm] = useState<FSMStatus | null>(null);
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -196,6 +199,11 @@ function ClassificationPipelineCard() {
         <Descriptions.Item label="State">
           <Tag color={FSM_STATE_COLORS[state] ?? "default"}>{state}</Tag>
         </Descriptions.Item>
+        <Descriptions.Item label="LLM Backend">
+          <Tag color={hasClassifyLlm ? "green" : "orange"}>
+            {hasClassifyLlm ? "Configured" : "Mock mode"}
+          </Tag>
+        </Descriptions.Item>
         <Descriptions.Item label="Run ID">
           <Text code>{fsm?.id ?? "—"}</Text>
         </Descriptions.Item>
@@ -214,6 +222,26 @@ function ClassificationPipelineCard() {
             {String(progress.columns_sampled)}
           </Descriptions.Item>
         )}
+        {progress.llm_labeled != null && (
+          <Descriptions.Item label="LLM Labeled">
+            {String(progress.llm_labeled)}
+          </Descriptions.Item>
+        )}
+        {progress.mean_k != null && (
+          <Descriptions.Item label="Mean K (conflict)">
+            {Number(progress.mean_k).toFixed(3)}
+          </Descriptions.Item>
+        )}
+        {progress.disagreements != null && (
+          <Descriptions.Item label="Disagreements">
+            {String(progress.disagreements)}
+          </Descriptions.Item>
+        )}
+        {progress.iteration != null && (
+          <Descriptions.Item label="Iteration">
+            {String(progress.iteration)}
+          </Descriptions.Item>
+        )}
         {progress.columns_classified != null && (
           <Descriptions.Item label="Classified">
             {String(progress.columns_classified)}
@@ -226,6 +254,13 @@ function ClassificationPipelineCard() {
             </Tag>
           </Descriptions.Item>
         )}
+        {progress.bootstrap_coverage != null && (
+          <Descriptions.Item label="Coverage">
+            <Tag color={Number(progress.bootstrap_coverage) >= 0.95 ? "green" : "orange"}>
+              {(Number(progress.bootstrap_coverage) * 100).toFixed(1)}%
+            </Tag>
+          </Descriptions.Item>
+        )}
         {progress.avg_confidence != null && (
           <Descriptions.Item label="Avg Confidence">
             {Number(progress.avg_confidence).toFixed(3)}
@@ -234,6 +269,11 @@ function ClassificationPipelineCard() {
         {progress.avg_conflict != null && (
           <Descriptions.Item label="Avg Conflict">
             {Number(progress.avg_conflict).toFixed(3)}
+          </Descriptions.Item>
+        )}
+        {progress.llm_calls != null && (
+          <Descriptions.Item label="LLM Calls">
+            {String(progress.llm_calls)}
           </Descriptions.Item>
         )}
       </Descriptions>
@@ -495,6 +535,11 @@ export default function Status() {
                     {status.config.has_bedrock ? "Configured" : "Not set"}
                   </Tag>
                 </Descriptions.Item>
+                <Descriptions.Item label="Classify LLM">
+                  <Tag color={status.config.has_classify_llm ? "green" : "orange"}>
+                    {status.config.has_classify_llm ? "Configured" : "Not set (mock mode)"}
+                  </Tag>
+                </Descriptions.Item>
                 <Descriptions.Item label="Database">
                   <Text code>{status.config.db_url_masked}</Text>
                 </Descriptions.Item>
@@ -514,7 +559,7 @@ export default function Status() {
       {/* ── Classification Pipeline ─────────────────── */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24}>
-          <ClassificationPipelineCard />
+          <ClassificationPipelineCard hasClassifyLlm={status?.config?.has_classify_llm} />
         </Col>
       </Row>
 

@@ -266,7 +266,7 @@ def _run_real_bootstrap(
     work_dir: Path,
 ) -> dict[str, Any]:
     """Run bootstrap convergence on real data with injected samples."""
-    from atelier.classify.bootstrap import run_bootstrap_pipeline
+    from atelier.classify.pipeline import run_classification_pipeline
     from atelier.classify.fsm import AgentFSM
     from atelier.classify.mock_llm import RealisticMockLLMBackend
     from atelier.config import load_config
@@ -287,12 +287,12 @@ def _run_real_bootstrap(
             revisit_correction_rate=0.70,
         )
 
-    result = run_bootstrap_pipeline(
+    result = run_classification_pipeline(
         cfg,
         fsm,
         llm_backend=llm_backend,
         samples=real_samples,
-        category_set_override=category_set,
+        category_set=category_set,
     )
 
     # Write results

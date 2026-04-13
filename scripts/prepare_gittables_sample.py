@@ -6,21 +6,98 @@ classification results, DST evidence fusion, and SAGE importance), computes
 sentence-transformer embeddings + UMAP projection, and outputs a parquet
 compatible with embedding-atlas.
 
+By default (``--classify``), runs atelier's own ML classification on each
+column to produce honest ``predicted_label`` values.  This is the seed
+dataset's label source — it shows what atelier's evidence fusion produces
+without an LLM, so users see real baseline quality.  The full pipeline
+(with LLM convergence) can then improve these results.
+
 Usage:
     # From signals eval output (recommended)
     uv run python scripts/prepare_gittables_sample.py \
         --input ~/local/src/cldr/signals/build/gittables_eval.parquet
 
-    # Or from raw columns parquet (download first via signals scripts)
+    # Skip classification (just re-project embeddings)
     uv run python scripts/prepare_gittables_sample.py \
-        --input ~/local/src/cldr/signals/build/datasets/gittables/gittables_columns.parquet
+        --input ~/local/src/cldr/signals/build/gittables_eval.parquet \
+        --no-classify
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+
+
+def _classify_seed_columns(table, columns: set[str]) -> list[str]:
+    """Run atelier's ML-only classification on each row to produce labels.
+
+    This is an offline, build-time step that calls ``_classify_column()``
+    with no LLM evidence (llm_code=None) — the one case where that is
+    legitimate.  The labels represent what atelier's evidence fusion
+    (name matching, pattern detection, cosine similarity, CatBoost, SVM)
+    produces on its own.
+    """
+    from atelier.classify.belief import FrameOfDiscernment
+    from atelier.classify.features import extract_features
+    from atelier.classify.mass_functions import DiscountConfig
+    from atelier.classify.pipeline import _classify_column
+    from atelier.classify.sampler import ColumnSample
+    from atelier.classify.taxonomy import (
+        HierarchicalCategorySet,
+        load_mock_annotations,
+    )
+
+    # Load vocabulary
+    category_set = load_mock_annotations(hierarchical=True)
+    if not isinstance(category_set, HierarchicalCategorySet):
+        raise RuntimeError("Expected HierarchicalCategorySet")
+    frame = FrameOfDiscernment(category_set)
+    discounts = DiscountConfig()
+
+    # Configure ML model paths (use defaults from build/)
+    from atelier.classify import ml_inference
+    ml_inference.configure_paths()
+
+    # Build ColumnSample objects from parquet rows
+    col_names = table.column("column_name").to_pylist()
+    sample_vals_raw = table.column("sample_values").to_pylist() if "sample_values" in columns else [None] * table.num_rows
+    col_types = table.column("column_type").to_pylist() if "column_type" in columns else ["string"] * table.num_rows
+    source_tables = table.column("source_table").to_pylist() if "source_table" in columns else ["unknown"] * table.num_rows
+    gt_codes = table.column("gt_code").to_pylist() if "gt_code" in columns else [None] * table.num_rows
+
+    labels = []
+    n_classified = 0
+    for i in range(table.num_rows):
+        sv = sample_vals_raw[i]
+        values = json.loads(sv) if sv else [] if isinstance(sv, str) else []
+
+        col = ColumnSample(
+            name=col_names[i],
+            table_name=source_tables[i] or "unknown",
+            column_type=col_types[i] or "string",
+            values=values[:50],
+            siblings=[],
+            total_count=len(values),
+            null_count=0,
+            ground_truth=gt_codes[i],
+        )
+
+        result = _classify_column(
+            col, category_set, frame,
+            use_cosine=True,
+            discounts=discounts,
+        )
+
+        label = result.get("predicted_label") or result.get("predicted_code") or ""
+        labels.append(label)
+        if label:
+            n_classified += 1
+
+    print(f"  Classified {n_classified}/{table.num_rows} columns")
+    return labels
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +115,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--model", default="all-MiniLM-L6-v2",
         help="Sentence transformer model (default: all-MiniLM-L6-v2)",
+    )
+    p.add_argument(
+        "--classify", dest="classify", action="store_true", default=True,
+        help="Run atelier classification to produce predicted_label (default)",
+    )
+    p.add_argument(
+        "--no-classify", dest="classify", action="store_false",
+        help="Skip classification; copy label from tag_label/gt_code",
     )
     args = p.parse_args(argv)
 
@@ -67,16 +152,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Build embedding texts ────────────────────────────────────
     if "embedding_text" in columns:
-        # Eval parquet already has rich embedding text
         texts = table.column("embedding_text").to_pylist()
         print("  Using existing embedding_text column")
     else:
-        # Raw columns — build from column_name + sample_values
         col_names = table.column("column_name").to_pylist()
         samples = table.column("sample_values").to_pylist()
         texts = []
         for name, sv in zip(col_names, samples):
-            import json
             vals = json.loads(sv) if sv else []
             parts = [f"column: {name}"]
             if vals:
@@ -117,13 +199,19 @@ def main(argv: list[str] | None = None) -> int:
         "text": pa.array(texts, type=pa.string()),
     }
 
-    # Category: use gt_code (ground truth) if available, else tag_label
-    if "gt_code" in columns:
-        out_columns["category"] = table.column("gt_code")
+    # predicted_label: produced by atelier's own evidence fusion (ML-only,
+    # no LLM).  This is the honest baseline — shows what the pipeline
+    # produces before the user runs the full LLM convergence loop.
+    if args.classify:
+        print("Running atelier classification...")
+        labels = _classify_seed_columns(table, columns)
+        out_columns["predicted_label"] = pa.array(labels, type=pa.string())
     elif "tag_label" in columns:
-        out_columns["category"] = table.column("tag_label")
+        out_columns["predicted_label"] = table.column("tag_label")
+    elif "gt_code" in columns:
+        out_columns["predicted_label"] = table.column("gt_code")
     elif "column_type" in columns:
-        out_columns["category"] = table.column("column_type")
+        out_columns["predicted_label"] = table.column("column_type")
 
     # Carry forward useful columns from the eval parquet
     for col in ["source_table", "column_name", "sample_values", "column_kind"]:
@@ -142,16 +230,16 @@ def main(argv: list[str] | None = None) -> int:
     pq.write_table(out_table, str(output_path))
 
     # ── Summary ──────────────────────────────────────────────────
-    if "category" in out_columns:
-        cats = out_columns["category"].to_pylist()
-        unique_cats = set(cats)
+    if "predicted_label" in out_columns:
+        cats = out_columns["predicted_label"].to_pylist()
+        unique_cats = set(c for c in cats if c)
         from collections import Counter
         print(f"\nWrote {output_path}")
         print(f"  Rows: {n_rows}")
-        print(f"  Categories: {len(unique_cats)}")
-        print(f"  Top categories:")
+        print(f"  Unique labels: {len(unique_cats)}")
+        print(f"  Top labels:")
         for cat, count in Counter(cats).most_common(10):
-            print(f"    {cat}: {count}")
+            print(f"    {cat or '(empty)'}: {count}")
     else:
         print(f"\nWrote {output_path} ({n_rows} rows)")
 

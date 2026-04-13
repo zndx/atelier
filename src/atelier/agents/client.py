@@ -140,10 +140,9 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
     if cfg.aws_session_token:
         env["AWS_SESSION_TOKEN"] = cfg.aws_session_token
 
-    model_is_bedrock = (
-        cfg.agent_model.startswith("arn:")
-        or "anthropic." in cfg.agent_model
-    )
+    from atelier.config import is_bedrock_model
+
+    model_is_bedrock = is_bedrock_model(cfg.agent_model)
     prefer_bedrock = model_is_bedrock or (cfg.has_bedrock and not cfg.has_anthropic)
     if prefer_bedrock and cfg.has_bedrock:
         env["CLAUDE_CODE_USE_BEDROCK"] = "1"

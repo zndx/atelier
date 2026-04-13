@@ -1,7 +1,16 @@
-"""End-to-end classification pipeline orchestration.
+"""End-to-end classification pipeline with bootstrap convergence.
 
 Drives the AgentFSM through:
-  LOADING_VOCAB → DISCOVERING → SAMPLING → CLASSIFYING → FUSING → EVALUATING
+  LOADING_VOCAB → DISCOVERING → SAMPLING
+    → LLM_SWEEP → VALIDATING → (revisit loop until converged)
+    → CLASSIFYING → FUSING → EVALUATING → CONVERGED
+
+The LLM is a required evidence source.  The backend is selected via
+``ANTHROPIC_SUBAGENT_MODEL`` (backend type inferred from model format —
+Bedrock ARN → ``BedrockStructuredBackend``, plain Anthropic ID →
+``AnthropicStructuredBackend``).  An explicit classify LLM
+(``ATELIER_LLM_API_KEY``) overrides the subagent model.
+``use_mock=True`` substitutes a deterministic mock backend for dev/CI.
 
 Writes results to build/results/{run_id}/ as JSON and parquet.
 """
@@ -24,6 +33,7 @@ from atelier.classify.mass_functions import (
     DiscountConfig,
     catboost_to_mass,
     cosine_to_mass,
+    llm_to_mass,
     name_match_to_mass,
     pattern_to_mass,
     svm_to_mass,
@@ -60,8 +70,15 @@ def run_classification_pipeline(
     use_mock: bool = False,
     samples: list[TableSample] | None = None,
     category_set: HierarchicalCategorySet | None = None,
+    llm_backend=None,
 ) -> dict[str, Any]:
-    """Run the full classification pipeline.
+    """Run the classification pipeline with LLM-driven convergence.
+
+    The pipeline requires an LLM backend for evidence fusion.  When no
+    explicit ``llm_backend`` is provided, one is created from config:
+    ``ATELIER_LLM_API_KEY`` takes priority, then ``ANTHROPIC_SUBAGENT_MODEL``
+    (backend type inferred from model format).  ``use_mock=True``
+    substitutes a deterministic mock for dev/CI.
 
     Args:
         cfg: AtelierConfig.
@@ -70,13 +87,26 @@ def run_classification_pipeline(
         database: Hive database to classify.
         sample_size: Rows to sample per table.
         tables_limit: Max tables to discover.
-        use_mock: Force mock data (for devenv/CI).
+        use_mock: Use mock data and mock LLM backend (for devenv/CI).
         samples: Pre-loaded TableSamples (skip discover/sample phases).
         category_set: Pre-loaded vocabulary (skip vocab loading).
+        llm_backend: Injected LLM backend (for testing). Created from
+            config when None.
 
     Returns:
         Pipeline result summary dict.
+
+    Raises:
+        ValueError: If no LLM backend is available and use_mock is False.
     """
+    # ── LLM backend resolution ────────────────────────────────
+    # The pipeline cannot function without an LLM.  Resolve early
+    # so callers get a clear error before any FSM state is created.
+    if llm_backend is None and not use_mock:
+        from atelier.classify.llm_backend import create_backend_from_cfg
+        # create_backend_from_cfg raises ValueError when no creds
+        llm_backend = create_backend_from_cfg(cfg)
+
     run = fsm.start_run(config={
         "connection_name": connection_name,
         "database": database,
@@ -138,22 +168,46 @@ def run_classification_pipeline(
                 except Exception as exc:
                     logger.warning("Failed to sample %s: %s", tname, exc)
 
-        total_columns = sum(len(ts.columns) for ts in all_samples)
+        # Flatten to column list with table mapping
+        all_columns: list[ColumnSample] = []
+        column_table: dict[str, str] = {}
+        for ts in all_samples:
+            for col in ts.columns:
+                all_columns.append(col)
+                column_table[col.name] = ts.name
+
+        total_columns = len(all_columns)
         logger.info("Sampled %d columns across %d tables", total_columns, len(all_samples))
 
-        fsm.advance(run_id, FSMState.CLASSIFYING, progress={
-            "tables_sampled": len(all_samples),
-            "columns_sampled": total_columns,
-        })
+        samples_by_name: dict[str, ColumnSample] = {c.name: c for c in all_columns}
+        column_names = list(samples_by_name.keys())
 
-        # ── CLASSIFYING + FUSING ─────────────────────────────────
-        # Try sentence-transformers for cosine; fall back to name+pattern only
-        has_embeddings = False
-        try:
-            from atelier.classify.embedding import classify_cosine
-            has_embeddings = True
-        except ImportError:
-            logger.warning("sentence-transformers not available; using name+pattern only")
+        # ── Resolve mock LLM backend (deferred until GT is available) ─
+        if llm_backend is None and use_mock:
+            from atelier.classify.mock_llm import RealisticMockLLMBackend
+            gt = {col.name: col.ground_truth for col in all_columns if col.ground_truth}
+            llm_backend = RealisticMockLLMBackend(ground_truth=gt)
+
+        # ── Bootstrap config + LLM prompts ────────────────────────
+        from atelier.classify.bootstrap import (
+            BootstrapConfig,
+            BootstrapState,
+            bootstrap_config_from_cfg,
+            _coverage,
+            _identify_disagreements,
+            _llm_revisit,
+            _llm_sweep,
+            _mean_k,
+            _run_ml_validation,
+        )
+        from atelier.classify.llm_backend import (
+            build_category_table,
+            build_system_prompt,
+        )
+
+        boot_cfg = bootstrap_config_from_cfg(cfg)
+        category_table = build_category_table(category_set)
+        system_prompt = build_system_prompt(category_table)
 
         # Wire config → ml_inference model paths
         from atelier.classify import ml_inference
@@ -164,44 +218,149 @@ def run_classification_pipeline(
 
         discounts = DiscountConfig.from_cfg(cfg)
 
+        # Try sentence-transformers for cosine
+        has_embeddings = False
+        try:
+            from atelier.classify.embedding import classify_cosine
+            has_embeddings = True
+        except ImportError:
+            logger.warning("sentence-transformers not available; using name+pattern only")
+
+        # ── LLM SWEEP ────────────────────────────────────────────
+        fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
+            "columns_total": total_columns,
+            "phase": "llm_sweep",
+        })
+
+        state = BootstrapState()
+
+        _llm_sweep(
+            state, boot_cfg, llm_backend, system_prompt,
+            column_names, samples_by_name, column_table,
+        )
+
+        coverage = _coverage(state, column_names)
+        logger.info(
+            "LLM sweep: labeled %d/%d (coverage=%.1f%%, calls=%d)",
+            len(state.labels), total_columns,
+            coverage * 100, state.llm_calls_total,
+        )
+
+        # ── VALIDATING ───────────────────────────────────────────
+        fsm.advance(run_id, FSMState.VALIDATING, progress={
+            "phase": "ml_validation",
+            "llm_labeled": len(state.labels),
+            "coverage": round(coverage, 4),
+        })
+
+        _run_ml_validation(
+            state, boot_cfg, column_names, samples_by_name,
+            category_set, frame, has_embeddings, discounts=discounts,
+        )
+
+        disagreements = _identify_disagreements(state, column_names, boot_cfg)
+        mean_k = _mean_k(state, column_names)
+
+        logger.info(
+            "ML validation: mean K=%.3f, disagreements=%d",
+            mean_k, len(disagreements),
+        )
+
+        # ── TARGETED REVISIT LOOP ────────────────────────────────
+        iteration_metrics: list[dict[str, Any]] = [{
+            "iteration": 0,
+            "mean_k": round(mean_k, 4),
+            "disagreements": len(disagreements),
+            "coverage": round(coverage, 4),
+        }]
+
+        for iteration in range(1, boot_cfg.max_iterations + 1):
+            if not disagreements:
+                logger.info("No disagreements — converged")
+                break
+
+            if state.llm_calls_total >= boot_cfg.max_total_llm_calls:
+                logger.info("Budget exhausted (%d calls)", state.llm_calls_total)
+                break
+
+            if mean_k < boot_cfg.k_threshold:
+                logger.info("Mean K=%.3f < threshold — converged", mean_k)
+                break
+
+            state.iteration = iteration
+
+            fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
+                "phase": "revisit",
+                "iteration": iteration,
+                "disagreements": len(disagreements),
+                "mean_k": round(mean_k, 4),
+            })
+
+            _llm_revisit(
+                state, boot_cfg, llm_backend, system_prompt,
+                disagreements, samples_by_name, column_table, category_set,
+            )
+
+            fsm.advance(run_id, FSMState.VALIDATING, progress={
+                "phase": "revalidation",
+                "iteration": iteration,
+                "llm_calls": state.llm_calls_total,
+            })
+
+            _run_ml_validation(
+                state, boot_cfg, column_names, samples_by_name,
+                category_set, frame, has_embeddings, discounts=discounts,
+            )
+
+            disagreements = _identify_disagreements(state, column_names, boot_cfg)
+            mean_k = _mean_k(state, column_names)
+            coverage = _coverage(state, column_names)
+
+            logger.info(
+                "Revisit %d: mean K=%.3f, disagreements=%d, coverage=%.1f%%, calls=%d",
+                iteration, mean_k, len(disagreements),
+                coverage * 100, state.llm_calls_total,
+            )
+
+            iteration_metrics.append({
+                "iteration": iteration,
+                "mean_k": round(mean_k, 4),
+                "disagreements": len(disagreements),
+                "coverage": round(coverage, 4),
+            })
+
+        # ── FINAL CLASSIFICATION PASS ────────────────────────────
+        coverage = _coverage(state, column_names)
+        mean_k = _mean_k(state, column_names)
+        converged = coverage >= boot_cfg.coverage_target and mean_k < boot_cfg.k_threshold
+
+        fsm.advance(run_id, FSMState.CLASSIFYING, progress={
+            "phase": "final_classification",
+            "converged": converged,
+            "mean_k": round(mean_k, 4),
+            "coverage": round(coverage, 4),
+        })
+
         classifications: list[dict[str, Any]] = []
-        for ts in all_samples:
-            for col in ts.columns:
-                result = _classify_column(
-                    col, category_set, frame,
-                    use_cosine=has_embeddings,
-                    discounts=discounts,
-                )
-                classifications.append(result)
+        for col in all_columns:
+            llm_code = state.labels.get(col.name)
+            llm_conf = state.confidence.get(col.name, 0.0)
+            result = _classify_column(
+                col, category_set, frame,
+                llm_code=llm_code,
+                llm_confidence=llm_conf,
+                llm_discount=boot_cfg.llm_discount,
+                use_cosine=has_embeddings,
+                discounts=discounts,
+            )
+            classifications.append(result)
 
         fsm.advance(run_id, FSMState.FUSING, progress={
             "columns_classified": len(classifications),
         })
 
-        # ── SHAP explanations (optional, config-driven) ──────────
-        if cfg.classify_shap_enabled:
-            try:
-                from atelier.classify.shap_explanations import run_shap_analysis
-                shap_features = [
-                    extract_features(
-                        column_name=col.name,
-                        column_type=col.column_type,
-                        values=col.values,
-                        siblings=col.siblings,
-                        source_table=col.table_name,
-                        total_count=col.total_count,
-                        null_count=col.null_count,
-                    )
-                    for ts in all_samples for col in ts.columns
-                ]
-                shap_result = run_shap_analysis(shap_features, category_set)
-                if shap_result:
-                    shap_records = shap_result.to_records(k=cfg.classify_shap_top_k)
-                    for cls_dict, shap_row in zip(classifications, shap_records):
-                        cls_dict.update(shap_row)
-                    logger.info("SHAP: %s method, %d items", shap_result.method, shap_result.n_items)
-            except Exception as e:
-                logger.warning("SHAP analysis failed: %s", e)
+        # ── Feature analysis (SHAP + SAGE, config-gated) ──────────
+        _run_feature_analysis(cfg, classifications, all_samples, category_set, results_dir)
 
         # ── EVALUATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.EVALUATING, progress={
@@ -210,13 +369,20 @@ def run_classification_pipeline(
 
         summary = _evaluate_results(classifications)
         eval_report = evaluate_classifications(classifications, category_set)
+        summary["converged"] = converged
+        summary["bootstrap_iterations"] = state.iteration
+        summary["llm_calls"] = state.llm_calls_total
+        summary["tokens_input"] = state.tokens_input
+        summary["tokens_output"] = state.tokens_output
+        summary["mean_k"] = round(mean_k, 4)
+        summary["bootstrap_coverage"] = round(coverage, 4)
+        summary["iteration_metrics"] = iteration_metrics
 
         # Write results
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
         eval_report.write_json(results_dir / "evaluation_report.json")
 
-        # Write parquet if pyarrow available
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
         # Auto-register as a dataset so the Embeddings page is populated
@@ -228,7 +394,7 @@ def run_classification_pipeline(
                     dataset_id=run_id,
                     name=f"Classification {run_id[:8]}",
                     parquet_path=str(parquet_path),
-                    description="ML classification pipeline results",
+                    description="Classification pipeline results",
                     row_count=len(classifications),
                 )
             except Exception as e:
@@ -293,13 +459,19 @@ def _classify_column(
     category_set: HierarchicalCategorySet,
     frame: FrameOfDiscernment,
     *,
+    llm_code: str | None = None,
+    llm_confidence: float = 0.0,
+    llm_alternatives: list[dict] | None = None,
+    llm_discount: float = 0.10,
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
 ) -> dict[str, Any]:
-    """Classify a single column using available evidence sources.
+    """Classify a single column using Dempster-Shafer evidence fusion.
 
-    Uses HierarchicalClassification.from_combined_evidence() for proper
-    pignistic probability ranking and belief interval computation.
+    Evidence sources (up to 6): name matching, pattern detection,
+    cosine similarity, LLM, CatBoost, SVM.  The pipeline always
+    supplies LLM evidence; llm_code may be None only for offline
+    use cases such as seed data preparation.
     """
     if discounts is None:
         discounts = DiscountConfig()
@@ -348,7 +520,17 @@ def _classify_column(
         except Exception:
             pass
 
-    # 4. CatBoost (if model available)
+    # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
+    if llm_code:
+        llm_mass_val = llm_to_mass(
+            llm_code, llm_confidence,
+            llm_alternatives or [],
+            frame, discount=llm_discount,
+        )
+        if not _is_vacuous(llm_mass_val):
+            source_masses["llm"] = llm_mass_val
+
+    # 5. CatBoost (if model available)
     try:
         from atelier.classify.ml_inference import predict_catboost
         cb_result = predict_catboost(features, category_set)
@@ -366,7 +548,7 @@ def _classify_column(
     except Exception:
         pass
 
-    # 5. SVM (if model available)
+    # 6. SVM (if model available)
     try:
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
@@ -449,6 +631,71 @@ def _mass_summary(assignment) -> dict[str, float]:
         key=lambda x: -x[1],
     )
     return {code: round(m, 4) for code, m in singletons[:3]}
+
+
+def _run_feature_analysis(
+    cfg,
+    classifications: list[dict[str, Any]],
+    all_samples: list[TableSample],
+    category_set: HierarchicalCategorySet,
+    results_dir: Path,
+) -> None:
+    """Run SHAP and SAGE feature analysis, mutating classifications in-place.
+
+    Both are gated by config (classify_shap_enabled, classify_sage_enabled).
+    SAGE uses predicted class indices as supervision — it measures feature
+    contribution to the model's own decisions, not external ground truth.
+    """
+    all_features = [
+        extract_features(
+            column_name=col.name,
+            column_type=col.column_type,
+            values=col.values,
+            siblings=col.siblings,
+            source_table=col.table_name,
+            total_count=col.total_count,
+            null_count=col.null_count,
+        )
+        for ts in all_samples for col in ts.columns
+    ]
+
+    # ── SHAP (per-item explanations) ────────────────────────
+    if cfg.classify_shap_enabled:
+        try:
+            from atelier.classify.shap_explanations import run_shap_analysis
+            shap_result = run_shap_analysis(all_features, category_set)
+            if shap_result:
+                shap_records = shap_result.to_records(k=cfg.classify_shap_top_k)
+                for cls_dict, shap_row in zip(classifications, shap_records):
+                    cls_dict.update(shap_row)
+                logger.info("SHAP: %s method, %d items", shap_result.method, shap_result.n_items)
+                shap_path = results_dir / "shap_summary.json"
+                shap_path.write_text(json.dumps(shap_result.to_dict(), indent=2) + "\n")
+        except Exception as e:
+            logger.warning("SHAP analysis failed: %s", e)
+
+    # ── SAGE (global feature importance) ────────────────────
+    if cfg.classify_sage_enabled:
+        try:
+            import numpy as np
+            from atelier.classify.sage import run_sage_analysis
+
+            code_to_idx = {cat.code: i for i, cat in enumerate(category_set.categories)}
+            gt_indices = np.array([
+                code_to_idx.get(c["predicted_code"], 0)
+                for c in classifications
+            ])
+
+            sage_result = run_sage_analysis(
+                all_features, gt_indices, category_set,
+                n_permutations=cfg.classify_sage_permutations,
+                detect_convergence=True,
+            )
+            logger.info("SAGE: %d features, %.1fs", len(sage_result.feature_names), sage_result.elapsed_seconds)
+            sage_path = results_dir / "sage_importance.json"
+            sage_path.write_text(json.dumps(sage_result.to_dict(), indent=2) + "\n")
+        except Exception as e:
+            logger.warning("SAGE analysis failed: %s", e)
 
 
 def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:

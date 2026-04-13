@@ -107,7 +107,7 @@ class _MockLLMBackend:
 @when("I run the bootstrap pipeline with mock data and mock LLM")
 def step_run_bootstrap(context):
     from atelier.config import load_config
-    from atelier.classify.bootstrap import run_bootstrap_pipeline
+    from atelier.classify.pipeline import run_classification_pipeline
     from atelier.classify.fsm import AgentFSM
     from atelier.classify.sampler import load_all_mock_samples
 
@@ -122,7 +122,7 @@ def step_run_bootstrap(context):
     fsm = AgentFSM()
     mock_backend = _MockLLMBackend(gt)
 
-    context.bootstrap_result = run_bootstrap_pipeline(
+    context.bootstrap_result = run_classification_pipeline(
         cfg, fsm, use_mock=True, llm_backend=mock_backend,
     )
 
@@ -147,7 +147,7 @@ def step_bootstrap_llm_calls(context, n):
 @when("I run the bootstrap pipeline with mock data and realistic mock LLM")
 def step_run_bootstrap_realistic(context):
     from atelier.config import load_config
-    from atelier.classify.bootstrap import run_bootstrap_pipeline
+    from atelier.classify.pipeline import run_classification_pipeline
     from atelier.classify.fsm import AgentFSM
     from atelier.classify.mock_llm import RealisticMockLLMBackend
     from atelier.classify.sampler import load_all_mock_samples
@@ -165,7 +165,7 @@ def step_run_bootstrap_realistic(context):
         gt, base_accuracy=0.55, seed=42,
     )
 
-    context.bootstrap_result = run_bootstrap_pipeline(
+    context.bootstrap_result = run_classification_pipeline(
         cfg, fsm, use_mock=True, llm_backend=mock_backend,
     )
 

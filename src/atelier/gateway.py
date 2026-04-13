@@ -305,6 +305,7 @@ def status():
     checks["config"] = {
         "has_anthropic": cfg.has_anthropic,
         "has_bedrock": cfg.has_bedrock,
+        "has_classify_llm": cfg.has_classify_llm,
         "agent_model": cfg.agent_model,
         "qdrant_host": cfg.qdrant_host,
         "qdrant_http_port": cfg.qdrant_http_port,
@@ -485,9 +486,13 @@ def fsm_status():
 def fsm_start():
     """Start a classification pipeline run.
 
-    Synchronous (runs in threadpool) — the pipeline itself runs in
-    a background thread, but the start call blocks briefly to create
-    the run and return the run_id.
+    The pipeline requires an LLM backend.  When ANTHROPIC_API_KEY is
+    available (always true with Claude Code), the pipeline auto-defaults
+    to AnthropicStructuredBackend + Haiku 4.5.  An explicit classify LLM
+    (ATELIER_LLM_API_KEY / ATELIER_LLM_BASE_URL) overrides the default.
+
+    ``use_mock=True`` substitutes a deterministic mock backend for
+    dev/CI testing without real API calls.
     """
     import threading
     try:
@@ -504,45 +509,31 @@ def fsm_start():
             return {"run_id": current.id, "started": False,
                     "error": f"Already running: {current.state.value}"}
 
-        run = fsm.start_run(config={"use_mock": True})
+        if not cfg.has_classify_llm:
+            return {"started": False,
+                    "error": "No classification LLM configured. "
+                    "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
         def _background():
-            run_classification_pipeline(cfg, fsm, use_mock=True)
-
-        t = threading.Thread(target=_background, daemon=True)
-        t.start()
-
-        return {"run_id": run.id, "started": True}
-    except Exception as exc:
-        return _error_envelope(f"FSM start failed: {exc}")
-
-
-@app.post("/api/fsm/start-bootstrap")
-def fsm_start_bootstrap():
-    """Start a bootstrap convergence pipeline run (LLM + ML + DST)."""
-    import threading
-    try:
-        from atelier.classify import get_fsm
-        from atelier.classify.bootstrap import run_bootstrap_pipeline
-        from atelier.config import load_config
-
-        cfg = load_config()
-        fsm = get_fsm()
-
-        current = fsm.get_status()
-        if current and current.state.value not in ("IDLE", "CONVERGED", "ERROR"):
-            return {"run_id": current.id, "started": False,
-                    "error": f"Already running: {current.state.value}"}
-
-        def _background():
-            run_bootstrap_pipeline(cfg, fsm, use_mock=True)
+            # Pipeline owns run creation via fsm.start_run() — don't
+            # create a run here (avoids double-run bug).
+            run_classification_pipeline(cfg, fsm)
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()
 
         return {"started": True}
     except Exception as exc:
-        return _error_envelope(f"Bootstrap start failed: {exc}")
+        return _error_envelope(f"FSM start failed: {exc}")
+
+
+@app.post("/api/fsm/start-bootstrap")
+def fsm_start_bootstrap():
+    """Deprecated — redirects to /api/fsm/start.
+
+    The convergence loop is now built into the single pipeline entry point.
+    """
+    return fsm_start()
 
 
 @app.get("/api/fsm/runs")

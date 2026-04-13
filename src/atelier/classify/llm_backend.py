@@ -1,7 +1,11 @@
 """LLM backend abstraction for bootstrap classification.
 
 Provides a unified interface for LLM-based column classification:
-- Anthropic (Claude) via the anthropic SDK
+- Anthropic Structured (Claude) — default when ANTHROPIC_API_KEY is
+  available.  Uses the Messages API ``output_config`` with JSON Schema
+  for guaranteed valid structured output, plus prompt caching for the
+  taxonomy system prompt.
+- Anthropic (Claude) — free-text fallback via the anthropic SDK
 - OpenAI-compatible (vLLM/GLM-4.7) via the openai SDK
 - Cerebras (GLM-4.7 via OpenAI-compatible API)
 - AWS Bedrock (Claude via the Converse API)
@@ -24,6 +28,47 @@ from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ── Anthropic structured output constants ────────────────────────
+
+# JSON Schema for structured classification output.  The SDK enforces
+# this via constrained decoding — no regex parsing needed.
+_CLASSIFICATION_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "column_name": {"type": "string"},
+        "category_code": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "confidence": {"type": "number"},
+        "evidence": {"type": "string"},
+        "alternatives": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["code", "confidence"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["column_name", "category_code", "confidence", "evidence", "alternatives"],
+    "additionalProperties": False,
+}
+
+CLASSIFICATION_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "classifications": {
+            "type": "array",
+            "items": _CLASSIFICATION_ITEM_SCHEMA,
+        },
+    },
+    "required": ["classifications"],
+    "additionalProperties": False,
+}
+
 
 # ── Cerebras constants ──────────────────────────────────────────
 
@@ -266,6 +311,16 @@ def _dicts_to_classifications(
     return results
 
 
+def _parse_structured_response(text: str, expected_names: list[str]) -> list[ColumnClassification]:
+    """Parse structured JSON output guaranteed valid by schema.
+
+    Shared by AnthropicStructuredBackend and BedrockStructuredBackend.
+    """
+    data = json.loads(text)
+    items = data.get("classifications", [])
+    return _dicts_to_classifications(items, expected_names)
+
+
 # ── Abstract backend ─────────────────────────────────────────────
 
 
@@ -360,6 +415,112 @@ class AnthropicBackend(LLMBackend):
                 model=self._config.model,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "ping"}],
+            )
+            return len(resp.content) > 0
+        except Exception:
+            return False
+
+
+# ── Anthropic structured output backend ──────────────────────────
+
+
+class AnthropicStructuredBackend(LLMBackend):
+    """Backend using the Anthropic Messages API with structured output.
+
+    Uses ``output_config`` with JSON Schema for guaranteed valid responses
+    (constrained decoding — no regex/JSON parsing fallbacks).  The system
+    prompt is sent with ``cache_control`` for prompt caching (90% input
+    token discount on subsequent calls in the same session).
+
+    This is the default backend when ``ANTHROPIC_API_KEY`` is present
+    and no explicit classify LLM backend is configured.
+    """
+
+    def __init__(self, config: LLMBackendConfig) -> None:
+        super().__init__(config)
+        self._client = None
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+
+        try:
+            import anthropic
+        except ImportError:
+            raise ImportError(
+                "anthropic package required. Install with: uv add anthropic"
+            )
+
+        if not self._config.api_key:
+            raise ValueError("Anthropic API key required.")
+
+        self._client = anthropic.Anthropic(api_key=self._config.api_key)
+        return self._client
+
+    def classify_batch(
+        self,
+        samples: list,
+        system_prompt: str,
+        revisit_context: dict[str, dict] | None = None,
+        table_name: str | None = None,
+    ) -> LLMResponse:
+        client = self._get_client()
+        user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
+        expected_names = [s.name for s in samples]
+
+        response = client.messages.create(
+            model=self._config.model,
+            max_tokens=self._config.max_tokens,
+            temperature=self._config.temperature,
+            system=[{
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user_prompt}],
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": CLASSIFICATION_OUTPUT_SCHEMA,
+                },
+            },
+        )
+
+        text = response.content[0].text
+        classifications = _parse_structured_response(text, expected_names)
+
+        cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        if cache_read:
+            logger.debug("Prompt cache hit: %d tokens read from cache", cache_read)
+        elif cache_write:
+            logger.debug("Prompt cache miss: %d tokens written to cache", cache_write)
+
+        return LLMResponse(
+            classifications=classifications,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            model=self._config.model,
+        )
+
+    def health_check(self) -> bool:
+        try:
+            client = self._get_client()
+            resp = client.messages.create(
+                model=self._config.model,
+                max_tokens=32,
+                messages=[{"role": "user", "content": "Respond with {\"ok\":true}"}],
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {"ok": {"type": "boolean"}},
+                            "required": ["ok"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
             )
             return len(resp.content) > 0
         except Exception:
@@ -596,6 +757,180 @@ class BedrockBackend(LLMBackend):
             return False
 
 
+# ── Bedrock structured output backend ────────────────────────────
+
+
+class BedrockStructuredBackend(LLMBackend):
+    """Backend using Bedrock invoke_model with Anthropic Messages API + structured output.
+
+    Uses ``invoke_model`` with the raw Anthropic Messages format to access
+    ``output_config`` (constrained JSON schema decoding) which is NOT available
+    through the Converse API or the ``AnthropicBedrock`` SDK wrapper.
+
+    The system prompt is sent with ``cache_control`` for prompt caching
+    (90% input token discount on cache hits, 5-min default TTL on Bedrock).
+
+    This is the auto-default backend when AWS Bedrock credentials are
+    present and no explicit classify LLM or ANTHROPIC_API_KEY is configured.
+    """
+
+    def __init__(self, config: LLMBackendConfig) -> None:
+        super().__init__(config)
+        self._client = None
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+
+        try:
+            import boto3
+        except ImportError:
+            raise ImportError(
+                "boto3 package required for Bedrock. Install with: uv add boto3"
+            )
+
+        if not self._config.aws_access_key_id or not self._config.aws_secret_access_key:
+            raise ValueError(
+                "AWS credentials required for Bedrock backend. "
+                "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+            )
+
+        session = boto3.Session(
+            aws_access_key_id=self._config.aws_access_key_id,
+            aws_secret_access_key=self._config.aws_secret_access_key,
+            aws_session_token=self._config.aws_session_token,
+            region_name=self._config.aws_region or "us-east-1",
+        )
+        self._client = session.client("bedrock-runtime")
+        return self._client
+
+    def classify_batch(
+        self,
+        samples: list,
+        system_prompt: str,
+        revisit_context: dict[str, dict] | None = None,
+        table_name: str | None = None,
+    ) -> LLMResponse:
+        client = self._get_client()
+        user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
+        expected_names = [s.name for s in samples]
+
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": self._config.max_tokens,
+            "temperature": self._config.temperature,
+            "system": [{
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            "messages": [{"role": "user", "content": user_prompt}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": CLASSIFICATION_OUTPUT_SCHEMA,
+                },
+            },
+        }
+
+        last_error: Exception | None = None
+        for attempt in range(self._config.max_retries):
+            try:
+                response = client.invoke_model(
+                    modelId=self._config.model,
+                    contentType="application/json",
+                    accept="application/json",
+                    body=json.dumps(request_body),
+                )
+                break
+            except Exception as e:
+                last_error = e
+                err_str = str(e)
+                retryable = any(code in err_str for code in (
+                    "ThrottlingException", "TooManyRequestsException",
+                    "ServiceUnavailableException", "ModelTimeoutException",
+                    "429", "503", "529",
+                ))
+                if retryable and attempt < self._config.max_retries - 1:
+                    delay = self._config.retry_delay * (2 ** attempt)
+                    logger.warning(
+                        "Bedrock transient error (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1, self._config.max_retries, delay, e,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise
+        else:
+            raise last_error  # type: ignore[misc]
+
+        body = json.loads(response["body"].read())
+        text = body["content"][0]["text"]
+        classifications = _parse_structured_response(text, expected_names)
+
+        usage = body.get("usage", {})
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0) or 0
+        cache_write = usage.get("cache_creation_input_tokens", 0) or 0
+        stop_reason = body.get("stop_reason", "end_turn")
+
+        if cache_read:
+            logger.debug("Bedrock prompt cache hit: %d tokens read", cache_read)
+        elif cache_write:
+            logger.debug("Bedrock prompt cache miss: %d tokens written", cache_write)
+
+        if stop_reason == "max_tokens":
+            logger.warning(
+                "Bedrock structured response TRUNCATED: %d chars, in=%d, out=%d",
+                len(text), input_tokens, output_tokens,
+            )
+        else:
+            logger.info(
+                "Bedrock structured: %d chars, stop=%s, in=%d, out=%d "
+                "(cache_read=%d, cache_write=%d)",
+                len(text), stop_reason, input_tokens, output_tokens,
+                cache_read, cache_write,
+            )
+
+        return LLMResponse(
+            classifications=classifications,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=self._config.model,
+            finish_reason=stop_reason,
+        )
+
+    def health_check(self) -> bool:
+        try:
+            client = self._get_client()
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 32,
+                "messages": [{"role": "user", "content": "Respond with {\"ok\":true}"}],
+                "output_config": {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {"ok": {"type": "boolean"}},
+                            "required": ["ok"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+            }
+            response = client.invoke_model(
+                modelId=self._config.model,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(request_body),
+            )
+            body = json.loads(response["body"].read())
+            return len(body.get("content", [])) > 0
+        except Exception:
+            return False
+
+
 # ── Factory ──────────────────────────────────────────────────────
 
 
@@ -604,6 +939,8 @@ def create_backend(config: LLMBackendConfig) -> LLMBackend:
 
     Raises ValueError on unknown backend type.
     """
+    if config.backend == "anthropic_structured":
+        return AnthropicStructuredBackend(config)
     if config.backend == "anthropic":
         return AnthropicBackend(config)
     if config.backend == "openai_compatible":
@@ -624,20 +961,76 @@ def create_backend(config: LLMBackendConfig) -> LLMBackend:
         return OpenAICompatibleBackend(cerebras_config)
     if config.backend == "bedrock":
         return BedrockBackend(config)
+    if config.backend == "bedrock_structured":
+        return BedrockStructuredBackend(config)
     raise ValueError(
         f"Unknown LLM backend: {config.backend!r}. "
-        f"Use 'anthropic', 'openai_compatible', 'cerebras', or 'bedrock'."
+        f"Use 'anthropic_structured', 'anthropic', 'openai_compatible', "
+        f"'cerebras', 'bedrock', or 'bedrock_structured'."
     )
 
 
 def create_backend_from_cfg(cfg) -> LLMBackend:
     """Create an LLM backend from an AtelierConfig.
 
-    Raises ValueError if no LLM backend is configured.
+    Resolution order:
+    1. Explicit classify LLM config (ATELIER_LLM_API_KEY / ATELIER_LLM_BASE_URL)
+    2. ANTHROPIC_SUBAGENT_MODEL — backend inferred from model format
+    3. Neither → ValueError (fail fast)
     """
-    if not cfg.has_classify_llm:
+    from atelier.config import is_bedrock_model
+
+    # 1. Explicit classify LLM backend configured
+    if cfg.classify_llm_api_key or cfg.classify_llm_base_url:
+        return create_backend(config_from_atelier(cfg))
+
+    # 2. Subagent model — infer backend from model identifier format
+    if not cfg.classify_subagent_model:
         raise ValueError(
             "No classification LLM configured. "
-            "Set ATELIER_LLM_API_KEY or ATELIER_LLM_BASE_URL."
+            "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."
         )
-    return create_backend(config_from_atelier(cfg))
+
+    model = cfg.classify_subagent_model
+    if is_bedrock_model(model):
+        return _build_bedrock_backend(cfg, model)
+    return _build_anthropic_backend(cfg, model)
+
+
+def _build_anthropic_backend(cfg, model: str) -> LLMBackend:
+    """Build an AnthropicStructuredBackend from config + model."""
+    if not cfg.anthropic_api_key:
+        raise ValueError(
+            f"Model {model!r} requires ANTHROPIC_API_KEY (direct API)."
+        )
+    logger.info("Classification LLM: AnthropicStructured %s", model)
+    return create_backend(LLMBackendConfig(
+        backend="anthropic_structured",
+        api_key=cfg.anthropic_api_key,
+        model=model,
+        max_tokens=8192,
+        temperature=0.0,
+        batch_size=cfg.classify_llm_columns_per_call,
+        max_retries=cfg.classify_llm_max_retries,
+    ))
+
+
+def _build_bedrock_backend(cfg, model: str) -> LLMBackend:
+    """Build a BedrockStructuredBackend from config + model."""
+    if not cfg.has_bedrock:
+        raise ValueError(
+            f"Model {model!r} requires AWS Bedrock credentials."
+        )
+    logger.info("Classification LLM: BedrockStructured %s", model)
+    return create_backend(LLMBackendConfig(
+        backend="bedrock_structured",
+        model=model,
+        max_tokens=8192,
+        temperature=0.0,
+        batch_size=cfg.classify_llm_columns_per_call,
+        max_retries=cfg.classify_llm_max_retries,
+        aws_access_key_id=cfg.aws_access_key_id,
+        aws_secret_access_key=cfg.aws_secret_access_key,
+        aws_region=cfg.aws_region,
+        aws_session_token=cfg.aws_session_token,
+    ))

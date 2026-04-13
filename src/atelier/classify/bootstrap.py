@@ -1,15 +1,18 @@
-"""Bootstrap convergence loop: LLM sweep + ML validation + targeted revisit.
+"""Bootstrap convergence helpers: LLM sweep + ML validation + targeted revisit.
 
-Three-phase architecture:
+Phase helpers and state types used by the classification pipeline's
+convergence loop (``pipeline.run_classification_pipeline``).
+
+Three phases:
 
   Phase 1 — LLM sweep:
     Send ALL columns to the LLM in table-aware batches.  LLMs are strong
     zero-shot classifiers; the vast majority of labels will be correct.
 
   Phase 2 — ML validation:
-    Run the existing 3-source ML pipeline (cosine + pattern + name_match)
-    with the LLM result as a 4th evidence source.  DST conflict K identifies
-    columns where ML evidence disagrees with the LLM label.
+    Run the full 6-source DST pipeline with the LLM result included.
+    DST conflict K identifies columns where ML evidence disagrees with
+    the LLM label.
 
   Phase 3 — Targeted revisit:
     Re-send only high-K disagreement columns to the LLM with enriched ML
@@ -22,56 +25,17 @@ FSM, HOCON config, and classification pipeline.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from atelier.classify.belief import (
-    FrameOfDiscernment,
-    HierarchicalClassification,
-)
-from atelier.classify.features import extract_features
-from atelier.classify.fsm import AgentFSM, FSMState
-from atelier.classify.llm_backend import (
-    ColumnClassification,
-    LLMBackend,
-    build_batch_user_prompt,
-    build_category_table,
-    build_system_prompt,
-    create_backend_from_cfg,
-)
-from atelier.classify.mass_functions import (
-    DiscountConfig,
-    catboost_to_mass,
-    cosine_to_mass,
-    llm_to_mass,
-    name_match_to_mass,
-    pattern_to_mass,
-    svm_to_mass,
-)
-from atelier.classify.evaluation import evaluate_classifications
-from atelier.classify.pipeline import (
-    _evaluate_results,
-    _is_vacuous,
-    _load_vocabulary,
-    _mass_summary,
-    _write_parquet,
-)
-from atelier.classify.sampler import (
-    ColumnSample,
-    TableSample,
-    discover_tables,
-    load_all_mock_samples,
-    load_annotations_from_hive,
-    sample_table_metadata,
-)
+from atelier.classify.belief import FrameOfDiscernment
+from atelier.classify.llm_backend import LLMBackend
+from atelier.classify.mass_functions import DiscountConfig
+from atelier.classify.sampler import ColumnSample
 from atelier.classify.taxonomy import HierarchicalCategorySet
 
 logger = logging.getLogger(__name__)
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 # ── State types ──────────────────────────────────────────────────
@@ -117,360 +81,6 @@ class BootstrapState:
     llm_calls_total: int = 0
     tokens_input: int = 0
     tokens_output: int = 0
-
-
-@dataclass(frozen=True)
-class BootstrapResult:
-    """Final output of the bootstrap convergence loop."""
-
-    ground_truth: dict[str, str]
-    confidence_map: dict[str, float]
-    source_map: dict[str, str]
-    converged: bool
-    final_coverage: float
-    final_mean_k: float
-    iterations: int
-    llm_calls: int
-    tokens_input: int
-    tokens_output: int
-
-
-# ── Pipeline entry point ─────────────────────────────────────────
-
-
-def run_bootstrap_pipeline(
-    cfg,
-    fsm: AgentFSM,
-    *,
-    connection_name: str | None = None,
-    database: str = "default",
-    sample_size: int = 50,
-    tables_limit: int = 100,
-    use_mock: bool = False,
-    llm_backend: LLMBackend | None = None,
-    samples: list[TableSample] | None = None,
-    category_set_override: HierarchicalCategorySet | None = None,
-) -> dict[str, Any]:
-    """Run the bootstrap convergence pipeline.
-
-    This wraps the existing ML pipeline with an LLM-driven convergence loop.
-    The LLM provides a 4th evidence source; DST conflict K drives iteration.
-
-    Args:
-        cfg: AtelierConfig.
-        fsm: AgentFSM for state tracking.
-        llm_backend: LLM backend (injected for testing; created from config if None).
-        use_mock: Force mock data for devenv/CI.
-        samples: Pre-loaded TableSamples (skip discover/sample phases).
-        category_set_override: Pre-loaded vocabulary (skip vocab loading).
-    """
-    run = fsm.start_run(config={
-        "connection_name": connection_name,
-        "database": database,
-        "sample_size": sample_size,
-        "tables_limit": tables_limit,
-        "use_mock": use_mock,
-        "pipeline": "bootstrap",
-    })
-    run_id = run.id
-
-    build_dir = _PROJECT_ROOT / "build"
-    results_dir = build_dir / "results" / run_id
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        # ── LOADING_VOCAB ────────────────────────────────────────
-        fsm.advance(run_id, FSMState.LOADING_VOCAB, progress={"step": "loading_vocab"})
-        if category_set_override is not None:
-            category_set = category_set_override
-        else:
-            category_set = _load_vocabulary(cfg, build_dir, connection_name, use_mock)
-        logger.info("Loaded %d leaf categories", len(category_set.categories))
-
-        if not isinstance(category_set, HierarchicalCategorySet):
-            raise RuntimeError("Expected HierarchicalCategorySet")
-
-        frame = FrameOfDiscernment(category_set)
-        fsm.advance(run_id, FSMState.DISCOVERING, progress={
-            "categories_loaded": len(category_set.categories),
-        })
-
-        # ── DISCOVERING + SAMPLING ────────────────────────────────
-        if samples is not None:
-            all_samples = samples
-            fsm.advance(run_id, FSMState.SAMPLING, progress={
-                "tables_discovered": len(all_samples),
-                "injected": True,
-            })
-        elif use_mock:
-            all_samples = load_all_mock_samples()
-            fsm.advance(run_id, FSMState.SAMPLING, progress={
-                "tables_discovered": len(all_samples),
-                "mock": True,
-            })
-        else:
-            table_names = discover_tables(
-                cfg, connection_name, database, limit=tables_limit
-            )
-            logger.info("Discovered %d tables", len(table_names))
-
-            fsm.advance(run_id, FSMState.SAMPLING, progress={
-                "tables_discovered": len(table_names),
-            })
-
-            all_samples: list[TableSample] = []
-            for tname in table_names:
-                try:
-                    ts = sample_table_metadata(
-                        cfg, tname, connection_name, database, sample_size
-                    )
-                    all_samples.append(ts)
-                except Exception as exc:
-                    logger.warning("Failed to sample %s: %s", tname, exc)
-
-        # Flatten to column list with table mapping
-        all_columns: list[ColumnSample] = []
-        column_table: dict[str, str] = {}
-        for ts in all_samples:
-            for col in ts.columns:
-                all_columns.append(col)
-                column_table[col.name] = ts.name
-
-        total_columns = len(all_columns)
-        logger.info("Sampled %d columns across %d tables", total_columns, len(all_samples))
-
-        # Build samples dict for lookup
-        samples_by_name: dict[str, ColumnSample] = {c.name: c for c in all_columns}
-        column_names = list(samples_by_name.keys())
-
-        # ── Create LLM backend ───────────────────────────────────
-        if llm_backend is None:
-            llm_backend = create_backend_from_cfg(cfg)
-
-        # Build bootstrap config and system prompt
-        boot_cfg = bootstrap_config_from_cfg(cfg)
-        category_table = build_category_table(category_set)
-        system_prompt = build_system_prompt(category_table)
-
-        # Wire config → ml_inference model paths
-        from atelier.classify import ml_inference
-        ml_inference.configure_paths(
-            catboost_path=cfg.classify_catboost_model_path,
-            svm_path=cfg.classify_svm_model_path,
-        )
-
-        discounts = DiscountConfig.from_cfg(cfg)
-
-        # Try sentence-transformers for cosine
-        has_embeddings = False
-        try:
-            from atelier.classify.embedding import classify_cosine
-            has_embeddings = True
-        except ImportError:
-            logger.warning("sentence-transformers not available; using name+pattern only")
-
-        # ── LLM SWEEP ────────────────────────────────────────────
-        fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
-            "columns_total": total_columns,
-            "phase": "llm_sweep",
-        })
-
-        state = BootstrapState()
-
-        _llm_sweep(
-            state, boot_cfg, llm_backend, system_prompt,
-            column_names, samples_by_name, column_table,
-        )
-
-        coverage = _coverage(state, column_names)
-        logger.info(
-            "LLM sweep: labeled %d/%d (coverage=%.1f%%, calls=%d)",
-            len(state.labels), total_columns,
-            coverage * 100, state.llm_calls_total,
-        )
-
-        # ── VALIDATING ───────────────────────────────────────────
-        fsm.advance(run_id, FSMState.VALIDATING, progress={
-            "phase": "ml_validation",
-            "llm_labeled": len(state.labels),
-            "coverage": round(coverage, 4),
-        })
-
-        _run_ml_validation(
-            state, boot_cfg, column_names, samples_by_name,
-            category_set, frame, has_embeddings, discounts=discounts,
-        )
-
-        disagreements = _identify_disagreements(state, column_names, boot_cfg)
-        mean_k = _mean_k(state, column_names)
-
-        logger.info(
-            "ML validation: mean K=%.3f, disagreements=%d",
-            mean_k, len(disagreements),
-        )
-
-        # ── TARGETED REVISIT LOOP ────────────────────────────────
-        iteration_metrics: list[dict[str, Any]] = [{
-            "iteration": 0,
-            "mean_k": round(mean_k, 4),
-            "disagreements": len(disagreements),
-            "coverage": round(coverage, 4),
-        }]
-
-        for iteration in range(1, boot_cfg.max_iterations + 1):
-            if not disagreements:
-                logger.info("No disagreements — converged")
-                break
-
-            if state.llm_calls_total >= boot_cfg.max_total_llm_calls:
-                logger.info("Budget exhausted (%d calls)", state.llm_calls_total)
-                break
-
-            if mean_k < boot_cfg.k_threshold:
-                logger.info("Mean K=%.3f < threshold — converged", mean_k)
-                break
-
-            state.iteration = iteration
-
-            # Back to LLM_SWEEP for revisit
-            fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
-                "phase": "revisit",
-                "iteration": iteration,
-                "disagreements": len(disagreements),
-                "mean_k": round(mean_k, 4),
-            })
-
-            _llm_revisit(
-                state, boot_cfg, llm_backend, system_prompt,
-                disagreements, samples_by_name, column_table, category_set,
-            )
-
-            # Back to VALIDATING
-            fsm.advance(run_id, FSMState.VALIDATING, progress={
-                "phase": "revalidation",
-                "iteration": iteration,
-                "llm_calls": state.llm_calls_total,
-            })
-
-            _run_ml_validation(
-                state, boot_cfg, column_names, samples_by_name,
-                category_set, frame, has_embeddings, discounts=discounts,
-            )
-
-            disagreements = _identify_disagreements(state, column_names, boot_cfg)
-            mean_k = _mean_k(state, column_names)
-            coverage = _coverage(state, column_names)
-
-            logger.info(
-                "Revisit %d: mean K=%.3f, disagreements=%d, coverage=%.1f%%, calls=%d",
-                iteration, mean_k, len(disagreements),
-                coverage * 100, state.llm_calls_total,
-            )
-
-            iteration_metrics.append({
-                "iteration": iteration,
-                "mean_k": round(mean_k, 4),
-                "disagreements": len(disagreements),
-                "coverage": round(coverage, 4),
-            })
-
-        # ── FINAL CLASSIFICATION PASS ────────────────────────────
-        # Run full pipeline with LLM evidence included
-        coverage = _coverage(state, column_names)
-        mean_k = _mean_k(state, column_names)
-        converged = coverage >= boot_cfg.coverage_target and mean_k < boot_cfg.k_threshold
-
-        fsm.advance(run_id, FSMState.CLASSIFYING, progress={
-            "phase": "final_classification",
-            "converged": converged,
-            "mean_k": round(mean_k, 4),
-            "coverage": round(coverage, 4),
-        })
-
-        # Build final classifications with LLM evidence
-        classifications: list[dict[str, Any]] = []
-        for col in all_columns:
-            llm_code = state.labels.get(col.name)
-            llm_conf = state.confidence.get(col.name, 0.0)
-            result = _classify_column_with_llm(
-                col, category_set, frame,
-                llm_code=llm_code,
-                llm_confidence=llm_conf,
-                llm_discount=boot_cfg.llm_discount,
-                use_cosine=has_embeddings,
-                discounts=discounts,
-            )
-            classifications.append(result)
-
-        fsm.advance(run_id, FSMState.FUSING, progress={
-            "columns_classified": len(classifications),
-        })
-
-        # ── EVALUATING ───────────────────────────────────────────
-        fsm.advance(run_id, FSMState.EVALUATING, progress={
-            "columns_fused": len(classifications),
-        })
-
-        summary = _evaluate_results(classifications)
-        eval_report = evaluate_classifications(classifications, category_set)
-        summary["converged"] = converged
-        summary["bootstrap_iterations"] = state.iteration
-        summary["llm_calls"] = state.llm_calls_total
-        summary["tokens_input"] = state.tokens_input
-        summary["tokens_output"] = state.tokens_output
-        summary["mean_k"] = round(mean_k, 4)
-        summary["bootstrap_coverage"] = round(coverage, 4)
-        summary["iteration_metrics"] = iteration_metrics
-
-        # Write results
-        results_path = results_dir / "classifications.json"
-        results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
-        eval_report.write_json(results_dir / "evaluation_report.json")
-
-        parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
-
-        # Auto-register as a dataset so the Embeddings page is populated
-        if parquet_path:
-            try:
-                from atelier.db.dao import AtelierDao
-                dao = AtelierDao()
-                dao.upsert_dataset(
-                    dataset_id=run_id,
-                    name=f"Bootstrap {run_id[:8]}",
-                    parquet_path=str(parquet_path),
-                    description="Bootstrap convergence pipeline results",
-                    row_count=len(classifications),
-                )
-            except Exception as e:
-                logger.warning("Failed to register dataset: %s", e)
-
-        fsm.advance(run_id, FSMState.CONVERGED, progress={
-            **summary,
-            "result_path": str(results_path),
-            "parquet_path": str(parquet_path) if parquet_path else None,
-        }, result_path=str(parquet_path) if parquet_path else str(results_path))
-
-        return {
-            "run_id": run_id,
-            "state": "CONVERGED",
-            "classifications": len(classifications),
-            "result_path": str(results_path),
-            "parquet_path": str(parquet_path) if parquet_path else None,
-            "evaluation_report": eval_report.to_dict(),
-            **summary,
-        }
-
-    except Exception as exc:
-        logger.exception("Bootstrap pipeline failed: %s", exc)
-        try:
-            fsm.advance(run_id, FSMState.ERROR, error=str(exc))
-        except ValueError:
-            pass
-        return {
-            "run_id": run_id,
-            "state": "ERROR",
-            "error": str(exc),
-        }
 
 
 # ── Phase helpers ────────────────────────────────────────────────
@@ -531,12 +141,14 @@ def _run_ml_validation(
     discounts: DiscountConfig | None = None,
 ) -> None:
     """Phase 2: Run ML classification on all columns, compute K."""
+    from atelier.classify.pipeline import _classify_column
+
     for name in column_names:
         col = samples[name]
         llm_code = state.labels.get(name)
         llm_conf = state.confidence.get(name, 0.0)
 
-        result = _classify_column_with_llm(
+        result = _classify_column(
             col, category_set, frame,
             llm_code=llm_code,
             llm_confidence=llm_conf,
@@ -656,162 +268,3 @@ def _mean_k(state: BootstrapState, column_names: list[str]) -> float:
     if not labeled:
         return 0.0
     return sum(state.ml_conflict.get(n, 0) for n in labeled) / len(labeled)
-
-
-# ── Column classification with LLM evidence ─────────────────────
-
-
-def _classify_column_with_llm(
-    col: ColumnSample,
-    category_set: HierarchicalCategorySet,
-    frame: FrameOfDiscernment,
-    *,
-    llm_code: str | None = None,
-    llm_confidence: float = 0.0,
-    llm_alternatives: list[dict] | None = None,
-    llm_discount: float = 0.10,
-    use_cosine: bool = True,
-    discounts: DiscountConfig | None = None,
-) -> dict[str, Any]:
-    """Classify a column using ML sources + optional LLM evidence.
-
-    Extends pipeline._classify_column() by adding llm_to_mass()
-    to the source_masses dict before fusion.
-    """
-    if discounts is None:
-        discounts = DiscountConfig()
-
-    features = extract_features(
-        column_name=col.name,
-        column_type=col.column_type,
-        values=col.values,
-        siblings=col.siblings,
-        source_table=col.table_name,
-        total_count=col.total_count,
-        null_count=col.null_count,
-    )
-
-    source_masses: dict[str, Any] = {}
-
-    # 1. Name matching
-    name_mass = name_match_to_mass(
-        col.name, frame, category_set,
-        exact_mass=discounts.name_match_exact,
-        code_mass=discounts.name_match_code,
-        alias_mass=discounts.name_match_alias,
-        overlap_mass=discounts.name_match_overlap,
-    )
-    if not _is_vacuous(name_mass):
-        source_masses["name_match"] = name_mass
-
-    # 2. Pattern detection
-    pattern_mass = pattern_to_mass(
-        features.pattern_signals, frame,
-        theta_mass=discounts.pattern_theta,
-    )
-    if not _is_vacuous(pattern_mass):
-        source_masses["pattern"] = pattern_mass
-
-    # 3. Cosine similarity
-    if use_cosine:
-        try:
-            from atelier.classify.embedding import classify_cosine as _cosine
-            similarities = _cosine(features, category_set)
-            cosine_mass = cosine_to_mass(
-                similarities, frame, discount=discounts.cosine,
-            )
-            source_masses["cosine"] = cosine_mass
-        except Exception:
-            pass
-
-    # 4. LLM evidence
-    if llm_code:
-        llm_mass = llm_to_mass(
-            llm_code, llm_confidence,
-            llm_alternatives or [],
-            frame, discount=llm_discount,
-        )
-        if not _is_vacuous(llm_mass):
-            source_masses["llm"] = llm_mass
-
-    # 5. CatBoost (if model available)
-    try:
-        from atelier.classify.ml_inference import predict_catboost
-        cb_result = predict_catboost(features, category_set)
-        if cb_result:
-            proba, variance = cb_result
-            cb_mass = catboost_to_mass(
-                proba, frame, variance,
-                base_discount=discounts.catboost_base,
-                variance_scale=discounts.catboost_variance_scale,
-                max_discount=discounts.catboost_max,
-                fallback_discount=discounts.catboost_fallback,
-            )
-            if not _is_vacuous(cb_mass):
-                source_masses["catboost"] = cb_mass
-    except Exception:
-        pass
-
-    # 6. SVM (if model available)
-    try:
-        from atelier.classify.ml_inference import predict_svm
-        svm_proba = predict_svm(features)
-        if svm_proba:
-            svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
-            if not _is_vacuous(svm_mass):
-                source_masses["svm"] = svm_mass
-    except Exception:
-        pass
-
-    # Fuse all evidence
-    if not source_masses:
-        return {
-            "table_name": col.table_name,
-            "column_name": col.name,
-            "column_type": col.column_type,
-            "predicted_code": None,
-            "predicted_label": "",
-            "confidence": 0.0,
-            "belief": 0.0,
-            "plausibility": 1.0,
-            "uncertainty": 1.0,
-            "conflict": 0.0,
-            "needs_clarification": True,
-            "evidence": "",
-            "evidence_sources": {},
-            "pattern_signals": features.pattern_signals,
-            "ground_truth": col.ground_truth,
-            "is_correct": None,
-        }
-
-    hc = HierarchicalClassification.from_combined_evidence(
-        source_masses=source_masses,
-        frame=frame,
-        category_set=category_set,
-    )
-
-    best_code = hc.category.code
-    bel, pl = hc.interval_at(best_code)
-
-    return {
-        "table_name": col.table_name,
-        "column_name": col.name,
-        "column_type": col.column_type,
-        "predicted_code": best_code,
-        "predicted_label": hc.category.label,
-        "confidence": hc.confidence,
-        "belief": round(bel, 4),
-        "plausibility": round(pl, 4),
-        "uncertainty": round(pl - bel, 4),
-        "conflict": hc.conflict,
-        "needs_clarification": hc.needs_clarification,
-        "evidence": hc.evidence,
-        "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
-        "pattern_signals": features.pattern_signals,
-        "ground_truth": col.ground_truth,
-        "is_correct": (
-            col.ground_truth == best_code
-            if col.ground_truth and best_code
-            else None
-        ),
-    }

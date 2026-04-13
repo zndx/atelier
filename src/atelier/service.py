@@ -90,7 +90,8 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
 
     def StartClassification(self, request, context):
         import threading
-        from atelier.classify import get_fsm, run_pipeline
+        from atelier.classify import get_fsm
+        from atelier.classify.pipeline import run_classification_pipeline
         from atelier.config import load_config
 
         cfg = load_config()
@@ -105,27 +106,25 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                 error=f"Pipeline already running in state {current.state.value}",
             )
 
-        run = fsm.start_run(config={
-            "connection_name": request.connection_name or None,
-            "database": request.database or "default",
-            "sample_size": request.sample_size or 50,
-            "use_mock": request.use_mock,
-        })
+        # Pipeline owns run creation via fsm.start_run() — don't create
+        # a duplicate run here (avoids double-run bug).
+        conn = request.connection_name or None
+        db = request.database or "default"
+        sample_size = request.sample_size or 50
+        use_mock = request.use_mock
 
         def _background():
-            from atelier.classify.pipeline import run_classification_pipeline
             run_classification_pipeline(
                 cfg, fsm,
-                connection_name=request.connection_name or None,
-                database=request.database or "default",
-                sample_size=request.sample_size or 50,
-                use_mock=request.use_mock,
+                connection_name=conn,
+                database=db,
+                sample_size=sample_size,
+                use_mock=use_mock,
             )
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()
 
         return atelier_pb2.StartClassificationResponse(
-            run_id=run.id,
             started=True,
         )

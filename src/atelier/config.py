@@ -74,6 +74,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.tables_limit": ("classify_tables_limit", int),
     "classify.embedding_model": ("classify_embedding_model", str),
     "classify.auto_start": ("classify_auto_start", bool),
+    "classify.subagent_model": ("classify_subagent_model", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm_model_path": ("classify_svm_model_path", str),
@@ -109,6 +110,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # SHAP explanations
     "classify.shap.enabled": ("classify_shap_enabled", bool),
     "classify.shap.top_k": ("classify_shap_top_k", int),
+    # SAGE feature importance
+    "classify.sage.enabled": ("classify_sage_enabled", bool),
+    "classify.sage.permutations": ("classify_sage_permutations", int),
 }
 
 # Reverse: field_name → ENV var name
@@ -136,6 +140,8 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"
     elif _field == "agent_enable_tool_search":
         _env = "ENABLE_TOOL_SEARCH"
+    elif _field == "classify_subagent_model":
+        _env = "ANTHROPIC_SUBAGENT_MODEL"
     elif _field == "cml_data_connections":
         # Not a platform-provided var — this is our own knob.
         _env = "ATELIER_DATA_CONNECTIONS"
@@ -212,6 +218,7 @@ class AtelierConfig:
     classify_tables_limit: int = 100
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_auto_start: bool = False
+    classify_subagent_model: str | None = None
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"
@@ -253,10 +260,23 @@ class AtelierConfig:
     classify_shap_enabled: bool = True
     classify_shap_top_k: int = 3
 
+    # SAGE feature importance
+    classify_sage_enabled: bool = False
+    classify_sage_permutations: int = 512
+
     @property
     def has_classify_llm(self) -> bool:
-        """True when an LLM backend is configured for classification."""
-        return bool(self.classify_llm_api_key or self.classify_llm_base_url)
+        """True when an LLM backend is available for classification.
+
+        Sources:
+        1. Explicit classify LLM (ATELIER_LLM_API_KEY / ATELIER_LLM_BASE_URL)
+        2. ANTHROPIC_SUBAGENT_MODEL (backend inferred from model format)
+        """
+        return bool(
+            self.classify_llm_api_key
+            or self.classify_llm_base_url
+            or self.classify_subagent_model
+        )
 
     # CML
     cml_project_id: str | None = None
@@ -315,6 +335,11 @@ def extract_model_family(model_id: str) -> str | None:
     """
     match = re.search(r"(opus|sonnet|haiku)", model_id)
     return match.group(1) if match else None
+
+
+def is_bedrock_model(model_id: str) -> bool:
+    """True when the model identifier is a Bedrock ARN or Bedrock model ID."""
+    return model_id.startswith("arn:") or "anthropic." in model_id
 
 
 # ── HOCON loading ────────────────────────────────────────────────

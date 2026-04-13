@@ -151,6 +151,9 @@ export default function Embeddings() {
             text: "text",
             projection: { x: "x", y: "y" },
           }}
+          defaultChartsConfig={{
+            embedding: { data: { x: "x", y: "y", category: "predicted_label" } },
+          }}
           colorScheme="light"
         />
       </div>
