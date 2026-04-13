@@ -6,6 +6,9 @@
 
   env.GREET = "atelier";
 
+  # psycopg pure-Python driver loads libpq via ctypes — needs it on LD_LIBRARY_PATH
+  env.LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.postgresql_16.lib ];
+
   packages = with pkgs; [
     # Core
     git

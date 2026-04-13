@@ -482,7 +482,12 @@ def _write_parquet(
     classifications: list[dict],
     output_path: Path,
 ) -> Path | None:
-    """Write classifications to parquet for embedding-atlas."""
+    """Write classifications to parquet for embedding-atlas.
+
+    Produces atlas-compatible columns: text, x, y (plus classification metadata).
+    Uses UMAP on sentence-transformer embeddings when available, otherwise falls
+    back to a deterministic PCA-like projection from DST numeric features.
+    """
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -490,9 +495,24 @@ def _write_parquet(
         logger.warning("pyarrow not available; skipping parquet output")
         return None
 
-    rows = []
+    if not classifications:
+        return None
+
+    # Build text column for atlas hover/search
+    texts = []
     for c in classifications:
+        label = c["predicted_label"] or c["predicted_code"] or "unknown"
+        texts.append(f"{c['table_name']}.{c['column_name']} — {label}")
+
+    # Compute 2D projection
+    x_vals, y_vals = _compute_projection(classifications, texts)
+
+    rows = []
+    for i, c in enumerate(classifications):
         row = {
+            "text": texts[i],
+            "x": x_vals[i],
+            "y": y_vals[i],
             "table_name": c["table_name"],
             "column_name": c["column_name"],
             "column_type": c["column_type"] or "",
@@ -515,9 +535,6 @@ def _write_parquet(
             row[f"shap_top{rank}_value"] = c.get(f"shap_top{rank}_value", 0.0)
         rows.append(row)
 
-    if not rows:
-        return None
-
     table = pa.table({
         k: [r[k] for r in rows]
         for k in rows[0].keys()
@@ -525,3 +542,51 @@ def _write_parquet(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, str(output_path))
     return output_path
+
+
+def _compute_projection(
+    classifications: list[dict],
+    texts: list[str],
+) -> tuple[list[float], list[float]]:
+    """Compute 2D x/y coordinates for embedding-atlas.
+
+    Tries UMAP on sentence-transformer embeddings first (best quality).
+    Falls back to PCA on DST numeric features (always available).
+    """
+    # Try UMAP + sentence-transformers for high-quality projection
+    try:
+        from sentence_transformers import SentenceTransformer
+        import umap
+        import numpy as np
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        embeddings = model.encode(texts, show_progress_bar=False, batch_size=256)
+        n_neighbors = min(15, max(2, len(texts) - 1))
+        reducer = umap.UMAP(
+            n_components=2, n_neighbors=n_neighbors,
+            min_dist=0.1, metric="cosine", random_state=42,
+        )
+        projection = reducer.fit_transform(embeddings)
+        return projection[:, 0].tolist(), projection[:, 1].tolist()
+    except Exception as e:
+        logger.debug("UMAP projection unavailable (%s), using DST feature projection", e)
+
+    # Fallback: PCA-like projection from DST numeric features
+    import numpy as np
+
+    features = np.array([
+        [c["confidence"], c["belief"], c["plausibility"],
+         c["uncertainty"], c["conflict"]]
+        for c in classifications
+    ], dtype=np.float32)
+
+    # Center and project onto first two principal components
+    centered = features - features.mean(axis=0)
+    try:
+        _, _, vt = np.linalg.svd(centered, full_matrices=False)
+        proj = centered @ vt[:2].T
+    except np.linalg.LinAlgError:
+        # Degenerate case — use confidence vs belief directly
+        proj = features[:, :2]
+
+    return proj[:, 0].tolist(), proj[:, 1].tolist()
