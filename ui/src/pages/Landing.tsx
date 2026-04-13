@@ -176,28 +176,28 @@ function Landing() {
           </Link>
         </Col>
         <Col xs={24} md={12} lg={8}>
-          <Card
-            title="Embeddings"
-            extra={<DotChartOutlined />}
-            hoverable
-            style={{ height: "100%" }}
-          >
-            <Paragraph type="secondary">
-              Interactive visualization of classification embeddings.
-              Explore results from the signals pipeline.
-            </Paragraph>
-            {datasets.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                {datasets.map((ds) => (
-                  <Link key={ds.id} to={`/embeddings/${ds.id}`}>
-                    <Tag color="blue" style={{ cursor: "pointer", marginBottom: 4 }}>
+          <Link to="/embeddings">
+            <Card
+              title="Embeddings"
+              extra={<DotChartOutlined />}
+              hoverable
+              style={{ height: "100%" }}
+            >
+              <Paragraph type="secondary">
+                Interactive visualization of classification embeddings.
+                Explore results from the signals pipeline.
+              </Paragraph>
+              {datasets.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  {datasets.map((ds) => (
+                    <Tag key={ds.id} color="blue" style={{ marginBottom: 4 }}>
                       {ds.name} ({ds.row_count} rows)
                     </Tag>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </Link>
         </Col>
         <Col xs={24} md={12} lg={8}>
           <Link to="/workflows">
