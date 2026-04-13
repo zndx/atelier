@@ -14,6 +14,7 @@ Public API::
 """
 
 from atelier.classify.belief import HierarchicalClassification
+from atelier.classify.bootstrap import run_bootstrap_pipeline
 from atelier.classify.fsm import AgentFSM, FSMRun, FSMState
 from atelier.classify.pipeline import run_classification_pipeline
 
@@ -33,6 +34,12 @@ def run_pipeline(cfg, *, use_mock: bool = False, **kwargs) -> dict:
     """Convenience wrapper for the full classification pipeline."""
     fsm = get_fsm()
     return run_classification_pipeline(cfg, fsm, use_mock=use_mock, **kwargs)
+
+
+def run_bootstrap(cfg, *, use_mock: bool = False, **kwargs) -> dict:
+    """Convenience wrapper for the bootstrap convergence pipeline."""
+    fsm = get_fsm()
+    return run_bootstrap_pipeline(cfg, fsm, use_mock=use_mock, **kwargs)
 
 
 def get_fsm_status(run_id: str | None = None) -> dict | None:

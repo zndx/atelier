@@ -74,6 +74,22 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.tables_limit": ("classify_tables_limit", int),
     "classify.embedding_model": ("classify_embedding_model", str),
     "classify.auto_start": ("classify_auto_start", bool),
+    # LLM backend for classification
+    "classify.llm.backend": ("classify_llm_backend", str),
+    "classify.llm.api_key": ("classify_llm_api_key", str),
+    "classify.llm.model": ("classify_llm_model", str),
+    "classify.llm.base_url": ("classify_llm_base_url", str),
+    "classify.llm.max_tokens": ("classify_llm_max_tokens", int),
+    "classify.llm.temperature": ("classify_llm_temperature", float),
+    "classify.llm.columns_per_call": ("classify_llm_columns_per_call", int),
+    "classify.llm.max_retries": ("classify_llm_max_retries", int),
+    "classify.llm.disable_reasoning": ("classify_llm_disable_reasoning", bool),
+    "classify.llm.discount": ("classify_llm_discount", float),
+    # Bootstrap convergence
+    "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
+    "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
+    "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
+    "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
 }
 
 # Reverse: field_name → ENV var name
@@ -177,6 +193,29 @@ class AtelierConfig:
     classify_tables_limit: int = 100
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_auto_start: bool = False
+
+    # Classification LLM backend
+    classify_llm_backend: str = "openai_compatible"
+    classify_llm_api_key: str | None = None
+    classify_llm_model: str = "glm-4.7"
+    classify_llm_base_url: str | None = None
+    classify_llm_max_tokens: int = 65536
+    classify_llm_temperature: float = 0.0
+    classify_llm_columns_per_call: int = 50
+    classify_llm_max_retries: int = 3
+    classify_llm_disable_reasoning: bool = False
+    classify_llm_discount: float = 0.10
+
+    # Bootstrap convergence
+    classify_bootstrap_max_iterations: int = 5
+    classify_bootstrap_k_threshold: float = 0.2
+    classify_bootstrap_coverage_target: float = 0.95
+    classify_bootstrap_max_total_llm_calls: int = 5000
+
+    @property
+    def has_classify_llm(self) -> bool:
+        """True when an LLM backend is configured for classification."""
+        return bool(self.classify_llm_api_key or self.classify_llm_base_url)
 
     # CML
     cml_project_id: str | None = None
@@ -352,6 +391,7 @@ _SECRET_FIELDS = frozenset({
     "aws_access_key_id",
     "aws_secret_access_key",
     "aws_session_token",
+    "classify_llm_api_key",
 })
 
 

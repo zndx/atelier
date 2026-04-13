@@ -517,6 +517,34 @@ def fsm_start():
         return _error_envelope(f"FSM start failed: {exc}")
 
 
+@app.post("/api/fsm/start-bootstrap")
+def fsm_start_bootstrap():
+    """Start a bootstrap convergence pipeline run (LLM + ML + DST)."""
+    import threading
+    try:
+        from atelier.classify import get_fsm
+        from atelier.classify.bootstrap import run_bootstrap_pipeline
+        from atelier.config import load_config
+
+        cfg = load_config()
+        fsm = get_fsm()
+
+        current = fsm.get_status()
+        if current and current.state.value not in ("IDLE", "CONVERGED", "ERROR"):
+            return {"run_id": current.id, "started": False,
+                    "error": f"Already running: {current.state.value}"}
+
+        def _background():
+            run_bootstrap_pipeline(cfg, fsm, use_mock=True)
+
+        t = threading.Thread(target=_background, daemon=True)
+        t.start()
+
+        return {"started": True}
+    except Exception as exc:
+        return _error_envelope(f"Bootstrap start failed: {exc}")
+
+
 @app.get("/api/fsm/runs")
 def fsm_runs():
     """List past classification pipeline runs."""

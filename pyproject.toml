@@ -27,6 +27,9 @@ agents = [
     "claude-agent-sdk>=0.1.0",
     "anthropic>=0.84.0",
 ]
+llm = [
+    "openai>=1.0.0",
+]
 viz = [
     "pyarrow>=18.0.0",
     "pandas>=2.2.0",

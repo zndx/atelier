@@ -34,9 +34,9 @@ Assignment) that distributes belief across the frame of discernment:
 | Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | M0 |
 | Pattern detection | 8 regex detectors | 0.10 | M0 |
 | Name matching | Column name ↔ label/abbrev/common_names | varies | M0 |
-| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | M1 stub |
-| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | M1 stub |
-| LLM | Claude Agent SDK structured classification | 0.10 | M1 planned |
+| LLM | OpenAI-compatible / Anthropic structured classification | 0.10 | M1 |
+| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | stub |
+| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | stub |
 
 The **discount** controls how much mass goes to Θ (total ignorance). Higher
 discount = more conservative = wider belief intervals.
@@ -77,9 +77,14 @@ Each column produces 12 SAGE-ablatable features:
 The classification pipeline runs as a background Finite State Machine:
 
 ```
-IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → CLASSIFYING → FUSING → EVALUATING → CONVERGED
-                                                                                        ↓
-                                                                                      IDLE
+ML-only path:
+IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → CLASSIFYING → FUSING → EVALUATING → CONVERGED → IDLE
+
+Bootstrap path:
+IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → LLM_SWEEP → VALIDATING ──┐
+                                                    ▲                     │
+                                                    └─── (disagreements) ─┘
+                                                          (converged) ────► CLASSIFYING → FUSING → EVALUATING → CONVERGED → IDLE
 ```
 
 State transitions are persisted to PostgreSQL. The Status page polls
@@ -89,15 +94,17 @@ State transitions are persisted to PostgreSQL. The Status page polls
 
 ```
 src/atelier/classify/
-├── __init__.py          # Public API: run_pipeline(), get_fsm_status()
+├── __init__.py          # Public API: run_pipeline(), run_bootstrap(), get_fsm_status()
 ├── belief.py            # DST core: BeliefAssignment, FocalElement, dempster_combine()
-├── mass_functions.py    # 5 evidence→mass converters (3 active, 2 stubs)
+├── mass_functions.py    # Evidence→mass converters (4 active + 2 stubs)
 ├── features.py          # 12 features + 8 pattern detectors
 ├── taxonomy.py          # ReferenceCategory, HierarchicalCategorySet
 ├── embedding.py         # Sentence-transformer cosine classifier
+├── llm_backend.py       # LLM backend abstraction (Anthropic, OpenAI-compatible)
+├── bootstrap.py         # Bootstrap convergence loop (LLM sweep + ML validation)
 ├── sampler.py           # Hive metadata sampling + mock fixtures
-├── synth.py             # Synthetic data generation (M1)
-├── pipeline.py          # End-to-end orchestration
+├── synth.py             # Synthetic data generation (future)
+├── pipeline.py          # Single-pass ML orchestration
 ├── fsm.py               # AgentFSM state machine
 └── fixtures/
     ├── mock_annotations.json  # 24-category mock vocabulary
@@ -140,7 +147,8 @@ Loaded from hive `default.annotations` (11 columns):
 ### REST Endpoints
 
 - `GET /api/fsm/status` — Current pipeline state + progress
-- `POST /api/fsm/start` — Start a classification run
+- `POST /api/fsm/start` — Start a single-pass ML classification run
+- `POST /api/fsm/start-bootstrap` — Start bootstrap convergence loop (LLM + ML)
 - `GET /api/fsm/runs` — List past runs
 
 ### gRPC RPCs
@@ -164,13 +172,82 @@ The pipeline wraps each column result in a `HierarchicalClassification` object
 Confidence is **pignistic probability** `BetP(singleton)`, the decision-theoretic
 transform that distributes multi-element focal set mass equally among members.
 
+## Bootstrap Convergence Loop
+
+The bootstrap pipeline wraps the single-pass ML pipeline in an iterative
+LLM↔ML convergence loop. It adds a 4th evidence source (LLM) and repeats
+until DST conflict K converges across all columns.
+
+### Three Phases
+
+1. **LLM Sweep** (`LLM_SWEEP`): Batch-classify all columns via the configured
+   LLM backend (GLM-4.7 on vLLM, Claude, or any OpenAI-compatible endpoint).
+   Columns are sent in table-aware batches with sibling context.
+
+2. **ML Validation** (`VALIDATING`): Run the existing 3-source ML pipeline
+   plus the new LLM mass function for each column. Compute per-column conflict
+   K from Dempster's rule. Identify disagreements where the LLM and ML top
+   predictions differ AND K exceeds the threshold.
+
+3. **Targeted Revisit** (back to `LLM_SWEEP`): Re-classify high-K columns
+   with enriched context — the ML prediction, belief interval, and conflict
+   score are included in the prompt. This gives the LLM a chance to reconsider
+   with evidence it didn't have in the first pass.
+
+### Convergence Criteria
+
+The loop terminates when:
+- `coverage >= 0.95` (95% of columns have a label) **AND**
+  `mean_k < 0.2` (average conflict is low), or
+- Budget exhausted (`max_iterations` or `max_total_llm_calls` reached)
+
+After convergence, the pipeline completes the standard path:
+CLASSIFYING → FUSING → EVALUATING → CONVERGED.
+
+### LLM Backend
+
+`llm_backend.py` provides a factory-pattern abstraction:
+
+- **`OpenAICompatibleBackend`**: For vLLM, GLM-4.7, and any endpoint
+  implementing the OpenAI chat completions API. Default backend.
+- **`AnthropicBackend`**: For Claude via the Anthropic SDK.
+- **`create_backend_from_cfg(cfg)`**: Factory that reads HOCON config
+  to select and configure the appropriate backend.
+
+Backends fail fast when not configured — no mock fallback in production code.
+
+### Configuration
+
+All bootstrap/LLM settings live in HOCON (`config/base.conf`):
+
+```hocon
+classify {
+    llm {
+        backend = "openai_compatible"  # or "anthropic"
+        model = "glm-4.7"
+        base_url = null                # vLLM endpoint URL
+        columns_per_call = 50
+        discount = 0.10                # DST discount for LLM mass
+    }
+    bootstrap {
+        max_iterations = 5
+        k_threshold = 0.2
+        coverage_target = 0.95
+        max_total_llm_calls = 5000
+    }
+}
+```
+
+Environment variable overrides follow the standard pattern:
+`ATELIER_LLM_MODEL`, `ATELIER_LLM_BASE_URL`, `ATELIER_BOOTSTRAP_K_THRESHOLD`, etc.
+
 ## Milestones
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
 | **M0** | Cosine + pattern + name match, FSM, pipeline E2E | Done |
 | **M0.5** | Schema fix, pignistic probability, HierarchicalClassification | Done |
-| M1 | CatBoost + SVM + LLM, synthetic data, 6 evidence sources | Planned |
-| M2 | Bootstrap convergence loop, LLM sweep ↔ ML validation | Planned |
+| **M1** | LLM evidence source, bootstrap convergence loop, LLM↔ML validation | Done |
+| M2 | CatBoost + SVM + synthetic data, 6 evidence sources | Planned |
 | M3 | SAGE importance, SHAP explanations, adaptive discounting | Planned |
 | M4 | Production scaling, async pipeline, Qdrant index | Planned |
