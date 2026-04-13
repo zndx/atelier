@@ -14,6 +14,7 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AgentInfo } from "../types/canvas";
+import { useDataset } from "../contexts/DatasetContext";
 
 const Terminal = lazy(() => import("../components/Terminal"));
 
@@ -27,17 +28,10 @@ interface StatusSummary {
   degraded?: boolean;
 }
 
-interface DatasetInfo {
-  id: string;
-  name: string;
-  description: string;
-  row_count: number;
-}
-
 function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
+  const { activeDatasetId, datasets } = useDataset();
 
   useEffect(() => {
     fetch("/api/status")
@@ -49,11 +43,6 @@ function Landing() {
       .then((r) => r.json())
       .then((data) => setAgents(data.agents || []))
       .catch(() => setAgents([]));
-
-    fetch("/api/datasets")
-      .then((r) => r.json())
-      .then((data) => setDatasets(data.datasets || []))
-      .catch(() => setDatasets([]));
   }, []);
 
   const skillCount = useMemo(
@@ -176,7 +165,7 @@ function Landing() {
           </Link>
         </Col>
         <Col xs={24} md={12} lg={8}>
-          <Link to="/embeddings">
+          <Link to={activeDatasetId ? `/embeddings/${activeDatasetId}` : "/embeddings"}>
             <Card
               title="Embeddings"
               extra={<DotChartOutlined />}

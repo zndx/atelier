@@ -2,6 +2,7 @@ import { ConfigProvider, Spin, theme } from "antd";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import Layout from "./components/Layout";
+import { DatasetProvider } from "./contexts/DatasetContext";
 import Landing from "./pages/Landing";
 
 const Agents = lazy(() => import("./pages/Agents"));
@@ -21,6 +22,7 @@ function App() {
         },
       }}
     >
+      <DatasetProvider>
       <BrowserRouter>
         <Routes>
           <Route
@@ -148,6 +150,7 @@ function App() {
           />
         </Routes>
       </BrowserRouter>
+      </DatasetProvider>
     </ConfigProvider>
   );
 }

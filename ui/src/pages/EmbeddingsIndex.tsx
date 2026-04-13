@@ -1,43 +1,12 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Card, Col, Empty, Row, Spin, Tag, Typography } from "antd";
+import { Card, Col, Empty, Row, Tag, Typography } from "antd";
 import { ArrowLeftOutlined, DotChartOutlined } from "@ant-design/icons";
+import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Paragraph } = Typography;
 
-interface DatasetInfo {
-  id: string;
-  name: string;
-  description: string;
-  row_count: number;
-}
-
 export default function EmbeddingsIndex() {
-  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/datasets")
-      .then((r) => r.json())
-      .then((data) => setDatasets(data.datasets || []))
-      .catch(() => setDatasets([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "calc(100vh - 128px)",
-        }}
-      >
-        <Spin size="large" />
-      </div>
-    );
-  }
+  const { datasets } = useDataset();
 
   return (
     <div>

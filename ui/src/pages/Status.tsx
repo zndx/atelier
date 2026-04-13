@@ -16,11 +16,13 @@ import {
 import {
   ArrowLeftOutlined,
   DatabaseOutlined,
+  EyeOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
+import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -126,6 +128,7 @@ function ClassificationPipelineCard() {
   const [fsm, setFsm] = useState<FSMStatus | null>(null);
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const { refreshDatasets } = useDataset();
 
   const fetchFSM = () => {
     setFsmLoading(true);
@@ -156,6 +159,13 @@ function ClassificationPipelineCard() {
   const state = fsm?.state ?? "IDLE";
   const isRunning = !["IDLE", "CONVERGED", "ERROR"].includes(state);
   const progress = fsm?.progress ?? {};
+
+  // Refresh datasets when pipeline converges so the new dataset appears
+  useEffect(() => {
+    if (state === "CONVERGED") {
+      refreshDatasets();
+    }
+  }, [state, refreshDatasets]);
 
   return (
     <Card
@@ -238,6 +248,46 @@ function ClassificationPipelineCard() {
           <Text code>{fsm.result_path}</Text>
         </div>
       )}
+    </Card>
+  );
+}
+
+function ActiveDatasetCard() {
+  const { activeDatasetId, setActiveDatasetId, datasets } = useDataset();
+
+  return (
+    <Card
+      title="Active Dataset"
+      extra={
+        <Space>
+          <Select
+            value={activeDatasetId ?? undefined}
+            onChange={(v) => setActiveDatasetId(v ?? null)}
+            style={{ minWidth: 240 }}
+            placeholder="No dataset selected"
+            options={datasets.map((d) => ({
+              label: `${d.name} (${d.row_count.toLocaleString()} rows)`,
+              value: d.id,
+            }))}
+            disabled={datasets.length === 0}
+            allowClear
+            size="small"
+          />
+          {activeDatasetId && (
+            <Link to={`/embeddings/${activeDatasetId}`}>
+              <Button icon={<EyeOutlined />} size="small">
+                View Embeddings
+              </Button>
+            </Link>
+          )}
+        </Space>
+      }
+    >
+      <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+        Select a classification result dataset for embedding visualization.
+        {datasets.length === 0 &&
+          " Run the classification pipeline to generate datasets."}
+      </Paragraph>
     </Card>
   );
 }
@@ -465,6 +515,13 @@ export default function Status() {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24}>
           <ClassificationPipelineCard />
+        </Col>
+      </Row>
+
+      {/* ── Active Dataset ───────────────────────── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <ActiveDatasetCard />
         </Col>
       </Row>
 
