@@ -269,9 +269,6 @@ def _build_category_set_from_records(
         row_id = str(row.get("id", "")).strip()
         if not row_id or not row_id[0].isdigit():
             continue
-        deprecated = str(row.get("deprecated", "")).strip().lower()
-        if deprecated == "yes":
-            continue
         if not _is_leaf(row_id):
             continue
 
@@ -334,9 +331,6 @@ def _build_category_set_from_records(
     for row in records:
         row_id = str(row.get("id", "")).strip()
         if not row_id or not row_id[0].isdigit():
-            continue
-        deprecated = str(row.get("deprecated", "")).strip().lower()
-        if deprecated == "yes":
             continue
         if _is_leaf(row_id):
             continue

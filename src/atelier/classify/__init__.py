@@ -20,6 +20,7 @@ from atelier.classify.fsm import AgentFSM, FSMRun, FSMState
 from atelier.classify.pipeline import run_classification_pipeline
 from atelier.classify.shap_explanations import run_shap_analysis
 from atelier.classify.synth import generate_synth_tables
+from atelier.classify.train_eval_cycle import run_real_data_eval
 
 # Module-level FSM singleton (initialized lazily by gateway/service)
 _fsm: AgentFSM | None = None

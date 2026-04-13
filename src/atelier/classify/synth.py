@@ -333,6 +333,42 @@ _GENERATORS: dict[str, Callable[[random.Random], str]] = {
 }
 
 
+# ── Template-based fallback generator ──────────────────────────
+
+
+def _make_template_generator(
+    templates: list[str],
+) -> Callable[[random.Random], str]:
+    """Create a generator that samples from real data value templates.
+
+    Applies mild perturbation to avoid verbatim copies: character-level
+    noise for strings, small numeric jitter for numbers.
+    """
+    def _gen(rng: random.Random) -> str:
+        base = rng.choice(templates)
+        # Try numeric perturbation first
+        try:
+            val = float(base.replace(",", ""))
+            jitter = val * rng.uniform(-0.1, 0.1)
+            result = val + jitter
+            if "." not in base and "e" not in base.lower():
+                return str(int(result))
+            return f"{result:.2f}"
+        except (ValueError, OverflowError):
+            pass
+        # String perturbation: swap a random character ~30% of the time
+        if len(base) > 3 and rng.random() < 0.3:
+            chars = list(base)
+            idx = rng.randint(0, len(chars) - 1)
+            if chars[idx].isalpha():
+                chars[idx] = rng.choice(string.ascii_letters)
+            elif chars[idx].isdigit():
+                chars[idx] = str(rng.randint(0, 9))
+            return "".join(chars)
+        return base
+    return _gen
+
+
 # ── Public API ──────────────────────────────────────────────────
 
 
@@ -340,6 +376,7 @@ def generate_synth_tables(
     category_set,
     output_dir: str | Path,
     *,
+    value_templates: dict[str, list[str]] | None = None,
     tables_per_category: int = 2,
     columns_per_table: int = 50,
     rows_per_table: int = 100,
@@ -354,6 +391,9 @@ def generate_synth_tables(
     Args:
         category_set: HierarchicalCategorySet with leaf categories.
         output_dir: Directory to write CSV + ground_truth.json.
+        value_templates: Optional {code: [values...]} for template-based generators.
+            When provided, categories without hand-coded generators use template
+            sampling with mild perturbation.
         tables_per_category: Ignored (kept for API compat). Use variants_per_category.
         columns_per_table: Max columns per CSV file.
         rows_per_table: Rows per column.
@@ -368,18 +408,32 @@ def generate_synth_tables(
 
     rng = random.Random(seed)
 
+    # Build merged generator registry: hand-coded + template fallbacks
+    generators = dict(_GENERATORS)
+    template_count = 0
+    if value_templates:
+        for code, values in value_templates.items():
+            if code not in generators and len(values) >= 3:
+                generators[code] = _make_template_generator(values)
+                template_count += 1
+        if template_count:
+            logger.info(
+                "Added %d template generators (%d hand-coded + %d template = %d total)",
+                template_count, len(_GENERATORS), template_count, len(generators),
+            )
+
     # Collect leaf categories that have generators
     leaf_specs: list[dict] = []
     for cat in category_set.categories:
         code = cat.code
-        if code not in _GENERATORS:
+        if code not in generators:
             continue
         leaf_specs.append({
             "code": code,
             "label": cat.label,
             "abbrev": getattr(cat, "abbrev", "") or "",
             "common_names": getattr(cat, "common_names", "") or "",
-            "generator": _GENERATORS[code],
+            "generator": generators[code],
         })
 
     if not leaf_specs:

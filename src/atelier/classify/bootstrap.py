@@ -148,6 +148,8 @@ def run_bootstrap_pipeline(
     tables_limit: int = 100,
     use_mock: bool = False,
     llm_backend: LLMBackend | None = None,
+    samples: list[TableSample] | None = None,
+    category_set_override: HierarchicalCategorySet | None = None,
 ) -> dict[str, Any]:
     """Run the bootstrap convergence pipeline.
 
@@ -159,6 +161,8 @@ def run_bootstrap_pipeline(
         fsm: AgentFSM for state tracking.
         llm_backend: LLM backend (injected for testing; created from config if None).
         use_mock: Force mock data for devenv/CI.
+        samples: Pre-loaded TableSamples (skip discover/sample phases).
+        category_set_override: Pre-loaded vocabulary (skip vocab loading).
     """
     run = fsm.start_run(config={
         "connection_name": connection_name,
@@ -177,7 +181,10 @@ def run_bootstrap_pipeline(
     try:
         # ── LOADING_VOCAB ────────────────────────────────────────
         fsm.advance(run_id, FSMState.LOADING_VOCAB, progress={"step": "loading_vocab"})
-        category_set = _load_vocabulary(cfg, build_dir, connection_name, use_mock)
+        if category_set_override is not None:
+            category_set = category_set_override
+        else:
+            category_set = _load_vocabulary(cfg, build_dir, connection_name, use_mock)
         logger.info("Loaded %d leaf categories", len(category_set.categories))
 
         if not isinstance(category_set, HierarchicalCategorySet):
@@ -188,24 +195,30 @@ def run_bootstrap_pipeline(
             "categories_loaded": len(category_set.categories),
         })
 
-        # ── DISCOVERING ──────────────────────────────────────────
-        if use_mock:
-            table_names = [t.name for t in load_all_mock_samples()]
+        # ── DISCOVERING + SAMPLING ────────────────────────────────
+        if samples is not None:
+            all_samples = samples
+            fsm.advance(run_id, FSMState.SAMPLING, progress={
+                "tables_discovered": len(all_samples),
+                "injected": True,
+            })
+        elif use_mock:
+            all_samples = load_all_mock_samples()
+            fsm.advance(run_id, FSMState.SAMPLING, progress={
+                "tables_discovered": len(all_samples),
+                "mock": True,
+            })
         else:
             table_names = discover_tables(
                 cfg, connection_name, database, limit=tables_limit
             )
-        logger.info("Discovered %d tables", len(table_names))
+            logger.info("Discovered %d tables", len(table_names))
 
-        fsm.advance(run_id, FSMState.SAMPLING, progress={
-            "tables_discovered": len(table_names),
-        })
+            fsm.advance(run_id, FSMState.SAMPLING, progress={
+                "tables_discovered": len(table_names),
+            })
 
-        # ── SAMPLING ─────────────────────────────────────────────
-        all_samples: list[TableSample] = []
-        if use_mock:
-            all_samples = load_all_mock_samples()
-        else:
+            all_samples: list[TableSample] = []
             for tname in table_names:
                 try:
                     ts = sample_table_metadata(
