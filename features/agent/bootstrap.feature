@@ -24,17 +24,20 @@ Feature: LLM bootstrap convergence loop
     When I compute llm_to_mass for code "99.99.99" with confidence 0.9
     Then the LLM mass should be vacuous
 
+  @slow
   Scenario: Bootstrap convergence loop reaches convergence with mock LLM
     When I run the bootstrap pipeline with mock data and mock LLM
     Then the bootstrap pipeline should reach CONVERGED state
     And the bootstrap result should report total LLM calls greater than 0
 
+  @slow
   Scenario: Bootstrap converges with realistic LLM disagreement
     When I run the bootstrap pipeline with mock data and realistic mock LLM
     Then the bootstrap pipeline should reach CONVERGED state
     And the bootstrap should have iterated more than 0 times
     And the final accuracy should exceed 0.40
 
+  @slow
   Scenario: Revisit phase reduces disagreements
     When I run the bootstrap pipeline with mock data and realistic mock LLM
     Then the bootstrap pipeline should reach CONVERGED state

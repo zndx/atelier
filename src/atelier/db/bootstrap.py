@@ -30,7 +30,7 @@ def run_migrations(db_url: str, migrations_dir: str = "db/migrations") -> None:
     """
     from sqlalchemy import create_engine, text
 
-    engine = create_engine(db_url)
+    engine = create_engine(db_url, connect_args={"connect_timeout": 10})
     migrations_path = Path(migrations_dir)
 
     if not migrations_path.exists():

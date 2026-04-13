@@ -15,6 +15,7 @@ Feature: Real data classification baseline
     When I generate template-based synthetic training data
     Then at least 150 categories should have synthetic columns
 
+  @slow
   Scenario: ML-only classification baseline on real data
     When I run the real data ML train-eval cycle
     Then at least 200 columns should be classified

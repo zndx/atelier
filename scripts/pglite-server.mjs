@@ -33,8 +33,14 @@ await db.exec('CREATE EXTENSION IF NOT EXISTS vector;')
 console.log(`[pglite] pgvector extension ready`)
 
 const server = new PGLiteSocketServer({ db, port: PORT, host: '127.0.0.1' })
-await server.start()
-console.log(`PGlite listening on 127.0.0.1:${PORT}, data at ${DATA_DIR}`)
+// Don't await — use .catch() so startup errors crash loudly instead of
+// being swallowed by the Promise (upstream issue #964).
+server.start()
+  .then(() => console.log(`PGlite listening on 127.0.0.1:${PORT}, data at ${DATA_DIR}`))
+  .catch(err => {
+    console.error('[pglite] FATAL: server.start() failed:', err)
+    process.exit(1)
+  })
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {

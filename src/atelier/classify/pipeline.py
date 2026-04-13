@@ -219,6 +219,21 @@ def run_classification_pipeline(
         # Write parquet if pyarrow available
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
+        # Auto-register as a dataset so the Embeddings page is populated
+        if parquet_path:
+            try:
+                from atelier.db.dao import AtelierDao
+                dao = AtelierDao()
+                dao.upsert_dataset(
+                    dataset_id=run_id,
+                    name=f"Classification {run_id[:8]}",
+                    parquet_path=str(parquet_path),
+                    description="ML classification pipeline results",
+                    row_count=len(classifications),
+                )
+            except Exception as e:
+                logger.warning("Failed to register dataset: %s", e)
+
         fsm.advance(run_id, FSMState.CONVERGED, progress={
             **summary,
             "result_path": str(results_path),

@@ -111,9 +111,13 @@ proto:
 test:
     uv run pytest
 
-# Run BDD scenarios (tier-0 only by default)
+# Run BDD scenarios (tier-0, fast only — excludes @slow ML training tests)
 bdd *ARGS:
-    ATELIER_BDD_TIER=0 uv run behave features/ {{ARGS}}
+    ATELIER_BDD_TIER=0 uv run behave features/ --tags="@tier-0" --tags="~@slow" {{ARGS}}
+
+# Run BDD including slow ML training tests (tier-0 only)
+bdd-slow *ARGS:
+    ATELIER_BDD_TIER=0 uv run behave features/ --tags="@tier-0" {{ARGS}}
 
 # Run BDD with full stack (tier-0 + tier-1, requires devenv services)
 bdd-full *ARGS:

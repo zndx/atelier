@@ -39,6 +39,7 @@ Feature: Dempster-Shafer classification pipeline
     Then the name match mass function should not be vacuous
     And the top singleton should be "1.1.1.1"
 
+  @slow
   Scenario: Pipeline end-to-end with mock data produces results
     When I run the classification pipeline with mock data
     Then the pipeline should reach CONVERGED state
@@ -74,6 +75,7 @@ Feature: Dempster-Shafer classification pipeline
     And category "1.1.3.1" label should be "Payment Card Number"
     And category "1.1.3.1" abbrev should be "PAN"
 
+  @slow
   Scenario: Structured evaluation produces per-category metrics
     When I run the classification pipeline with mock data
     Then the pipeline should reach CONVERGED state
@@ -86,6 +88,7 @@ Feature: Dempster-Shafer classification pipeline
     When I attempt to advance to "FUSING"
     Then the transition should be rejected with an error
 
+  @slow
   Scenario: Configurable discounts affect classification confidence
     Given custom discount factors with cosine 0.5 and svm 0.4
     When I run the classification pipeline with custom discounts

@@ -6,6 +6,7 @@ Feature: SHAP per-item explanations
   Background:
     Given the mock annotations vocabulary is loaded
 
+  @slow
   Scenario: CatBoost TreeSHAP produces per-item explanations
     When I run the synth-train-eval cycle with SHAP enabled
     Then each classification should have shap_top1_name and shap_top1_value

@@ -12,6 +12,16 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+# Default engine settings for PGlite resilience. Callers can override
+# individual keys via engine_args (e.g. tests may set pool_size=1).
+_DEFAULT_ENGINE_ARGS = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+    "pool_size": 3,
+    "max_overflow": 2,
+    "connect_args": {"connect_timeout": 10},
+}
+
 
 class AtelierDao:
     """Database access for Atelier application state."""
@@ -26,9 +36,8 @@ class AtelierDao:
             from atelier.config import load_config
             engine_url = load_config().db_url
 
-        self.engine = create_engine(
-            engine_url, echo=echo, **(engine_args or {}),
-        )
+        merged = {**_DEFAULT_ENGINE_ARGS, **(engine_args or {})}
+        self.engine = create_engine(engine_url, echo=echo, **merged)
         self.Session = sessionmaker(
             bind=self.engine, autoflush=True, autocommit=False,
         )
