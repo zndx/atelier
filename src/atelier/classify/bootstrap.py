@@ -43,6 +43,7 @@ from atelier.classify.llm_backend import (
     create_backend_from_cfg,
 )
 from atelier.classify.mass_functions import (
+    DiscountConfig,
     catboost_to_mass,
     cosine_to_mass,
     llm_to_mass,
@@ -238,6 +239,15 @@ def run_bootstrap_pipeline(
         category_table = build_category_table(category_set)
         system_prompt = build_system_prompt(category_table)
 
+        # Wire config → ml_inference model paths
+        from atelier.classify import ml_inference
+        ml_inference.configure_paths(
+            catboost_path=cfg.classify_catboost_model_path,
+            svm_path=cfg.classify_svm_model_path,
+        )
+
+        discounts = DiscountConfig.from_cfg(cfg)
+
         # Try sentence-transformers for cosine
         has_embeddings = False
         try:
@@ -275,7 +285,7 @@ def run_bootstrap_pipeline(
 
         _run_ml_validation(
             state, boot_cfg, column_names, samples_by_name,
-            category_set, frame, has_embeddings,
+            category_set, frame, has_embeddings, discounts=discounts,
         )
 
         disagreements = _identify_disagreements(state, column_names, boot_cfg)
@@ -331,7 +341,7 @@ def run_bootstrap_pipeline(
 
             _run_ml_validation(
                 state, boot_cfg, column_names, samples_by_name,
-                category_set, frame, has_embeddings,
+                category_set, frame, has_embeddings, discounts=discounts,
             )
 
             disagreements = _identify_disagreements(state, column_names, boot_cfg)
@@ -375,6 +385,7 @@ def run_bootstrap_pipeline(
                 llm_confidence=llm_conf,
                 llm_discount=boot_cfg.llm_discount,
                 use_cosine=has_embeddings,
+                discounts=discounts,
             )
             classifications.append(result)
 
@@ -489,6 +500,7 @@ def _run_ml_validation(
     category_set: HierarchicalCategorySet,
     frame: FrameOfDiscernment,
     has_embeddings: bool,
+    discounts: DiscountConfig | None = None,
 ) -> None:
     """Phase 2: Run ML classification on all columns, compute K."""
     for name in column_names:
@@ -502,6 +514,7 @@ def _run_ml_validation(
             llm_confidence=llm_conf,
             llm_discount=cfg.llm_discount,
             use_cosine=has_embeddings,
+            discounts=discounts,
         )
 
         if result["predicted_code"]:
@@ -630,12 +643,16 @@ def _classify_column_with_llm(
     llm_alternatives: list[dict] | None = None,
     llm_discount: float = 0.10,
     use_cosine: bool = True,
+    discounts: DiscountConfig | None = None,
 ) -> dict[str, Any]:
     """Classify a column using ML sources + optional LLM evidence.
 
     Extends pipeline._classify_column() by adding llm_to_mass()
     to the source_masses dict before fusion.
     """
+    if discounts is None:
+        discounts = DiscountConfig()
+
     features = extract_features(
         column_name=col.name,
         column_type=col.column_type,
@@ -649,12 +666,21 @@ def _classify_column_with_llm(
     source_masses: dict[str, Any] = {}
 
     # 1. Name matching
-    name_mass = name_match_to_mass(col.name, frame, category_set)
+    name_mass = name_match_to_mass(
+        col.name, frame, category_set,
+        exact_mass=discounts.name_match_exact,
+        code_mass=discounts.name_match_code,
+        alias_mass=discounts.name_match_alias,
+        overlap_mass=discounts.name_match_overlap,
+    )
     if not _is_vacuous(name_mass):
         source_masses["name_match"] = name_mass
 
     # 2. Pattern detection
-    pattern_mass = pattern_to_mass(features.pattern_signals, frame)
+    pattern_mass = pattern_to_mass(
+        features.pattern_signals, frame,
+        theta_mass=discounts.pattern_theta,
+    )
     if not _is_vacuous(pattern_mass):
         source_masses["pattern"] = pattern_mass
 
@@ -663,7 +689,9 @@ def _classify_column_with_llm(
         try:
             from atelier.classify.embedding import classify_cosine as _cosine
             similarities = _cosine(features, category_set)
-            cosine_mass = cosine_to_mass(similarities, frame)
+            cosine_mass = cosine_to_mass(
+                similarities, frame, discount=discounts.cosine,
+            )
             source_masses["cosine"] = cosine_mass
         except Exception:
             pass
@@ -684,7 +712,13 @@ def _classify_column_with_llm(
         cb_result = predict_catboost(features, category_set)
         if cb_result:
             proba, variance = cb_result
-            cb_mass = catboost_to_mass(proba, frame, variance)
+            cb_mass = catboost_to_mass(
+                proba, frame, variance,
+                base_discount=discounts.catboost_base,
+                variance_scale=discounts.catboost_variance_scale,
+                max_discount=discounts.catboost_max,
+                fallback_discount=discounts.catboost_fallback,
+            )
             if not _is_vacuous(cb_mass):
                 source_masses["catboost"] = cb_mass
     except Exception:
@@ -695,7 +729,7 @@ def _classify_column_with_llm(
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
         if svm_proba:
-            svm_mass = svm_to_mass(svm_proba, frame)
+            svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
     except Exception:

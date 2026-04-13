@@ -29,14 +29,14 @@ supports A but much remains uncertain — a signal to gather more evidence.
 Each source independently produces a **mass function** (Basic Probability
 Assignment) that distributes belief across the frame of discernment:
 
-| Source | Type | Discount | Status |
-|--------|------|----------|--------|
-| Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | M0 |
-| Pattern detection | 8 regex detectors | 0.10 | M0 |
-| Name matching | Column name ↔ label/abbrev/common_names | varies | M0 |
-| LLM | OpenAI-compatible / Anthropic / Bedrock / Cerebras | 0.10 | M1 |
-| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | M2 |
-| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | M2 |
+| Source | Type | Discount | Configurable | Status |
+|--------|------|----------|--------------|--------|
+| Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | `classify.discounts.cosine` | M0 |
+| Pattern detection | 8 regex detectors | 0.10 | `classify.discounts.pattern_theta` | M0 |
+| Name matching | Column name ↔ label/abbrev/common_names | varies | `classify.discounts.name_match_*` | M0 |
+| LLM | OpenAI-compatible / Anthropic / Bedrock / Cerebras | 0.10 | `classify.llm.discount` | M1 |
+| CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | `classify.discounts.catboost_*` | M2 |
+| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | `classify.discounts.svm` | M2 |
 
 The **discount** controls how much mass goes to Θ (total ignorance). Higher
 discount = more conservative = wider belief intervals.
@@ -112,6 +112,7 @@ src/atelier/classify/
 ├── train_eval_cycle.py  # Synth → train → classify → evaluate orchestrator
 ├── mock_llm.py          # Realistic mock LLM (confusable pairs, seeded mistakes)
 ├── sage.py              # SAGE feature importance (permutation-based)
+├── shap_explanations.py # Per-item SHAP feature attribution (TreeSHAP + PermutationSHAP)
 ├── pipeline.py          # Single-pass ML orchestration (6 evidence sources)
 ├── fsm.py               # AgentFSM state machine
 └── fixtures/
@@ -131,9 +132,9 @@ build/
 ├── data/synth/          # Synthetic training data
 ├── models/              # Trained CatBoost + SVM models, embedding caches
 └── results/{run_id}/
-    ├── classifications.json           # Per-column DST results
+    ├── classifications.json           # Per-column DST results (+ SHAP columns when enabled)
     ├── evaluation_report.json         # Per-category P/R/F1, confusion matrix
-    └── atelier_embeddings.parquet     # For embedding-atlas
+    └── atelier_embeddings.parquet     # For embedding-atlas (+ shap_top{1,2,3}_{name,value})
 ```
 
 ### Controlled Vocabulary
@@ -254,6 +255,64 @@ classify {
 Environment variable overrides follow the standard pattern:
 `ATELIER_LLM_MODEL`, `ATELIER_LLM_BASE_URL`, `ATELIER_BOOTSTRAP_K_THRESHOLD`, etc.
 
+## SHAP Explanations
+
+Per-item feature attribution explaining **why** each column was classified as
+it was. Complements the global SAGE importance (which ranks features across
+the entire dataset) with item-level explanations.
+
+### Two Methods
+
+| Method | Algorithm | Speed | Features | When Used |
+|--------|-----------|-------|----------|-----------|
+| CatBoost TreeSHAP | Exact O(TLD) built-in | ~0.1s for 50 items | Grouped: embedding, discrete | Auto when CatBoost model loaded |
+| Embedding PermutationSHAP | `shap.PermutationExplainer` | ~50s/item on CPU | 12 named features | Tier-1, explicit request only |
+
+**Auto mode** (`method="auto"`) only uses TreeSHAP — PermutationSHAP is too
+slow for default pipeline runs and must be explicitly requested.
+
+### Output
+
+Each classification gains 6 extra columns:
+- `shap_top1_name`, `shap_top1_value`
+- `shap_top2_name`, `shap_top2_value`
+- `shap_top3_name`, `shap_top3_value`
+
+These flow through to JSON, parquet, and evaluation output.
+
+### Configuration
+
+```hocon
+classify.shap {
+    enabled = true        # Enable SHAP in pipeline (auto-selects method)
+    top_k = 3             # Number of top features to report per item
+}
+```
+
+## Configurable Discounts
+
+All DST discount factors are configurable via HOCON. The `DiscountConfig`
+dataclass bundles all parameters with `DiscountConfig.from_cfg(cfg)` factory:
+
+```hocon
+classify.discounts {
+    cosine = 0.30                    # Cosine similarity → Theta mass
+    svm = 0.20                       # SVM → Theta mass
+    pattern_theta = 0.10             # Pattern detection → Theta mass
+    name_match_exact = 0.70          # Exact label match singleton mass
+    name_match_code = 0.50           # Formal code/abbrev match mass
+    name_match_alias = 0.50          # Common name alias match mass
+    name_match_overlap = 0.30        # Word overlap match mass
+    catboost_base = 0.10             # Adaptive discount base
+    catboost_variance_scale = 1.6    # Variance-to-discount scaling
+    catboost_max = 0.50              # Cap on adaptive discount
+    catboost_fallback = 0.15         # When no variance available
+    confusable_ratio_threshold = 3.0 # CatBoost confusable pair threshold
+}
+```
+
+Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM`, etc.
+
 ## Milestones
 
 | Milestone | Scope | Status |
@@ -263,4 +322,5 @@ Environment variable overrides follow the standard pattern:
 | **M1** | LLM evidence source, bootstrap convergence loop, LLM↔ML validation | Done |
 | **M2** | CatBoost + SVM + synthetic data, 6 evidence sources, Bedrock/Cerebras backends | Done |
 | **M3** | Evaluation framework, E2E synth-train-eval, realistic mock LLM, SAGE importance | Done |
-| M4 | SHAP explanations, adaptive discounting, production scaling | Planned |
+| **M4** | SHAP explanations, configurable discounts, thread-safe model loading | Done |
+| M5 | Production deployment on real hive data, CAI integration | Planned |

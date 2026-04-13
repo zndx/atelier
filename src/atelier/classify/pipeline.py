@@ -21,6 +21,7 @@ from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
 from atelier.classify.mass_functions import (
+    DiscountConfig,
     catboost_to_mass,
     cosine_to_mass,
     name_match_to_mass,
@@ -143,18 +144,53 @@ def run_classification_pipeline(
         except ImportError:
             logger.warning("sentence-transformers not available; using name+pattern only")
 
+        # Wire config → ml_inference model paths
+        from atelier.classify import ml_inference
+        ml_inference.configure_paths(
+            catboost_path=cfg.classify_catboost_model_path,
+            svm_path=cfg.classify_svm_model_path,
+        )
+
+        discounts = DiscountConfig.from_cfg(cfg)
+
         classifications: list[dict[str, Any]] = []
         for ts in all_samples:
             for col in ts.columns:
                 result = _classify_column(
                     col, category_set, frame,
                     use_cosine=has_embeddings,
+                    discounts=discounts,
                 )
                 classifications.append(result)
 
         fsm.advance(run_id, FSMState.FUSING, progress={
             "columns_classified": len(classifications),
         })
+
+        # ── SHAP explanations (optional, config-driven) ──────────
+        if cfg.classify_shap_enabled:
+            try:
+                from atelier.classify.shap_explanations import run_shap_analysis
+                shap_features = [
+                    extract_features(
+                        column_name=col.name,
+                        column_type=col.column_type,
+                        values=col.values,
+                        siblings=col.siblings,
+                        source_table=col.table_name,
+                        total_count=col.total_count,
+                        null_count=col.null_count,
+                    )
+                    for ts in all_samples for col in ts.columns
+                ]
+                shap_result = run_shap_analysis(shap_features, category_set)
+                if shap_result:
+                    shap_records = shap_result.to_records(k=cfg.classify_shap_top_k)
+                    for cls_dict, shap_row in zip(classifications, shap_records):
+                        cls_dict.update(shap_row)
+                    logger.info("SHAP: %s method, %d items", shap_result.method, shap_result.n_items)
+            except Exception as e:
+                logger.warning("SHAP analysis failed: %s", e)
 
         # ── EVALUATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.EVALUATING, progress={
@@ -232,12 +268,16 @@ def _classify_column(
     frame: FrameOfDiscernment,
     *,
     use_cosine: bool = True,
+    discounts: DiscountConfig | None = None,
 ) -> dict[str, Any]:
     """Classify a single column using available evidence sources.
 
     Uses HierarchicalClassification.from_combined_evidence() for proper
     pignistic probability ranking and belief interval computation.
     """
+    if discounts is None:
+        discounts = DiscountConfig()
+
     features = extract_features(
         column_name=col.name,
         column_type=col.column_type,
@@ -252,12 +292,21 @@ def _classify_column(
     source_masses: dict[str, Any] = {}
 
     # 1. Name matching
-    name_mass = name_match_to_mass(col.name, frame, category_set)
+    name_mass = name_match_to_mass(
+        col.name, frame, category_set,
+        exact_mass=discounts.name_match_exact,
+        code_mass=discounts.name_match_code,
+        alias_mass=discounts.name_match_alias,
+        overlap_mass=discounts.name_match_overlap,
+    )
     if not _is_vacuous(name_mass):
         source_masses["name_match"] = name_mass
 
     # 2. Pattern detection
-    pattern_mass = pattern_to_mass(features.pattern_signals, frame)
+    pattern_mass = pattern_to_mass(
+        features.pattern_signals, frame,
+        theta_mass=discounts.pattern_theta,
+    )
     if not _is_vacuous(pattern_mass):
         source_masses["pattern"] = pattern_mass
 
@@ -266,7 +315,9 @@ def _classify_column(
         try:
             from atelier.classify.embedding import classify_cosine as _cosine
             similarities = _cosine(features, category_set)
-            cosine_mass = cosine_to_mass(similarities, frame)
+            cosine_mass = cosine_to_mass(
+                similarities, frame, discount=discounts.cosine,
+            )
             source_masses["cosine"] = cosine_mass
         except Exception:
             pass
@@ -277,7 +328,13 @@ def _classify_column(
         cb_result = predict_catboost(features, category_set)
         if cb_result:
             proba, variance = cb_result
-            cb_mass = catboost_to_mass(proba, frame, variance)
+            cb_mass = catboost_to_mass(
+                proba, frame, variance,
+                base_discount=discounts.catboost_base,
+                variance_scale=discounts.catboost_variance_scale,
+                max_discount=discounts.catboost_max,
+                fallback_discount=discounts.catboost_fallback,
+            )
             if not _is_vacuous(cb_mass):
                 source_masses["catboost"] = cb_mass
     except Exception:
@@ -288,7 +345,7 @@ def _classify_column(
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
         if svm_proba:
-            svm_mass = svm_to_mass(svm_proba, frame)
+            svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
     except Exception:
@@ -409,7 +466,7 @@ def _write_parquet(
 
     rows = []
     for c in classifications:
-        rows.append({
+        row = {
             "table_name": c["table_name"],
             "column_name": c["column_name"],
             "column_type": c["column_type"] or "",
@@ -425,7 +482,12 @@ def _write_parquet(
             "ground_truth": c["ground_truth"] or "",
             "is_correct": c["is_correct"] if c["is_correct"] is not None else False,
             "pattern_signals": ", ".join(c.get("pattern_signals", [])),
-        })
+        }
+        # SHAP columns (present when SHAP analysis ran)
+        for rank in range(1, 4):
+            row[f"shap_top{rank}_name"] = c.get(f"shap_top{rank}_name", "")
+            row[f"shap_top{rank}_value"] = c.get(f"shap_top{rank}_value", 0.0)
+        rows.append(row)
 
     if not rows:
         return None

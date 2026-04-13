@@ -85,3 +85,9 @@ Feature: Dempster-Shafer classification pipeline
     Given a fresh AgentFSM in "IDLE" state
     When I attempt to advance to "FUSING"
     Then the transition should be rejected with an error
+
+  Scenario: Configurable discounts affect classification confidence
+    Given custom discount factors with cosine 0.5 and svm 0.4
+    When I run the classification pipeline with custom discounts
+    Then the pipeline should reach CONVERGED state
+    And the average confidence should differ from default discounts

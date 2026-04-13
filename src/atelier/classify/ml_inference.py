@@ -7,6 +7,7 @@ are not present, predict functions return None (graceful degradation).
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -17,13 +18,14 @@ _svm = None
 _svm_loaded = False
 _catboost_path: Path | None = None
 _svm_path: Path | None = None
+_lock = threading.Lock()
 
 
 def configure_paths(
     catboost_path: str | Path | None = None,
     svm_path: str | Path | None = None,
 ) -> None:
-    """Override default model file locations (for testing).
+    """Override default model file locations.
 
     Call ``reset()`` first if models are already loaded.
     """
@@ -33,45 +35,53 @@ def configure_paths(
 
 
 def get_catboost(model_path: str | Path | None = None):
-    """Lazy-load CatBoost model. Returns None if not available."""
+    """Lazy-load CatBoost model (thread-safe). Returns None if not available."""
     global _catboost, _catboost_loaded
     if _catboost_loaded:
         return _catboost
 
-    _catboost_loaded = True
-    path = Path(model_path) if model_path else (_catboost_path or Path("build/models/catboost.cbm"))
-    if not path.exists():
-        logger.debug("CatBoost model not found at %s, skipping", path)
-        return None
+    with _lock:
+        if _catboost_loaded:
+            return _catboost
 
-    try:
-        from atelier.classify.catboost_classifier import CatBoostColumnClassifier
-        _catboost = CatBoostColumnClassifier.load(path)
-        return _catboost
-    except Exception as e:
-        logger.warning("Failed to load CatBoost model: %s", e)
-        return None
+        _catboost_loaded = True
+        path = Path(model_path) if model_path else (_catboost_path or Path("build/models/catboost.cbm"))
+        if not path.exists():
+            logger.debug("CatBoost model not found at %s, skipping", path)
+            return None
+
+        try:
+            from atelier.classify.catboost_classifier import CatBoostColumnClassifier
+            _catboost = CatBoostColumnClassifier.load(path)
+            return _catboost
+        except Exception as e:
+            logger.warning("Failed to load CatBoost model: %s", e)
+            return None
 
 
 def get_svm(model_path: str | Path | None = None):
-    """Lazy-load SVM model. Returns None if not available."""
+    """Lazy-load SVM model (thread-safe). Returns None if not available."""
     global _svm, _svm_loaded
     if _svm_loaded:
         return _svm
 
-    _svm_loaded = True
-    path = Path(model_path) if model_path else (_svm_path or Path("build/models/svm.pkl"))
-    if not path.exists():
-        logger.debug("SVM model not found at %s, skipping", path)
-        return None
+    with _lock:
+        if _svm_loaded:
+            return _svm
 
-    try:
-        from atelier.classify.svm_classifier import SVMClassifier
-        _svm = SVMClassifier.load(path)
-        return _svm
-    except Exception as e:
-        logger.warning("Failed to load SVM model: %s", e)
-        return None
+        _svm_loaded = True
+        path = Path(model_path) if model_path else (_svm_path or Path("build/models/svm.pkl"))
+        if not path.exists():
+            logger.debug("SVM model not found at %s, skipping", path)
+            return None
+
+        try:
+            from atelier.classify.svm_classifier import SVMClassifier
+            _svm = SVMClassifier.load(path)
+            return _svm
+        except Exception as e:
+            logger.warning("Failed to load SVM model: %s", e)
+            return None
 
 
 def predict_catboost(features, category_set) -> tuple[dict[str, float], dict[str, float]] | None:
@@ -132,9 +142,10 @@ def predict_svm(features) -> dict[str, float] | None:
 def reset():
     """Reset cached models and configured paths (useful for testing)."""
     global _catboost, _catboost_loaded, _svm, _svm_loaded, _catboost_path, _svm_path
-    _catboost = None
-    _catboost_loaded = False
-    _svm = None
-    _svm_loaded = False
-    _catboost_path = None
-    _svm_path = None
+    with _lock:
+        _catboost = None
+        _catboost_loaded = False
+        _svm = None
+        _svm_loaded = False
+        _catboost_path = None
+        _svm_path = None

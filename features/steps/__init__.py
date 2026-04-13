@@ -19,4 +19,5 @@ from features.agent.step_defs.synth_steps import *  # noqa: F401,F403
 from features.agent.step_defs.ml_steps import *  # noqa: F401,F403
 from features.agent.step_defs.ml_e2e_steps import *  # noqa: F401,F403
 from features.agent.step_defs.sage_steps import *  # noqa: F401,F403
+from features.agent.step_defs.shap_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_steps import *  # noqa: F401,F403

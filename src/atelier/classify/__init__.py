@@ -18,6 +18,7 @@ from atelier.classify.bootstrap import run_bootstrap_pipeline
 from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.fsm import AgentFSM, FSMRun, FSMState
 from atelier.classify.pipeline import run_classification_pipeline
+from atelier.classify.shap_explanations import run_shap_analysis
 from atelier.classify.synth import generate_synth_tables
 
 # Module-level FSM singleton (initialized lazily by gateway/service)

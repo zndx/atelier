@@ -11,8 +11,49 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 
 from atelier.classify.belief import BeliefAssignment, FocalElement, FrameOfDiscernment
+
+
+@dataclass(frozen=True)
+class DiscountConfig:
+    """DST discount factors loaded from HOCON config.
+
+    Each value controls how much evidence mass the corresponding source
+    allocates to Theta (total ignorance).  Higher = more conservative.
+    """
+
+    cosine: float = 0.30
+    svm: float = 0.20
+    pattern_theta: float = 0.10
+    name_match_exact: float = 0.70
+    name_match_code: float = 0.50
+    name_match_alias: float = 0.50
+    name_match_overlap: float = 0.30
+    catboost_base: float = 0.10
+    catboost_variance_scale: float = 1.6
+    catboost_max: float = 0.50
+    catboost_fallback: float = 0.15
+    confusable_ratio_threshold: float = 3.0
+
+    @classmethod
+    def from_cfg(cls, cfg) -> DiscountConfig:
+        """Build from an AtelierConfig (reads classify_discount_* fields)."""
+        return cls(
+            cosine=cfg.classify_discount_cosine,
+            svm=cfg.classify_discount_svm,
+            pattern_theta=cfg.classify_discount_pattern_theta,
+            name_match_exact=cfg.classify_discount_name_match_exact,
+            name_match_code=cfg.classify_discount_name_match_code,
+            name_match_alias=cfg.classify_discount_name_match_alias,
+            name_match_overlap=cfg.classify_discount_name_match_overlap,
+            catboost_base=cfg.classify_discount_catboost_base,
+            catboost_variance_scale=cfg.classify_discount_catboost_variance_scale,
+            catboost_max=cfg.classify_discount_catboost_max,
+            catboost_fallback=cfg.classify_discount_catboost_fallback,
+            confusable_ratio_threshold=cfg.classify_discount_confusable_ratio_threshold,
+        )
 
 
 def _camel_to_words(name: str) -> str:
@@ -121,11 +162,16 @@ def pattern_to_mass(
     pattern_signals: list[str],
     frame: FrameOfDiscernment,
     pattern_category_map: dict[str, str] | None = None,
+    *,
+    theta_mass: float = 0.10,
 ) -> BeliefAssignment:
     """Convert detected pattern signals to a mass function.
 
     Maps pattern names to category codes. When no patterns are detected,
     returns a vacuous mass function.
+
+    Args:
+        theta_mass: Fraction of total mass allocated to Theta.
     """
     if pattern_category_map is None:
         pattern_category_map = DEFAULT_PATTERN_MAP
@@ -142,12 +188,13 @@ def pattern_to_mass(
     if not matched_codes:
         return frame.vacuous()
 
-    mass_per_code = 0.9 / len(matched_codes)
+    evidence_mass = 1.0 - theta_mass
+    mass_per_code = evidence_mass / len(matched_codes)
     masses: dict[FocalElement, float] = {}
     for code in matched_codes:
         masses[frame.singleton(code)] = mass_per_code
 
-    masses[frame.theta] = 0.1
+    masses[frame.theta] = theta_mass
     return BeliefAssignment(masses=masses)
 
 
@@ -158,14 +205,19 @@ def name_match_to_mass(
     column_name: str,
     frame: FrameOfDiscernment,
     category_set,
+    *,
+    exact_mass: float = 0.70,
+    code_mass: float = 0.50,
+    alias_mass: float = 0.50,
+    overlap_mass: float = 0.30,
 ) -> BeliefAssignment:
     """Convert column name matching into a mass function.
 
-    Matching levels:
-    - Exact label match: 0.7 singleton + 0.3 Theta
-    - Formal code (abbrev) match: 0.5 singleton + 0.5 Theta
-    - Common name alias match: 0.5 singleton + 0.5 Theta
-    - Word overlap match: 0.3 singleton + 0.7 Theta
+    Matching levels (singleton mass, remainder goes to Theta):
+    - Exact label match: *exact_mass* (default 0.70)
+    - Formal code (abbrev) match: *code_mass* (default 0.50)
+    - Common name alias match: *alias_mass* (default 0.50)
+    - Word overlap match: *overlap_mass* (default 0.30)
     - No match: vacuous (1.0 Theta)
     """
     col_words = column_name.replace("_", " ").lower().strip()
@@ -184,37 +236,37 @@ def name_match_to_mass(
 
         # Exact label match ("email address" == "email address")
         if col_words == cat_words:
-            if 0.7 > best_mass:
+            if exact_mass > best_mass:
                 best_code = cat.code
-                best_mass = 0.7
+                best_mass = exact_mass
         # Formal code match ("pan" == "pan", "ssn" == "ssn")
         elif cat_abbrev and col_compact == cat_abbrev:
-            if 0.5 > best_mass:
+            if code_mass > best_mass:
                 best_code = cat.code
-                best_mass = 0.5
+                best_mass = code_mass
         # Common name alias match ("credit card" in "Credit Card|CC|DPAN")
         elif hasattr(cat, "common_names") and cat.common_names:
             aliases = [a.strip().lower() for a in cat.common_names.split("|")]
             if not aliases or not aliases[0]:
                 aliases = [a.strip().lower() for a in cat.common_names.split(",")]
             if col_words in aliases or col_compact in aliases:
-                if 0.5 > best_mass:
+                if alias_mass > best_mass:
                     best_code = cat.code
-                    best_mass = 0.5
+                    best_mass = alias_mass
             else:
                 # Word overlap from label
                 cat_word_set = set(cat_words.split())
                 if len(cat_word_set) > 1 and cat_word_set.issubset(col_word_set):
-                    if 0.3 > best_mass:
+                    if overlap_mass > best_mass:
                         best_code = cat.code
-                        best_mass = 0.3
+                        best_mass = overlap_mass
         else:
             # Word overlap from label
             cat_word_set = set(cat_words.split())
             if len(cat_word_set) > 1 and cat_word_set.issubset(col_word_set):
-                if 0.3 > best_mass:
+                if overlap_mass > best_mass:
                     best_code = cat.code
-                    best_mass = 0.3
+                    best_mass = overlap_mass
 
     if best_code is None:
         return frame.vacuous()
@@ -288,6 +340,11 @@ def catboost_to_mass(
     proba: dict[str, float],
     frame: FrameOfDiscernment,
     virtual_ensembles_variance: dict[str, float] | None = None,
+    *,
+    base_discount: float = 0.10,
+    variance_scale: float = 1.6,
+    max_discount: float = 0.50,
+    fallback_discount: float = 0.15,
 ) -> BeliefAssignment:
     """Convert CatBoost predicted probabilities to a DST mass function.
 
@@ -299,6 +356,10 @@ def catboost_to_mass(
         frame: Frame of discernment.
         virtual_ensembles_variance: Optional {code: variance} from
             CatBoost virtual ensembles for uncertainty quantification.
+        base_discount: Base discount before variance adjustment.
+        variance_scale: Multiplier for average variance.
+        max_discount: Maximum adaptive discount.
+        fallback_discount: Discount when no variance data available.
     """
     if not proba:
         return frame.vacuous()
@@ -306,9 +367,9 @@ def catboost_to_mass(
     # Adaptive discount from virtual ensemble variance
     if virtual_ensembles_variance:
         avg_var = sum(virtual_ensembles_variance.values()) / len(virtual_ensembles_variance)
-        discount = min(0.5, 0.1 + avg_var * 1.6)
+        discount = min(max_discount, base_discount + avg_var * variance_scale)
     else:
-        discount = 0.15
+        discount = fallback_discount
 
     masses: dict[FocalElement, float] = {}
     evidence_mass = 1.0 - discount

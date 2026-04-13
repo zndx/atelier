@@ -7,6 +7,7 @@ embeddings.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,28 +17,33 @@ if TYPE_CHECKING:
 
 _model = None
 _model_name: str = "all-MiniLM-L6-v2"
+_model_lock = threading.Lock()
 
 
 def _get_model():
-    """Lazy-load the sentence-transformer model."""
+    """Lazy-load the sentence-transformer model (thread-safe)."""
     global _model
-    if _model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            raise ImportError(
-                "sentence-transformers required for embedding classification. "
-                "Install with: pip install sentence-transformers"
-            )
-        _model = SentenceTransformer(_model_name)
+    if _model is not None:
+        return _model
+    with _model_lock:
+        if _model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError:
+                raise ImportError(
+                    "sentence-transformers required for embedding classification. "
+                    "Install with: pip install sentence-transformers"
+                )
+            _model = SentenceTransformer(_model_name)
     return _model
 
 
 def set_model_name(name: str) -> None:
     """Override the default model name (before first use)."""
     global _model_name, _model
-    _model_name = name
-    _model = None
+    with _model_lock:
+        _model_name = name
+        _model = None
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:

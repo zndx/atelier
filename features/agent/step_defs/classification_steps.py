@@ -321,6 +321,42 @@ def step_eval_confusion(context):
         assert "count" in entry and entry["count"] > 0
 
 
+# ── Configurable Discounts ───────────────────────────────────────
+
+
+@given("custom discount factors with cosine {cosine:g} and svm {svm:g}")
+def step_custom_discounts(context, cosine, svm):
+    from atelier.classify.mass_functions import DiscountConfig
+    context.custom_discounts = DiscountConfig(
+        cosine=float(cosine),
+        svm=float(svm),
+    )
+
+
+@when("I run the classification pipeline with custom discounts")
+def step_run_pipeline_custom_discounts(context):
+    from atelier.config import load_config
+    from atelier.classify import run_pipeline
+    # Run default first
+    cfg = load_config()
+    context.default_result = run_pipeline(cfg, use_mock=True)
+    # Run with custom discounts (override config fields)
+    cfg2 = load_config()
+    cfg2.classify_discount_cosine = context.custom_discounts.cosine
+    cfg2.classify_discount_svm = context.custom_discounts.svm
+    context.pipeline_result = run_pipeline(cfg2, use_mock=True)
+
+
+@then("the average confidence should differ from default discounts")
+def step_check_confidence_differs(context):
+    default_conf = context.default_result.get("avg_confidence", 0.0)
+    custom_conf = context.pipeline_result.get("avg_confidence", 0.0)
+    # With higher discounts (more mass → Theta), confidence should change
+    assert abs(default_conf - custom_conf) > 0.001, (
+        f"Default avg_confidence={default_conf:.4f} == custom={custom_conf:.4f}"
+    )
+
+
 # ── FSM ──────────────────────────────────────────────────────────────
 
 
