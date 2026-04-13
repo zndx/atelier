@@ -244,72 +244,74 @@ async def _run_smoke_test_async(cfg: AtelierConfig) -> dict:
     # setting_sources, the SDK defaults to None and silently skips filesystem
     # slash commands.
     project_root = Path(__file__).resolve().parent.parent.parent.parent
+    provider = "bedrock" if env.get("CLAUDE_CODE_USE_BEDROCK") else "anthropic"
 
-    # Capture real stderr from the CLI subprocess. Without this callback,
-    # claude-agent-sdk constructs ProcessError with a placeholder string
-    # ("Check stderr output for details") because the child's stderr is
-    # inherited, not piped. With the callback we get actionable errors.
-    stderr_lines: list[str] = []
+    last_error: str | None = None
 
-    def _capture_stderr(line: str) -> None:
-        stderr_lines.append(line)
+    # Retry once on cold-start failure. The claude CLI sometimes exits with
+    # code 1 on its first invocation (session directory initialization, config
+    # discovery, etc.) and succeeds on the immediate retry.
+    for attempt in range(2):
+        stderr_lines: list[str] = []
 
-    options = ClaudeAgentOptions(
-        allowed_tools=[],
-        permission_mode="dontAsk",
-        model=cfg.agent_model,
-        max_turns=1,
-        max_budget_usd=0.05,
-        cwd=str(project_root),
-        setting_sources=["project"],
-        env=env,
-        stderr=_capture_stderr,
-    )
+        def _capture_stderr(line: str) -> None:
+            stderr_lines.append(line)
 
-    texts: list[str] = []
-    result_meta: dict = {}
+        options = ClaudeAgentOptions(
+            allowed_tools=[],
+            permission_mode="dontAsk",
+            model=cfg.agent_model,
+            max_turns=1,
+            max_budget_usd=0.05,
+            cwd=str(project_root),
+            setting_sources=["project"],
+            env=env,
+            stderr=_capture_stderr,
+        )
 
-    try:
-        async for message in query(
-            prompt="Reply with exactly: Atelier agent SDK operational",
-            options=options,
-        ):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        texts.append(block.text)
-            elif isinstance(message, ResultMessage):
-                result_meta = {
-                    "duration_ms": message.duration_ms,
-                    "num_turns": message.num_turns,
-                    "session_id": message.session_id,
-                    "total_cost_usd": message.total_cost_usd,
-                }
-    except Exception as e:
-        # Compose the most actionable error possible: exception type and
-        # message, process exit code if available, and the tail of the
-        # captured stderr lines. We deliberately ignore ProcessError.stderr
-        # (a hardcoded placeholder inside the SDK) in favor of lines we
-        # collected via the stderr callback above.
-        exit_code = getattr(e, "exit_code", None)
-        detail = f"{type(e).__name__}: {e}"
-        if exit_code is not None:
-            detail += f" (exit {exit_code})"
-        if stderr_lines:
-            tail = stderr_lines[-20:]
-            detail += "\n\nstderr:\n" + "\n".join(tail)
-        provider = "bedrock" if env.get("CLAUDE_CODE_USE_BEDROCK") else "anthropic"
-        return {
-            "success": False,
-            "error": detail,
-            "provider": provider,
-            "model": cfg.agent_model,
-        }
+        texts: list[str] = []
+        result_meta: dict = {}
+
+        try:
+            async for message in query(
+                prompt="Reply with exactly: Atelier agent SDK operational",
+                options=options,
+            ):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            texts.append(block.text)
+                elif isinstance(message, ResultMessage):
+                    result_meta = {
+                        "duration_ms": message.duration_ms,
+                        "num_turns": message.num_turns,
+                        "session_id": message.session_id,
+                        "total_cost_usd": message.total_cost_usd,
+                    }
+            return {
+                "success": True,
+                "reply": " ".join(texts).strip(),
+                "retried": attempt > 0,
+                **result_meta,
+            }
+        except Exception as e:
+            exit_code = getattr(e, "exit_code", None)
+            detail = f"{type(e).__name__}: {e}"
+            if exit_code is not None:
+                detail += f" (exit {exit_code})"
+            if stderr_lines:
+                tail = stderr_lines[-20:]
+                detail += "\n\nstderr:\n" + "\n".join(tail)
+            last_error = detail
+
+            if attempt == 0:
+                await asyncio.sleep(1)
 
     return {
-        "success": True,
-        "reply": " ".join(texts).strip(),
-        **result_meta,
+        "success": False,
+        "error": last_error,
+        "provider": provider,
+        "model": cfg.agent_model,
     }
 
 

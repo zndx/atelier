@@ -81,6 +81,7 @@ interface SmokeResult {
   duration_ms?: number;
   session_id?: string;
   total_cost_usd?: number;
+  retried?: boolean;
   error?: string;
 }
 
@@ -540,6 +541,9 @@ export default function Status() {
                 <Descriptions column={1} size="small">
                   <Descriptions.Item label="Status">
                     <Tag color="green">Success</Tag>
+                    {smoke.retried && (
+                      <Tag color="orange" style={{ marginLeft: 4 }}>Cold start retry</Tag>
+                    )}
                   </Descriptions.Item>
                   <Descriptions.Item label="Reply">
                     {smoke.reply}
