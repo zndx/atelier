@@ -32,7 +32,15 @@ console.log(`[pglite] database initialized, data at ${DATA_DIR}`)
 await db.exec('CREATE EXTENSION IF NOT EXISTS vector;')
 console.log(`[pglite] pgvector extension ready`)
 
-const server = new PGLiteSocketServer({ db, port: PORT, host: '127.0.0.1' })
+const server = new PGLiteSocketServer({
+  db,
+  port: PORT,
+  host: '127.0.0.1',
+  // Allow a handful of concurrent connections so migrations, DAO, and
+  // readiness probes don't block each other.  PGlite serialises queries
+  // internally, so this is safe — it just keeps the TCP accept queue open.
+  maxConnections: 8,
+})
 // Don't await — use .catch() so startup errors crash loudly instead of
 // being swallowed by the Promise (upstream issue #964).
 server.start()
