@@ -139,3 +139,63 @@ def step_bootstrap_converged(context):
 def step_bootstrap_llm_calls(context, n):
     calls = context.bootstrap_result.get("llm_calls", 0)
     assert calls > n, f"LLM calls = {calls}, expected > {n}"
+
+
+# ── Realistic mock LLM ────────────────────────────────────────────
+
+
+@when("I run the bootstrap pipeline with mock data and realistic mock LLM")
+def step_run_bootstrap_realistic(context):
+    from atelier.config import load_config
+    from atelier.classify.bootstrap import run_bootstrap_pipeline
+    from atelier.classify.fsm import AgentFSM
+    from atelier.classify.mock_llm import RealisticMockLLMBackend
+    from atelier.classify.sampler import load_all_mock_samples
+
+    gt = {}
+    for ts in load_all_mock_samples():
+        for col in ts.columns:
+            if col.ground_truth:
+                gt[col.name] = col.ground_truth
+
+    cfg = load_config()
+    fsm = AgentFSM()
+    # Lower accuracy to force disagreements and trigger revisit loop
+    mock_backend = RealisticMockLLMBackend(
+        gt, base_accuracy=0.55, seed=42,
+    )
+
+    context.bootstrap_result = run_bootstrap_pipeline(
+        cfg, fsm, use_mock=True, llm_backend=mock_backend,
+    )
+
+
+@then("the bootstrap should have iterated more than {n:d} times")
+def step_bootstrap_iterations(context, n):
+    iters = context.bootstrap_result.get("bootstrap_iterations", 0)
+    assert iters > n, (
+        f"Bootstrap iterations = {iters}, expected > {n}"
+    )
+
+
+@then("the final accuracy should exceed {threshold:g}")
+def step_bootstrap_accuracy(context, threshold):
+    acc = context.bootstrap_result.get("accuracy")
+    assert acc is not None, "No accuracy in bootstrap result"
+    assert acc > float(threshold), (
+        f"Bootstrap accuracy {acc:.4f} <= {threshold}"
+    )
+
+
+@then("the number of disagreements should decrease across iterations")
+def step_disagreements_decrease(context):
+    metrics = context.bootstrap_result.get("iteration_metrics", [])
+    assert len(metrics) >= 2, (
+        f"Need >= 2 iteration metrics, got {len(metrics)}"
+    )
+    first_disagreements = metrics[0]["disagreements"]
+    last_disagreements = metrics[-1]["disagreements"]
+    assert last_disagreements < first_disagreements, (
+        f"Disagreements did not decrease: first={first_disagreements}, "
+        f"last={last_disagreements}"
+    )

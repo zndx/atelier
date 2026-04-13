@@ -1,0 +1,131 @@
+"""Realistic mock LLM backend for testing bootstrap convergence.
+
+Makes plausible classification mistakes (~80% accuracy) and corrects
+~70% of them when revisited with ML context. Deterministic via seeded RNG.
+"""
+
+from __future__ import annotations
+
+import random
+from typing import Any
+
+from atelier.classify.llm_backend import ColumnClassification, LLMResponse
+
+# Confusable pairs: categories that a real LLM might plausibly mix up
+CONFUSABLE_PAIRS = [
+    ("1.1.1.1", "1.2.3"),     # Email ↔ URL
+    ("1.1.1.2", "1.1.3.2"),   # Phone ↔ Bank Account
+    ("1.1.2.3", "1.1.2.2"),   # SSN ↔ DOB
+    ("1.1.3.1", "1.1.3.2"),   # Credit Card ↔ Bank Account
+    ("2.1", "1.1.2.2"),       # Timestamp ↔ DOB
+    ("1.1.2.1", "1.1.1.3"),   # Full Name ↔ Address
+    ("2.2", "1.2.2"),         # Record ID ↔ UUID
+]
+
+
+def _build_confusion_map(pairs: list[tuple[str, str]]) -> dict[str, str]:
+    """Build bidirectional confusion lookup."""
+    m: dict[str, str] = {}
+    for a, b in pairs:
+        m[a] = b
+        m[b] = a
+    return m
+
+
+_CONFUSION = _build_confusion_map(CONFUSABLE_PAIRS)
+
+
+class RealisticMockLLMBackend:
+    """Mock LLM that makes plausible classification mistakes.
+
+    - Gets ~base_accuracy right with varying confidence (0.7–0.95)
+    - When wrong, confuses siblings from CONFUSABLE_PAIRS
+    - On revisit with ML context, corrects ~revisit_correction_rate of mistakes
+    - Deterministic via seeded RNG
+    """
+
+    def __init__(
+        self,
+        ground_truth: dict[str, str],
+        *,
+        base_accuracy: float = 0.80,
+        revisit_correction_rate: float = 0.70,
+        seed: int = 42,
+    ):
+        self._gt = ground_truth
+        self._base_accuracy = base_accuracy
+        self._revisit_correction_rate = revisit_correction_rate
+        self._rng = random.Random(seed)
+        # Track which columns we've already gotten wrong
+        self._mistakes: set[str] = set()
+
+    def classify_batch(
+        self,
+        samples: list,
+        system_prompt: str,
+        revisit_context: dict[str, dict] | None = None,
+        table_name: str | None = None,
+    ) -> LLMResponse:
+        classifications = []
+        for sample in samples:
+            true_code = self._gt.get(sample.name)
+            if not true_code:
+                classifications.append(ColumnClassification(
+                    column_name=sample.name,
+                    category_code=None,
+                    confidence=0.0,
+                    evidence="no ground truth available",
+                    alternatives=[],
+                ))
+                continue
+
+            is_revisit = (
+                revisit_context is not None
+                and sample.name in revisit_context
+            )
+
+            if is_revisit and sample.name in self._mistakes:
+                # On revisit, correct mistakes with some probability
+                if self._rng.random() < self._revisit_correction_rate:
+                    code = true_code
+                    confidence = round(self._rng.uniform(0.80, 0.95), 2)
+                    self._mistakes.discard(sample.name)
+                else:
+                    # Still wrong
+                    code = _CONFUSION.get(true_code, true_code)
+                    confidence = round(self._rng.uniform(0.60, 0.75), 2)
+            elif self._rng.random() < self._base_accuracy:
+                # Correct classification
+                code = true_code
+                confidence = round(self._rng.uniform(0.70, 0.95), 2)
+            else:
+                # Wrong — confuse with sibling
+                code = _CONFUSION.get(true_code, true_code)
+                confidence = round(self._rng.uniform(0.55, 0.80), 2)
+                if code != true_code:
+                    self._mistakes.add(sample.name)
+
+            alternatives = []
+            if code != true_code:
+                alternatives.append({
+                    "code": true_code,
+                    "confidence": round(confidence * 0.5, 2),
+                })
+
+            classifications.append(ColumnClassification(
+                column_name=sample.name,
+                category_code=code,
+                confidence=confidence,
+                evidence=f"realistic mock ({'revisit' if is_revisit else 'initial'})",
+                alternatives=alternatives,
+            ))
+
+        return LLMResponse(
+            classifications=classifications,
+            input_tokens=len(samples) * 150,
+            output_tokens=len(samples) * 80,
+            model="realistic-mock",
+        )
+
+    def health_check(self) -> bool:
+        return True

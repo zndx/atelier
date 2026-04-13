@@ -29,6 +29,17 @@ Feature: LLM bootstrap convergence loop
     Then the bootstrap pipeline should reach CONVERGED state
     And the bootstrap result should report total LLM calls greater than 0
 
+  Scenario: Bootstrap converges with realistic LLM disagreement
+    When I run the bootstrap pipeline with mock data and realistic mock LLM
+    Then the bootstrap pipeline should reach CONVERGED state
+    And the bootstrap should have iterated more than 0 times
+    And the final accuracy should exceed 0.40
+
+  Scenario: Revisit phase reduces disagreements
+    When I run the bootstrap pipeline with mock data and realistic mock LLM
+    Then the bootstrap pipeline should reach CONVERGED state
+    And the number of disagreements should decrease across iterations
+
   Scenario: FSM transitions through bootstrap states
     Given a fresh AgentFSM
     When I start a new run

@@ -17,6 +17,7 @@ from atelier.classify.belief import (
     FrameOfDiscernment,
     HierarchicalClassification,
 )
+from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
 from atelier.classify.mass_functions import (
@@ -161,10 +162,12 @@ def run_classification_pipeline(
         })
 
         summary = _evaluate_results(classifications)
+        eval_report = evaluate_classifications(classifications, category_set)
 
         # Write results
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
+        eval_report.write_json(results_dir / "evaluation_report.json")
 
         # Write parquet if pyarrow available
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
@@ -181,6 +184,7 @@ def run_classification_pipeline(
             "classifications": len(classifications),
             "result_path": str(results_path),
             "parquet_path": str(parquet_path) if parquet_path else None,
+            "evaluation_report": eval_report.to_dict(),
             **summary,
         }
 

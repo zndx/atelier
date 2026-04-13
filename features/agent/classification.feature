@@ -43,7 +43,8 @@ Feature: Dempster-Shafer classification pipeline
     When I run the classification pipeline with mock data
     Then the pipeline should reach CONVERGED state
     And the results should contain at least 40 classified columns
-    And the accuracy against ground truth should exceed 0.3
+    And the accuracy against ground truth should exceed 0.6
+    And the micro-F1 should exceed 0.55
 
   Scenario: FSM state transitions are valid
     Given a fresh AgentFSM
@@ -72,6 +73,13 @@ Feature: Dempster-Shafer classification pipeline
     And category "1.1.1.1" abbrev should be "EMAIL"
     And category "1.1.3.1" label should be "Payment Card Number"
     And category "1.1.3.1" abbrev should be "PAN"
+
+  Scenario: Structured evaluation produces per-category metrics
+    When I run the classification pipeline with mock data
+    Then the pipeline should reach CONVERGED state
+    And the evaluation report should contain per-category metrics
+    And every category with support > 0 should have precision and recall
+    And the evaluation report should contain a confusion matrix
 
   Scenario: FSM rejects invalid transitions
     Given a fresh AgentFSM in "IDLE" state

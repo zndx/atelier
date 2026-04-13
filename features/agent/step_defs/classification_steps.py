@@ -278,6 +278,49 @@ def step_accuracy_threshold(context, threshold):
     assert acc > float(threshold), f"Accuracy {acc} <= {threshold}"
 
 
+@then("the micro-F1 should exceed {threshold:g}")
+def step_micro_f1_threshold(context, threshold):
+    report = context.pipeline_result.get("evaluation_report")
+    assert report is not None, "No evaluation_report in pipeline result"
+    micro_f1 = report.get("micro_f1", 0.0)
+    assert micro_f1 > float(threshold), f"Micro F1 {micro_f1} <= {threshold}"
+
+
+# ── Evaluation Report ────────────────────────────────────────────────
+
+
+@then("the evaluation report should contain per-category metrics")
+def step_eval_per_category(context):
+    report = context.pipeline_result.get("evaluation_report")
+    assert report is not None, "No evaluation_report in pipeline result"
+    per_cat = report.get("per_category", [])
+    assert len(per_cat) > 0, "No per-category metrics in evaluation report"
+
+
+@then("every category with support > 0 should have precision and recall")
+def step_eval_precision_recall(context):
+    report = context.pipeline_result["evaluation_report"]
+    for cat in report["per_category"]:
+        if cat["support"] > 0:
+            assert cat["precision"] >= 0.0, (
+                f"Category {cat['code']} missing precision"
+            )
+            assert cat["recall"] >= 0.0, (
+                f"Category {cat['code']} missing recall"
+            )
+
+
+@then("the evaluation report should contain a confusion matrix")
+def step_eval_confusion(context):
+    report = context.pipeline_result["evaluation_report"]
+    cm = report.get("confusion_matrix", [])
+    assert len(cm) > 0, "No confusion matrix entries"
+    for entry in cm:
+        assert "true_code" in entry
+        assert "predicted_code" in entry
+        assert "count" in entry and entry["count"] > 0
+
+
 # ── FSM ──────────────────────────────────────────────────────────────
 
 

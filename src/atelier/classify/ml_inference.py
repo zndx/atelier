@@ -15,6 +15,21 @@ _catboost = None
 _catboost_loaded = False
 _svm = None
 _svm_loaded = False
+_catboost_path: Path | None = None
+_svm_path: Path | None = None
+
+
+def configure_paths(
+    catboost_path: str | Path | None = None,
+    svm_path: str | Path | None = None,
+) -> None:
+    """Override default model file locations (for testing).
+
+    Call ``reset()`` first if models are already loaded.
+    """
+    global _catboost_path, _svm_path
+    _catboost_path = Path(catboost_path) if catboost_path else None
+    _svm_path = Path(svm_path) if svm_path else None
 
 
 def get_catboost(model_path: str | Path | None = None):
@@ -24,7 +39,7 @@ def get_catboost(model_path: str | Path | None = None):
         return _catboost
 
     _catboost_loaded = True
-    path = Path(model_path) if model_path else Path("build/models/catboost.cbm")
+    path = Path(model_path) if model_path else (_catboost_path or Path("build/models/catboost.cbm"))
     if not path.exists():
         logger.debug("CatBoost model not found at %s, skipping", path)
         return None
@@ -45,7 +60,7 @@ def get_svm(model_path: str | Path | None = None):
         return _svm
 
     _svm_loaded = True
-    path = Path(model_path) if model_path else Path("build/models/svm.pkl")
+    path = Path(model_path) if model_path else (_svm_path or Path("build/models/svm.pkl"))
     if not path.exists():
         logger.debug("SVM model not found at %s, skipping", path)
         return None
@@ -115,9 +130,11 @@ def predict_svm(features) -> dict[str, float] | None:
 
 
 def reset():
-    """Reset cached models (useful for testing)."""
-    global _catboost, _catboost_loaded, _svm, _svm_loaded
+    """Reset cached models and configured paths (useful for testing)."""
+    global _catboost, _catboost_loaded, _svm, _svm_loaded, _catboost_path, _svm_path
     _catboost = None
     _catboost_loaded = False
     _svm = None
     _svm_loaded = False
+    _catboost_path = None
+    _svm_path = None

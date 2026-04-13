@@ -108,6 +108,10 @@ src/atelier/classify/
 ├── catboost_classifier.py # CatBoost with virtual ensemble uncertainty
 ├── ml_train.py          # Training orchestrator (synth → models)
 ├── ml_inference.py      # Lazy-loading inference wrappers
+├── evaluation.py        # Structured evaluation (per-category P/R/F1, confusion matrix)
+├── train_eval_cycle.py  # Synth → train → classify → evaluate orchestrator
+├── mock_llm.py          # Realistic mock LLM (confusable pairs, seeded mistakes)
+├── sage.py              # SAGE feature importance (permutation-based)
 ├── pipeline.py          # Single-pass ML orchestration (6 evidence sources)
 ├── fsm.py               # AgentFSM state machine
 └── fixtures/
@@ -125,9 +129,10 @@ build/
 ├── data/annotations/    # Cached vocabulary from hive
 ├── data/samples/        # Sampled metadata
 ├── data/synth/          # Synthetic training data
-├── models/              # Embedding caches
+├── models/              # Trained CatBoost + SVM models, embedding caches
 └── results/{run_id}/
     ├── classifications.json           # Per-column DST results
+    ├── evaluation_report.json         # Per-category P/R/F1, confusion matrix
     └── atelier_embeddings.parquet     # For embedding-atlas
 ```
 
@@ -257,5 +262,5 @@ Environment variable overrides follow the standard pattern:
 | **M0.5** | Schema fix, pignistic probability, HierarchicalClassification | Done |
 | **M1** | LLM evidence source, bootstrap convergence loop, LLM↔ML validation | Done |
 | **M2** | CatBoost + SVM + synthetic data, 6 evidence sources, Bedrock/Cerebras backends | Done |
-| M3 | SAGE importance, SHAP explanations, adaptive discounting | Planned |
-| M4 | Production scaling, async pipeline, Qdrant index | Planned |
+| **M3** | Evaluation framework, E2E synth-train-eval, realistic mock LLM, SAGE importance | Done |
+| M4 | SHAP explanations, adaptive discounting, production scaling | Planned |

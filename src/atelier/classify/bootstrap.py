@@ -50,6 +50,7 @@ from atelier.classify.mass_functions import (
     pattern_to_mass,
     svm_to_mass,
 )
+from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.pipeline import (
     _evaluate_results,
     _is_vacuous,
@@ -286,6 +287,13 @@ def run_bootstrap_pipeline(
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
+        iteration_metrics: list[dict[str, Any]] = [{
+            "iteration": 0,
+            "mean_k": round(mean_k, 4),
+            "disagreements": len(disagreements),
+            "coverage": round(coverage, 4),
+        }]
+
         for iteration in range(1, boot_cfg.max_iterations + 1):
             if not disagreements:
                 logger.info("No disagreements — converged")
@@ -336,6 +344,13 @@ def run_bootstrap_pipeline(
                 coverage * 100, state.llm_calls_total,
             )
 
+            iteration_metrics.append({
+                "iteration": iteration,
+                "mean_k": round(mean_k, 4),
+                "disagreements": len(disagreements),
+                "coverage": round(coverage, 4),
+            })
+
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         # Run full pipeline with LLM evidence included
         coverage = _coverage(state, column_names)
@@ -373,6 +388,7 @@ def run_bootstrap_pipeline(
         })
 
         summary = _evaluate_results(classifications)
+        eval_report = evaluate_classifications(classifications, category_set)
         summary["converged"] = converged
         summary["bootstrap_iterations"] = state.iteration
         summary["llm_calls"] = state.llm_calls_total
@@ -380,10 +396,12 @@ def run_bootstrap_pipeline(
         summary["tokens_output"] = state.tokens_output
         summary["mean_k"] = round(mean_k, 4)
         summary["bootstrap_coverage"] = round(coverage, 4)
+        summary["iteration_metrics"] = iteration_metrics
 
         # Write results
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
+        eval_report.write_json(results_dir / "evaluation_report.json")
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
@@ -399,6 +417,7 @@ def run_bootstrap_pipeline(
             "classifications": len(classifications),
             "result_path": str(results_path),
             "parquet_path": str(parquet_path) if parquet_path else None,
+            "evaluation_report": eval_report.to_dict(),
             **summary,
         }
 
