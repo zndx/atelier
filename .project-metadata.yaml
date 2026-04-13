@@ -9,6 +9,7 @@ specification_version: 1.0
 prototype_version: 0.1.0
 
 environment_variables:
+  # ── AWS / Bedrock Credentials ──────────────────────────────────
   AWS_ACCESS_KEY_ID:
     default: ""
     description: >-
@@ -21,17 +22,27 @@ environment_variables:
     default: "us-east-1"
     description: >-
       AWS region for Bedrock inference.
-  ATELIER_AGENT_MODEL:
+  AWS_SESSION_TOKEN:
     default: ""
     description: >-
-      Model ID or Bedrock inference profile ARN. Example:
-      arn:aws:bedrock:us-east-1:440464140575:inference-profile/us.anthropic.claude-opus-4-6-v1
+      AWS session token for temporary credentials (STS AssumeRole). Leave
+      blank when using permanent IAM credentials.
+
+  # ── Anthropic Direct API ───────────────────────────────────────
   ANTHROPIC_API_KEY:
     default: ""
     description: >-
       Direct Anthropic API key. Provides overwatch capability for onboarding
       and configuration assistance, or serves as primary provider when preferred.
       Can coexist with Bedrock credentials — both are validated at startup.
+
+  # ── Agent SDK (Claude Code) ────────────────────────────────────
+  ATELIER_AGENT_MODEL:
+    default: ""
+    description: >-
+      Primary model for agentic orchestration. Plain Anthropic ID for direct
+      API, Bedrock inference profile ARN for AWS. Example:
+      arn:aws:bedrock:us-east-1:440464140575:inference-profile/us.anthropic.claude-opus-4-6-v1
   ANTHROPIC_DEFAULT_SONNET_MODEL:
     default: ""
     description: >-
@@ -61,6 +72,8 @@ environment_variables:
     description: >-
       Enable the CLI's tool-search beta. Defaults to "false" on the
       Bedrock path. Leave blank to accept the provider default.
+
+  # ── Classification LLM ─────────────────────────────────────────
   ANTHROPIC_SUBAGENT_MODEL:
     default: ""
     description: >-
@@ -70,6 +83,38 @@ environment_variables:
       uses direct Messages API. Required when ATELIER_LLM_API_KEY is not set.
       Example (Bedrock): us.anthropic.claude-sonnet-4-5-20250929-v1:0
       Example (direct): claude-sonnet-4-5-20250929
+  ATELIER_LLM_BACKEND:
+    default: ""
+    description: >-
+      Explicit LLM backend for classification. Overrides ANTHROPIC_SUBAGENT_MODEL.
+      Values: "openai_compatible" (vLLM, LiteLLM, etc.), "cerebras",
+      "anthropic", "bedrock". Requires ATELIER_LLM_API_KEY and/or
+      ATELIER_LLM_BASE_URL. Leave blank to use ANTHROPIC_SUBAGENT_MODEL.
+  ATELIER_LLM_API_KEY:
+    default: ""
+    description: >-
+      API key for the explicit classification LLM backend. Required when
+      ATELIER_LLM_BACKEND is set to "openai_compatible" or "cerebras".
+  ATELIER_LLM_MODEL:
+    default: ""
+    description: >-
+      Model name for the explicit classification LLM. Default depends on
+      backend (e.g. "glm-4.7" for openai_compatible, "zai-glm-4.7" for
+      cerebras). Only used with ATELIER_LLM_BACKEND.
+  ATELIER_LLM_BASE_URL:
+    default: ""
+    description: >-
+      Base URL for the explicit LLM backend. Essential for on-prem
+      open-weights models served via vLLM, LiteLLM, or similar.
+      Example: http://hgx-node:8000/v1
+  ATELIER_LLM_COLUMNS_PER_CALL:
+    default: "50"
+    description: >-
+      Number of columns to classify per LLM call. Higher values reduce API
+      round-trips but increase per-call token usage. Reduce for models with
+      smaller context windows.
+
+  # ── Classification Pipeline ────────────────────────────────────
   ATELIER_CLASSIFY_CONNECTION:
     default: ""
     description: >-
@@ -80,11 +125,42 @@ environment_variables:
     description: >-
       Hive database to classify. Tables are discovered via the connection
       specified in ATELIER_CLASSIFY_CONNECTION.
+  ATELIER_CLASSIFY_SAMPLE_SIZE:
+    default: "50"
+    description: >-
+      Number of sample values to retrieve per column for classification
+      evidence. Higher values improve classification accuracy but increase
+      memory usage and API payload size.
+  ATELIER_CLASSIFY_TABLES_LIMIT:
+    default: "100"
+    description: >-
+      Maximum number of tables to discover and classify per pipeline run.
+      Set to 0 for unlimited. Useful for initial testing on large databases.
   ATELIER_CLASSIFY_AUTO_START:
     default: "false"
     description: >-
       Set to "true" to automatically start the classification pipeline when
       the gateway boots. Otherwise, start manually from the UI or API.
+
+  # ── Bootstrap Convergence ──────────────────────────────────────
+  ATELIER_BOOTSTRAP_MAX_ITERATIONS:
+    default: "5"
+    description: >-
+      Maximum LLM-ML convergence iterations. Each iteration: LLM sweep,
+      ML validation, targeted revisit of disagreements. Pipeline stops
+      early when convergence criteria are met.
+  ATELIER_BOOTSTRAP_K_THRESHOLD:
+    default: "0.2"
+    description: >-
+      Mean Cohen's Kappa conflict threshold for convergence. Lower values
+      require tighter LLM-ML agreement before stopping. Range: 0.0-1.0.
+  ATELIER_BOOTSTRAP_COVERAGE_TARGET:
+    default: "0.95"
+    description: >-
+      Fraction of columns that must be classified before the pipeline
+      considers converging. Range: 0.0-1.0.
+
+  # ── Data Connections ───────────────────────────────────────────
   ATELIER_DATA_CONNECTIONS:
     default: ""
     description: >-
