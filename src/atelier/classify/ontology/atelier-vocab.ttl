@@ -1,0 +1,985 @@
+## -----------------------------------------------------------------
+## Atelier Vocabulary — CCO-Mediated BFO Alignment
+## -----------------------------------------------------------------
+##
+## Direct mappings from Schema.org types, DBpedia types, and Atelier's
+## PII classification vocabulary to BFO 2020 and the Common Core
+## Ontologies (CCO v2.1).
+##
+## Methodology follows Prudhomme et al. (2025):
+##   "A semantic approach to mapping the Provenance Ontology to
+##    Basic Formal Ontology" — Sci Data 12, 282.
+##   https://doi.org/10.1038/s41597-025-04580-1
+##
+## Mapping criteria:
+##   1. Equivalence (owl:equivalentClass) — coextensive concepts
+##   2. Subsumption (rdfs:subClassOf) — source narrower than target
+##   3. Conservativity — no new entailments in source ontologies
+##   4. Completeness — every mapped term accounted for
+##   5. SSSOM annotations — provenance and justification per axiom
+##
+## Structure (following PROV-to-BFO modular pattern):
+##   This file is standalone — imports only BFO, CCO, and RO.
+##   It does NOT import Schema.org or DBpedia ontologies directly;
+##   instead it declares the mapped terms with their canonical IRIs.
+##
+## Version: 0.1.0 (prototype — 35 external types + 24 Atelier terms)
+## License: Apache-2.0
+## -----------------------------------------------------------------
+
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix sssom:  <https://w3id.org/sssom/> .
+
+@prefix obo:    <http://purl.obolibrary.org/obo/> .
+@prefix cco:    <https://www.commoncoreontologies.org/> .
+@prefix schema: <https://schema.org/> .
+@prefix dbo:    <http://dbpedia.org/ontology/> .
+@prefix atelier: <https://atelier.zndx.org/ontology/> .
+
+## -----------------------------------------------------------------
+## Ontology declaration
+## -----------------------------------------------------------------
+
+<https://atelier.zndx.org/ontology/>
+    rdf:type owl:Ontology ;
+    owl:versionIRI <https://atelier.zndx.org/ontology/0.1.0> ;
+    rdfs:label "Atelier Vocabulary — CCO-Mediated BFO Alignment"@en ;
+    rdfs:comment """Direct mappings from Schema.org, DBpedia, and Atelier's PII
+classification vocabulary to BFO 2020 via the Common Core Ontologies (CCO).
+Follows the Prudhomme et al. (2025) mapping methodology."""@en ;
+    owl:imports <http://purl.obolibrary.org/obo/bfo.owl> ;
+    owl:imports <https://www.commoncoreontologies.org/InformationEntityOntology> ;
+    owl:imports <https://www.commoncoreontologies.org/AgentOntology> ;
+    owl:imports <https://www.commoncoreontologies.org/ExtendedRelationOntology> .
+
+
+## =================================================================
+## PART 1: Schema.org Class Mappings (13 types)
+## =================================================================
+
+## -----------------------------------------------------------------
+## 1.1 Agent types
+## -----------------------------------------------------------------
+
+## schema:Person ⊑ cco:Person
+## schema:Person is broader (includes fictional), cco:Person is Homo sapiens.
+## Subsumption is conservative: every real person satisfies both.
+schema:Person
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00001262 ;  # cco:Person
+    rdfs:label "Person"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Person ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00001262 ;
+    sssom:object_label    "Person" ;
+    rdfs:comment """schema:Person includes fictional and legal persons;
+cco:Person is restricted to Homo sapiens (Animal subclass in CCO).
+Subsumption chosen over equivalence because schema:Person's extension
+is broader. For metadata classification, the overlap (real persons)
+is the relevant domain."""@en .
+
+## schema:Organization ⊑ cco:Organization
+schema:Organization
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00001180 ;  # cco:Organization
+    rdfs:label "Organization"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Organization ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00001180 ;
+    sssom:object_label    "Organization" ;
+    rdfs:comment """schema:Organization encompasses businesses, NGOs,
+government bodies, and informal groups. cco:Organization requires
+membership, role-bearing capability, and organizational rules.
+Subsumption is conservative: schema:Organization may include
+looser groupings that CCO would classify as Group of Agents."""@en .
+
+## -----------------------------------------------------------------
+## 1.2 Information content types
+## -----------------------------------------------------------------
+
+## schema:CreativeWork ⊑ cco:InformationContentEntity
+## Creative works are ICEs — they can be designative, descriptive,
+## or prescriptive depending on content, so we map to the parent.
+schema:CreativeWork
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000958 ;  # cco:InformationContentEntity
+    rdfs:label "Creative Work"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:CreativeWork ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000958 ;
+    sssom:object_label    "Information Content Entity" ;
+    rdfs:comment """A creative work is an information content entity whose
+identity is the pattern (text, music, code), not any particular carrier.
+Mapped to ICE rather than a specific subtype because creative works span
+the designative/descriptive/prescriptive trichotomy."""@en .
+
+## schema:Dataset ⊑ cco:InformationContentEntity
+schema:Dataset
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000958 ;  # cco:InformationContentEntity
+    rdfs:label "Dataset"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Dataset ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000958 ;
+    sssom:object_label    "Information Content Entity" ;
+    rdfs:comment """A dataset is a structured collection of information content.
+In BFO terms, it is a GDC that generically depends on some information
+bearing entity (file, database) and is about some domain of entities.
+Mapped to ICE (not Descriptive ICE) because datasets may contain
+designative, descriptive, or prescriptive content."""@en .
+
+## schema:SoftwareSourceCode ⊑ cco:PrescriptiveICE
+schema:SoftwareSourceCode
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000965 ;  # cco:PrescriptiveICE
+    rdfs:label "Software Source Code"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:SoftwareSourceCode ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000965 ;
+    sssom:object_label    "Prescriptive Information Content Entity" ;
+    rdfs:comment """Source code prescribes computational behavior — it serves
+as a set of propositions that prescribe an Entity (the executing process).
+This aligns with CCO's definition: 'prescribes some Entity' where the
+prescribed entity is the computation the code specifies."""@en .
+
+## -----------------------------------------------------------------
+## 1.3 Spatial types
+## -----------------------------------------------------------------
+
+## schema:Place ⊑ BFO:Site
+schema:Place
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;  # bfo:Site
+    rdfs:label "Place"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Place ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000029 ;
+    sssom:object_label    "site" ;
+    rdfs:comment """schema:Place denotes a fixed physical location. BFO Site is
+a three-dimensional immaterial entity bounded by a material entity or
+process. This is the standard BFO mapping for named locations, following
+the same pattern as prov:Location ≡ bfo:Site in Prudhomme et al."""@en .
+
+## schema:PostalAddress ⊑ cco:DesignativeICE
+## A postal address is an ICE that designates a location, not the
+## location itself. This follows the BFO distinction between the
+## information (address string) and the entity it is about (site).
+schema:PostalAddress
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Postal Address"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:PostalAddress ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000686 ;
+    sssom:object_label    "Designative Information Content Entity" ;
+    rdfs:comment """A postal address is a set of symbols (street, city, zip)
+that designates a Site for postal delivery. It is the information content
+(GDC), not the physical location (Site). This distinction is critical
+for PII classification: the address string is the sensitive datum."""@en .
+
+## schema:Country ⊑ BFO:Site
+schema:Country
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;  # bfo:Site
+    rdfs:label "Country"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Country ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000029 ;
+    sssom:object_label    "site" ;
+    rdfs:comment """A country is a geopolitically bounded three-dimensional
+immaterial entity — a Site in BFO terms."""@en .
+
+## -----------------------------------------------------------------
+## 1.4 Temporal and event types
+## -----------------------------------------------------------------
+
+## schema:Event ⊑ BFO:Process
+schema:Event
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;  # bfo:Process
+    rdfs:label "Event"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Event ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000015 ;
+    sssom:object_label    "process" ;
+    rdfs:comment """schema:Event denotes something that happens at a time and
+place. In BFO, events are processes — occurrents that unfold through time.
+Following the prov:Activity ≡ bfo:Process pattern from Prudhomme."""@en .
+
+## -----------------------------------------------------------------
+## 1.5 Measurement and value types
+## -----------------------------------------------------------------
+
+## schema:QuantitativeValue ⊑ cco:DescriptiveICE
+schema:QuantitativeValue
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Quantitative Value"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:QuantitativeValue ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000853 ;
+    sssom:object_label    "Descriptive Information Content Entity" ;
+    rdfs:comment """A quantitative value is an ICE that describes a Quality
+(BFO:0000019) of some entity via a numeric measurement. It is descriptive
+because it consists of propositions characterizing the measured entity."""@en .
+
+## schema:MonetaryAmount ⊑ cco:DescriptiveICE
+schema:MonetaryAmount
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Monetary Amount"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:MonetaryAmount ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000853 ;
+    sssom:object_label    "Descriptive Information Content Entity" ;
+    rdfs:comment """A monetary amount describes the financial quality of a
+transaction or asset. It is a specialization of DescriptiveICE."""@en .
+
+
+## =================================================================
+## PART 2: Schema.org Property Mappings (7 properties)
+## =================================================================
+
+## schema:name ⊑ cco:designates
+## A name is a designative symbol that uniquely distinguishes an entity.
+schema:name
+    rdf:type owl:DatatypeProperty ;
+    rdfs:subPropertyOf cco:ont00001765 ;  # cco:has_text_value
+    rdfs:label "name"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:name ;
+    owl:annotatedProperty rdfs:subPropertyOf ;
+    owl:annotatedTarget   cco:ont00001765 ;
+    sssom:object_label    "has text value" ;
+    rdfs:comment """schema:name provides the textual content of a Designative
+ICE. The name value (string) is the text carried by an information bearing
+entity that designates the named entity. Mapped to has_text_value because
+name is a datatype property (string range), while cco:designates is an
+object property linking ICE to Entity."""@en .
+
+## schema:identifier — parallel to schema:name for identifiers
+schema:identifier
+    rdf:type rdf:Property ;
+    rdfs:label "identifier"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:identifier ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00001916 ;
+    sssom:object_label    "designates" ;
+    rdfs:comment """schema:identifier provides values (strings or URLs) that
+designate an entity. Related to cco:designates (object property linking
+DesignativeICE to Entity). The identifier value is the text content of
+a Designative ICE instance. skos:relatedMatch used because schema:identifier
+is polymorphic (accepts Text, URL, or PropertyValue)."""@en .
+
+## schema:description ⊑ cco:describes (as property pattern)
+schema:description
+    rdf:type rdf:Property ;
+    rdfs:label "description"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:description ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00001982 ;
+    sssom:object_label    "describes" ;
+    rdfs:comment """schema:description provides text that describes an entity.
+Related to cco:describes (object property linking DescriptiveICE to Entity).
+The description text is the content of a Descriptive ICE instance.
+skos:relatedMatch because schema:description has a string range while
+cco:describes links ICE instances to described entities."""@en .
+
+## schema:dateCreated — temporal descriptive property
+schema:dateCreated
+    rdf:type rdf:Property ;
+    rdfs:label "date created"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:dateCreated ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00000853 ;
+    sssom:object_label    "Descriptive Information Content Entity" ;
+    rdfs:comment """schema:dateCreated provides a Date/DateTime value describing
+when an entity came into existence. The date value is a Descriptive ICE
+that is_about a temporal region (the creation moment). Related rather than
+subsumed because the property's range is a literal, not an ICE instance."""@en .
+
+## schema:dateModified — temporal descriptive property
+schema:dateModified
+    rdf:type rdf:Property ;
+    rdfs:label "date modified"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:dateModified ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00000853 ;
+    sssom:object_label    "Descriptive Information Content Entity" ;
+    rdfs:comment """schema:dateModified provides a Date/DateTime value describing
+when an entity was last changed. Same pattern as schema:dateCreated."""@en .
+
+## schema:url — designative property (locator)
+schema:url
+    rdf:type rdf:Property ;
+    rdfs:label "url"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:url ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00001916 ;
+    sssom:object_label    "designates" ;
+    rdfs:comment """schema:url provides a URL that designates a web resource.
+A URL is a Designative ICE — a set of symbols (scheme, host, path) that
+uniquely distinguishes a resource on the web."""@en .
+
+## schema:email — designative property (contact)
+schema:email
+    rdf:type rdf:Property ;
+    rdfs:label "email"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:email ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00001916 ;
+    sssom:object_label    "designates" ;
+    rdfs:comment """schema:email provides an email address that designates a
+mailbox (and transitively, a person or organization). An email address
+is a Designative ICE in the PII classification context."""@en .
+
+## schema:telephone — designative property (contact)
+schema:telephone
+    rdf:type rdf:Property ;
+    rdfs:label "telephone"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:telephone ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00001916 ;
+    sssom:object_label    "designates" ;
+    rdfs:comment """schema:telephone provides a phone number that designates
+a communication endpoint. A phone number is a Designative ICE."""@en .
+
+## schema:address — designative property (location)
+schema:address
+    rdf:type rdf:Property ;
+    rdfs:label "address"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:address ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   cco:ont00001916 ;
+    sssom:object_label    "designates" ;
+    rdfs:comment """schema:address provides a postal address or text that
+designates a physical location (Site). The address string is a
+Designative ICE; the location itself is a BFO Site."""@en .
+
+
+## =================================================================
+## PART 3: DBpedia Class Mappings (15 types)
+## =================================================================
+
+## -----------------------------------------------------------------
+## 3.1 Agent types
+## -----------------------------------------------------------------
+
+## dbo:Person ≡ cco:Person
+## Both denote members of Homo sapiens. Equivalence is justified.
+dbo:Person
+    rdf:type owl:Class ;
+    owl:equivalentClass cco:ont00001262 ;  # cco:Person
+    rdfs:label "Person"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Person ;
+    owl:annotatedProperty owl:equivalentClass ;
+    owl:annotatedTarget   cco:ont00001262 ;
+    sssom:object_label    "Person" ;
+    rdfs:comment """dbo:Person and cco:Person are coextensive: both denote
+individual members of Homo sapiens. dbo:Person is defined in DBpedia
+as 'a human being regarded as an individual', which matches CCO's
+'An Animal that is a member of the species Homo sapiens.'"""@en .
+
+## dbo:Organisation ⊑ cco:Organization
+dbo:Organisation
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00001180 ;  # cco:Organization
+    rdfs:label "Organisation"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Organisation ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00001180 ;
+    sssom:object_label    "Organization" ;
+    rdfs:comment """dbo:Organisation (British spelling) covers the same
+extension as cco:Organization. Subsumption rather than equivalence
+because DBpedia may include informal groupings that lack the
+organizational rules required by CCO's definition."""@en .
+
+## dbo:Company ⊑ cco:CommercialOrganization
+dbo:Company
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000443 ;  # cco:CommercialOrganization
+    rdfs:label "Company"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Company ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000443 ;
+    sssom:object_label    "Commercial Organization" ;
+    rdfs:comment """A company is an organization whose primary objective is
+profit from goods or services. CCO defines CommercialOrganization as
+an Organization bearing a Commercial Role, which captures the same
+essential characteristic."""@en .
+
+## -----------------------------------------------------------------
+## 3.2 Information content types
+## -----------------------------------------------------------------
+
+## dbo:Work ⊑ cco:InformationContentEntity
+dbo:Work
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000958 ;  # cco:InformationContentEntity
+    rdfs:label "Work"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Work ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000958 ;
+    sssom:object_label    "Information Content Entity" ;
+    rdfs:comment """dbo:Work is an intellectual or artistic creation — an
+information content entity whose identity is the abstract content,
+not any particular physical carrier."""@en .
+
+## dbo:Software ⊑ cco:PrescriptiveICE
+dbo:Software
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000965 ;  # cco:PrescriptiveICE
+    rdfs:label "Software"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Software ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000965 ;
+    sssom:object_label    "Prescriptive Information Content Entity" ;
+    rdfs:comment """Software prescribes computational behavior. As an ICE,
+its identity is the instruction set (pattern), not any particular
+installation. Prescriptive because it serves as a set of propositions
+that prescribe the behavior of a computational process."""@en .
+
+## dbo:WrittenWork ⊑ cco:DescriptiveICE
+dbo:WrittenWork
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Written Work"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:WrittenWork ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000853 ;
+    sssom:object_label    "Descriptive Information Content Entity" ;
+    rdfs:comment """Written works (books, articles, essays) primarily consist
+of propositions that describe some domain. While some written works
+are prescriptive (manuals, specifications), the prototypical written
+work is descriptive. Mapped to DescriptiveICE as the predominant case;
+prescriptive written works may additionally satisfy PrescriptiveICE."""@en .
+
+## -----------------------------------------------------------------
+## 3.3 Spatial types
+## -----------------------------------------------------------------
+
+## dbo:Place ⊑ BFO:Site
+dbo:Place
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;  # bfo:Site
+    rdfs:label "Place"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Place ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000029 ;
+    sssom:object_label    "site" ;
+    rdfs:comment """dbo:Place denotes a named geographic location — a
+three-dimensional immaterial entity in BFO terms."""@en .
+
+## dbo:Country ⊑ BFO:Site
+dbo:Country
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;  # bfo:Site
+    rdfs:label "Country"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Country ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000029 ;
+    sssom:object_label    "site" ;
+    rdfs:comment """A country is a geopolitically bounded site."""@en .
+
+## dbo:City ⊑ BFO:Site
+dbo:City
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;  # bfo:Site
+    rdfs:label "City"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:City ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000029 ;
+    sssom:object_label    "site" ;
+    rdfs:comment """A city is a populated site with municipal governance."""@en .
+
+## dbo:PopulatedPlace ⊑ BFO:Site
+dbo:PopulatedPlace
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;  # bfo:Site
+    rdfs:label "Populated Place"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:PopulatedPlace ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000029 ;
+    sssom:object_label    "site" ;
+    rdfs:comment """A populated place is a site at which people reside."""@en .
+
+## -----------------------------------------------------------------
+## 3.4 Temporal and event types
+## -----------------------------------------------------------------
+
+## dbo:Event ⊑ BFO:Process
+dbo:Event
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;  # bfo:Process
+    rdfs:label "Event"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Event ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000015 ;
+    sssom:object_label    "process" ;
+    rdfs:comment """dbo:Event denotes something that occurs at a time and place.
+Same mapping pattern as schema:Event and prov:Activity."""@en .
+
+## dbo:SportsEvent ⊑ BFO:Process
+dbo:SportsEvent
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;  # bfo:Process
+    rdfs:subClassOf dbo:Event ;
+    rdfs:label "Sports Event"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:SportsEvent ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000015 ;
+    sssom:object_label    "process" ;
+    rdfs:comment """A sports event is a process involving athletic competition.
+Inherits the Event → Process mapping."""@en .
+
+## dbo:TimePeriod ⊑ BFO:one-dimensional temporal region
+dbo:TimePeriod
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000038 ;  # bfo:one-dimensional temporal region
+    rdfs:label "Time Period"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:TimePeriod ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000038 ;
+    sssom:object_label    "one-dimensional temporal region" ;
+    rdfs:comment """A time period is a connected temporal region with
+non-zero duration — a one-dimensional temporal region in BFO."""@en .
+
+## dbo:Year ⊑ BFO:one-dimensional temporal region
+dbo:Year
+    rdf:type owl:Class ;
+    rdfs:subClassOf obo:BFO_0000038 ;  # bfo:one-dimensional temporal region
+    rdfs:label "Year"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Year ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   obo:BFO_0000038 ;
+    sssom:object_label    "one-dimensional temporal region" ;
+    rdfs:comment """A year is a one-dimensional temporal region of
+approximately 365.25 days duration."""@en .
+
+## -----------------------------------------------------------------
+## 3.5 Financial type
+## -----------------------------------------------------------------
+
+## dbo:Currency ⊑ cco:DesignativeICE
+dbo:Currency
+    rdf:type owl:Class ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Currency"@en .
+
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   dbo:Currency ;
+    owl:annotatedProperty rdfs:subClassOf ;
+    owl:annotatedTarget   cco:ont00000686 ;
+    sssom:object_label    "Designative Information Content Entity" ;
+    rdfs:comment """A currency (USD, EUR, BTC) is a symbolic system that
+designates units of monetary value. The currency symbol/code is a
+Designative ICE; the monetary value it enables measuring is a
+BFO Quality."""@en .
+
+
+## =================================================================
+## PART 4: Atelier PII Vocabulary — CCO Grounding
+## =================================================================
+##
+## Maps Atelier's 24-node universal vocabulary (16 leaves, 8 internal)
+## to CCO classes. All nodes descend from cco:InformationContentEntity.
+## Codes use hierarchical dot notation: ICE.SENSITIVE.PID.CONTACT.EMAIL
+##
+## This grounding is conservative: it adds BFO/CCO superclass axioms
+## without altering the existing vocabulary structure or semantics.
+## -----------------------------------------------------------------
+
+## -----------------------------------------------------------------
+## 4.1 Root and sensitivity tier (internal nodes)
+## -----------------------------------------------------------------
+
+## ICE ≡ cco:InformationContentEntity
+atelier:ICE
+    rdf:type owl:Class ;
+    owl:equivalentClass cco:ont00000958 ;  # cco:InformationContentEntity
+    rdfs:label "Information Content Entity"@en ;
+    skos:notation "0" ;
+    rdfs:comment """Root of Atelier's classification vocabulary. Equivalent
+to CCO's Information Content Entity — a GDC that generically depends on
+some Information Bearing Entity and is about some Entity."""@en .
+
+## ICE.NONSENSITIVE ⊑ ICE (no specific CCO counterpart)
+atelier:ICE.NONSENSITIVE
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE ;
+    rdfs:label "Non-Sensitive Data"@en ;
+    skos:notation "0.1" ;
+    rdfs:comment """ICE not requiring elevated protection. Sensitivity is a
+data-governance concern orthogonal to BFO/CCO's ontological distinctions.
+No CCO equivalent exists; this is an Atelier domain class."""@en .
+
+## ICE.SENSITIVE ⊑ ICE (no specific CCO counterpart)
+atelier:ICE.SENSITIVE
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE ;
+    rdfs:label "Sensitive Data"@en ;
+    skos:notation "1" ;
+    rdfs:comment """ICE requiring protection due to privacy, regulatory, or
+business sensitivity. An Atelier domain class with no CCO equivalent."""@en .
+
+## ICE.METADATA ⊑ ICE (metadata about data)
+atelier:ICE.METADATA
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE ;
+    rdfs:label "Metadata"@en ;
+    skos:notation "2" ;
+    rdfs:comment """Data about data — timestamps, identifiers, and structural
+information. An ICE that is_about other ICEs."""@en .
+
+## -----------------------------------------------------------------
+## 4.2 PII hierarchy (internal nodes)
+## -----------------------------------------------------------------
+
+## ICE.SENSITIVE.PID ⊑ ICE.SENSITIVE
+atelier:ICE.SENSITIVE.PID
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE ;
+    rdfs:label "Personally Identifiable Data"@en ;
+    skos:notation "1.1" ;
+    rdfs:comment """ICE relating to an identified or identifiable natural
+person. In CCO terms, these are ICEs that are_about a cco:Person."""@en .
+
+## ICE.SENSITIVE.PID.CONTACT ⊑ cco:DesignativeICE
+## Contact information designates communication channels for persons.
+atelier:ICE.SENSITIVE.PID.CONTACT
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Contact Information"@en ;
+    skos:notation "1.1.1" ;
+    rdfs:comment """ICE designating communication channels (email, phone,
+address) for contacting a person. Grounded as DesignativeICE because
+contact data designates endpoints for reaching an Agent."""@en .
+
+## ICE.SENSITIVE.PID.IDENTITY ⊑ cco:DesignativeICE
+## Identity information designates specific persons.
+atelier:ICE.SENSITIVE.PID.IDENTITY
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Identity Information"@en ;
+    skos:notation "1.1.2" ;
+    rdfs:comment """ICE designating a specific person (name, DOB, government ID).
+Grounded as DesignativeICE because identity data designates a Person."""@en .
+
+## ICE.SENSITIVE.PID.FINANCIAL ⊑ ICE.SENSITIVE.PID
+atelier:ICE.SENSITIVE.PID.FINANCIAL
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID ;
+    rdfs:label "Financial Data"@en ;
+    skos:notation "1.1.3" ;
+    rdfs:comment """ICE relating to financial accounts or transactions of a
+person. Contains both designative (account numbers) and descriptive
+(transaction amounts) children, so mapped to the parent ICE level."""@en .
+
+## ICE.SENSITIVE.TECHNICAL ⊑ cco:DesignativeICE
+atelier:ICE.SENSITIVE.TECHNICAL
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Technical Data"@en ;
+    skos:notation "1.2" ;
+    rdfs:comment """ICE designating technical resources (IP addresses, device
+IDs, URLs). Grounded as DesignativeICE because technical identifiers
+designate infrastructure entities."""@en .
+
+## -----------------------------------------------------------------
+## 4.3 Leaf categories — Contact (DesignativeICE)
+## -----------------------------------------------------------------
+
+atelier:ICE.SENSITIVE.PID.CONTACT.EMAIL
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.CONTACT ;
+    rdfs:label "Email Address"@en ;
+    skos:notation "1.1.1.1" ;
+    skos:altLabel "email"@en, "e-mail"@en ;
+    rdfs:comment """A Designative ICE consisting of a mailbox address
+(local-part@domain) that designates a person's electronic mailbox."""@en .
+
+atelier:ICE.SENSITIVE.PID.CONTACT.PHONE
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.CONTACT ;
+    rdfs:label "Phone Number"@en ;
+    skos:notation "1.1.1.2" ;
+    skos:altLabel "phone"@en, "tel"@en, "telephone"@en ;
+    rdfs:comment """A Designative ICE consisting of a telephone number that
+designates a communication endpoint reachable by a person."""@en .
+
+atelier:ICE.SENSITIVE.PID.CONTACT.ADDRESS
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.CONTACT ;
+    rdfs:label "Mailing Address"@en ;
+    skos:notation "1.1.1.3" ;
+    skos:altLabel "address"@en, "street address"@en, "postal address"@en ;
+    rdfs:comment """A Designative ICE consisting of a postal address that
+designates a physical Site for mail delivery."""@en .
+
+## -----------------------------------------------------------------
+## 4.4 Leaf categories — Identity (DesignativeICE)
+## -----------------------------------------------------------------
+
+atelier:ICE.SENSITIVE.PID.IDENTITY.FULLNAME
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.IDENTITY ;
+    rdfs:label "Full Name"@en ;
+    skos:notation "1.1.2.1" ;
+    skos:altLabel "name"@en, "person name"@en, "legal name"@en ;
+    rdfs:comment """A Designative ICE consisting of a person's complete legal
+name that designates that Person."""@en .
+
+atelier:ICE.SENSITIVE.PID.IDENTITY.DOB
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.IDENTITY ;
+    rdfs:label "Date of Birth"@en ;
+    skos:notation "1.1.2.2" ;
+    skos:altLabel "DOB"@en, "birthday"@en, "birth date"@en ;
+    rdfs:comment """A Designative ICE (inherited from Identity parent) that
+designates a person via their birth date as a quasi-identifier.
+Note: DOB also has descriptive character (it describes a temporal quality
+of a person), but CCO's ICE subtypes are pairwise disjoint. We classify
+DOB as Designative because its primary function in PII classification
+is person identification, not temporal description."""@en .
+
+atelier:ICE.SENSITIVE.PID.IDENTITY.GOVID
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.IDENTITY ;
+    rdfs:label "Government Identifier"@en ;
+    skos:notation "1.1.2.3" ;
+    skos:altLabel "SSN"@en, "social security"@en, "tax id"@en,
+                  "passport number"@en ;
+    rdfs:comment """A Designative ICE consisting of a government-issued
+identifier (SSN, passport, driver's license number) that designates
+a Person within a governmental administrative system."""@en .
+
+## -----------------------------------------------------------------
+## 4.5 Leaf categories — Financial (mixed Designative/Descriptive)
+## -----------------------------------------------------------------
+
+atelier:ICE.SENSITIVE.PID.FINANCIAL.PAN
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.FINANCIAL ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Payment Card Number"@en ;
+    skos:notation "1.1.3.1" ;
+    skos:altLabel "PAN"@en, "credit card"@en, "card number"@en ;
+    rdfs:comment """A Designative ICE consisting of a primary account number
+(PAN) that designates a payment card account."""@en .
+
+atelier:ICE.SENSITIVE.PID.FINANCIAL.BAN
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.FINANCIAL ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Bank Account Number"@en ;
+    skos:notation "1.1.3.2" ;
+    skos:altLabel "account number"@en, "IBAN"@en, "routing number"@en ;
+    rdfs:comment """A Designative ICE consisting of a bank account number
+(IBAN, routing+account) that designates a bank account."""@en .
+
+atelier:ICE.SENSITIVE.PID.FINANCIAL.TXNAMT
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID.FINANCIAL ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Transaction Amount"@en ;
+    skos:notation "1.1.3.3" ;
+    skos:altLabel "amount"@en, "payment"@en, "price"@en ;
+    rdfs:comment """A Descriptive ICE consisting of a monetary value that
+describes the financial magnitude of a transaction. Unlike account
+numbers (designative), amounts describe a Quality of a process."""@en .
+
+## -----------------------------------------------------------------
+## 4.6 Leaf categories — Technical (DesignativeICE)
+## -----------------------------------------------------------------
+
+atelier:ICE.SENSITIVE.TECHNICAL.IPADDR
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.TECHNICAL ;
+    rdfs:label "IP Address"@en ;
+    skos:notation "1.2.1" ;
+    skos:altLabel "IP"@en, "IPv4"@en, "IPv6"@en, "network address"@en ;
+    rdfs:comment """A Designative ICE consisting of an Internet Protocol
+address that designates a network interface on a device."""@en .
+
+atelier:ICE.SENSITIVE.TECHNICAL.DEVID
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.TECHNICAL ;
+    rdfs:label "Device Identifier"@en ;
+    skos:notation "1.2.2" ;
+    skos:altLabel "UUID"@en, "MAC address"@en, "device ID"@en,
+                  "serial number"@en ;
+    rdfs:comment """A Designative ICE consisting of a unique identifier
+(UUID, MAC, serial number) that designates a computing device."""@en .
+
+atelier:ICE.SENSITIVE.TECHNICAL.URL
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.TECHNICAL ;
+    rdfs:label "URL"@en ;
+    skos:notation "1.2.3" ;
+    skos:altLabel "web address"@en, "link"@en, "URI"@en, "endpoint"@en ;
+    rdfs:comment """A Designative ICE consisting of a Uniform Resource Locator
+that designates a web resource."""@en .
+
+## -----------------------------------------------------------------
+## 4.7 Leaf categories — Metadata
+## -----------------------------------------------------------------
+
+atelier:ICE.METADATA.TIMESTAMP
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.METADATA ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Timestamp"@en ;
+    skos:notation "2.1" ;
+    skos:altLabel "date"@en, "datetime"@en, "created_at"@en,
+                  "updated_at"@en ;
+    rdfs:comment """A Descriptive ICE consisting of a date/time value that
+describes when an event occurred or a record was modified. It is_about
+a temporal region (BFO:0000008)."""@en .
+
+atelier:ICE.METADATA.RECID
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.METADATA ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Record Identifier"@en ;
+    skos:notation "2.2" ;
+    skos:altLabel "ID"@en, "primary key"@en, "row ID"@en, "record ID"@en ;
+    rdfs:comment """A Designative ICE consisting of a unique key (integer,
+UUID, slug) that designates a database record."""@en .
+
+atelier:ICE.METADATA.STATUS
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.METADATA ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Status Code"@en ;
+    skos:notation "2.3" ;
+    skos:altLabel "status"@en, "state"@en, "flag"@en, "code"@en ;
+    rdfs:comment """A Descriptive ICE consisting of a categorical value
+(active/inactive, pending/approved) that describes the current state
+of a record or process."""@en .
+
+
+## =================================================================
+## PART 5: Cross-Ontology Alignment Annotations
+## =================================================================
+##
+## These annotations document how the three ontology families
+## (Schema.org, DBpedia, Atelier) relate to each other via their
+## shared CCO/BFO grounding — without asserting direct equivalence
+## between the source ontologies.
+## -----------------------------------------------------------------
+
+## schema:Person and dbo:Person share a CCO grounding
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:Person ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   dbo:Person ;
+    rdfs:comment """Both schema:Person and dbo:Person are grounded in
+cco:Person. schema:Person via subsumption (broader extension),
+dbo:Person via equivalence."""@en .
+
+## schema:email and atelier:EMAIL share a CCO grounding
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:email ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   atelier:ICE.SENSITIVE.PID.CONTACT.EMAIL ;
+    rdfs:comment """schema:email (property) and atelier:EMAIL (class) both
+ground in cco:DesignativeICE via cco:designates. schema:email is a
+property whose values are email address strings; atelier:EMAIL is a
+class of columns that contain such strings."""@en .
+
+## schema:PostalAddress and atelier:ADDRESS share DesignativeICE grounding
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:PostalAddress ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   atelier:ICE.SENSITIVE.PID.CONTACT.ADDRESS ;
+    rdfs:comment """Both ground in cco:DesignativeICE. schema:PostalAddress
+is a structured address object; atelier:ADDRESS classifies columns
+containing address strings."""@en .
+
+## schema:name and atelier:FULLNAME share DesignativeICE grounding
+[] rdf:type owl:Axiom ;
+    owl:annotatedSource   schema:name ;
+    owl:annotatedProperty skos:relatedMatch ;
+    owl:annotatedTarget   atelier:ICE.SENSITIVE.PID.IDENTITY.FULLNAME ;
+    rdfs:comment """schema:name values and atelier:FULLNAME columns both
+contain Designative ICEs that designate entities by name. atelier:FULLNAME
+is narrower (person names only); schema:name covers all entity types."""@en .
+
+
+## =================================================================
+## END
+## =================================================================

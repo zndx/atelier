@@ -115,9 +115,13 @@ src/atelier/classify/
 ├── shap_explanations.py # Per-item SHAP feature attribution (TreeSHAP + PermutationSHAP)
 ├── pipeline.py          # Single-pass ML orchestration (6 evidence sources)
 ├── fsm.py               # AgentFSM state machine
-└── fixtures/
-    ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
-    └── mock_tables.json           # 8 tables, 50 columns with ground truth
+├── fixtures/
+│   ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
+│   └── fixture_tables.json        # 8 tables, 50 columns with ground truth
+└── ontology/
+    ├── atelier-vocab.ttl          # CCO-mediated BFO alignment (59 mapped terms)
+    ├── sparql/unmapped-terms.rq   # Totality validation query
+    └── README.md                  # Mapping methodology and usage
 ```
 
 ### Build Directory

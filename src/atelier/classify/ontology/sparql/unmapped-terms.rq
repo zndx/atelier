@@ -1,0 +1,124 @@
+# unmapped-terms.rq — Totality check for atelier-vocab.ttl
+#
+# Finds Schema.org, DBpedia, and Atelier classes/properties declared in
+# the mapping file that lack any BFO/CCO alignment axiom.
+#
+# A term is "mapped" if it participates in at least one of:
+#   - rdfs:subClassOf targeting a BFO or CCO class
+#   - owl:equivalentClass targeting a BFO or CCO class
+#   - rdfs:subPropertyOf targeting a BFO or CCO property
+#   - owl:equivalentProperty targeting a BFO or CCO property
+#   - skos:relatedMatch targeting a BFO or CCO term
+#
+# Expected result on a complete mapping: zero rows.
+#
+# Usage with ROBOT:
+#   robot verify --input atelier-vocab.ttl \
+#     --queries sparql/unmapped-terms.rq
+
+PREFIX owl:    <http://www.w3.org/2002/07/owl#>
+PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:   <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:   <http://www.w3.org/2004/02/skos/core#>
+PREFIX obo:    <http://purl.obolibrary.org/obo/>
+PREFIX cco:    <https://www.commoncoreontologies.org/>
+PREFIX schema: <https://schema.org/>
+PREFIX dbo:    <http://dbpedia.org/ontology/>
+PREFIX atelier: <https://atelier.zndx.org/ontology/>
+
+SELECT ?term ?type WHERE {
+  # Collect all declared terms from the three source namespaces
+  {
+    ?term rdf:type owl:Class .
+    FILTER(
+      STRSTARTS(STR(?term), STR(schema:)) ||
+      STRSTARTS(STR(?term), STR(dbo:)) ||
+      STRSTARTS(STR(?term), STR(atelier:))
+    )
+    BIND("Class" AS ?type)
+  }
+  UNION
+  {
+    { ?term rdf:type owl:ObjectProperty }
+    UNION
+    { ?term rdf:type owl:DatatypeProperty }
+    UNION
+    { ?term rdf:type rdf:Property }
+    FILTER(
+      STRSTARTS(STR(?term), STR(schema:)) ||
+      STRSTARTS(STR(?term), STR(dbo:)) ||
+      STRSTARTS(STR(?term), STR(atelier:))
+    )
+    BIND("Property" AS ?type)
+  }
+
+  # Exclude terms that have at least one BFO/CCO alignment
+  FILTER NOT EXISTS {
+    {
+      ?term rdfs:subClassOf ?target .
+      FILTER(
+        STRSTARTS(STR(?target), STR(obo:BFO_)) ||
+        STRSTARTS(STR(?target), STR(cco:))
+      )
+    }
+    UNION
+    {
+      ?term owl:equivalentClass ?target .
+      FILTER(
+        STRSTARTS(STR(?target), STR(obo:BFO_)) ||
+        STRSTARTS(STR(?target), STR(cco:))
+      )
+    }
+    UNION
+    {
+      ?term rdfs:subPropertyOf ?target .
+      FILTER(
+        STRSTARTS(STR(?target), STR(obo:BFO_)) ||
+        STRSTARTS(STR(?target), STR(cco:))
+      )
+    }
+    UNION
+    {
+      ?term owl:equivalentProperty ?target .
+      FILTER(
+        STRSTARTS(STR(?target), STR(obo:BFO_)) ||
+        STRSTARTS(STR(?target), STR(cco:))
+      )
+    }
+    UNION
+    {
+      # Also count terms mapped via annotated axiom with skos:relatedMatch
+      [] rdf:type owl:Axiom ;
+         owl:annotatedSource ?term ;
+         owl:annotatedProperty skos:relatedMatch ;
+         owl:annotatedTarget ?target .
+      FILTER(
+        STRSTARTS(STR(?target), STR(obo:BFO_)) ||
+        STRSTARTS(STR(?target), STR(cco:))
+      )
+    }
+    UNION
+    {
+      # Atelier terms mapped via subClassOf to another atelier term
+      # that itself has a CCO/BFO grounding (transitive)
+      ?term rdfs:subClassOf ?parent .
+      FILTER(STRSTARTS(STR(?parent), STR(atelier:)))
+      {
+        ?parent rdfs:subClassOf ?gparent .
+        FILTER(
+          STRSTARTS(STR(?gparent), STR(obo:BFO_)) ||
+          STRSTARTS(STR(?gparent), STR(cco:))
+        )
+      }
+      UNION
+      {
+        ?parent owl:equivalentClass ?gparent .
+        FILTER(
+          STRSTARTS(STR(?gparent), STR(obo:BFO_)) ||
+          STRSTARTS(STR(?gparent), STR(cco:))
+        )
+      }
+    }
+  }
+}
+ORDER BY ?type ?term
