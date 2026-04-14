@@ -12,6 +12,8 @@
 - [Embeddings](./architecture/embeddings.md)
 - [gRPC Service](./architecture/grpc.md)
 - [Classification Pipeline](./architecture/classification.md)
+- [Data Sources & Versioning](./architecture/data-sources.md)
+- [Proposed Integrations](./architecture/integrations.md)
 
 # Scenarios
 

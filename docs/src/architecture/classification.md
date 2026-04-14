@@ -329,4 +329,5 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M2** | CatBoost + SVM + synthetic data, 6 evidence sources, Bedrock/Cerebras backends | Done |
 | **M3** | Evaluation framework, E2E synth-train-eval, realistic mock LLM, SAGE importance | Done |
 | **M4** | SHAP explanations, configurable discounts, thread-safe model loading | Done |
-| M5 | Production deployment on real hive data, CAI integration | Planned |
+| **M5** | Data sources + versioning, OOTB onboarding (300-leaf ontology, 25 sample tables) | Done |
+| M6 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |
