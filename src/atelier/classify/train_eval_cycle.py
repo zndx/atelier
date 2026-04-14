@@ -32,7 +32,7 @@ def run_synth_train_eval(
     from atelier.classify.evaluation import evaluate_classifications
     from atelier.classify.ml_train import train_all
     from atelier.classify.pipeline import _classify_column
-    from atelier.classify.sampler import load_all_mock_samples
+    from atelier.classify.sampler import load_fixture_samples
     from atelier.classify.synth import generate_synth_tables
     from atelier.classify import ml_inference
 
@@ -73,7 +73,7 @@ def run_synth_train_eval(
     try:
         # 4. Classify mock data
         frame = FrameOfDiscernment(category_set)
-        all_samples = load_all_mock_samples()
+        all_samples = load_fixture_samples()
         classifications: list[dict[str, Any]] = []
         all_sources: set[str] = set()
         catboost_count = 0

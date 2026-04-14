@@ -8,9 +8,15 @@ Run the full Dempster-Shafer classification pipeline on sampled columns.
    ```python
    from atelier.config import load_config
    from atelier.classify import run_pipeline
+   from atelier.classify.sampler import load_fixture_samples
+   from atelier.classify.mock_llm import RealisticMockLLMBackend
 
    cfg = load_config()
-   result = run_pipeline(cfg, use_mock=True)
+   samples = load_fixture_samples()
+   gt = {c.name: c.ground_truth for ts in samples for c in ts.columns if c.ground_truth}
+   result = run_pipeline(
+       cfg, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+   )
    ```
 
 2. The pipeline executes these stages:

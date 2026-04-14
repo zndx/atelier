@@ -426,30 +426,35 @@ def vocabulary_stats():
         from atelier.classify.taxonomy import (
             load_annotations_from_json,
             load_annotations_from_hive as _hive_vocab,
-            load_mock_annotations,
+            load_universal_vocabulary,
+            compose_vocabularies,
         )
 
         cfg = load_config()
         project_root = Path(__file__).resolve().parent.parent.parent
         cache_path = project_root / "build" / "data" / "annotations" / "annotations.json"
 
-        # Try cache first (validated — reject empty)
+        # Universal base (always available)
+        universal = load_universal_vocabulary(hierarchical=True)
+
+        # Try cache first (domain extensions — validated, reject empty)
         if cache_path.exists():
             cs = load_annotations_from_json(cache_path, hierarchical=True)
             if len(cs.categories) > 0:
-                return {"terms": len(cs.categories), "source": "cache"}
+                composed = compose_vocabularies(universal, cs)
+                return {"terms": len(composed.categories), "source": "cache"}
 
-        # Try hive
+        # Try hive domain extensions
         try:
             cs = _hive_vocab(cfg)
             if len(cs.categories) > 0:
-                return {"terms": len(cs.categories), "source": "hive"}
+                composed = compose_vocabularies(universal, cs)
+                return {"terms": len(composed.categories), "source": "hive"}
         except Exception:
             pass
 
-        # Fall back to mock
-        cs = load_mock_annotations(hierarchical=True)
-        return {"terms": len(cs.categories), "source": "mock"}
+        # Universal only (no domain extensions)
+        return {"terms": len(universal.categories), "source": "universal"}
     except Exception as exc:
         return _error_envelope(f"vocabulary_stats failed: {exc}")
 
@@ -530,8 +535,8 @@ def fsm_start():
     to AnthropicStructuredBackend + Haiku 4.5.  An explicit classify LLM
     (ATELIER_LLM_API_KEY / ATELIER_LLM_BASE_URL) overrides the default.
 
-    ``use_mock=True`` substitutes a deterministic mock backend for
-    dev/CI testing without real API calls.
+    For dev/CI testing without real API calls, inject ``samples=`` and
+    ``llm_backend=`` via the Python API.
     """
     import threading
     try:

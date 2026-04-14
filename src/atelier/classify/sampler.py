@@ -1,7 +1,7 @@
 """Metadata sampler for hive tables via CAI Data Platform.
 
 Discovers tables and samples column metadata from production databases.
-Falls back to mock fixtures when cml.data_v1 is unavailable (devenv/CI).
+For dev/test without hive, use load_fixture_samples() and inject via samples=.
 """
 
 from __future__ import annotations
@@ -71,23 +71,26 @@ def discover_tables(
 ) -> list[str]:
     """List tables from a hive database via CAI Data Platform.
 
-    Falls back to mock fixture table names when cml.data_v1 is unavailable.
+    Raises RuntimeError when cml.data_v1 is unavailable.
+    For dev/test, inject samples= into the pipeline instead.
     """
     try:
         import cml.data_v1 as cmldata
+    except ImportError:
+        raise RuntimeError(
+            "cml.data_v1 not available — inject samples= for dev/test"
+        ) from None
 
-        if connection_name is None:
-            names = cfg.cml_data_connection_names
-            if not names:
-                raise ValueError("No data connections configured")
-            connection_name = names[0]
+    if connection_name is None:
+        names = cfg.cml_data_connection_names
+        if not names:
+            raise ValueError("No data connections configured")
+        connection_name = names[0]
 
-        conn = cmldata.get_connection(connection_name)
-        df = conn.get_pandas_dataframe(f"SHOW TABLES IN {database}")
-        tables = df.iloc[:, 0].tolist()[:limit]
-        return [str(t) for t in tables]
-    except (ImportError, Exception):
-        return _mock_table_names()
+    conn = cmldata.get_connection(connection_name)
+    df = conn.get_pandas_dataframe(f"SHOW TABLES IN {database}")
+    tables = df.iloc[:, 0].tolist()[:limit]
+    return [str(t) for t in tables]
 
 
 def sample_table_metadata(
@@ -100,63 +103,66 @@ def sample_table_metadata(
 ) -> TableSample:
     """Sample column metadata from a hive table.
 
-    Falls back to mock fixtures when cml.data_v1 is unavailable.
+    Raises RuntimeError when cml.data_v1 is unavailable.
+    For dev/test, inject samples= into the pipeline instead.
     """
     try:
         import cml.data_v1 as cmldata
+    except ImportError:
+        raise RuntimeError(
+            "cml.data_v1 not available — inject samples= for dev/test"
+        ) from None
 
-        if connection_name is None:
-            names = cfg.cml_data_connection_names
-            if not names:
-                raise ValueError("No data connections configured")
-            connection_name = names[0]
+    if connection_name is None:
+        names = cfg.cml_data_connection_names
+        if not names:
+            raise ValueError("No data connections configured")
+        connection_name = names[0]
 
-        conn = cmldata.get_connection(connection_name)
-        df = conn.get_pandas_dataframe(
-            f"SELECT * FROM {database}.{table_name} LIMIT {sample_size}"
+    conn = cmldata.get_connection(connection_name)
+    df = conn.get_pandas_dataframe(
+        f"SELECT * FROM {database}.{table_name} LIMIT {sample_size}"
+    )
+
+    column_names = list(df.columns)
+
+    # True cardinality: one query for all columns, bounded by limit
+    distinct_counts: dict[str, int] = {}
+    try:
+        distinct_exprs = ", ".join(
+            f"COUNT(DISTINCT `{col}`) AS `distinct_{col}`"
+            for col in column_names
         )
+        cardinality_df = conn.get_pandas_dataframe(
+            f"SELECT {distinct_exprs} FROM "
+            f"(SELECT * FROM {database}.{table_name} "
+            f"LIMIT {column_sample_limit}) sub"
+        )
+        for col in column_names:
+            distinct_counts[col] = int(cardinality_df[f"distinct_{col}"].iloc[0])
+    except Exception:
+        pass  # Fall back to sample-based cardinality in features
 
-        column_names = list(df.columns)
+    columns = []
+    for col_name in column_names:
+        col_values = [str(v) for v in df[col_name].dropna().head(5).tolist()]
+        null_count = int(df[col_name].isna().sum())
+        total_count = len(df)
+        col_type = str(df[col_name].dtype)
 
-        # True cardinality: one query for all columns, bounded by limit
-        distinct_counts: dict[str, int] = {}
-        try:
-            distinct_exprs = ", ".join(
-                f"COUNT(DISTINCT `{col}`) AS `distinct_{col}`"
-                for col in column_names
-            )
-            cardinality_df = conn.get_pandas_dataframe(
-                f"SELECT {distinct_exprs} FROM "
-                f"(SELECT * FROM {database}.{table_name} "
-                f"LIMIT {column_sample_limit}) sub"
-            )
-            for col in column_names:
-                distinct_counts[col] = int(cardinality_df[f"distinct_{col}"].iloc[0])
-        except Exception:
-            pass  # Fall back to sample-based cardinality in features
+        columns.append(ColumnSample(
+            name=col_name,
+            column_type=col_type,
+            values=col_values,
+            total_count=total_count,
+            null_count=null_count,
+            table_name=table_name,
+            database=database,
+            siblings=column_names,
+            distinct_count=distinct_counts.get(col_name),
+        ))
 
-        columns = []
-        for col_name in column_names:
-            col_values = [str(v) for v in df[col_name].dropna().head(5).tolist()]
-            null_count = int(df[col_name].isna().sum())
-            total_count = len(df)
-            col_type = str(df[col_name].dtype)
-
-            columns.append(ColumnSample(
-                name=col_name,
-                column_type=col_type,
-                values=col_values,
-                total_count=total_count,
-                null_count=null_count,
-                table_name=table_name,
-                database=database,
-                siblings=column_names,
-                distinct_count=distinct_counts.get(col_name),
-            ))
-
-        return TableSample(name=table_name, database=database, columns=columns)
-    except (ImportError, Exception):
-        return _mock_table_sample(table_name)
+    return TableSample(name=table_name, database=database, columns=columns)
 
 
 def load_annotations_from_hive(
@@ -165,7 +171,7 @@ def load_annotations_from_hive(
 ) -> list[dict]:
     """Load annotation records from default.annotations via hive.
 
-    Falls back to mock annotations when unavailable.
+    Returns empty list when hive is unavailable (no domain extensions).
     """
     try:
         import cml.data_v1 as cmldata
@@ -185,27 +191,27 @@ def load_annotations_from_hive(
         )
         return records
     except ImportError:
-        log.info("cml.data_v1 not available — using mock annotations")
-        return _load_mock_annotation_records()
+        log.info("cml.data_v1 not available — no domain annotations loaded")
+        return []
     except Exception as exc:
-        log.warning("Failed to load annotations from hive: %s — using mock annotations", exc)
-        return _load_mock_annotation_records()
+        log.warning("Failed to load annotations from hive: %s — no domain annotations loaded", exc)
+        return []
 
 
-# ── Mock data ────────────────────────────────────────────────────────
+# ── Fixture data (for dev/test) ───────────────────────────────────
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def _mock_table_names() -> list[str]:
-    """Return mock table names from fixtures."""
-    tables = _load_mock_tables()
+def _fixture_table_names() -> list[str]:
+    """Return fixture table names from static test data."""
+    tables = _load_fixture_tables()
     return [t["table_name"] for t in tables]
 
 
-def _mock_table_sample(table_name: str) -> TableSample:
-    """Return mock table sample from fixtures."""
-    tables = _load_mock_tables()
+def _fixture_table_sample(table_name: str) -> TableSample:
+    """Return a fixture TableSample for the named table."""
+    tables = _load_fixture_tables()
     for t in tables:
         if t["table_name"] == table_name:
             col_names = [c["name"] for c in t["columns"]]
@@ -232,25 +238,20 @@ def _mock_table_sample(table_name: str) -> TableSample:
     return TableSample(name=table_name)
 
 
-def _load_mock_tables() -> list[dict]:
-    """Load mock tables from fixtures."""
-    path = _FIXTURES_DIR / "mock_tables.json"
+def _load_fixture_tables() -> list[dict]:
+    """Load fixture tables from static test data."""
+    path = _FIXTURES_DIR / "fixture_tables.json"
     if not path.exists():
         return []
     with open(path) as f:
         return json.load(f)
 
 
-def _load_mock_annotation_records() -> list[dict]:
-    """Load mock annotation records from fixtures."""
-    path = _FIXTURES_DIR / "mock_annotations.json"
-    if not path.exists():
-        return []
-    with open(path) as f:
-        return json.load(f)
+def load_fixture_samples() -> list[TableSample]:
+    """Load all fixture TableSamples for dev/test."""
+    tables = _load_fixture_tables()
+    return [_fixture_table_sample(t["table_name"]) for t in tables]
 
 
-def load_all_mock_samples() -> list[TableSample]:
-    """Load all mock table samples for testing."""
-    tables = _load_mock_tables()
-    return [_mock_table_sample(t["table_name"]) for t in tables]
+# Backward-compatible alias
+load_all_mock_samples = load_fixture_samples

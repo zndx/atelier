@@ -102,7 +102,7 @@ src/atelier/classify/
 ├── embedding.py         # Sentence-transformer cosine classifier
 ├── llm_backend.py       # LLM backend factory (Anthropic, OpenAI-compat, Bedrock, Cerebras)
 ├── bootstrap.py         # Bootstrap convergence loop (LLM sweep + ML validation)
-├── sampler.py           # Hive metadata sampling + mock fixtures
+├── sampler.py           # Hive metadata sampling + fixture data loading
 ├── synth.py             # Synthetic data generation (17 category generators)
 ├── svm_classifier.py    # Dual TF-IDF + LinearSVC + Platt scaling
 ├── catboost_classifier.py # CatBoost with virtual ensemble uncertainty
@@ -116,8 +116,8 @@ src/atelier/classify/
 ├── pipeline.py          # Single-pass ML orchestration (6 evidence sources)
 ├── fsm.py               # AgentFSM state machine
 └── fixtures/
-    ├── mock_annotations.json  # 24-category mock vocabulary
-    └── mock_tables.json       # 8 tables, 50 columns with ground truth
+    ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
+    └── mock_tables.json           # 8 tables, 50 columns with ground truth
 ```
 
 ### Build Directory

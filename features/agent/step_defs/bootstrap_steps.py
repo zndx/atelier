@@ -109,11 +109,12 @@ def step_run_bootstrap(context):
     from atelier.config import load_config
     from atelier.classify.pipeline import run_classification_pipeline
     from atelier.classify.fsm import AgentFSM
-    from atelier.classify.sampler import load_all_mock_samples
+    from atelier.classify.sampler import load_fixture_samples
 
-    # Collect ground truth from mock fixtures
+    # Collect ground truth from fixtures
+    samples = load_fixture_samples()
     gt = {}
-    for ts in load_all_mock_samples():
+    for ts in samples:
         for col in ts.columns:
             if col.ground_truth:
                 gt[col.name] = col.ground_truth
@@ -123,7 +124,7 @@ def step_run_bootstrap(context):
     mock_backend = _MockLLMBackend(gt)
 
     context.bootstrap_result = run_classification_pipeline(
-        cfg, fsm, use_mock=True, llm_backend=mock_backend,
+        cfg, fsm, samples=samples, llm_backend=mock_backend,
     )
 
 
@@ -150,10 +151,11 @@ def step_run_bootstrap_realistic(context):
     from atelier.classify.pipeline import run_classification_pipeline
     from atelier.classify.fsm import AgentFSM
     from atelier.classify.mock_llm import RealisticMockLLMBackend
-    from atelier.classify.sampler import load_all_mock_samples
+    from atelier.classify.sampler import load_fixture_samples
 
+    samples = load_fixture_samples()
     gt = {}
-    for ts in load_all_mock_samples():
+    for ts in samples:
         for col in ts.columns:
             if col.ground_truth:
                 gt[col.name] = col.ground_truth
@@ -166,7 +168,7 @@ def step_run_bootstrap_realistic(context):
     )
 
     context.bootstrap_result = run_classification_pipeline(
-        cfg, fsm, use_mock=True, llm_backend=mock_backend,
+        cfg, fsm, samples=samples, llm_backend=mock_backend,
     )
 
 

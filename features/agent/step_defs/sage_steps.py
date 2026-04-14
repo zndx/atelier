@@ -8,7 +8,7 @@ from behave import when, then
 def step_run_sage(context, n):
     from atelier.classify.features import extract_features
     from atelier.classify.sage import run_sage_analysis
-    from atelier.classify.sampler import load_all_mock_samples
+    from atelier.classify.sampler import load_fixture_samples
 
     category_set = context.category_set
     code_to_idx = {
@@ -17,7 +17,7 @@ def step_run_sage(context, n):
 
     all_features = []
     gt_indices = []
-    for ts in load_all_mock_samples():
+    for ts in load_fixture_samples():
         for col in ts.columns:
             if col.ground_truth and col.ground_truth in code_to_idx:
                 features = extract_features(

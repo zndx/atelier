@@ -10,7 +10,8 @@ The LLM is a required evidence source.  The backend is selected via
 Bedrock ARN → ``BedrockStructuredBackend``, plain Anthropic ID →
 ``AnthropicStructuredBackend``).  An explicit classify LLM
 (``ATELIER_LLM_API_KEY``) overrides the subagent model.
-``use_mock=True`` substitutes a deterministic mock backend for dev/CI.
+
+For dev/test, inject ``samples=`` and ``llm_backend=`` explicitly.
 
 Writes results to build/results/{run_id}/ as JSON and parquet.
 """
@@ -42,14 +43,14 @@ from atelier.classify.sampler import (
     ColumnSample,
     TableSample,
     discover_tables,
-    load_all_mock_samples,
     sample_table_metadata,
 )
 from atelier.classify.taxonomy import (
     HierarchicalCategorySet,
+    compose_vocabularies,
     load_annotations_from_hive,
     load_annotations_from_json,
-    load_mock_annotations,
+    load_universal_vocabulary,
     save_annotations_json,
 )
 
@@ -66,7 +67,6 @@ def run_classification_pipeline(
     database: str = "default",
     sample_size: int = 50,
     tables_limit: int = 100,
-    use_mock: bool = False,
     samples: list[TableSample] | None = None,
     category_set: HierarchicalCategorySet | None = None,
     llm_backend=None,
@@ -76,8 +76,10 @@ def run_classification_pipeline(
     The pipeline requires an LLM backend for evidence fusion.  When no
     explicit ``llm_backend`` is provided, one is created from config:
     ``ATELIER_LLM_API_KEY`` takes priority, then ``ANTHROPIC_SUBAGENT_MODEL``
-    (backend type inferred from model format).  ``use_mock=True``
-    substitutes a deterministic mock for dev/CI.
+    (backend type inferred from model format).
+
+    For dev/test without hive or real LLM, inject ``samples=`` and
+    ``llm_backend=`` explicitly.
 
     Args:
         cfg: AtelierConfig.
@@ -86,7 +88,6 @@ def run_classification_pipeline(
         database: Hive database to classify.
         sample_size: Rows to sample per table.
         tables_limit: Max tables to discover.
-        use_mock: Use mock data and mock LLM backend (for devenv/CI).
         samples: Pre-loaded TableSamples (skip discover/sample phases).
         category_set: Pre-loaded vocabulary (skip vocab loading).
         llm_backend: Injected LLM backend (for testing). Created from
@@ -96,12 +97,12 @@ def run_classification_pipeline(
         Pipeline result summary dict.
 
     Raises:
-        ValueError: If no LLM backend is available and use_mock is False.
+        ValueError: If no LLM backend is available.
     """
     # ── LLM backend resolution ────────────────────────────────
     # The pipeline cannot function without an LLM.  Resolve early
     # so callers get a clear error before any FSM state is created.
-    if llm_backend is None and not use_mock:
+    if llm_backend is None:
         from atelier.classify.llm_backend import create_backend_from_cfg
         # create_backend_from_cfg raises ValueError when no creds
         llm_backend = create_backend_from_cfg(cfg)
@@ -111,7 +112,6 @@ def run_classification_pipeline(
         "database": database,
         "sample_size": sample_size,
         "tables_limit": tables_limit,
-        "use_mock": use_mock,
     })
     run_id = run.id
 
@@ -123,7 +123,7 @@ def run_classification_pipeline(
         # ── LOADING_VOCAB ────────────────────────────────────────
         fsm.advance(run_id, FSMState.LOADING_VOCAB, progress={"step": "loading_vocab"})
         if category_set is None:
-            category_set = _load_vocabulary(cfg, build_dir, connection_name, use_mock)
+            category_set = _load_vocabulary(cfg, build_dir, connection_name)
         logger.info("Loaded %d leaf categories", len(category_set.categories))
 
         if not isinstance(category_set, HierarchicalCategorySet):
@@ -140,12 +140,6 @@ def run_classification_pipeline(
             fsm.advance(run_id, FSMState.SAMPLING, progress={
                 "tables_discovered": len(all_samples),
                 "injected": True,
-            })
-        elif use_mock:
-            all_samples = load_all_mock_samples()
-            fsm.advance(run_id, FSMState.SAMPLING, progress={
-                "tables_discovered": len(all_samples),
-                "mock": True,
             })
         else:
             table_names = discover_tables(
@@ -180,12 +174,6 @@ def run_classification_pipeline(
 
         samples_by_name: dict[str, ColumnSample] = {c.name: c for c in all_columns}
         column_names = list(samples_by_name.keys())
-
-        # ── Resolve mock LLM backend (deferred until GT is available) ─
-        if llm_backend is None and use_mock:
-            from atelier.classify.mock_llm import RealisticMockLLMBackend
-            gt = {col.name: col.ground_truth for col in all_columns if col.ground_truth}
-            llm_backend = RealisticMockLLMBackend(ground_truth=gt)
 
         # ── Bootstrap config + LLM prompts ────────────────────────
         from atelier.classify.bootstrap import (
@@ -428,22 +416,51 @@ def run_classification_pipeline(
         }
 
 
-def _load_vocabulary(cfg, build_dir: Path, connection_name, use_mock: bool):
-    """Load vocabulary from hive, cache, or mock."""
+def _load_vocabulary(cfg, build_dir: Path, connection_name):
+    """Load vocabulary: universal base + optional domain extensions.
+
+    Two-layer composition:
+      1. Universal BFO-grounded vocabulary (always loaded, ships in git)
+      2. Domain annotations (customer-specific, from hive or cache)
+
+    Domain annotations compose on top of the universal base via ``is_a``
+    parent references.  When unavailable, returns universal-only.
+    """
+    log = logging.getLogger(__name__)
+
+    # Always start with BFO-grounded universal vocabulary
+    universal = load_universal_vocabulary(hierarchical=True)
+    log.info("Loaded universal vocabulary: %d terms", len(universal.categories))
+
+    # Try domain extensions (customer annotations from cache or hive)
+    domain_cs = _load_domain_annotations(cfg, build_dir, connection_name)
+    if domain_cs is None:
+        return universal
+
+    # Compose: domain terms attach to universal tree via parent_code
+    composed = compose_vocabularies(universal, domain_cs)
+    log.info(
+        "Composed vocabulary: %d universal + %d domain = %d total terms",
+        len(universal.categories), len(domain_cs.categories),
+        len(composed.categories),
+    )
+    return composed
+
+
+def _load_domain_annotations(cfg, build_dir: Path, connection_name):
+    """Load domain-specific annotations from cache or hive.
+
+    Returns a CategorySet of domain terms, or None if unavailable.
+    """
     log = logging.getLogger(__name__)
     cache_dir = build_dir / "data" / "annotations"
     cache_path = cache_dir / "annotations.json"
-
-    if use_mock:
-        cs = load_mock_annotations(hierarchical=True)
-        save_annotations_json(cs, cache_path)
-        return cs
 
     # Try cached first — but reject empty caches (poisoned by prior failures)
     if cache_path.exists():
         cs = load_annotations_from_json(cache_path, hierarchical=True)
         if len(cs.categories) > 0:
-            log.info("Loaded %d categories from cache %s", len(cs.categories), cache_path)
+            log.info("Loaded %d domain categories from cache %s", len(cs.categories), cache_path)
             return cs
         log.warning("Cache %s contains 0 categories — treating as corrupt, will re-fetch", cache_path)
         cache_path.unlink()
@@ -452,17 +469,15 @@ def _load_vocabulary(cfg, build_dir: Path, connection_name, use_mock: bool):
     try:
         cs = load_annotations_from_hive(cfg, connection_name)
         if len(cs.categories) == 0:
-            log.warning("Hive returned 0 categories — not caching empty result, falling back to mock")
-        else:
-            log.info("Loaded %d categories from hive", len(cs.categories))
-            save_annotations_json(cs, cache_path)
-            return cs
+            log.warning("Hive returned 0 domain categories — skipping domain layer")
+            return None
+        log.info("Loaded %d domain categories from hive", len(cs.categories))
+        save_annotations_json(cs, cache_path)
+        return cs
     except Exception as exc:
-        log.warning("Failed to load vocabulary from hive: %s", exc)
+        log.warning("Failed to load domain annotations from hive: %s", exc)
 
-    # Fall back to mock
-    log.info("Falling back to mock vocabulary")
-    return load_mock_annotations(hierarchical=True)
+    return None
 
 
 def _classify_column(
@@ -529,8 +544,8 @@ def _classify_column(
                 similarities, frame, discount=discounts.cosine,
             )
             source_masses["cosine"] = cosine_mass
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Cosine similarity unavailable for %s: %s", col.name, exc)
 
     # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
     if llm_code:
@@ -557,8 +572,8 @@ def _classify_column(
             )
             if not _is_vacuous(cb_mass):
                 source_masses["catboost"] = cb_mass
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("CatBoost unavailable for %s: %s", col.name, exc)
 
     # 6. SVM (if model available)
     try:
@@ -568,8 +583,8 @@ def _classify_column(
             svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("SVM unavailable for %s: %s", col.name, exc)
 
     # Fuse evidence via HierarchicalClassification
     if not source_masses:
@@ -622,6 +637,8 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "plausibility": 1.0,
         "uncertainty": 1.0,
         "conflict": 0.0,
+        "needs_clarification": False,
+        "evidence": [],
         "evidence_sources": {},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,

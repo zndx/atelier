@@ -32,9 +32,14 @@ Sample column metadata from production tables via CAI Data Platform hive connect
 
 4. Save sampled metadata to `build/data/samples/{run_id}/columns.json`
 
-## Mock Data
+## Fixture Data (dev/test)
 
-When `cml.data_v1` is unavailable (devenv/CI), the sampler automatically falls back to mock fixtures in `src/atelier/classify/fixtures/mock_tables.json`. These contain 8 realistic tables with 50 columns and known ground truth labels.
+For devenv/CI where `cml.data_v1` is unavailable, load fixture data explicitly:
+```python
+from atelier.classify.sampler import load_fixture_samples
+samples = load_fixture_samples()
+```
+The fixture file `src/atelier/classify/fixtures/fixture_tables.json` contains 8 realistic tables with 50 columns and known ground truth labels. Inject via `samples=` into the pipeline.
 
 ## Output
 

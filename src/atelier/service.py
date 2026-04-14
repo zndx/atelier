@@ -111,7 +111,6 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
         conn = request.connection_name or None
         db = request.database or "default"
         sample_size = request.sample_size or 50
-        use_mock = request.use_mock
 
         def _background():
             run_classification_pipeline(
@@ -119,7 +118,6 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                 connection_name=conn,
                 database=db,
                 sample_size=sample_size,
-                use_mock=use_mock,
             )
 
         t = threading.Thread(target=_background, daemon=True)

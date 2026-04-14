@@ -8,8 +8,8 @@ from behave import given, when, then
 
 @given("the mock annotations vocabulary is loaded")
 def step_load_mock_vocab(context):
-    from atelier.classify.taxonomy import load_mock_annotations
-    context.category_set = load_mock_annotations(hierarchical=True)
+    from atelier.classify.taxonomy import load_universal_vocabulary
+    context.category_set = load_universal_vocabulary(hierarchical=True)
     assert len(context.category_set.categories) > 0
 
 
@@ -17,8 +17,8 @@ def step_load_mock_vocab(context):
 def step_build_frame(context):
     from atelier.classify.belief import FrameOfDiscernment
     if not hasattr(context, "category_set"):
-        from atelier.classify.taxonomy import load_mock_annotations
-        context.category_set = load_mock_annotations(hierarchical=True)
+        from atelier.classify.taxonomy import load_universal_vocabulary
+        context.category_set = load_universal_vocabulary(hierarchical=True)
     context.frame = FrameOfDiscernment(context.category_set)
     assert len(context.frame.singletons) > 0
 
@@ -252,8 +252,15 @@ def step_check_abbrev(context, code, expected):
 def step_run_pipeline(context):
     from atelier.config import load_config
     from atelier.classify import run_pipeline
+    from atelier.classify.sampler import load_fixture_samples
+    from atelier.classify.mock_llm import RealisticMockLLMBackend
+
     cfg = load_config()
-    context.pipeline_result = run_pipeline(cfg, use_mock=True)
+    samples = load_fixture_samples()
+    gt = {c.name: c.ground_truth for ts in samples for c in ts.columns if c.ground_truth}
+    context.pipeline_result = run_pipeline(
+        cfg, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+    )
 
 
 @then("the pipeline should reach CONVERGED state")
@@ -337,14 +344,24 @@ def step_custom_discounts(context, cosine, svm):
 def step_run_pipeline_custom_discounts(context):
     from atelier.config import load_config
     from atelier.classify import run_pipeline
+    from atelier.classify.sampler import load_fixture_samples
+    from atelier.classify.mock_llm import RealisticMockLLMBackend
+
+    samples = load_fixture_samples()
+    gt = {c.name: c.ground_truth for ts in samples for c in ts.columns if c.ground_truth}
+
     # Run default first
     cfg = load_config()
-    context.default_result = run_pipeline(cfg, use_mock=True)
+    context.default_result = run_pipeline(
+        cfg, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+    )
     # Run with custom discounts (override config fields)
     cfg2 = load_config()
     cfg2.classify_discount_cosine = context.custom_discounts.cosine
     cfg2.classify_discount_svm = context.custom_discounts.svm
-    context.pipeline_result = run_pipeline(cfg2, use_mock=True)
+    context.pipeline_result = run_pipeline(
+        cfg2, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+    )
 
 
 @then("the average confidence should differ from default discounts")

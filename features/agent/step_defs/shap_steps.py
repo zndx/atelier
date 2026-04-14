@@ -8,7 +8,6 @@ from behave import when, then
 
 @when("I run the synth-train-eval cycle with SHAP enabled")
 def step_run_synth_train_eval_with_shap(context):
-    from atelier.classify.taxonomy import load_mock_annotations
     from atelier.classify.train_eval_cycle import run_synth_train_eval
     from atelier.classify.shap_explanations import run_catboost_shap
     from atelier.classify.embedding import embed_texts
@@ -35,7 +34,7 @@ def step_run_synth_train_eval_with_shap(context):
 
     try:
         from atelier.classify.ml_inference import get_catboost
-        from atelier.classify.sampler import load_all_mock_samples
+        from atelier.classify.sampler import load_fixture_samples
         from atelier.classify.features import extract_features
 
         cb = get_catboost()
@@ -43,7 +42,7 @@ def step_run_synth_train_eval_with_shap(context):
 
         # Build feature matrix for mock data
         all_features = []
-        for ts in load_all_mock_samples():
+        for ts in load_fixture_samples():
             for col in ts.columns:
                 all_features.append(extract_features(
                     column_name=col.name,
@@ -105,12 +104,12 @@ def step_check_shap_nonzero(context, pct):
 @when("I run SHAP analysis with embedding permutation method on mock data")
 def step_run_embedding_shap(context):
     from atelier.classify.shap_explanations import run_embedding_shap
-    from atelier.classify.sampler import load_all_mock_samples
+    from atelier.classify.sampler import load_fixture_samples
     from atelier.classify.features import extract_features
 
     category_set = context.category_set
     all_features = []
-    for ts in load_all_mock_samples():
+    for ts in load_fixture_samples():
         for col in ts.columns:
             all_features.append(extract_features(
                 column_name=col.name,

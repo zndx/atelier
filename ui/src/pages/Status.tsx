@@ -201,7 +201,7 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
         </Descriptions.Item>
         <Descriptions.Item label="LLM Backend">
           <Tag color={hasClassifyLlm ? "green" : "orange"}>
-            {hasClassifyLlm ? "Configured" : "Mock mode"}
+            {hasClassifyLlm ? "Configured" : "Not configured"}
           </Tag>
         </Descriptions.Item>
         <Descriptions.Item label="Run ID">

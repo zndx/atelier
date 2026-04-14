@@ -11,7 +11,8 @@ execution on Cloudera AI with hive data connections.
 Public API::
 
     from atelier.classify import run_pipeline, get_fsm_status
-    result = run_pipeline(cfg, use_mock=True)
+    from atelier.classify.sampler import load_fixture_samples
+    result = run_pipeline(cfg, samples=load_fixture_samples(), llm_backend=mock)
 """
 
 import warnings
@@ -36,13 +37,16 @@ def get_fsm(dao=None) -> AgentFSM:
     return _fsm
 
 
-def run_pipeline(cfg, *, use_mock: bool = False, **kwargs) -> dict:
-    """Convenience wrapper for the classification pipeline."""
+def run_pipeline(cfg, **kwargs) -> dict:
+    """Convenience wrapper for the classification pipeline.
+
+    For dev/test, inject samples= and llm_backend= explicitly.
+    """
     fsm = get_fsm()
-    return run_classification_pipeline(cfg, fsm, use_mock=use_mock, **kwargs)
+    return run_classification_pipeline(cfg, fsm, **kwargs)
 
 
-def run_bootstrap(cfg, *, use_mock: bool = False, **kwargs) -> dict:
+def run_bootstrap(cfg, **kwargs) -> dict:
     """Deprecated — use ``run_pipeline()`` instead.
 
     The convergence loop is now built into the single pipeline entry point.
@@ -52,7 +56,7 @@ def run_bootstrap(cfg, *, use_mock: bool = False, **kwargs) -> dict:
         DeprecationWarning,
         stacklevel=2,
     )
-    return run_pipeline(cfg, use_mock=use_mock, **kwargs)
+    return run_pipeline(cfg, **kwargs)
 
 
 def get_fsm_status(run_id: str | None = None) -> dict | None:

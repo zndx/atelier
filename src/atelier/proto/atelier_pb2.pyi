@@ -99,16 +99,14 @@ class FSMStatusResponse(_message.Message):
     def __init__(self, run_id: _Optional[str] = ..., state: _Optional[str] = ..., started_at: _Optional[str] = ..., updated_at: _Optional[str] = ..., progress_json: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
 
 class StartClassificationRequest(_message.Message):
-    __slots__ = ("connection_name", "database", "sample_size", "use_mock")
+    __slots__ = ("connection_name", "database", "sample_size")
     CONNECTION_NAME_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
     SAMPLE_SIZE_FIELD_NUMBER: _ClassVar[int]
-    USE_MOCK_FIELD_NUMBER: _ClassVar[int]
     connection_name: str
     database: str
     sample_size: int
-    use_mock: bool
-    def __init__(self, connection_name: _Optional[str] = ..., database: _Optional[str] = ..., sample_size: _Optional[int] = ..., use_mock: bool = ...) -> None: ...
+    def __init__(self, connection_name: _Optional[str] = ..., database: _Optional[str] = ..., sample_size: _Optional[int] = ...) -> None: ...
 
 class StartClassificationResponse(_message.Message):
     __slots__ = ("run_id", "started", "error")
