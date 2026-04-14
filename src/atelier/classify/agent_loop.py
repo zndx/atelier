@@ -600,6 +600,12 @@ def run_agent_loop(
                         turn, response.stop_reason)
             break
 
+    # If we exhausted turns without explicit convergence, record why
+    if not converged and state.agent_converged_reason is None:
+        state.agent_converged_reason = (
+            f"Turn limit reached ({max_turns} turns) without explicit convergence"
+        )
+
     logger.info(
         "Agent loop finished: turns=%d, converged=%s, reason=%s",
         state.agent_turns, converged, state.agent_converged_reason,

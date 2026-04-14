@@ -394,6 +394,9 @@ def run_classification_pipeline(
         summary["mean_k"] = round(mean_k, 4)
         summary["bootstrap_coverage"] = round(coverage, 4)
         summary["k_convergence_rate"] = round(k_convergence_rate(state), 4)
+        summary["agent_turns"] = state.agent_turns
+        summary["agent_converged_reason"] = state.agent_converged_reason
+        summary["agent_reasoning"] = state.agent_reasoning
         summary["iteration_metrics"] = [
             {
                 "iteration": m.iteration,
