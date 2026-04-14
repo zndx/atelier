@@ -1,4 +1,4 @@
-@tier-0
+@tier-0 @gpu
 Feature: Dempster-Shafer classification pipeline
   As a data steward, I need the classification pipeline to correctly
   identify column types from metadata so that I can tag production

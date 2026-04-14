@@ -1,4 +1,4 @@
-@tier-0
+@tier-0 @gpu
 Feature: LLM bootstrap convergence loop
   As a data steward, I need the bootstrap pipeline to iterate LLM
   and ML classification until DST conflict converges, validating

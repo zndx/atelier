@@ -6,8 +6,14 @@
 
   env.GREET = "atelier";
 
-  # psycopg pure-Python driver loads libpq via ctypes — needs it on LD_LIBRARY_PATH
-  env.LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.postgresql_16.lib ];
+  # psycopg needs libpq; CUDA toolkit provides libcudart.
+  # NVIDIA driver libs (libcuda, libnvidia-ml, libnvidia-ptxjitcompiler) are
+  # symlinked into .devenv/nvidia-driver-libs/ by enterShell to avoid pulling
+  # in the host glibc from /lib/x86_64-linux-gnu/. See Signals devenv.nix.
+  env.LD_LIBRARY_PATH = builtins.concatStringsSep ":" [
+    (lib.makeLibraryPath [ pkgs.postgresql_16.lib pkgs.zlib ])
+    "/usr/local/cuda/lib64"
+  ];
 
   packages = with pkgs; [
     # Core
@@ -56,6 +62,7 @@
 
     # Python tools
     uv
+    zlib  # needed by numpy C extensions in pip wheels
 
     # Utilities
     presenterm
@@ -139,6 +146,21 @@
   enterShell = ''
     hello
     git --version
+
+    # NVIDIA driver libs for PyTorch CUDA.
+    # Nix ld-linux doesn't search /lib/x86_64-linux-gnu/ (which also has
+    # a conflicting glibc).  Symlink just the driver .so files into a
+    # clean directory and prepend it to LD_LIBRARY_PATH.
+    NVIDIA_DRIVER_LIBS="$PWD/.devenv/nvidia-driver-libs"
+    if [ -e /lib/x86_64-linux-gnu/libcuda.so.1 ]; then
+      mkdir -p "$NVIDIA_DRIVER_LIBS"
+      for lib in libcuda libnvidia-ml libnvidia-ptxjitcompiler; do
+        for f in /lib/x86_64-linux-gnu/''${lib}.so*; do
+          [ -e "$f" ] && ln -sfn "$f" "$NVIDIA_DRIVER_LIBS/$(basename "$f")"
+        done
+      done
+      export LD_LIBRARY_PATH="$NVIDIA_DRIVER_LIBS''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
   '';
 
   enterTest = ''

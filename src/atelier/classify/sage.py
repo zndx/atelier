@@ -1,5 +1,10 @@
 """SAGE feature importance analysis for the classification pipeline.
 
+SAGE (Shapley Additive Global importancE) quantifies how much each
+evidence source contributes to classification decisions. This is a
+critical pipeline component — not optional — gated by config only to
+manage runtime cost during development and interactive UI testing.
+
 Wraps the cosine similarity classifier as a SAGE model function and
 computes marginal feature contributions via permutation unrolling.
 
@@ -122,8 +127,9 @@ class FeatureMaskModel:
         # Batch encode only unique uncached texts
         if pending:
             unique_texts = list(pending.keys())
+            from atelier.classify.embedding import get_batch_size
             raw = model.encode(unique_texts, normalize_embeddings=True,
-                               show_progress_bar=False)
+                               show_progress_bar=False, batch_size=get_batch_size())
             for j, text in enumerate(unique_texts):
                 vec = raw[j]
                 for idx in pending[text]:

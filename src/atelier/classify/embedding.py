@@ -3,10 +3,15 @@
 Lazy-loads all-MiniLM-L6-v2 (384-dim, normalized) and computes cosine
 similarity between column feature embedding text and category reference
 embeddings.
+
+GPU acceleration: call ``configure(device="auto")`` before first use.
+When a CUDA device is detected, the model loads on GPU and batch sizes
+are automatically scaled up (32→256).
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,9 +20,48 @@ if TYPE_CHECKING:
     from atelier.classify.features import ColumnFeatures
     from atelier.classify.taxonomy import CategorySet
 
+logger = logging.getLogger(__name__)
+
 _model = None
 _model_name: str = "all-MiniLM-L6-v2"
 _model_lock = threading.Lock()
+
+# Device and batch size — set via configure() before first model load
+_device: str = "cpu"
+_batch_size: int = 32
+
+
+def configure(device: str = "auto", batch_size: int = 32) -> None:
+    """Set device and batch size before first model load.
+
+    Args:
+        device: ``"auto"`` detects CUDA via preflight_gpu(), or explicit
+                ``"cuda"``/``"cpu"``.
+        batch_size: Base batch size for model.encode(). Auto-scaled to 256
+                    when GPU is detected and batch_size <= 64.
+    """
+    global _device, _batch_size, _model
+    if device == "auto":
+        from atelier.classify.gpu import preflight_gpu
+        gpu = preflight_gpu()
+        _device = gpu.resolved_device
+        if gpu.warnings:
+            for w in gpu.warnings:
+                logger.warning("GPU: %s", w)
+        logger.info("Embedding device: %s (%s)", _device, gpu.summary())
+    else:
+        _device = device
+        logger.info("Embedding device: %s (explicit)", _device)
+
+    _batch_size = batch_size
+    # Auto-scale for GPU — MiniLM-L6 easily handles 256+ on modern GPUs
+    if _device.startswith("cuda") and _batch_size <= 64:
+        _batch_size = 256
+        logger.info("Embedding batch size auto-scaled to %d for GPU", _batch_size)
+
+    # Invalidate cached model if device changed
+    with _model_lock:
+        _model = None
 
 
 def _get_model():
@@ -34,7 +78,7 @@ def _get_model():
                     "sentence-transformers required for embedding classification. "
                     "Install with: pip install sentence-transformers"
                 )
-            _model = SentenceTransformer(_model_name)
+            _model = SentenceTransformer(_model_name, device=_device)
     return _model
 
 
@@ -46,10 +90,17 @@ def set_model_name(name: str) -> None:
         _model = None
 
 
+def get_batch_size() -> int:
+    """Return the resolved batch size (for use by external callers like SAGE)."""
+    return _batch_size
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """Encode texts into normalized embeddings."""
     model = _get_model()
-    embeddings = model.encode(texts, normalize_embeddings=True)
+    embeddings = model.encode(
+        texts, normalize_embeddings=True, batch_size=_batch_size,
+    )
     return embeddings.tolist()
 
 
@@ -81,7 +132,9 @@ def classify_cosine(
 
     model = _get_model()
     all_texts = [query_text] + ref_texts
-    embeddings = model.encode(all_texts, normalize_embeddings=True)
+    embeddings = model.encode(
+        all_texts, normalize_embeddings=True, batch_size=_batch_size,
+    )
 
     query_emb = embeddings[0]
     ref_embs = embeddings[1:]
@@ -113,7 +166,9 @@ def classify_cosine_batch(
 
     model = _get_model()
     all_texts = query_texts + ref_texts
-    embeddings = model.encode(all_texts, normalize_embeddings=True)
+    embeddings = model.encode(
+        all_texts, normalize_embeddings=True, batch_size=_batch_size,
+    )
 
     n_queries = len(query_texts)
     query_embs = embeddings[:n_queries]

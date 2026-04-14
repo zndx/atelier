@@ -1,4 +1,4 @@
-@tier-0
+@tier-0 @gpu
 Feature: Agent-driven classification convergence
   The agent loop wraps bootstrap pipeline functions as tools,
   letting Claude reason about which columns to revisit.

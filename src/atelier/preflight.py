@@ -82,6 +82,7 @@ def run_preflight(
     _check_qdrant_host_set(result, cfg)
     _check_credentials_configured(result, cfg)
     _check_parquet_dir_exists(result, cfg)
+    _check_gpu(result)
 
     return result
 
@@ -202,6 +203,38 @@ def _check_parquet_dir_exists(result: PreflightResult, cfg: AtelierConfig) -> No
             status="warn",
             message=f"Parquet directory not found: {cfg.parquet_dir}",
             remediation="Create the directory or update data.parquet_dir in config.",
+        ))
+
+
+def _check_gpu(result: PreflightResult) -> None:
+    """Advisory GPU detection — never blocks, just reports availability."""
+    try:
+        from atelier.classify.gpu import preflight_gpu
+        gpu = preflight_gpu()
+        if gpu.available:
+            result.checks.append(CheckResult(
+                name="gpu",
+                status="pass",
+                message=gpu.summary(),
+            ))
+        elif gpu.device_count > 0:
+            result.checks.append(CheckResult(
+                name="gpu",
+                status="warn",
+                message=gpu.summary(),
+                remediation="; ".join(gpu.warnings) if gpu.warnings else "",
+            ))
+        else:
+            result.checks.append(CheckResult(
+                name="gpu",
+                status="warn",
+                message="No NVIDIA GPUs detected — embeddings will use CPU",
+            ))
+    except Exception:
+        result.checks.append(CheckResult(
+            name="gpu",
+            status="warn",
+            message="GPU detection skipped (torch not installed)",
         ))
 
 

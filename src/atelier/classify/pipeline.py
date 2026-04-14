@@ -118,6 +118,13 @@ def run_classification_pipeline(
         # create_backend_from_cfg raises ValueError when no creds
         llm_backend = create_backend_from_cfg(cfg)
 
+    # ── Embedding acceleration ────────────────────────────────
+    from atelier.classify.embedding import configure as configure_embeddings
+    configure_embeddings(
+        device=cfg.classify_embedding_device,
+        batch_size=cfg.classify_embedding_batch_size,
+    )
+
     run = fsm.start_run(
         config={
             "connection_name": connection_name,
@@ -764,6 +771,9 @@ def _run_feature_analysis(
             logger.warning("SHAP analysis failed: %s", e)
 
     # ── SAGE (global feature importance) ────────────────────
+    # SAGE is critical — it quantifies per-feature contribution to
+    # classification. The config flag gates runtime cost for dev/UI
+    # testing, not because SAGE is optional. See config/base.conf.
     if cfg.classify_sage_enabled:
         try:
             import numpy as np
@@ -894,12 +904,12 @@ def _compute_projection(
     """
     # Try UMAP + sentence-transformers for high-quality projection
     try:
-        from sentence_transformers import SentenceTransformer
+        from atelier.classify.embedding import _get_model, get_batch_size
         import umap
         import numpy as np
 
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        embeddings = model.encode(texts, show_progress_bar=False, batch_size=256)
+        model = _get_model()
+        embeddings = model.encode(texts, show_progress_bar=False, batch_size=get_batch_size())
         n_neighbors = min(15, max(2, len(texts) - 1))
         reducer = umap.UMAP(
             n_components=2, n_neighbors=n_neighbors,
