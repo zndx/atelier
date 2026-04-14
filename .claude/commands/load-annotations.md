@@ -1,34 +1,37 @@
 # Load Annotations
 
-Load the controlled vocabulary from the `default.annotations` hive table.
+Load the controlled vocabulary — universal BFO-grounded base plus optional domain extensions from the `default.annotations` hive table.
 
 ## Instructions
 
-1. Load annotations from hive (or cached JSON):
+1. Load annotations (two-layer composition):
    ```python
    from atelier.config import load_config
    from atelier.classify.taxonomy import (
+       load_annotations_from_hive,
        load_annotations_from_json,
-       load_mock_annotations,
+       load_universal_vocabulary,
+       compose_vocabularies,
        save_annotations_json,
    )
-   from atelier.classify.sampler import load_annotations_from_hive
 
    cfg = load_config()
 
-   # Try hive first, fall back to cache/mock
+   # Universal base (always available, BFO-grounded)
+   universal = load_universal_vocabulary(hierarchical=True)
+
+   # Try domain extensions from hive, compose on top
    try:
-       records = load_annotations_from_hive(cfg)
-       from atelier.classify.taxonomy import _build_category_set_from_records
-       cs = _build_category_set_from_records(records, hierarchical=True)
+       domain_cs = load_annotations_from_hive(cfg)
+       cs = compose_vocabularies(universal, domain_cs)
        save_annotations_json(cs, "build/data/annotations/annotations.json")
    except Exception:
-       cs = load_mock_annotations(hierarchical=True)
+       cs = universal
    ```
 
 2. Validate the vocabulary:
    - All leaf categories have non-empty labels and descriptions
-   - Dot-notation hierarchy is consistent (parents exist)
+   - Mnemonic hierarchy is consistent (parents exist)
    - No duplicate codes
    - Deprecated entries excluded
 
@@ -38,17 +41,26 @@ Load the controlled vocabulary from the `default.annotations` hive table.
    frame = FrameOfDiscernment(cs)
    ```
 
-## Annotations Schema
+## Two-Layer Vocabulary Architecture
+
+```
+Domain Extensions (runtime, from hive)     Universal Base (in git, BFO-grounded)
+  ACME.TRADE_SECRET is_a BUSINESS    →     ICE → SENSITIVE → PID → CONTACT → EMAIL
+```
+
+- **Universal layer**: BFO-grounded terms shipped in `fixtures/universal_vocabulary.json`
+- **Domain layer**: Customer-specific terms from hive annotations table, attached via `parent_code`
+
+## Annotations Schema (Hive)
 
 | Column | Maps to | Purpose |
 |--------|---------|---------|
-| id | code | Hierarchical dot-notation identifier |
+| id | code | Mnemonic dot-path identifier (e.g., ICE.SENSITIVE.PID.CONTACT.EMAIL) |
 | ontology | label group | Sensitivity tier / parent grouping |
 | annotation | label | The annotation tag name |
 | definition | description | Human-readable definition |
 | common_names | abbrev | Pipe-separated aliases |
 | deprecated | filter | "yes" = exclude from active vocabulary |
-| non_corp, emp_contractor, individual, corp | sensitivity | Data subject role ratings |
 
 ## Output
 

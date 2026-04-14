@@ -36,11 +36,10 @@ def main() -> int:
     # Generate synth data if needed
     if args.generate or not (args.synth_dir / "ground_truth.json").exists():
         logger.info("Generating synthetic data in %s", args.synth_dir)
-        from atelier.classify.sampler import load_mock_annotations
         from atelier.classify.synth import generate_synth_tables
-        from atelier.classify.taxonomy import HierarchicalCategorySet
+        from atelier.classify.taxonomy import HierarchicalCategorySet, load_universal_vocabulary
 
-        cats = HierarchicalCategorySet.from_raw(load_mock_annotations())
+        cats = load_universal_vocabulary(hierarchical=True)
         result = generate_synth_tables(cats, args.synth_dir)
         total_cols = sum(t["column_count"] for t in result)
         logger.info("Generated %d columns in %d files", total_cols, len(result))
@@ -49,11 +48,10 @@ def main() -> int:
         logger.error("No ground_truth.json found in %s", args.synth_dir)
         return 1
 
-    from atelier.classify.sampler import load_mock_annotations
-    from atelier.classify.taxonomy import HierarchicalCategorySet
+    from atelier.classify.taxonomy import HierarchicalCategorySet, load_universal_vocabulary
     from atelier.classify.ml_train import train_all
 
-    cats = HierarchicalCategorySet.from_raw(load_mock_annotations())
+    cats = load_universal_vocabulary(hierarchical=True)
     paths = train_all(args.synth_dir, cats, args.models_dir)
 
     for name, path in paths.items():

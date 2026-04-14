@@ -8,20 +8,20 @@ Feature: ML classifier mass functions
     And a frame of discernment from the vocabulary
 
   Scenario: CatBoost mass converts probabilities to belief assignment
-    When I compute CatBoost mass from {"1.1.1.1": 0.7, "1.1.2.1": 0.2, "2.1": 0.1}
+    When I compute CatBoost mass from {"ICE.SENSITIVE.PID.CONTACT.EMAIL": 0.7, "ICE.SENSITIVE.PID.IDENTITY.FULLNAME": 0.2, "ICE.METADATA.TIMESTAMP": 0.1}
     Then the ML mass function should not be vacuous
-    And the ML top singleton should be "1.1.1.1"
+    And the ML top singleton should be "ICE.SENSITIVE.PID.CONTACT.EMAIL"
     And theta mass should be approximately 0.15
 
   Scenario: CatBoost adaptive discount increases with high variance
-    When I compute CatBoost mass with variance from {"1.1.1.1": 0.7, "2.1": 0.3} and {"1.1.1.1": 0.25, "2.1": 0.25}
+    When I compute CatBoost mass with variance from {"ICE.SENSITIVE.PID.CONTACT.EMAIL": 0.7, "ICE.METADATA.TIMESTAMP": 0.3} and {"ICE.SENSITIVE.PID.CONTACT.EMAIL": 0.25, "ICE.METADATA.TIMESTAMP": 0.25}
     Then the ML mass function should not be vacuous
     And theta mass should be greater than 0.20
 
   Scenario: SVM mass converts calibrated probabilities
-    When I compute SVM mass from {"1.1.2.1": 0.6, "1.1.2.2": 0.3, "2.1": 0.1}
+    When I compute SVM mass from {"ICE.SENSITIVE.PID.IDENTITY.FULLNAME": 0.6, "ICE.SENSITIVE.PID.IDENTITY.DOB": 0.3, "ICE.METADATA.TIMESTAMP": 0.1}
     Then the ML mass function should not be vacuous
-    And the ML top singleton should be "1.1.2.1"
+    And the ML top singleton should be "ICE.SENSITIVE.PID.IDENTITY.FULLNAME"
     And theta mass should be approximately 0.20
 
   Scenario: Mass functions return vacuous on empty input

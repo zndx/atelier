@@ -6,8 +6,8 @@ Create deterministic synthetic training tables with representative column data.
 
 1. Load the controlled vocabulary:
    ```python
-   from atelier.classify.taxonomy import load_mock_annotations
-   cs = load_mock_annotations(hierarchical=True)
+   from atelier.classify.taxonomy import load_universal_vocabulary
+   cs = load_universal_vocabulary(hierarchical=True)
    ```
 
 2. For each leaf category, generate synthetic tables:

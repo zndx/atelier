@@ -183,8 +183,8 @@ def build_system_prompt(category_table: str) -> str:
         "\n"
         "## Response Format\n"
         "\n"
-        '[{"column_name": "ssn", "category_code": "1.1.2.3", "confidence": 0.95, '
-        '"evidence": "SSN pattern", "alternatives": [{"code": "1.1.2.1", "confidence": 0.03}]}]'
+        '[{"column_name": "ssn", "category_code": "ICE.SENSITIVE.PID.IDENTITY.GOVID", "confidence": 0.95, '
+        '"evidence": "SSN pattern", "alternatives": [{"code": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "confidence": 0.03}]}]'
     )
 
 
@@ -255,7 +255,7 @@ def _parse_classifications(text: str, expected_names: list[str]) -> list[ColumnC
         if isinstance(data, list):
             return _dicts_to_classifications(data, expected_names)
     except (json.JSONDecodeError, ValueError):
-        pass
+        logger.debug("Direct JSON parse failed, trying regex array extraction")
 
     # Regex fallback: extract JSON array
     array_match = re.search(r"\[[\s\S]*\]", cleaned)
@@ -265,7 +265,7 @@ def _parse_classifications(text: str, expected_names: list[str]) -> list[ColumnC
             if isinstance(data, list):
                 return _dicts_to_classifications(data, expected_names)
         except (json.JSONDecodeError, ValueError):
-            pass
+            logger.debug("Regex array extraction failed, trying individual object extraction")
 
     # Last resort: extract individual JSON objects
     results = []

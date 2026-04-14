@@ -109,7 +109,7 @@ class EvaluationReport:
             top = sorted(self.per_category, key=lambda pc: -pc.support)[:10]
             for pc in top:
                 lines.append(
-                    f"    {pc.code:12s} P={pc.precision:.2f} R={pc.recall:.2f} "
+                    f"    {pc.code:40s} P={pc.precision:.2f} R={pc.recall:.2f} "
                     f"F1={pc.f1:.2f} n={pc.support}"
                 )
         return "\n".join(lines)
@@ -218,8 +218,8 @@ def compute_hierarchical_accuracy(
     """Correct if predicted is ancestor or descendant of truth.
 
     Gives partial credit for predictions in the right branch of the
-    taxonomy tree — e.g. predicting "1.1" (PII) when truth is "1.1.1.1"
-    (Email) counts as correct.
+    taxonomy tree — e.g. predicting "ICE.SENSITIVE.PID" when truth is
+    "ICE.SENSITIVE.PID.CONTACT.EMAIL" counts as correct.
     """
     if not y_true:
         return 0.0

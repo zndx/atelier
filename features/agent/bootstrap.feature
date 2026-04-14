@@ -9,14 +9,14 @@ Feature: LLM bootstrap convergence loop
 
   Scenario: LLM mass function converts prediction to belief assignment
     Given a frame of discernment from the vocabulary
-    When I compute llm_to_mass for code "1.1.1.1" with confidence 0.9
-    Then the LLM mass should assign mass greater than 0.8 to "1.1.1.1"
+    When I compute llm_to_mass for code "ICE.SENSITIVE.PID.CONTACT.EMAIL" with confidence 0.9
+    Then the LLM mass should assign mass greater than 0.8 to "ICE.SENSITIVE.PID.CONTACT.EMAIL"
     And the LLM mass should assign less than 0.2 to theta
 
   Scenario: LLM mass function handles alternatives
     Given a frame of discernment from the vocabulary
-    When I compute llm_to_mass for "1.1.1.1" with confidence 0.7 and alternative "1.1.3.1" at 0.2
-    Then the LLM mass should have "1.1.3.1" as a focal element
+    When I compute llm_to_mass for "ICE.SENSITIVE.PID.CONTACT.EMAIL" with confidence 0.7 and alternative "ICE.SENSITIVE.PID.FINANCIAL.PAN" at 0.2
+    Then the LLM mass should have "ICE.SENSITIVE.PID.FINANCIAL.PAN" as a focal element
     And the total LLM mass should sum to 1.0
 
   Scenario: LLM mass function returns vacuous for unknown code

@@ -47,11 +47,11 @@ def _classify_seed_columns(table, columns: set[str]) -> list[str]:
     from atelier.classify.sampler import ColumnSample
     from atelier.classify.taxonomy import (
         HierarchicalCategorySet,
-        load_mock_annotations,
+        load_universal_vocabulary,
     )
 
     # Load vocabulary
-    category_set = load_mock_annotations(hierarchical=True)
+    category_set = load_universal_vocabulary(hierarchical=True)
     if not isinstance(category_set, HierarchicalCategorySet):
         raise RuntimeError("Expected HierarchicalCategorySet")
     frame = FrameOfDiscernment(category_set)

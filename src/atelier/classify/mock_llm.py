@@ -13,22 +13,27 @@ from atelier.classify.llm_backend import ColumnClassification, LLMResponse
 
 # Confusable pairs: categories that a real LLM might plausibly mix up
 CONFUSABLE_PAIRS = [
-    ("1.1.1.1", "1.2.3"),     # Email ↔ URL
-    ("1.1.1.2", "1.1.3.2"),   # Phone ↔ Bank Account
-    ("1.1.2.3", "1.1.2.2"),   # SSN ↔ DOB
-    ("1.1.3.1", "1.1.3.2"),   # Credit Card ↔ Bank Account
-    ("2.1", "1.1.2.2"),       # Timestamp ↔ DOB
-    ("1.1.2.1", "1.1.1.3"),   # Full Name ↔ Address
-    ("2.2", "1.2.2"),         # Record ID ↔ UUID
+    ("ICE.SENSITIVE.PID.CONTACT.EMAIL", "ICE.SENSITIVE.TECHNICAL.URL"),       # Email ↔ URL
+    ("ICE.SENSITIVE.PID.CONTACT.PHONE", "ICE.SENSITIVE.PID.FINANCIAL.BAN"),   # Phone ↔ Bank Account
+    ("ICE.SENSITIVE.PID.IDENTITY.GOVID", "ICE.SENSITIVE.PID.IDENTITY.DOB"),   # SSN ↔ DOB
+    ("ICE.SENSITIVE.PID.FINANCIAL.PAN", "ICE.SENSITIVE.PID.FINANCIAL.BAN"),   # Credit Card ↔ Bank Account
+    ("ICE.METADATA.TIMESTAMP", "ICE.SENSITIVE.PID.IDENTITY.DOB"),             # Timestamp ↔ DOB
+    ("ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "ICE.SENSITIVE.PID.CONTACT.ADDRESS"),  # Full Name ↔ Address
+    ("ICE.METADATA.RECID", "ICE.SENSITIVE.TECHNICAL.DEVID"),                  # Record ID ↔ UUID
 ]
 
 
-def _build_confusion_map(pairs: list[tuple[str, str]]) -> dict[str, str]:
-    """Build bidirectional confusion lookup."""
-    m: dict[str, str] = {}
+def _build_confusion_map(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
+    """Build bidirectional confusion lookup (multi-valued).
+
+    A code can appear in multiple pairs (e.g., BAN is confusable with
+    both PHONE and PAN).  The map stores all targets so the caller can
+    pick one at random.
+    """
+    m: dict[str, list[str]] = {}
     for a, b in pairs:
-        m[a] = b
-        m[b] = a
+        m.setdefault(a, []).append(b)
+        m.setdefault(b, []).append(a)
     return m
 
 
@@ -92,7 +97,8 @@ class RealisticMockLLMBackend:
                     self._mistakes.discard(sample.name)
                 else:
                     # Still wrong
-                    code = _CONFUSION.get(true_code, true_code)
+                    confusables = _CONFUSION.get(true_code)
+                    code = self._rng.choice(confusables) if confusables else true_code
                     confidence = round(self._rng.uniform(0.60, 0.75), 2)
             elif self._rng.random() < self._base_accuracy:
                 # Correct classification
@@ -100,7 +106,8 @@ class RealisticMockLLMBackend:
                 confidence = round(self._rng.uniform(0.70, 0.95), 2)
             else:
                 # Wrong — confuse with sibling
-                code = _CONFUSION.get(true_code, true_code)
+                confusables = _CONFUSION.get(true_code)
+                code = self._rng.choice(confusables) if confusables else true_code
                 confidence = round(self._rng.uniform(0.55, 0.80), 2)
                 if code != true_code:
                     self._mistakes.add(sample.name)
