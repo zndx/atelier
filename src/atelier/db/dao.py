@@ -265,7 +265,8 @@ class AtelierDao:
 
     def upsert_fsm_run(self, run_id: str, state: str, started_at: str,
                        updated_at: str, config: str = "", progress: str = "",
-                       error: str | None = None, result_path: str | None = None):
+                       error: str | None = None, result_path: str | None = None,
+                       source_id: str | None = None):
         """Insert or update an FSM run record."""
         from atelier.db.model import FSMRun
         with self.get_session() as session:
@@ -274,6 +275,7 @@ class AtelierDao:
                 run = FSMRun(
                     id=run_id, state=state, config=config,
                     progress=progress, error=error, result_path=result_path,
+                    source_id=source_id,
                 )
                 session.add(run)
             else:
@@ -281,6 +283,8 @@ class AtelierDao:
                 run.progress = progress
                 run.error = error
                 run.result_path = result_path
+                if source_id is not None:
+                    run.source_id = source_id
 
     def get_fsm_run(self, run_id: str) -> dict | None:
         """Return an FSM run by ID as dict, or None."""
@@ -293,7 +297,8 @@ class AtelierDao:
                     "started_at": str(r.started_at or ""),
                     "updated_at": str(r.updated_at or ""),
                     "config": r.config, "progress": r.progress,
-                    "error": r.error, "result_path": r.result_path}
+                    "error": r.error, "result_path": r.result_path,
+                    "source_id": r.source_id}
 
     def list_fsm_runs(self) -> list[dict]:
         """Return all FSM runs as dicts."""
@@ -305,6 +310,7 @@ class AtelierDao:
                  "started_at": str(r.started_at or ""),
                  "updated_at": str(r.updated_at or ""),
                  "config": r.config, "progress": r.progress,
-                 "error": r.error, "result_path": r.result_path}
+                 "error": r.error, "result_path": r.result_path,
+                 "source_id": r.source_id}
                 for r in rows
             ]

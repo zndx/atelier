@@ -63,6 +63,7 @@ class FSMRun:
     progress: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     result_path: str | None = None
+    source_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +75,7 @@ class FSMRun:
             "progress": self.progress,
             "error": self.error,
             "result_path": self.result_path,
+            "source_id": self.source_id,
         }
 
 
@@ -97,7 +99,11 @@ class AgentFSM:
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def start_run(self, config: dict[str, Any] | None = None) -> FSMRun:
+    def start_run(
+        self,
+        config: dict[str, Any] | None = None,
+        source_id: str | None = None,
+    ) -> FSMRun:
         """Create and persist a new classification run."""
         run_id = str(uuid.uuid4())[:8]
         now = self._now()
@@ -107,6 +113,7 @@ class AgentFSM:
             started_at=now,
             updated_at=now,
             config=config or {},
+            source_id=source_id,
         )
         self._runs[run_id] = run
         self._current_run_id = run_id
@@ -186,6 +193,7 @@ class AgentFSM:
                 progress=json.dumps(run.progress),
                 error=run.error,
                 result_path=run.result_path,
+                source_id=run.source_id,
             )
         except Exception:
             pass  # Graceful — FSM works in-memory even without DB
@@ -207,6 +215,7 @@ class AgentFSM:
                 progress=json.loads(row.get("progress") or "{}"),
                 error=row.get("error"),
                 result_path=row.get("result_path"),
+                source_id=row.get("source_id"),
             )
         except Exception:
             return None
@@ -225,6 +234,7 @@ class AgentFSM:
                     progress=json.loads(row.get("progress") or "{}"),
                     error=row.get("error"),
                     result_path=row.get("result_path"),
+                    source_id=row.get("source_id"),
                 )
                 for row in rows
             ]

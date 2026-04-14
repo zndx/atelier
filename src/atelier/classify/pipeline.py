@@ -118,12 +118,16 @@ def run_classification_pipeline(
         # create_backend_from_cfg raises ValueError when no creds
         llm_backend = create_backend_from_cfg(cfg)
 
-    run = fsm.start_run(config={
-        "connection_name": connection_name,
-        "database": database,
-        "sample_size": sample_size,
-        "tables_limit": tables_limit,
-    })
+    run = fsm.start_run(
+        config={
+            "connection_name": connection_name,
+            "database": database,
+            "sample_size": sample_size,
+            "tables_limit": tables_limit,
+            "source_id": source_id,
+        },
+        source_id=source_id,
+    )
     run_id = run.id
 
     build_dir = _PROJECT_ROOT / "build"
