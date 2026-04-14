@@ -137,12 +137,14 @@ class AgentFSM:
                 raise ValueError(f"Run {run_id} not found")
             self._runs[run_id] = run
 
-        valid = _TRANSITIONS.get(run.state, set())
-        if new_state not in valid:
-            raise ValueError(
-                f"Invalid transition: {run.state.value} -> {new_state.value}. "
-                f"Valid: {[s.value for s in valid]}"
-            )
+        # Allow same-state advances as progress updates (sub-phase reporting)
+        if new_state != run.state:
+            valid = _TRANSITIONS.get(run.state, set())
+            if new_state not in valid:
+                raise ValueError(
+                    f"Invalid transition: {run.state.value} -> {new_state.value}. "
+                    f"Valid: {[s.value for s in valid]}"
+                )
 
         run.state = new_state
         run.updated_at = self._now()

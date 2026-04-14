@@ -20,7 +20,8 @@ class DataSource(Base):
     display_name = Column(String, nullable=False)
     vocabulary_mode = Column(String, nullable=False, default="universal")
     created_at = Column(DateTime, server_default=func.now())
-    metadata = Column(Text, nullable=True)             # JSON
+    source_metadata = Column("metadata", Text, nullable=True)  # JSON
+    is_archived = Column(Boolean, nullable=False, default=False)
 
 
 class Agent(Base):
@@ -51,6 +52,7 @@ class Dataset(Base):
     summary = Column(Text, nullable=True)
     fsm_run_id = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+    is_archived = Column(Boolean, nullable=False, default=False)
 
 
 class FSMRun(Base):

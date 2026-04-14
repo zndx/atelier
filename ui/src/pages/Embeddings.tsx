@@ -41,10 +41,16 @@ export default function Embeddings() {
         if (!cancelled) setDataset(ds);
 
         // 3. Fetch parquet bytes on main thread (goes through Vite proxy)
-        if (!cancelled) setStatus(`Downloading ${ds.row_count.toLocaleString()} rows...`);
+        if (!cancelled) setStatus(ds.row_count ? `Downloading ${ds.row_count.toLocaleString()} rows...` : "Downloading data...");
         const parquetResp = await fetch(`/api/datasets/${datasetId}/data`);
         if (!parquetResp.ok) {
-          if (!cancelled) setError(`Failed to fetch parquet: HTTP ${parquetResp.status}`);
+          if (!cancelled) {
+            if (parquetResp.status === 404) {
+              setError("no-data");
+            } else {
+              setError(`Failed to fetch parquet: HTTP ${parquetResp.status}`);
+            }
+          }
           return;
         }
         const buffer = new Uint8Array(await parquetResp.arrayBuffer());
@@ -78,6 +84,7 @@ export default function Embeddings() {
   }, [datasetId, coordinator]);
 
   if (error) {
+    const isNoData = error === "no-data";
     return (
       <div style={{ padding: 24 }}>
         <Link to="/">
@@ -85,7 +92,16 @@ export default function Embeddings() {
             Back
           </Button>
         </Link>
-        <Alert type="error" message="Error" description={error} showIcon />
+        {isNoData ? (
+          <Alert
+            type="info"
+            message="No Embeddings Data Yet"
+            description="Run a classification pipeline on this dataset to generate embeddings for visualization."
+            showIcon
+          />
+        ) : (
+          <Alert type="error" message="Error" description={error} showIcon />
+        )}
       </div>
     );
   }
