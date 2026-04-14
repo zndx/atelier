@@ -233,6 +233,25 @@ def load_mock_annotations(*, hierarchical: bool = True) -> CategorySet:
     return load_annotations_from_json(path, hierarchical=hierarchical)
 
 
+# ── Record normalization ─────────────────────────────────────────────
+
+
+def _normalize_record(row: dict) -> dict:
+    """Normalize a hive annotation record for reliable key access.
+
+    Handles four known quirks from Hive/Impala:
+    - Table-qualified keys: ``annotations.id`` → ``id``
+    - Uppercase keys: ``ID`` → ``id``
+    - BOM/quote artifacts: ``'id`` → ``id``
+    - Spaces in keys: ``Common Names`` → ``common_names``
+    """
+    normalized: dict = {}
+    for k, v in row.items():
+        nk = k.lower().strip().strip("'").replace(" ", "_").rsplit(".", 1)[-1]
+        normalized[nk] = v
+    return normalized
+
+
 # ── Shared builder ───────────────────────────────────────────────────
 
 
@@ -253,6 +272,7 @@ def _build_category_set_from_records(
     - non_corp, emp_contractor, individual, corp: sensitivity ratings
     - deprecated: "yes"/"no" filter flag
     """
+    records = [_normalize_record(r) for r in records]
     all_ids = {str(r.get("id", "")).strip() for r in records}
 
     def _is_leaf(row_id: str) -> bool:

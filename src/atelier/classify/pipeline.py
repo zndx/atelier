@@ -43,15 +43,14 @@ from atelier.classify.sampler import (
     TableSample,
     discover_tables,
     load_all_mock_samples,
-    load_annotations_from_hive,
     sample_table_metadata,
 )
 from atelier.classify.taxonomy import (
     HierarchicalCategorySet,
+    load_annotations_from_hive,
     load_annotations_from_json,
     load_mock_annotations,
     save_annotations_json,
-    _build_category_set_from_records,
 )
 
 logger = logging.getLogger(__name__)
@@ -431,6 +430,7 @@ def run_classification_pipeline(
 
 def _load_vocabulary(cfg, build_dir: Path, connection_name, use_mock: bool):
     """Load vocabulary from hive, cache, or mock."""
+    log = logging.getLogger(__name__)
     cache_dir = build_dir / "data" / "annotations"
     cache_path = cache_dir / "annotations.json"
 
@@ -439,19 +439,30 @@ def _load_vocabulary(cfg, build_dir: Path, connection_name, use_mock: bool):
         save_annotations_json(cs, cache_path)
         return cs
 
-    # Try cached first
+    # Try cached first — but reject empty caches (poisoned by prior failures)
     if cache_path.exists():
-        return load_annotations_from_json(cache_path, hierarchical=True)
+        cs = load_annotations_from_json(cache_path, hierarchical=True)
+        if len(cs.categories) > 0:
+            log.info("Loaded %d categories from cache %s", len(cs.categories), cache_path)
+            return cs
+        log.warning("Cache %s contains 0 categories — treating as corrupt, will re-fetch", cache_path)
+        cache_path.unlink()
 
     # Try hive
     try:
-        records = load_annotations_from_hive(cfg, connection_name)
-        cs = _build_category_set_from_records(records, hierarchical=True)
-        save_annotations_json(cs, cache_path)
-        return cs
-    except Exception:
-        # Fall back to mock
-        return load_mock_annotations(hierarchical=True)
+        cs = load_annotations_from_hive(cfg, connection_name)
+        if len(cs.categories) == 0:
+            log.warning("Hive returned 0 categories — not caching empty result, falling back to mock")
+        else:
+            log.info("Loaded %d categories from hive", len(cs.categories))
+            save_annotations_json(cs, cache_path)
+            return cs
+    except Exception as exc:
+        log.warning("Failed to load vocabulary from hive: %s", exc)
+
+    # Fall back to mock
+    log.info("Falling back to mock vocabulary")
+    return load_mock_annotations(hierarchical=True)
 
 
 def _classify_column(

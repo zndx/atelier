@@ -31,6 +31,7 @@ interface StatusSummary {
 function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [termCount, setTermCount] = useState<number | null>(null);
   const { activeDatasetId, datasets } = useDataset();
 
   useEffect(() => {
@@ -43,6 +44,11 @@ function Landing() {
       .then((r) => r.json())
       .then((data) => setAgents(data.agents || []))
       .catch(() => setAgents([]));
+
+    fetch("/api/vocabulary/stats")
+      .then((r) => r.json())
+      .then((data) => setTermCount(data.terms ?? null))
+      .catch(() => setTermCount(null));
   }, []);
 
   const skillCount = useMemo(
@@ -141,7 +147,7 @@ function Landing() {
           <Card>
             <Statistic
               title="Terms"
-              value={46}
+              value={termCount ?? "—"}
               prefix={<BookOutlined />}
             />
           </Card>

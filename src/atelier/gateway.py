@@ -415,6 +415,45 @@ def test_data_connection(name: str):
         return _error_envelope(f"test_data_connection failed: {exc}")
 
 
+# ── Vocabulary ────────────────────────────────────────────────────
+
+
+@app.get("/api/vocabulary/stats")
+def vocabulary_stats():
+    """Return vocabulary term count from cache, hive, or mock."""
+    try:
+        from atelier.config import load_config
+        from atelier.classify.taxonomy import (
+            load_annotations_from_json,
+            load_annotations_from_hive as _hive_vocab,
+            load_mock_annotations,
+        )
+
+        cfg = load_config()
+        project_root = Path(__file__).resolve().parent.parent.parent
+        cache_path = project_root / "build" / "data" / "annotations" / "annotations.json"
+
+        # Try cache first (validated — reject empty)
+        if cache_path.exists():
+            cs = load_annotations_from_json(cache_path, hierarchical=True)
+            if len(cs.categories) > 0:
+                return {"terms": len(cs.categories), "source": "cache"}
+
+        # Try hive
+        try:
+            cs = _hive_vocab(cfg)
+            if len(cs.categories) > 0:
+                return {"terms": len(cs.categories), "source": "hive"}
+        except Exception:
+            pass
+
+        # Fall back to mock
+        cs = load_mock_annotations(hierarchical=True)
+        return {"terms": len(cs.categories), "source": "mock"}
+    except Exception as exc:
+        return _error_envelope(f"vocabulary_stats failed: {exc}")
+
+
 # ── Terminal WebSocket ─────────────────────────────────────────────
 
 

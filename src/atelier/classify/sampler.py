@@ -7,9 +7,12 @@ Falls back to mock fixtures when cml.data_v1 is unavailable (devenv/CI).
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -175,8 +178,17 @@ def load_annotations_from_hive(
 
         conn = cmldata.get_connection(connection_name)
         df = conn.get_pandas_dataframe("SELECT * FROM default.annotations")
-        return df.to_dict("records")
-    except (ImportError, Exception):
+        records = df.to_dict("records")
+        log.info(
+            "Loaded %d annotation records from hive (columns: %s)",
+            len(records), list(df.columns),
+        )
+        return records
+    except ImportError:
+        log.info("cml.data_v1 not available — using mock annotations")
+        return _load_mock_annotation_records()
+    except Exception as exc:
+        log.warning("Failed to load annotations from hive: %s — using mock annotations", exc)
         return _load_mock_annotation_records()
 
 
