@@ -1,0 +1,2902 @@
+[
+  {
+    "code": "ICE",
+    "label": "Information Content Entity",
+    "parent_code": null,
+    "taxonomy": "universal",
+    "abbrev": "ICE",
+    "description": "BFO: Generically Dependent Continuant — copyable information content whose identity is the pattern, not the carrier."
+  },
+  {
+    "code": "ICE.NONSENSITIVE",
+    "label": "Non-Sensitive Data",
+    "parent_code": "ICE",
+    "taxonomy": "universal",
+    "abbrev": "C_NOS",
+    "description": "Data not requiring elevated protection. Internal operational or structural information."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "label": "Designative Content",
+    "parent_code": "ICE.NONSENSITIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_DESIG",
+    "description": "Information that designates — names, identifiers, codes, and references. Maps to cco:DesignativeICE."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "label": "Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_NAME",
+    "description": "Designates an entity by name — a natural language label for identification."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.PERSON",
+    "label": "Person Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "PERSNAME",
+    "description": "A person's name used in a non-PII context (e.g., author, contributor).",
+    "common_names": "author, contributor, reviewer, writer"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.ORG",
+    "label": "Organization Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "ORGNAME",
+    "description": "The name of an organization, company, or institution.",
+    "common_names": "company, organization, institution, employer, publisher"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.PRODUCT",
+    "label": "Product Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "PRODNAME",
+    "description": "The name of a product, software, or commercial artifact.",
+    "common_names": "product, brand, software, application, tool"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.SCIENTIFIC",
+    "label": "Scientific Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "SCINAME",
+    "description": "A scientific or taxonomic name (genus, species, chemical compound).",
+    "common_names": "species, genus, compound, molecule, element"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.GEO",
+    "label": "Geographic Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "GEONAME",
+    "description": "A geographic place name (country, city, region) in non-address context.",
+    "common_names": "country, city, state, region, continent, territory"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.EVENT",
+    "label": "Event Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "EVTNAME",
+    "description": "The name of an event, conference, or occurrence.",
+    "common_names": "event, conference, meeting, festival, ceremony"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.PROJECT",
+    "label": "Project Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "PROJNAME",
+    "description": "The name of a project, initiative, or campaign.",
+    "common_names": "project, initiative, campaign, program"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.MATERIAL",
+    "label": "Material Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "MATNAME",
+    "description": "The name of a physical material or substance.",
+    "common_names": "material, substance, fabric, alloy, polymer"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.AWARD",
+    "label": "Award Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "AWDNAME",
+    "description": "The name of an award, honor, or certification.",
+    "common_names": "award, prize, medal, certification, honor"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.BRAND",
+    "label": "Brand Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "BRANDNAME",
+    "description": "A commercial brand or trademark name.",
+    "common_names": "brand, trademark, make, manufacturer"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.VENUE",
+    "label": "Venue Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "VENUENAME",
+    "description": "The name of a venue, arena, or meeting place.",
+    "common_names": "venue, arena, stadium, theater, hall"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.ARTWORK",
+    "label": "Artwork / Creative Work",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "ARTNAME",
+    "description": "The name of an artwork, painting, or creative work.",
+    "common_names": "artwork, painting, sculpture, exhibit"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.SONG",
+    "label": "Song / Track Title",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "SONGNAME",
+    "description": "The title of a song, musical track, or composition.",
+    "common_names": "song, track, title, composition, album"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.MOVIE",
+    "label": "Movie / Film Title",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "MOVIENAME",
+    "description": "The title of a movie, film, or TV show.",
+    "common_names": "movie, film, show, series, episode"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.BOOK",
+    "label": "Book Title",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "BOOKNAME",
+    "description": "The title of a book, publication, or written work.",
+    "common_names": "book, publication, novel, textbook, paper"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.DISEASE",
+    "label": "Disease Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "DISNAME",
+    "description": "The name of a disease, condition, or syndrome (non-PII context).",
+    "common_names": "disease, condition, syndrome, disorder, illness"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.DRUG",
+    "label": "Drug / Medication Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "DRUGNAME",
+    "description": "The name of a drug, medication, or pharmaceutical (non-PII context).",
+    "common_names": "drug, medication, pharmaceutical, compound, active ingredient"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.FOOD",
+    "label": "Food / Ingredient Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
+    "taxonomy": "universal",
+    "abbrev": "FOODNAME",
+    "description": "The name of a food item, ingredient, or dish.",
+    "common_names": "food, ingredient, dish, recipe, cuisine"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "label": "Code / Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_CODE",
+    "description": "Designates an entity by symbolic code or identifier."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
+    "label": "Generic Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "GENID",
+    "description": "A generic unique identifier (UUID, hash, or opaque key).",
+    "common_names": "id, identifier, key, uuid, guid, hash"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ABBREV",
+    "label": "Abbreviation / Acronym",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ABBR",
+    "description": "An abbreviation or acronym used as a designator.",
+    "common_names": "abbreviation, acronym, code, symbol"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.POSTAL",
+    "label": "Postal Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "POSTALCD",
+    "description": "A postal or ZIP code designating a geographic delivery area.",
+    "common_names": "zip, zipcode, postal code, postcode"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ISO_COUNTRY",
+    "label": "ISO Country Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ISOCC",
+    "description": "An ISO 3166 country code (2-letter, 3-letter, or numeric).",
+    "common_names": "country code, iso alpha-2, iso alpha-3, iso 3166"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ISO_CURRENCY",
+    "label": "ISO Currency Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ISOCUR",
+    "description": "An ISO 4217 currency code (USD, EUR, JPY).",
+    "common_names": "currency code, iso 4217, money code"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ISO_LANGUAGE",
+    "label": "ISO Language Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ISOLANG",
+    "description": "An ISO 639 language code (en, fr, de).",
+    "common_names": "language code, iso 639, locale code"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.IATA",
+    "label": "IATA Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "IATA",
+    "description": "An IATA airport or airline code.",
+    "common_names": "airport code, airline code, iata"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.NAICS",
+    "label": "NAICS Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "NAICS",
+    "description": "A North American Industry Classification System code.",
+    "common_names": "naics, industry code, sic code"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.TICKER",
+    "label": "Stock Ticker",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "TICKER",
+    "description": "A stock exchange ticker symbol.",
+    "common_names": "ticker, stock symbol, trading symbol"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.DOI",
+    "label": "Digital Object Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "DOI",
+    "description": "A DOI uniquely identifying a digital publication.",
+    "common_names": "doi, digital object identifier"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ISBN",
+    "label": "ISBN",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ISBN",
+    "description": "An International Standard Book Number.",
+    "common_names": "isbn, book number"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ISSN",
+    "label": "ISSN",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ISSN",
+    "description": "An International Standard Serial Number for periodicals.",
+    "common_names": "issn, serial number, journal id"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.SKU",
+    "label": "SKU / Product Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "SKU",
+    "description": "A Stock Keeping Unit or product catalog code.",
+    "common_names": "sku, product code, item number, part number, upc, ean, barcode"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.FIPS",
+    "label": "FIPS Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "FIPS",
+    "description": "A Federal Information Processing Standard geographic code.",
+    "common_names": "fips, county code, state fips"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.LEI",
+    "label": "Legal Entity Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "LEI",
+    "description": "A 20-character LEI per ISO 17442.",
+    "common_names": "lei, legal entity identifier"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.DUNS",
+    "label": "DUNS Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "DUNS",
+    "description": "A Dun & Bradstreet business identifier.",
+    "common_names": "duns, duns number, d-u-n-s"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.MIME_TYPE",
+    "label": "MIME Type",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "MIMETYPE",
+    "description": "A media type designation (application/json, text/csv).",
+    "common_names": "mime, content type, media type"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.PHONE_CODE",
+    "label": "Phone Country Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "PHONECODE",
+    "description": "An international dialing code (+1, +44, +81).",
+    "common_names": "country code, dialing code, phone prefix"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.CAS",
+    "label": "CAS Registry Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "CAS",
+    "description": "A Chemical Abstracts Service registry number.",
+    "common_names": "cas, cas number, chemical id"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.VIN",
+    "label": "Vehicle Identification Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "VIN",
+    "description": "A vehicle identification number.",
+    "common_names": "vin, vehicle id, chassis number"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.CUSIP",
+    "label": "CUSIP Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "CUSIP",
+    "description": "A Committee on Uniform Securities Identification Procedures number.",
+    "common_names": "cusip, security id, isin"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.CIK",
+    "label": "SEC CIK Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "CIK",
+    "description": "A Central Index Key number from the SEC.",
+    "common_names": "cik, sec id, edgar id"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.GTIN",
+    "label": "Global Trade Item Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "GTIN",
+    "description": "A GTIN product identifier (EAN, UPC, or ISBN).",
+    "common_names": "gtin, ean, upc, barcode, product id"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.HASH_ID",
+    "label": "Hash Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "HASHID",
+    "description": "A cryptographic hash used as an identifier (SHA, MD5).",
+    "common_names": "hash, sha256, md5, sha1, digest, fingerprint"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.SEMANTIC_VERSION",
+    "label": "Semantic Version",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "SEMVER",
+    "description": "A semantic version string (1.2.3, 2.0.0-rc.1).",
+    "common_names": "semver, version, release, v1.0, major.minor.patch"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.PLATE_NUMBER",
+    "label": "License Plate Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "PLATENUM",
+    "description": "A vehicle registration plate number.",
+    "common_names": "license plate, plate number, registration"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.FLIGHT_NUMBER",
+    "label": "Flight Number",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "FLIGHTNUM",
+    "description": "An airline flight number designation.",
+    "common_names": "flight number, flight, flight code"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "label": "Geographic Reference",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_GEO",
+    "description": "Designates a geographic site or spatial reference. Maps to BFO:Site."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY",
+    "label": "Country",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "COUNTRY",
+    "description": "A sovereign nation or territory.",
+    "common_names": "country, nation, state, sovereignty"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION",
+    "label": "Region / State / Province",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "REGION",
+    "description": "A sub-national administrative region.",
+    "common_names": "state, province, region, territory, prefecture, canton"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.CITY",
+    "label": "City / Town",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "CITY",
+    "description": "A city, town, municipality, or urban area.",
+    "common_names": "city, town, municipality, village, metro"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.LOCATION",
+    "label": "Location Text",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "LOCTXT",
+    "description": "General free-text location or place description.",
+    "common_names": "location, place, site, venue, area"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COORDINATES",
+    "label": "Geographic Coordinates",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "COORDS",
+    "description": "Latitude/longitude pair or other spatial coordinate.",
+    "common_names": "latitude, longitude, lat, lon, coordinates, geolocation"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.CONTINENT",
+    "label": "Continent",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "CONTINENT",
+    "description": "One of the seven continents.",
+    "common_names": "continent"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.DISTRICT",
+    "label": "District / Borough",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "DISTRICT",
+    "description": "A district, borough, ward, or neighborhood.",
+    "common_names": "district, borough, ward, neighborhood, county"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.TIMEZONE",
+    "label": "Time Zone",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "TZ",
+    "description": "A time zone identifier (UTC, EST, America/New_York).",
+    "common_names": "timezone, tz, time zone, utc offset"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.ADDRESS_LINE",
+    "label": "Address Line",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "ADDRLINE",
+    "description": "A non-PII address line (business address, facility address).",
+    "common_names": "address line, street, suite, floor, building"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.LANDMARK",
+    "label": "Landmark / POI",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "LANDMARK",
+    "description": "A landmark, point of interest, or notable location.",
+    "common_names": "landmark, poi, monument, park, building, attraction"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.AIRPORT",
+    "label": "Airport",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "AIRPORT",
+    "description": "An airport name or identifier.",
+    "common_names": "airport, airfield, aerodrome"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.PORT",
+    "label": "Port / Harbor",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO",
+    "taxonomy": "universal",
+    "abbrev": "PORT",
+    "description": "A seaport or harbor.",
+    "common_names": "port, harbor, dock, terminal, maritime"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "label": "Reference",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_REF",
+    "description": "References to external entities — citations, versions, sources."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.CITATION",
+    "label": "Citation",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "taxonomy": "universal",
+    "abbrev": "CITATION",
+    "description": "A bibliographic citation or reference to a published work.",
+    "common_names": "citation, reference, bibliography, doi, source"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.VERSION",
+    "label": "Version Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "taxonomy": "universal",
+    "abbrev": "VERID",
+    "description": "A version string or release identifier.",
+    "common_names": "version, release, revision, build, tag"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.SOURCE",
+    "label": "Source Attribution",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "taxonomy": "universal",
+    "abbrev": "SRCATTR",
+    "description": "Attribution of data origin or provenance.",
+    "common_names": "source, origin, provenance, data source, feed"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.URL",
+    "label": "URL Reference",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "taxonomy": "universal",
+    "abbrev": "URLREF",
+    "description": "A URL reference to an external resource (non-PII context).",
+    "common_names": "url, link, href, website, webpage, uri"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.FILEPATH",
+    "label": "File Path",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "taxonomy": "universal",
+    "abbrev": "FPATH",
+    "description": "A filesystem path or object storage key.",
+    "common_names": "path, filepath, filename, directory, s3 key, blob path"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.TITLE",
+    "label": "Title",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "TITLE",
+    "description": "The title of a work, document, or creative output.",
+    "common_names": "title, headline, subject line, header, name"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.LABEL",
+    "label": "Label / Tag",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "LABEL",
+    "description": "A classification label, tag, or annotation applied to an entity.",
+    "common_names": "label, tag, annotation, category, class"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.BOOLEAN",
+    "label": "Boolean Flag",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "BOOLFLAG",
+    "description": "A designative boolean indicator (true/false, yes/no, 0/1).",
+    "common_names": "flag, boolean, indicator, is_active, enabled, has"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.EMAIL_DOMAIN",
+    "label": "Email Domain",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "EMAILDOM",
+    "description": "An email domain (non-PII, e.g., company domain patterns).",
+    "common_names": "email domain, domain, @company.com"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.DOMAIN_NAME",
+    "label": "Domain Name",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "DOMNAME",
+    "description": "An internet domain name (non-PII context).",
+    "common_names": "domain, hostname, fqdn, tld, subdomain"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.PHONE_FORMAT",
+    "label": "Phone Format Pattern",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
+    "taxonomy": "universal",
+    "abbrev": "PHONEFMT",
+    "description": "A phone number format pattern (non-PII, e.g., +1-XXX-XXX-XXXX).",
+    "common_names": "phone format, country pattern, dialing format"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "label": "Descriptive Content",
+    "parent_code": "ICE.NONSENSITIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_DESC",
+    "description": "Information that describes — text, measurements, categories, temporal values. Maps to cco:DescriptiveICE."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "label": "Text Content",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_TXT",
+    "description": "Free-text descriptions, comments, and narrative content."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.DESCRIPTION",
+    "label": "Description",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "DESC",
+    "description": "A general free-text description of an entity.",
+    "common_names": "description, desc, detail, summary, about"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.COMMENT",
+    "label": "Comment / Note",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "COMMENT",
+    "description": "A comment, note, or remark attached to a record.",
+    "common_names": "comment, note, remark, observation, memo"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.ABSTRACT",
+    "label": "Abstract / Summary",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "ABSTRACT",
+    "description": "A summary or abstract of a longer work.",
+    "common_names": "abstract, summary, synopsis, overview, brief"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.DEFINITION",
+    "label": "Definition",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "DEFN",
+    "description": "A formal definition of a term or concept.",
+    "common_names": "definition, meaning, explanation, gloss"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.BODY",
+    "label": "Body Text",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "BODYTEXT",
+    "description": "The main body text of a document or message.",
+    "common_names": "body, content, text, message, article"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.KEYWORDS",
+    "label": "Keywords",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "KEYWORDS",
+    "description": "A list of keywords or key phrases.",
+    "common_names": "keywords, tags, key phrases, topics, terms"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.INSTRUCTION",
+    "label": "Instruction Text",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "INSTRTEXT",
+    "description": "Instructional or how-to text content.",
+    "common_names": "instructions, directions, steps, procedure, how-to"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.REVIEW",
+    "label": "Review Text",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "REVIEW",
+    "description": "A review, rating commentary, or evaluation text.",
+    "common_names": "review, feedback, evaluation, testimonial, critique"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.LOG_MESSAGE",
+    "label": "Log Message",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "LOGMSG",
+    "description": "A structured or semi-structured log entry.",
+    "common_names": "log, log message, trace, event log, audit log"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.ERROR_MESSAGE",
+    "label": "Error Message",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "ERRMSG",
+    "description": "An error message, exception, or diagnostic text.",
+    "common_names": "error, exception, stacktrace, fault, warning"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.QUERY",
+    "label": "Query / Search Text",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "QUERY",
+    "description": "A search query, SQL statement, or filter expression.",
+    "common_names": "query, search, sql, filter, expression"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.TRANSLATION",
+    "label": "Translation",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "XLATE",
+    "description": "A translated version of text content.",
+    "common_names": "translation, translated, localized, i18n"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.HEADLINE",
+    "label": "Headline / Title Text",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "HEADLINE",
+    "description": "A headline, subject line, or title text.",
+    "common_names": "headline, subject, title, header, tagline"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.CAPTION",
+    "label": "Caption",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "CAPTION",
+    "description": "A caption or alt-text for an image or media.",
+    "common_names": "caption, alt text, subtitle, legend, tooltip"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.ADDRESS_TEXT",
+    "label": "Address Text",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "ADDRTXT",
+    "description": "A formatted address as free text (non-PII, business context).",
+    "common_names": "address, formatted address, full address, mailing address"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.BIOGRAPHY",
+    "label": "Biography",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "BIO",
+    "description": "A biographical description (non-PII, public context).",
+    "common_names": "bio, biography, about me, profile, blurb"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.CHANGELOG",
+    "label": "Changelog Entry",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "CHANGELOG",
+    "description": "A changelog or release note entry.",
+    "common_names": "changelog, release note, change, update, what's new"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT.RECIPE",
+    "label": "Recipe / Instructions",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
+    "taxonomy": "universal",
+    "abbrev": "RECIPE",
+    "description": "A recipe, cooking instructions, or procedural text.",
+    "common_names": "recipe, ingredients, instructions, steps, method"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "label": "Categorical Value",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_CAT",
+    "description": "Categorical descriptors — types, classes, ranks, enumerations."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.TYPE",
+    "label": "Type / Class",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "TYPECLS",
+    "description": "A type or class label from a controlled enumeration.",
+    "common_names": "type, class, kind, category, classification"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.CATEGORY",
+    "label": "Category",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "CATEG",
+    "description": "A category or grouping assignment.",
+    "common_names": "category, group, segment, bucket, tier"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.RANK",
+    "label": "Rank / Rating",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "RANK",
+    "description": "An ordinal rank, rating, or priority level.",
+    "common_names": "rank, rating, priority, level, grade, tier, severity"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.LANGUAGE",
+    "label": "Language",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "LANG",
+    "description": "A human language name or designation.",
+    "common_names": "language, lang, locale, tongue"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.GENDER",
+    "label": "Gender",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "GENDER",
+    "description": "A gender designation (non-PII context, e.g., product category).",
+    "common_names": "gender, sex, m/f"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.COLOR",
+    "label": "Color",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "COLOR",
+    "description": "A color designation or code.",
+    "common_names": "color, colour, hex color, rgb"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.SIZE",
+    "label": "Size / Dimension Category",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "SIZECAT",
+    "description": "A categorical size designation (S, M, L, XL).",
+    "common_names": "size, dimension, fit, small, medium, large"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.STATUS",
+    "label": "Status / State",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "CATSTAT",
+    "description": "A categorical status or lifecycle state value.",
+    "common_names": "status, state, phase, stage, condition, lifecycle"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.INDUSTRY",
+    "label": "Industry / Sector",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "INDUSTRY",
+    "description": "An industry, sector, or vertical classification.",
+    "common_names": "industry, sector, vertical, domain, market"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.DEPARTMENT",
+    "label": "Department / Division",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "DEPT",
+    "description": "An organizational department or division.",
+    "common_names": "department, division, unit, team, group, org unit"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.ROLE",
+    "label": "Role / Job Title",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "JOBROLE",
+    "description": "A job title, role, or position designation.",
+    "common_names": "role, title, position, job, occupation, profession"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.FORMAT",
+    "label": "Data Format",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "DATAFMT",
+    "description": "A data format designation (CSV, JSON, XML, Parquet).",
+    "common_names": "format, file format, encoding, data type, schema"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.PROTOCOL",
+    "label": "Protocol",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "PROTOCOL",
+    "description": "A communication or data transfer protocol.",
+    "common_names": "protocol, http, https, ftp, ssh, tcp, udp"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.BOOLEAN_ENUM",
+    "label": "Boolean Enumeration",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "BOOLENUM",
+    "description": "An enumerated boolean-like value (active/inactive, enabled/disabled).",
+    "common_names": "active, inactive, enabled, disabled, yes, no, on, off"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.SEVERITY",
+    "label": "Severity Level",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "SEVERITY",
+    "description": "A severity or criticality classification.",
+    "common_names": "severity, criticality, urgency, priority, impact"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.SENTIMENT",
+    "label": "Sentiment",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "SENTIMENT",
+    "description": "A sentiment classification (positive, negative, neutral).",
+    "common_names": "sentiment, polarity, mood, tone, positive, negative"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.LIFECYCLE",
+    "label": "Lifecycle Stage",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "LIFECYCLE",
+    "description": "A lifecycle or maturity stage designation.",
+    "common_names": "lifecycle, stage, maturity, phase, draft, published, archived"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.CHANNEL",
+    "label": "Channel",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "CHANNEL",
+    "description": "A communication or distribution channel.",
+    "common_names": "channel, medium, source, platform, touchpoint"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.PLATFORM",
+    "label": "Platform / OS",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "PLATFORM",
+    "description": "An operating system, platform, or runtime environment.",
+    "common_names": "platform, os, operating system, runtime, environment"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.BROWSER",
+    "label": "Browser / User Agent",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "BROWSER",
+    "description": "A web browser or user agent designation.",
+    "common_names": "browser, user agent, chrome, firefox, safari"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.DEVICE_TYPE",
+    "label": "Device Type",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "DEVTYPE",
+    "description": "A device type classification (mobile, desktop, tablet).",
+    "common_names": "device type, mobile, desktop, tablet, iot, wearable"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.CONTENT_TYPE",
+    "label": "Content Type",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "CONTTYPE",
+    "description": "A content type or media classification.",
+    "common_names": "content type, media, article, video, image, podcast, post"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.PAYMENT_METHOD",
+    "label": "Payment Method",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "PAYMETHOD",
+    "description": "A payment method designation.",
+    "common_names": "payment method, credit card, debit, wire, ach, paypal, cash"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.SHIPPING_METHOD",
+    "label": "Shipping Method",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "SHIPMETHOD",
+    "description": "A shipping or delivery method.",
+    "common_names": "shipping, delivery, express, standard, freight, overnight"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.EDUCATION_LEVEL",
+    "label": "Education Level",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "EDULEVEL",
+    "description": "An educational attainment level.",
+    "common_names": "education, degree, diploma, bachelor, master, phd, certification"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.RELATIONSHIP",
+    "label": "Relationship Type",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "RELTYPE",
+    "description": "A relationship type between entities.",
+    "common_names": "relationship, relation, parent, child, sibling, spouse, manager"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.PERMISSION_LEVEL",
+    "label": "Permission Level",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "PERMLEVEL",
+    "description": "An access permission or authorization level.",
+    "common_names": "permission, access level, admin, read, write, execute, owner"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.RISK_LEVEL",
+    "label": "Risk Level",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "RISKLEVEL",
+    "description": "A risk assessment classification.",
+    "common_names": "risk, risk level, high risk, low risk, exposure, vulnerability"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.APPROVAL_STATUS",
+    "label": "Approval Status",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "APPRVSTAT",
+    "description": "An approval or review status.",
+    "common_names": "approved, pending, rejected, review, submitted, in review"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.CURRENCY_NAME",
+    "label": "Currency Name",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "CURNAME",
+    "description": "A currency name (non-ISO-code context).",
+    "common_names": "currency, dollar, euro, yen, pound, rupee"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.UNIT",
+    "label": "Unit of Measure",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "UNITOFMEAS",
+    "description": "A unit of measurement designation.",
+    "common_names": "unit, uom, kg, lb, meter, inch, gallon, liter"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "label": "Measurement",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_MEAS",
+    "description": "Quantitative descriptions — measurements of BFO:Quality instances."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.LENGTH",
+    "label": "Length",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASLEN",
+    "description": "A measurement of spatial extent along one dimension.",
+    "common_names": "length, distance, height, width, depth, size"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.AREA",
+    "label": "Area",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASAREA",
+    "description": "A measurement of two-dimensional spatial extent.",
+    "common_names": "area, surface area, sq ft, sq m, acreage"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.VOLUME",
+    "label": "Volume",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASVOL",
+    "description": "A measurement of three-dimensional spatial extent.",
+    "common_names": "volume, capacity, liters, gallons, cubic"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.WEIGHT",
+    "label": "Weight / Mass",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASWT",
+    "description": "A measurement of mass or weight.",
+    "common_names": "weight, mass, kg, lbs, grams, tons, ounces"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.TEMPERATURE",
+    "label": "Temperature",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASTEMP",
+    "description": "A measurement of temperature.",
+    "common_names": "temperature, temp, celsius, fahrenheit, kelvin"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.SPEED",
+    "label": "Speed / Velocity",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASSPD",
+    "description": "A measurement of speed or velocity.",
+    "common_names": "speed, velocity, mph, km/h, knots"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.PRESSURE",
+    "label": "Pressure",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASPRS",
+    "description": "A measurement of pressure.",
+    "common_names": "pressure, psi, bar, pascal, atm"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.FREQUENCY",
+    "label": "Frequency",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASFREQ",
+    "description": "A measurement of frequency or rate of occurrence.",
+    "common_names": "frequency, rate, hz, rpm, bpm, per second"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.ENERGY",
+    "label": "Energy",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASENRG",
+    "description": "A measurement of energy.",
+    "common_names": "energy, joules, calories, kwh, watt-hours"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.POWER",
+    "label": "Power",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASPWR",
+    "description": "A measurement of power output.",
+    "common_names": "power, watts, horsepower, kw"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.DENSITY",
+    "label": "Density",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASDENS",
+    "description": "A measurement of density (mass per volume).",
+    "common_names": "density, g/cm3, kg/m3, specific gravity"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.CONCENTRATION",
+    "label": "Concentration",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASCONC",
+    "description": "A measurement of concentration (ppm, mol/L).",
+    "common_names": "concentration, ppm, ppb, molarity, mg/L, percent"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.PERCENTAGE",
+    "label": "Percentage",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASPCT",
+    "description": "A ratio expressed as a fraction of 100.",
+    "common_names": "percentage, percent, ratio, rate, proportion, share"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.SCORE",
+    "label": "Score / Index",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASSCORE",
+    "description": "A numeric score, index, or rating value.",
+    "common_names": "score, index, rating, grade, rank, points"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.COUNT",
+    "label": "Count",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASCNT",
+    "description": "An integer count of discrete items.",
+    "common_names": "count, number, quantity, total, tally, occurrences"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.DURATION",
+    "label": "Duration",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASDUR",
+    "description": "A measurement of elapsed time.",
+    "common_names": "duration, elapsed, interval, period, time span, seconds, minutes"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.AGE",
+    "label": "Age",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASAGE",
+    "description": "A measurement of age (years, months, days).",
+    "common_names": "age, years old, months old"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.PRICE",
+    "label": "Price / Cost",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASPRICE",
+    "description": "A monetary amount representing price or cost.",
+    "common_names": "price, cost, fee, charge, rate, amount, value"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.REVENUE",
+    "label": "Revenue / Sales",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASREV",
+    "description": "An aggregate revenue or sales figure.",
+    "common_names": "revenue, sales, income, earnings, turnover, gross"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.BUDGET",
+    "label": "Budget / Allocation",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASBUDGET",
+    "description": "A budgeted or allocated monetary amount.",
+    "common_names": "budget, allocation, funding, spend, expenditure"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.MARKET_VALUE",
+    "label": "Market Value",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASMKTVAL",
+    "description": "A market valuation or capitalization figure.",
+    "common_names": "market value, market cap, valuation, appraisal, assessment"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.EXCHANGE_RATE",
+    "label": "Exchange Rate",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASXRATE",
+    "description": "A currency exchange rate.",
+    "common_names": "exchange rate, fx rate, conversion rate, forex"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.LATITUDE",
+    "label": "Latitude",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASLAT",
+    "description": "A geographic latitude value in decimal degrees.",
+    "common_names": "latitude, lat"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.LONGITUDE",
+    "label": "Longitude",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASLON",
+    "description": "A geographic longitude value in decimal degrees.",
+    "common_names": "longitude, lon, lng"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.ELEVATION",
+    "label": "Elevation / Altitude",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASELEV",
+    "description": "A measurement of elevation above sea level.",
+    "common_names": "elevation, altitude, height, asl"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.DISTANCE",
+    "label": "Distance",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASDIST",
+    "description": "A measurement of distance between two points.",
+    "common_names": "distance, range, miles, kilometers, proximity"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.BANDWIDTH",
+    "label": "Bandwidth / Data Rate",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASBW",
+    "description": "A measurement of data transfer rate.",
+    "common_names": "bandwidth, throughput, mbps, gbps, data rate"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.STORAGE",
+    "label": "Storage Size",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASSTOR",
+    "description": "A measurement of data storage capacity.",
+    "common_names": "storage, file size, bytes, kb, mb, gb, tb"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.LATENCY",
+    "label": "Latency / Response Time",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASLAT_T",
+    "description": "A measurement of delay or response time.",
+    "common_names": "latency, response time, ping, delay, ms, milliseconds"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.UPTIME",
+    "label": "Uptime / Availability",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASUP",
+    "description": "A measurement of system availability.",
+    "common_names": "uptime, availability, sla, nine nines"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.CPU_USAGE",
+    "label": "CPU Usage",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASCPU",
+    "description": "A measurement of processor utilization.",
+    "common_names": "cpu, cpu usage, processor, utilization, load"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.MEMORY_USAGE",
+    "label": "Memory Usage",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASMEM",
+    "description": "A measurement of memory consumption.",
+    "common_names": "memory, ram, heap, memory usage, resident"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.VOLTAGE",
+    "label": "Voltage",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASVOLT",
+    "description": "A measurement of electrical potential difference.",
+    "common_names": "voltage, volts, v, potential"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.CURRENT",
+    "label": "Electric Current",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASCURR",
+    "description": "A measurement of electric current.",
+    "common_names": "current, amps, amperes, milliamps"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.ANGLE",
+    "label": "Angle",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASANGLE",
+    "description": "A measurement of angular displacement.",
+    "common_names": "angle, degrees, radians, heading, bearing, azimuth"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.FLOW_RATE",
+    "label": "Flow Rate",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASFLOW",
+    "description": "A measurement of fluid or data flow rate.",
+    "common_names": "flow rate, gallons per minute, liters per second, throughput"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.HUMIDITY",
+    "label": "Humidity",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASHUM",
+    "description": "A measurement of relative or absolute humidity.",
+    "common_names": "humidity, rh, relative humidity, dew point"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.LUMINOSITY",
+    "label": "Luminosity / Brightness",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASLUM",
+    "description": "A measurement of luminous intensity or brightness.",
+    "common_names": "luminosity, brightness, lux, lumens, candela"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.DECIBEL",
+    "label": "Sound Level",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASDB",
+    "description": "A measurement of sound pressure level.",
+    "common_names": "decibel, db, sound level, noise, volume"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.PH",
+    "label": "pH Level",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASPH",
+    "description": "A measurement of acidity/alkalinity (pH scale).",
+    "common_names": "ph, acidity, alkalinity, ph level"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.RESOLUTION",
+    "label": "Resolution",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASRES",
+    "description": "A measurement of image or display resolution.",
+    "common_names": "resolution, dpi, ppi, pixels, megapixels, 1080p, 4k"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.RATIO",
+    "label": "Ratio",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASRATIO",
+    "description": "A dimensionless ratio or proportion.",
+    "common_names": "ratio, proportion, factor, multiplier, coefficient"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.POPULATION",
+    "label": "Population",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT",
+    "taxonomy": "universal",
+    "abbrev": "MEASPOP",
+    "description": "A count of population or user base.",
+    "common_names": "population, inhabitants, users, subscribers, members"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "label": "Temporal Value",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_TEMP",
+    "description": "Temporal descriptions — dates, times, periods, durations."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.DATE",
+    "label": "Date",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "DATEVAL",
+    "description": "A calendar date (YYYY-MM-DD or similar format).",
+    "common_names": "date, calendar date, day"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.DATETIME",
+    "label": "Date-Time",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "DTVAL",
+    "description": "A combined date and time value.",
+    "common_names": "datetime, timestamp, date time, iso 8601"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.TIME",
+    "label": "Time of Day",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "TIMEVAL",
+    "description": "A time-of-day value without date component.",
+    "common_names": "time, clock time, hour, hh:mm, time of day"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.YEAR",
+    "label": "Year",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "YEARVAL",
+    "description": "A calendar year value.",
+    "common_names": "year, fiscal year, calendar year, vintage"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.MONTH",
+    "label": "Month",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "MONTHVAL",
+    "description": "A month name or number.",
+    "common_names": "month, month name, month number"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.DAY_OF_WEEK",
+    "label": "Day of Week",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "DOWVAL",
+    "description": "A day-of-week designation.",
+    "common_names": "day of week, weekday, day name, dow"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.QUARTER",
+    "label": "Quarter",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "QTRVAL",
+    "description": "A fiscal or calendar quarter designation (Q1-Q4).",
+    "common_names": "quarter, q1, q2, q3, q4, fiscal quarter"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.PERIOD",
+    "label": "Period / Interval",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "PERIODVAL",
+    "description": "A named time period or interval.",
+    "common_names": "period, interval, span, range, epoch, era"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.START_DATE",
+    "label": "Start Date",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "STARTDT",
+    "description": "The beginning date of a temporal interval.",
+    "common_names": "start date, begin date, effective date, from date, since"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.END_DATE",
+    "label": "End Date",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "ENDDT",
+    "description": "The ending date of a temporal interval.",
+    "common_names": "end date, expiry date, until, through, to date"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.CRON",
+    "label": "Cron / Schedule",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL",
+    "taxonomy": "universal",
+    "abbrev": "CRONVAL",
+    "description": "A cron expression or schedule specification.",
+    "common_names": "cron, schedule, recurrence, frequency, interval"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "label": "Numeric Value",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_NUM",
+    "description": "Numeric values that are descriptive but not unit-bearing measurements."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC.INTEGER",
+    "label": "Integer",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "taxonomy": "universal",
+    "abbrev": "INTVAL",
+    "description": "A whole number value without units.",
+    "common_names": "integer, int, whole number, count"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC.DECIMAL",
+    "label": "Decimal / Float",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "taxonomy": "universal",
+    "abbrev": "DECVAL",
+    "description": "A decimal or floating-point number without units.",
+    "common_names": "decimal, float, double, real, number"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC.ORDINAL",
+    "label": "Ordinal Position",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "taxonomy": "universal",
+    "abbrev": "ORDVAL",
+    "description": "An ordinal position in a sequence.",
+    "common_names": "ordinal, position, rank, order, sequence number, index"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC.PROBABILITY",
+    "label": "Probability / Confidence",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "taxonomy": "universal",
+    "abbrev": "PROBVAL",
+    "description": "A probability, confidence score, or likelihood value [0,1].",
+    "common_names": "probability, confidence, likelihood, p-value, score"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC.BINARY",
+    "label": "Binary Value",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "taxonomy": "universal",
+    "abbrev": "BINVAL",
+    "description": "A binary 0/1 numeric value.",
+    "common_names": "binary, bit, flag, 0/1"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC.RANGE",
+    "label": "Numeric Range",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.NUMERIC",
+    "taxonomy": "universal",
+    "abbrev": "RANGEVAL",
+    "description": "A numeric range expressed as min-max.",
+    "common_names": "range, min-max, band, bracket, interval"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING",
+    "label": "Embedding / Vector",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_EMBED",
+    "description": "A numeric vector or embedding representation."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING.WORD_EMBEDDING",
+    "label": "Word Embedding",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING",
+    "taxonomy": "universal",
+    "abbrev": "WORDEMB",
+    "description": "A word or sentence embedding vector.",
+    "common_names": "embedding, vector, word2vec, bert, transformer, representation"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING.FEATURE_VECTOR",
+    "label": "Feature Vector",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING",
+    "taxonomy": "universal",
+    "abbrev": "FEATVEC",
+    "description": "A feature vector for machine learning input.",
+    "common_names": "features, feature vector, input vector, encoding"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING.IMAGE_EMBEDDING",
+    "label": "Image Embedding",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.EMBEDDING",
+    "taxonomy": "universal",
+    "abbrev": "IMGEMB",
+    "description": "An image embedding or visual feature vector.",
+    "common_names": "image embedding, visual features, cnn features, clip"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "label": "Statistical Value",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_STAT",
+    "description": "Statistical measures, aggregates, and derived quantities."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.MEAN",
+    "label": "Mean / Average",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "MEAN",
+    "description": "An arithmetic mean or average value.",
+    "common_names": "mean, average, avg, arithmetic mean"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.MEDIAN",
+    "label": "Median",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "MEDIAN",
+    "description": "A median value (50th percentile).",
+    "common_names": "median, middle, 50th percentile"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.STD_DEV",
+    "label": "Standard Deviation",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "STDDEV",
+    "description": "A standard deviation measurement.",
+    "common_names": "standard deviation, std, sigma, variance, spread"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.PERCENTILE",
+    "label": "Percentile",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "PCTILE",
+    "description": "A percentile or quantile value.",
+    "common_names": "percentile, quantile, quartile, p50, p95, p99"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.CORRELATION",
+    "label": "Correlation",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "CORR",
+    "description": "A correlation coefficient or association measure.",
+    "common_names": "correlation, r-squared, pearson, spearman, association"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.TREND",
+    "label": "Trend / Growth Rate",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "TREND",
+    "description": "A trend, growth rate, or change-over-time metric.",
+    "common_names": "trend, growth, change, delta, yoy, mom, rate of change"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.HISTOGRAM_BIN",
+    "label": "Histogram Bin",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "HISTBIN",
+    "description": "A histogram bin edge or bucket boundary.",
+    "common_names": "bin, bucket, histogram, distribution, bin edge"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL.CONFIDENCE_INTERVAL",
+    "label": "Confidence Interval",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.STATISTICAL",
+    "taxonomy": "universal",
+    "abbrev": "CI",
+    "description": "A statistical confidence interval bound.",
+    "common_names": "confidence interval, ci, lower bound, upper bound, margin of error"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "label": "Prescriptive Content",
+    "parent_code": "ICE.NONSENSITIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_PRESC",
+    "description": "Information that prescribes — specifications, formulas, rules, and plans. Maps to cco:PrescriptiveICE."
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.FORMAT_SPEC",
+    "label": "Format Specification",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "FMTSPEC",
+    "description": "A specification defining data format, schema, or structure.",
+    "common_names": "format spec, schema, template, pattern, layout, specification"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.FORMULA",
+    "label": "Formula / Expression",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "FORMULA",
+    "description": "A mathematical, chemical, or logical formula.",
+    "common_names": "formula, equation, expression, calculation, regex"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.RULE",
+    "label": "Rule / Constraint",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "RULE",
+    "description": "A business rule, validation constraint, or policy rule.",
+    "common_names": "rule, constraint, policy, validation, check, assertion"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.CONFIG",
+    "label": "Configuration",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "CONFIG",
+    "description": "A configuration setting, parameter, or option.",
+    "common_names": "config, setting, parameter, option, preference, property"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.PERMISSION",
+    "label": "Permission / Access Control",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "PERM",
+    "description": "An access control or permission specification.",
+    "common_names": "permission, access, role, acl, privilege, grant"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.SCHEDULE",
+    "label": "Schedule / Plan",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "SCHED",
+    "description": "A schedule, plan, or workflow specification.",
+    "common_names": "schedule, plan, workflow, pipeline, process, sequence"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.COMMAND",
+    "label": "Command / Action",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "CMD",
+    "description": "A command, action, or operation specification.",
+    "common_names": "command, action, operation, method, verb, endpoint"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.TEMPLATE",
+    "label": "Template / Pattern",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "TMPL",
+    "description": "A template, pattern, or boilerplate text.",
+    "common_names": "template, pattern, boilerplate, placeholder, mask"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.THRESHOLD",
+    "label": "Threshold / Limit",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "THRESH",
+    "description": "A threshold, limit, or boundary value.",
+    "common_names": "threshold, limit, max, min, ceiling, floor, bound, cap"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.LICENSE",
+    "label": "License / Terms",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "LICENSE",
+    "description": "A license type, terms of service, or usage agreement.",
+    "common_names": "license, terms, eula, agreement, open source, copyright"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.SLA",
+    "label": "Service Level Agreement",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "SLA",
+    "description": "A service level agreement or performance guarantee.",
+    "common_names": "sla, service level, uptime guarantee, response time target"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.POLICY",
+    "label": "Policy Definition",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "POLICY",
+    "description": "A policy definition or governance rule.",
+    "common_names": "policy, governance, compliance, regulation, requirement"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.API_SPEC",
+    "label": "API Specification",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "APISPEC",
+    "description": "An API specification or interface definition.",
+    "common_names": "api spec, openapi, swagger, graphql, endpoint, interface"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.FILTER",
+    "label": "Filter / Predicate",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "FILTER",
+    "description": "A filter predicate, query condition, or selection criteria.",
+    "common_names": "filter, predicate, condition, where clause, criteria"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.MAPPING",
+    "label": "Mapping / Transform",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "MAPPING",
+    "description": "A data mapping, transformation, or conversion rule.",
+    "common_names": "mapping, transform, conversion, crosswalk, lookup"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.SCHEMA_DEF",
+    "label": "Schema Definition",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "SCHEMADEF",
+    "description": "A schema definition (DDL, JSON Schema, Avro, Protobuf).",
+    "common_names": "schema, ddl, json schema, avro, protobuf, model definition"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.CRON_SPEC",
+    "label": "Cron Specification",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "CRONSPEC",
+    "description": "A cron expression or scheduling specification.",
+    "common_names": "cron, schedule, 0 * * * *, recurrence, job schedule"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.REGEX",
+    "label": "Regular Expression",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "REGEX",
+    "description": "A regular expression pattern.",
+    "common_names": "regex, regexp, pattern, glob, wildcard, match"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.RETENTION_POLICY",
+    "label": "Retention Policy",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "RETENTION",
+    "description": "A data retention or archival policy specification.",
+    "common_names": "retention, archival, purge, expiry policy, data lifecycle"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.VALIDATION_RULE",
+    "label": "Validation Rule",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "VALRULE",
+    "description": "A data validation rule or constraint expression.",
+    "common_names": "validation, check constraint, data quality, assertion, invariant"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.DEFAULT_VALUE",
+    "label": "Default Value",
+    "parent_code": "ICE.NONSENSITIVE.PRESCRIPTIVE",
+    "taxonomy": "universal",
+    "abbrev": "DEFVAL",
+    "description": "A prescribed default value for a field.",
+    "common_names": "default, fallback, initial value, seed value"
+  },
+  {
+    "code": "ICE.SENSITIVE",
+    "label": "Sensitive Data",
+    "parent_code": "ICE",
+    "taxonomy": "universal",
+    "abbrev": "C_SENS",
+    "description": "Data requiring protection due to privacy, regulatory, or business sensitivity."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID",
+    "label": "Personally Identifiable Data",
+    "parent_code": "ICE.SENSITIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_PID",
+    "description": "Data relating to an identified or identifiable natural person."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT",
+    "label": "Contact Information",
+    "parent_code": "ICE.SENSITIVE.PID",
+    "taxonomy": "universal",
+    "abbrev": "C_CI",
+    "description": "Information used to contact a person."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.EMAIL",
+    "label": "Email Address",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT",
+    "taxonomy": "universal",
+    "abbrev": "EMAIL",
+    "description": "An electronic mail address for a person.",
+    "common_names": "email, e-mail"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "label": "Phone Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT",
+    "taxonomy": "universal",
+    "abbrev": "PHONE",
+    "description": "A telephone number for contacting a person.",
+    "common_names": "phone, tel, telephone"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS",
+    "label": "Mailing Address",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT",
+    "taxonomy": "universal",
+    "abbrev": "ADDR",
+    "description": "A physical postal address.",
+    "common_names": "address, street address, postal address"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.FAX",
+    "label": "Fax Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT",
+    "taxonomy": "universal",
+    "abbrev": "FAX",
+    "description": "A facsimile telephone number.",
+    "common_names": "fax, facsimile"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.SOCIAL_MEDIA",
+    "label": "Social Media Handle",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT",
+    "taxonomy": "universal",
+    "abbrev": "SOCIAL",
+    "description": "A social media account handle or profile URL.",
+    "common_names": "twitter, linkedin, facebook, instagram, social media, handle, username"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.MESSENGER",
+    "label": "Messaging ID",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT",
+    "taxonomy": "universal",
+    "abbrev": "MSNGR",
+    "description": "An instant messaging identifier.",
+    "common_names": "skype, whatsapp, telegram, messenger, chat id, im"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY",
+    "label": "Identity Information",
+    "parent_code": "ICE.SENSITIVE.PID",
+    "taxonomy": "universal",
+    "abbrev": "C_ID",
+    "description": "Data that identifies a specific person."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME",
+    "label": "Full Name",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "FULLNAME",
+    "description": "A person's complete legal name.",
+    "common_names": "name, person name, legal name"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.FIRST_NAME",
+    "label": "First Name",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "FNAME",
+    "description": "A person's given name.",
+    "common_names": "first name, given name, forename"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.LAST_NAME",
+    "label": "Last Name",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "LNAME",
+    "description": "A person's family name.",
+    "common_names": "last name, surname, family name"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.MIDDLE_NAME",
+    "label": "Middle Name",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "MNAME",
+    "description": "A person's middle name or initial.",
+    "common_names": "middle name, middle initial"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.MAIDEN_NAME",
+    "label": "Maiden Name",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "MAIDEN",
+    "description": "A person's birth surname before marriage.",
+    "common_names": "maiden name, birth name, nee"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.DOB",
+    "label": "Date of Birth",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "DOB",
+    "description": "The date on which a person was born.",
+    "common_names": "DOB, birthday, birth date"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.GOVID",
+    "label": "Government Identifier",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "GOVID",
+    "description": "A government-issued identifier (SSN, passport, driver's license).",
+    "common_names": "SSN, social security, tax id, passport number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.GENDER_PII",
+    "label": "Gender (PII)",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "GENDERPII",
+    "description": "A person's gender identity (PII context).",
+    "common_names": "gender, sex, m/f, male, female"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.NATIONALITY",
+    "label": "Nationality",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "NATL",
+    "description": "A person's citizenship or nationality.",
+    "common_names": "nationality, citizenship, country of origin"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.ETHNICITY",
+    "label": "Ethnicity / Race",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "ETHNIC",
+    "description": "A person's ethnicity or racial classification.",
+    "common_names": "ethnicity, race, ethnic group, ancestry"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.BIRTH_PLACE",
+    "label": "Birth Place",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "BPLACE",
+    "description": "A person's place of birth.",
+    "common_names": "birthplace, birth city, place of birth, born in"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.MARITAL_STATUS",
+    "label": "Marital Status",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "MARITAL",
+    "description": "A person's marital status.",
+    "common_names": "marital status, married, single, divorced, widowed"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.PHOTO",
+    "label": "Photograph",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "PHOTO",
+    "description": "A photograph or biometric image of a person.",
+    "common_names": "photo, image, headshot, portrait, biometric"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.SIGNATURE",
+    "label": "Signature",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "SIG",
+    "description": "A person's handwritten or digital signature.",
+    "common_names": "signature, autograph, signed, digital signature"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.VOICEPRINT",
+    "label": "Voiceprint",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY",
+    "taxonomy": "universal",
+    "abbrev": "VOICEPR",
+    "description": "A biometric voiceprint or voice recording.",
+    "common_names": "voiceprint, voice, audio, speech sample"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "label": "Financial Data",
+    "parent_code": "ICE.SENSITIVE.PID",
+    "taxonomy": "universal",
+    "abbrev": "C_FD",
+    "description": "Data relating to financial accounts or transactions."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.PAN",
+    "label": "Payment Card Number",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "PAN",
+    "description": "A credit or debit card primary account number.",
+    "common_names": "PAN, credit card, card number, CC number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.BAN",
+    "label": "Bank Account Number",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "BAN",
+    "description": "A unique identifier for a bank account.",
+    "common_names": "account number, IBAN, routing number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.TXNAMT",
+    "label": "Transaction Amount",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "TXNAMT",
+    "description": "The monetary value of a financial transaction.",
+    "common_names": "amount, payment, price"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.CVV",
+    "label": "Card Verification Value",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "CVV",
+    "description": "A card verification value or security code.",
+    "common_names": "cvv, cvc, security code, card verification"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.EXPIRY",
+    "label": "Card Expiry Date",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "CARDEXP",
+    "description": "A payment card expiration date.",
+    "common_names": "expiry, expiration, exp date, valid thru"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.TAX_ID",
+    "label": "Tax Identifier",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "TAXID",
+    "description": "A tax identification number (EIN, TIN, VAT number).",
+    "common_names": "tax id, ein, tin, vat number, tax number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.SALARY",
+    "label": "Salary / Compensation",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "SALARY",
+    "description": "A person's salary, wage, or compensation amount.",
+    "common_names": "salary, wage, compensation, pay, income"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.CREDIT_SCORE",
+    "label": "Credit Score",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "CREDSCORE",
+    "description": "A person's credit score or credit rating.",
+    "common_names": "credit score, fico, credit rating, credit history"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.INVESTMENT",
+    "label": "Investment Account",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "INVEST",
+    "description": "An investment or brokerage account identifier.",
+    "common_names": "investment, brokerage, portfolio, 401k, ira, pension"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.INSURANCE_ID",
+    "label": "Insurance ID",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "INSID",
+    "description": "An insurance policy number or member ID.",
+    "common_names": "insurance id, policy number, member id, claim number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.ROUTING_NUM",
+    "label": "Routing Number",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "ROUTNUM",
+    "description": "A bank routing or transit number.",
+    "common_names": "routing number, aba, sort code, swift, bic"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.FINANCIAL.CRYPTO_ADDR",
+    "label": "Cryptocurrency Address",
+    "parent_code": "ICE.SENSITIVE.PID.FINANCIAL",
+    "taxonomy": "universal",
+    "abbrev": "CRYPTOADDR",
+    "description": "A cryptocurrency wallet address.",
+    "common_names": "wallet address, bitcoin, ethereum, crypto address"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH",
+    "label": "Health Data",
+    "parent_code": "ICE.SENSITIVE.PID",
+    "taxonomy": "universal",
+    "abbrev": "C_HEALTH",
+    "description": "Protected health information (PHI) relating to a person's medical history."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.DIAGNOSIS",
+    "label": "Diagnosis",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "DIAG",
+    "description": "A medical diagnosis or condition classification.",
+    "common_names": "diagnosis, condition, disease, disorder, icd code"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.PRESCRIPTION",
+    "label": "Prescription",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "PRESCRIP",
+    "description": "A medication prescription or drug order.",
+    "common_names": "prescription, medication, drug, rx, dosage"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.BLOOD_TYPE",
+    "label": "Blood Type",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "BLDTYPE",
+    "description": "A person's blood type classification.",
+    "common_names": "blood type, abo, rh factor"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.ALLERGY",
+    "label": "Allergy",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "ALLERGY",
+    "description": "A documented allergy or adverse reaction.",
+    "common_names": "allergy, allergies, adverse reaction, sensitivity"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.MEDICAL_RECORD",
+    "label": "Medical Record Number",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "MRN",
+    "description": "A medical record number or health ID.",
+    "common_names": "mrn, medical record, health id, patient id"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.INSURANCE_CLAIM",
+    "label": "Insurance Claim",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "INSCLAIM",
+    "description": "A health insurance claim identifier.",
+    "common_names": "claim, insurance claim, claim number, eob"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.LAB_RESULT",
+    "label": "Lab Result",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "LABRESULT",
+    "description": "A clinical laboratory test result.",
+    "common_names": "lab result, test result, panel, blood test, urinalysis"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.VITAL_SIGN",
+    "label": "Vital Sign",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "VITAL",
+    "description": "A clinical vital sign measurement (BP, HR, temp).",
+    "common_names": "vital sign, blood pressure, heart rate, pulse, bmi, o2 sat"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.PROCEDURE",
+    "label": "Medical Procedure",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "MEDPROC",
+    "description": "A medical or surgical procedure record.",
+    "common_names": "procedure, surgery, operation, cpt code, treatment"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.HEALTH.DISABILITY",
+    "label": "Disability Status",
+    "parent_code": "ICE.SENSITIVE.PID.HEALTH",
+    "taxonomy": "universal",
+    "abbrev": "DISABIL",
+    "description": "A disability classification or accommodation status.",
+    "common_names": "disability, handicap, ada, accommodation, impairment"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL",
+    "label": "Technical Data",
+    "parent_code": "ICE.SENSITIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_TD",
+    "description": "Data relating to technical systems and infrastructure."
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.IPADDR",
+    "label": "IP Address",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "IPADDR",
+    "description": "An Internet Protocol address identifying a device on a network.",
+    "common_names": "IP, IPv4, IPv6, network address"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.DEVID",
+    "label": "Device Identifier",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "DEVID",
+    "description": "A unique identifier for a computing device.",
+    "common_names": "UUID, MAC address, device ID, serial number"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.URL_PII",
+    "label": "URL (PII context)",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "URLPII",
+    "description": "A URL that may expose personal activity or identity.",
+    "common_names": "web address, link, URI, endpoint"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.HOSTNAME",
+    "label": "Hostname",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "HOSTNAME",
+    "description": "A DNS hostname or server name.",
+    "common_names": "hostname, server, fqdn, domain name"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.API_KEY",
+    "label": "API Key / Token",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "APIKEY",
+    "description": "An API key, access token, or secret.",
+    "common_names": "api key, token, secret, bearer, access key"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.PASSWORD_HASH",
+    "label": "Password Hash",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "PASSHASH",
+    "description": "A hashed password or credential digest.",
+    "common_names": "password, hash, bcrypt, sha256, digest, credential"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.SESSION_TOKEN",
+    "label": "Session Token",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "SESSTOKEN",
+    "description": "A session identifier or authentication token.",
+    "common_names": "session, session id, jwt, cookie, auth token"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.COOKIE",
+    "label": "Browser Cookie",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "COOKIE",
+    "description": "A browser cookie value containing tracking or session data.",
+    "common_names": "cookie, tracking, browser cookie"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.SSH_KEY",
+    "label": "SSH Key",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "SSHKEY",
+    "description": "An SSH public or private key.",
+    "common_names": "ssh key, public key, private key, authorized key"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.CERTIFICATE",
+    "label": "Digital Certificate",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "CERT",
+    "description": "An X.509 certificate or TLS/SSL certificate.",
+    "common_names": "certificate, cert, x509, ssl, tls, pem"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.DATABASE_CONN",
+    "label": "Database Connection String",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "DBCONN",
+    "description": "A database connection string containing credentials.",
+    "common_names": "connection string, dsn, jdbc, odbc, database url"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS",
+    "label": "Business-Sensitive Data",
+    "parent_code": "ICE.SENSITIVE",
+    "taxonomy": "universal",
+    "abbrev": "C_BIZ",
+    "description": "Data sensitive due to commercial, competitive, or contractual concerns."
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.TRADE_SECRET",
+    "label": "Trade Secret",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "TRADESEC",
+    "description": "Proprietary business information constituting a trade secret.",
+    "common_names": "trade secret, proprietary, confidential formula, secret recipe"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.CONTRACT_VALUE",
+    "label": "Contract Value",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "CONTRVAL",
+    "description": "A contract monetary value or deal size.",
+    "common_names": "contract value, deal size, agreement amount, bid"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.CUSTOMER_LIST",
+    "label": "Customer List",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "CUSTLIST",
+    "description": "A customer, client, or prospect list.",
+    "common_names": "customer list, client list, prospect, lead list"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.PRICING_STRATEGY",
+    "label": "Pricing Strategy",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "PRICESTRAT",
+    "description": "Internal pricing strategy or margin data.",
+    "common_names": "pricing, margin, markup, discount strategy, cost structure"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.MARKET_INTEL",
+    "label": "Market Intelligence",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "MKTINTEL",
+    "description": "Competitive or market intelligence data.",
+    "common_names": "market intel, competitive analysis, market research, competitor"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.INTERNAL_MEMO",
+    "label": "Internal Communication",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "INTMEMO",
+    "description": "Internal memos, emails, or communications marked confidential.",
+    "common_names": "internal memo, confidential, restricted, internal only"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.LEGAL_HOLD",
+    "label": "Legal Hold Document",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "LEGHOLD",
+    "description": "Documents under legal hold or litigation preservation.",
+    "common_names": "legal hold, litigation, preservation, privileged, attorney-client"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.AUDIT_FINDING",
+    "label": "Audit Finding",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "AUDITFIND",
+    "description": "Internal or external audit findings and observations.",
+    "common_names": "audit finding, observation, non-conformance, gap, remediation"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.FINANCIAL_FORECAST",
+    "label": "Financial Forecast",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "FINFORECAST",
+    "description": "Internal financial forecast or projection data.",
+    "common_names": "forecast, projection, estimate, guidance, outlook"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.STRATEGIC_PLAN",
+    "label": "Strategic Plan",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "STRATPLAN",
+    "description": "Strategic planning or roadmap data.",
+    "common_names": "strategy, roadmap, initiative, objective, okr, kpi target"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.EMPLOYEE_RECORD",
+    "label": "Employee Record",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "EMPREC",
+    "description": "An employee record containing sensitive HR data.",
+    "common_names": "employee record, personnel, hr record, staff record"
+  },
+  {
+    "code": "ICE.SENSITIVE.BUSINESS.PERFORMANCE_REVIEW",
+    "label": "Performance Review",
+    "parent_code": "ICE.SENSITIVE.BUSINESS",
+    "taxonomy": "universal",
+    "abbrev": "PERFREV",
+    "description": "An employee performance review or evaluation.",
+    "common_names": "performance review, evaluation, appraisal, feedback, rating"
+  },
+  {
+    "code": "ICE.METADATA",
+    "label": "Metadata",
+    "parent_code": "ICE",
+    "taxonomy": "universal",
+    "abbrev": "C_META",
+    "description": "Data about data — timestamps, identifiers, and structural information."
+  },
+  {
+    "code": "ICE.METADATA.TIMESTAMP",
+    "label": "Timestamp",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "TSTAMP",
+    "description": "A date and/or time value recording when an event occurred.",
+    "common_names": "date, datetime, created_at, updated_at"
+  },
+  {
+    "code": "ICE.METADATA.RECID",
+    "label": "Record Identifier",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "RECID",
+    "description": "A unique key identifying a database record.",
+    "common_names": "ID, primary key, row ID, record ID"
+  },
+  {
+    "code": "ICE.METADATA.STATUS",
+    "label": "Status Code",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "STATUS",
+    "description": "A categorical value indicating the state of a record.",
+    "common_names": "status, state, flag, code"
+  },
+  {
+    "code": "ICE.METADATA.CREATED_BY",
+    "label": "Created By",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "CREATEDBY",
+    "description": "The user or system that created a record.",
+    "common_names": "created by, author, creator, inserted by"
+  },
+  {
+    "code": "ICE.METADATA.MODIFIED_BY",
+    "label": "Modified By",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "MODIFIEDBY",
+    "description": "The user or system that last modified a record.",
+    "common_names": "modified by, updated by, editor, changed by"
+  },
+  {
+    "code": "ICE.METADATA.CREATED_AT",
+    "label": "Created At",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "CREATEDAT",
+    "description": "The timestamp when a record was created.",
+    "common_names": "created at, creation date, insert time, registered"
+  },
+  {
+    "code": "ICE.METADATA.MODIFIED_AT",
+    "label": "Modified At",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "MODIFIEDAT",
+    "description": "The timestamp when a record was last modified.",
+    "common_names": "modified at, updated at, last modified, changed at"
+  },
+  {
+    "code": "ICE.METADATA.DELETED_AT",
+    "label": "Deleted At",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "DELETEDAT",
+    "description": "The timestamp when a record was soft-deleted.",
+    "common_names": "deleted at, removed at, archived at, expired at"
+  },
+  {
+    "code": "ICE.METADATA.VERSION",
+    "label": "Version Number",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "VERSIONNO",
+    "description": "A version or revision number for a record.",
+    "common_names": "version, revision, generation, iteration"
+  },
+  {
+    "code": "ICE.METADATA.SCHEMA",
+    "label": "Schema / Table Name",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "SCHEMANAME",
+    "description": "A database schema, table, or collection name.",
+    "common_names": "schema, table, collection, entity, model"
+  },
+  {
+    "code": "ICE.METADATA.COLUMN_NAME",
+    "label": "Column / Field Name",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "COLNAME",
+    "description": "A column, field, or attribute name.",
+    "common_names": "column, field, attribute, property, key"
+  },
+  {
+    "code": "ICE.METADATA.DATA_TYPE",
+    "label": "Data Type",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "DATATYPE",
+    "description": "A data type designation for a column or field.",
+    "common_names": "data type, type, dtype, varchar, integer, boolean"
+  },
+  {
+    "code": "ICE.METADATA.ENCODING",
+    "label": "Encoding",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "ENCODING",
+    "description": "A character or data encoding specification.",
+    "common_names": "encoding, charset, utf-8, ascii, latin-1"
+  },
+  {
+    "code": "ICE.METADATA.ROW_COUNT",
+    "label": "Row Count",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "ROWCNT",
+    "description": "The number of rows in a table or result set.",
+    "common_names": "row count, record count, cardinality, total rows"
+  },
+  {
+    "code": "ICE.METADATA.CHECKSUM",
+    "label": "Checksum / Hash",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "CHECKSUM",
+    "description": "A data integrity checksum or hash value.",
+    "common_names": "checksum, hash, md5, sha256, digest, crc"
+  },
+  {
+    "code": "ICE.METADATA.PARTITION",
+    "label": "Partition Key",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "PARTKEY",
+    "description": "A partitioning key for distributed data storage.",
+    "common_names": "partition, shard, bucket, partition key"
+  },
+  {
+    "code": "ICE.METADATA.TTL",
+    "label": "Time to Live",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "TTL",
+    "description": "A time-to-live or expiration setting for cached data.",
+    "common_names": "ttl, expiry, cache duration, retention"
+  },
+  {
+    "code": "ICE.METADATA.ETL_BATCH",
+    "label": "ETL Batch ID",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "ETLBATCH",
+    "description": "An ETL batch or pipeline execution identifier.",
+    "common_names": "batch id, etl id, pipeline run, job id, load id"
+  },
+  {
+    "code": "ICE.METADATA.LINEAGE",
+    "label": "Data Lineage",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "LINEAGE",
+    "description": "Data lineage or provenance tracking information.",
+    "common_names": "lineage, provenance, origin, data flow, upstream, downstream"
+  },
+  {
+    "code": "ICE.METADATA.NULLABLE",
+    "label": "Nullable Flag",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "NULLABLE",
+    "description": "Indicates whether a field allows null values.",
+    "common_names": "nullable, not null, required, optional, mandatory"
+  },
+  {
+    "code": "ICE.METADATA.SOURCE_SYSTEM",
+    "label": "Source System",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "SRCSYS",
+    "description": "The system or application that originated the data.",
+    "common_names": "source system, origin, feed, integration, upstream"
+  },
+  {
+    "code": "ICE.METADATA.LOAD_TIMESTAMP",
+    "label": "Load Timestamp",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "LOADTS",
+    "description": "The timestamp when data was loaded into the current system.",
+    "common_names": "load time, ingestion time, arrival time, landed at"
+  },
+  {
+    "code": "ICE.METADATA.RECORD_TYPE",
+    "label": "Record Type Discriminator",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "RECTYPE",
+    "description": "A discriminator column indicating record type in a polymorphic table.",
+    "common_names": "record type, dtype, discriminator, entity type"
+  },
+  {
+    "code": "ICE.METADATA.IS_DELETED",
+    "label": "Soft Delete Flag",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "ISDEL",
+    "description": "A flag indicating soft deletion of a record.",
+    "common_names": "is_deleted, deleted, soft delete, tombstone, removed"
+  },
+  {
+    "code": "ICE.METADATA.TENANT_ID",
+    "label": "Tenant Identifier",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "TENANTID",
+    "description": "A multi-tenant partition identifier.",
+    "common_names": "tenant, tenant id, org id, workspace, account"
+  }
+]

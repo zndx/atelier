@@ -23,7 +23,7 @@
 ##   It does NOT import Schema.org or DBpedia ontologies directly;
 ##   instead it declares the mapped terms with their canonical IRIs.
 ##
-## Version: 0.1.0 (prototype — 35 external types + 24 Atelier terms)
+## Version: 0.2.0 (expanded — 35 external types + 325 Atelier terms)
 ## License: Apache-2.0
 ## -----------------------------------------------------------------
 
@@ -649,12 +649,15 @@ BFO Quality."""@en .
 
 
 ## =================================================================
-## PART 4: Atelier PII Vocabulary — CCO Grounding
+## PART 4: Atelier Vocabulary — CCO Grounding
 ## =================================================================
 ##
-## Maps Atelier's 24-node universal vocabulary (16 leaves, 8 internal)
+## Maps Atelier's expanded vocabulary (325 categories, 300 leaves)
 ## to CCO classes. All nodes descend from cco:InformationContentEntity.
 ## Codes use hierarchical dot notation: ICE.SENSITIVE.PID.CONTACT.EMAIL
+##
+## Only internal nodes that introduce a new CCO grounding are declared
+## here. Leaf categories inherit grounding from their parents.
 ##
 ## This grounding is conservative: it adds BFO/CCO superclass axioms
 ## without altering the existing vocabulary structure or semantics.
@@ -683,6 +686,41 @@ atelier:ICE.NONSENSITIVE
     rdfs:comment """ICE not requiring elevated protection. Sensitivity is a
 data-governance concern orthogonal to BFO/CCO's ontological distinctions.
 No CCO equivalent exists; this is an Atelier domain class."""@en .
+
+## ICE.NONSENSITIVE.DESIGNATIVE ⊑ cco:DesignativeICE
+## Names, identifiers, codes, and references.
+atelier:ICE.NONSENSITIVE.DESIGNATIVE
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.NONSENSITIVE ;
+    rdfs:subClassOf cco:ont00000686 ;  # cco:DesignativeICE
+    rdfs:label "Designative Content"@en ;
+    rdfs:comment """Non-sensitive ICE that designates — names, identifiers,
+codes, and references. Maps to cco:DesignativeICE. Children include
+NAME.*, CODE.*, GEO.*, REF.*, TITLE, LABEL, BOOLEAN subtrees."""@en .
+
+## ICE.NONSENSITIVE.DESCRIPTIVE ⊑ cco:DescriptiveICE
+## Text, measurements, categories, temporal values.
+atelier:ICE.NONSENSITIVE.DESCRIPTIVE
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.NONSENSITIVE ;
+    rdfs:subClassOf cco:ont00000853 ;  # cco:DescriptiveICE
+    rdfs:label "Descriptive Content"@en ;
+    rdfs:comment """Non-sensitive ICE that describes — free text, measurements,
+categorical values, temporal data, statistics. Maps to cco:DescriptiveICE.
+Children include TEXT.*, CATEGORICAL.*, MEASUREMENT.*, TEMPORAL.*,
+NUMERIC.*, EMBEDDING.*, STATISTICAL.* subtrees."""@en .
+
+## ICE.NONSENSITIVE.PRESCRIPTIVE ⊑ cco:PrescriptiveICE
+## Specifications, formulas, rules, and plans.
+atelier:ICE.NONSENSITIVE.PRESCRIPTIVE
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.NONSENSITIVE ;
+    rdfs:subClassOf cco:ont00000965 ;  # cco:PrescriptiveICE
+    rdfs:label "Prescriptive Content"@en ;
+    rdfs:comment """Non-sensitive ICE that prescribes — specifications, formulas,
+rules, configurations, templates. Maps to cco:PrescriptiveICE. Children
+include FORMAT_SPEC, FORMULA, RULE, CONFIG, PERMISSION, SCHEDULE,
+COMMAND, TEMPLATE, THRESHOLD, LICENSE, SLA, etc."""@en .
 
 ## ICE.SENSITIVE ⊑ ICE (no specific CCO counterpart)
 atelier:ICE.SENSITIVE
@@ -758,6 +796,24 @@ atelier:ICE.SENSITIVE.TECHNICAL
     rdfs:comment """ICE designating technical resources (IP addresses, device
 IDs, URLs). Grounded as DesignativeICE because technical identifiers
 designate infrastructure entities."""@en .
+
+## ICE.SENSITIVE.PID.HEALTH ⊑ ICE.SENSITIVE.PID
+atelier:ICE.SENSITIVE.PID.HEALTH
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE.PID ;
+    rdfs:label "Health Data"@en ;
+    rdfs:comment """Protected health information (PHI) relating to a person's
+medical history. Contains both designative (medical record numbers) and
+descriptive (diagnoses, lab results) children."""@en .
+
+## ICE.SENSITIVE.BUSINESS ⊑ ICE.SENSITIVE
+atelier:ICE.SENSITIVE.BUSINESS
+    rdf:type owl:Class ;
+    rdfs:subClassOf atelier:ICE.SENSITIVE ;
+    rdfs:label "Business-Sensitive Data"@en ;
+    rdfs:comment """Data sensitive due to commercial, competitive, or contractual
+concerns. Trade secrets, contract values, customer lists, and internal
+communications."""@en .
 
 ## -----------------------------------------------------------------
 ## 4.3 Leaf categories — Contact (DesignativeICE)

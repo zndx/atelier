@@ -31,8 +31,8 @@ philosophical justification (`rdfs:comment`).
 |--------|---------|------------|-------|
 | Schema.org | 11 | 9 | 20 |
 | DBpedia | 15 | — | 15 |
-| Atelier PII | 16 leaves + 8 internal | — | 24 |
-| **Total** | | | **59** |
+| Atelier vocabulary | 300 leaves + 25 internal | — | 325 |
+| **Total (unique)** | | | **360** |
 
 ## CCO Modules Imported
 

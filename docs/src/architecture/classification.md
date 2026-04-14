@@ -118,6 +118,8 @@ src/atelier/classify/
 ├── fixtures/
 │   ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
 │   └── fixture_tables.json        # 8 tables, 50 columns with ground truth
+data/sample/
+└── ontology.json                  # Expanded vocabulary (300 leaves, 25 internal)
 └── ontology/
     ├── atelier-vocab.ttl          # CCO-mediated BFO alignment (59 mapped terms)
     ├── sparql/unmapped-terms.rq   # Totality validation query
