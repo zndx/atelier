@@ -139,6 +139,37 @@ class HierarchicalCategorySet(CategorySet):
             current = self.parent.get(current)
         return result
 
+    def atlas_type_graph(self) -> list[dict]:
+        """Export as Apache Atlas Classification type definitions.
+
+        Internal nodes map to superTypes chains; leaves become applied
+        classification types. Each type carries the full mnemonic code
+        path, human label, and SKOS notation as attributes.
+
+        Returns:
+            List of Atlas-compatible type definition dicts.
+        """
+        types: list[dict] = []
+        for cat in self.all_categories:
+            parent = self.all_by_code.get(cat.parent_code or "")
+            super_types = [parent.atlas_type_name] if parent else []
+            is_leaf = cat.code in self.leaf_codes
+
+            type_def = {
+                "name": cat.atlas_type_name,
+                "description": cat.description or cat.label,
+                "superTypes": super_types,
+                "attributeDefs": [
+                    {"name": "ice_code", "typeName": "string",
+                     "isOptional": False, "defaultValue": cat.code},
+                    {"name": "notation", "typeName": "string",
+                     "isOptional": True, "defaultValue": cat.notation},
+                ],
+                "entityTypes": ["DataSet", "Column"] if is_leaf else [],
+            }
+            types.append(type_def)
+        return types
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

@@ -114,6 +114,10 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # SAGE feature importance
     "classify.sage.enabled": ("classify_sage_enabled", bool),
     "classify.sage.permutations": ("classify_sage_permutations", int),
+    # Agent-driven convergence
+    "classify.agent.enabled": ("classify_agent_enabled", bool),
+    "classify.agent.max_turns": ("classify_agent_max_turns", int),
+    "classify.agent.model": ("classify_agent_model", str),
 }
 
 # Reverse: field_name → ENV var name
@@ -265,6 +269,11 @@ class AtelierConfig:
     # SAGE feature importance
     classify_sage_enabled: bool = False
     classify_sage_permutations: int = 512
+
+    # Agent-driven convergence
+    classify_agent_enabled: bool = False
+    classify_agent_max_turns: int = 10
+    classify_agent_model: str | None = None  # falls back to agent_model
 
     @property
     def has_classify_llm(self) -> bool:

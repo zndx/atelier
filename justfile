@@ -119,8 +119,12 @@ bdd *ARGS:
 bdd-slow *ARGS:
     ATELIER_BDD_TIER=0 uv run behave features/ --tags="@tier-0" {{ARGS}}
 
-# Run BDD with full stack (tier-0 + tier-1, requires devenv services)
-bdd-full *ARGS:
+# Run BDD with full stack (tier-0 + tier-1, excludes @slow — auto-starts devenv if needed)
+behave *ARGS:
+    ATELIER_BDD_TIER=1 uv run behave features/ --tags="~@slow" {{ARGS}}
+
+# Run BDD with full stack including @slow scenarios (pipeline convergence, ML training)
+behave-slow *ARGS:
     ATELIER_BDD_TIER=1 uv run behave features/ {{ARGS}}
 
 # Run only deployment runtime profile

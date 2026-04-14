@@ -1,4 +1,4 @@
-@tier-1
+@tier-1 @slow
 Feature: SAGE feature importance analysis
   As a data scientist, I need to understand which features
   drive classification decisions.

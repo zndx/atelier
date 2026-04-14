@@ -5,8 +5,9 @@ category in the controlled vocabulary. Each category gets both semantic
 column names (human-readable variants) and opaque names (coded/random)
 to force classifiers to learn from VALUE PATTERNS, not just names.
 
-Ported from signals/scripts/generate_meta_tagging_train.py, scoped to
-the 24-category mock taxonomy.
+Value generators are sourced from synth_generators.py (shared with
+generate_sample_source.py). The GeneratorRegistry from synth_registry.py
+provides extensible coverage tracking and vocabulary-driven generation.
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ import string
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from atelier.classify.synth_generators import GENERATORS
 
 logger = logging.getLogger(__name__)
 
@@ -147,191 +150,6 @@ def _generate_opaque_names(rng: random.Random, count: int = 15) -> list[str]:
     return names
 
 
-# ── Value generators ────────────────────────────────────────────
-
-_FIRST_NAMES = [
-    "James", "John", "Robert", "Michael", "William", "David", "Richard",
-    "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Susan", "Jessica",
-    "Sarah", "Emily", "Amy", "Anna", "Emma", "Sophia", "Olivia",
-]
-_LAST_NAMES = [
-    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
-    "Davis", "Rodriguez", "Martinez", "Anderson", "Taylor", "Thomas",
-    "Jackson", "White", "Harris", "Martin", "Thompson", "Moore", "Lee",
-]
-_CITIES = [
-    "New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Seattle",
-    "Denver", "Boston", "Austin", "Portland", "Miami", "Dallas", "Atlanta",
-]
-_STATES = ["CA", "TX", "NY", "FL", "WA", "IL", "CO", "MA", "GA", "PA"]
-_STREETS = [
-    "Main St", "Oak Ave", "Maple Dr", "Cedar Ln", "Pine Rd",
-    "Elm St", "Birch Way", "Park Blvd", "Lake Dr", "Hill Rd",
-]
-_DOMAINS = ["gmail.com", "outlook.com", "yahoo.com", "company.com", "protonmail.com"]
-_STATUSES = ["active", "inactive", "pending", "completed", "failed", "cancelled", "approved", "rejected"]
-
-
-def _gen_email(rng: random.Random) -> str:
-    first = rng.choice(_FIRST_NAMES).lower()
-    last = rng.choice(_LAST_NAMES).lower()
-    sep = rng.choice([".", "_", ""])
-    domain = rng.choice(_DOMAINS)
-    suffix = "" if rng.random() > 0.3 else str(rng.randint(1, 99))
-    return f"{first}{sep}{last}{suffix}@{domain}"
-
-
-def _gen_phone(rng: random.Random) -> str:
-    area = rng.randint(200, 999)
-    mid = rng.randint(200, 999)
-    last = rng.randint(1000, 9999)
-    fmt = rng.choice(["({}) {}-{}", "{}-{}-{}", "{}.{}.{}", "+1{}{}{}", "{} {} {}"])
-    return fmt.format(area, mid, last)
-
-
-def _gen_address(rng: random.Random) -> str:
-    num = rng.randint(100, 9999)
-    street = rng.choice(_STREETS)
-    city = rng.choice(_CITIES)
-    state = rng.choice(_STATES)
-    zipcode = rng.randint(10000, 99999)
-    return f"{num} {street}, {city}, {state} {zipcode}"
-
-
-def _gen_full_name(rng: random.Random) -> str:
-    first = rng.choice(_FIRST_NAMES)
-    last = rng.choice(_LAST_NAMES)
-    if rng.random() < 0.2:
-        middle = rng.choice(string.ascii_uppercase)
-        return f"{first} {middle}. {last}"
-    return f"{first} {last}"
-
-
-def _gen_dob(rng: random.Random) -> str:
-    year = rng.randint(1940, 2010)
-    month = rng.randint(1, 12)
-    day = rng.randint(1, 28)
-    fmt = rng.choice(["{:04d}-{:02d}-{:02d}", "{:02d}/{:02d}/{:04d}", "{:02d}-{:02d}-{:04d}"])
-    if "{:04d}" == fmt[:5]:
-        return fmt.format(year, month, day)
-    return fmt.format(month, day, year)
-
-
-def _gen_ssn(rng: random.Random) -> str:
-    a = rng.randint(100, 899)
-    b = rng.randint(10, 99)
-    c = rng.randint(1000, 9999)
-    if rng.random() < 0.3:
-        return f"XXX-XX-{c}"
-    return f"{a}-{b}-{c}"
-
-
-def _gen_credit_card(rng: random.Random) -> str:
-    prefix = rng.choice(["4", "5", "37", "6011"])
-    remaining = 16 - len(prefix)
-    digits = prefix + "".join(str(rng.randint(0, 9)) for _ in range(remaining))
-    if rng.random() < 0.3:
-        return f"XXXX-XXXX-XXXX-{digits[-4:]}"
-    return f"{digits[:4]}-{digits[4:8]}-{digits[8:12]}-{digits[12:]}"
-
-
-def _gen_bank_account(rng: random.Random) -> str:
-    length = rng.choice([8, 10, 12])
-    return "".join(str(rng.randint(0, 9)) for _ in range(length))
-
-
-def _gen_amount(rng: random.Random) -> str:
-    val = round(rng.uniform(0.50, 99999.99), 2)
-    if rng.random() < 0.5:
-        return f"${val:,.2f}"
-    return f"{val:.2f}"
-
-
-def _gen_ipv4(rng: random.Random) -> str:
-    return ".".join(str(rng.randint(1, 254)) for _ in range(4))
-
-
-def _gen_uuid(rng: random.Random) -> str:
-    hexchars = "0123456789abcdef"
-    parts = [
-        "".join(rng.choices(hexchars, k=8)),
-        "".join(rng.choices(hexchars, k=4)),
-        "4" + "".join(rng.choices(hexchars, k=3)),
-        rng.choice("89ab") + "".join(rng.choices(hexchars, k=3)),
-        "".join(rng.choices(hexchars, k=12)),
-    ]
-    return "-".join(parts)
-
-
-def _gen_url(rng: random.Random) -> str:
-    domain = rng.choice(["example.com", "acme.org", "data.io", "api.service.com"])
-    path = "/".join(rng.choices(["users", "api", "v2", "data", "docs", "status"], k=rng.randint(1, 3)))
-    return f"https://{domain}/{path}"
-
-
-def _gen_timestamp(rng: random.Random) -> str:
-    year = rng.randint(2018, 2026)
-    month = rng.randint(1, 12)
-    day = rng.randint(1, 28)
-    hour = rng.randint(0, 23)
-    minute = rng.randint(0, 59)
-    second = rng.randint(0, 59)
-    if rng.random() < 0.5:
-        return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}Z"
-    return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
-
-
-def _gen_record_id(rng: random.Random) -> str:
-    if rng.random() < 0.6:
-        return str(rng.randint(1, 9999999))
-    prefix = rng.choice(["REC", "ID", "TXN", "ORD", "USR"])
-    return f"{prefix}-{rng.randint(100000, 999999)}"
-
-
-def _gen_status(rng: random.Random) -> str:
-    return rng.choice(_STATUSES)
-
-
-def _gen_generic_string(rng: random.Random) -> str:
-    """Not sensitive — generic filler data."""
-    templates = [
-        lambda: "".join(rng.choices(string.ascii_letters, k=rng.randint(5, 20))),
-        lambda: f"item_{rng.randint(1, 10000)}",
-        lambda: rng.choice(["red", "blue", "green", "yellow", "black", "white"]),
-        lambda: f"category_{rng.choice(string.ascii_uppercase)}",
-        lambda: str(rng.randint(1, 100)),
-    ]
-    return rng.choice(templates)()
-
-
-def _gen_internal_code(rng: random.Random) -> str:
-    """Internal non-sensitive — department/system codes."""
-    prefixes = ["DEPT", "DIV", "SYS", "MOD", "GRP", "UNIT"]
-    return f"{rng.choice(prefixes)}-{rng.randint(100, 999)}"
-
-
-# ── Generator registry ──────────────────────────────────────────
-
-_GENERATORS: dict[str, Callable[[random.Random], str]] = {
-    "ICE.NONSENSITIVE": _gen_internal_code,
-    "ICE.SENSITIVE.PID.CONTACT.EMAIL": _gen_email,
-    "ICE.SENSITIVE.PID.CONTACT.PHONE": _gen_phone,
-    "ICE.SENSITIVE.PID.CONTACT.ADDRESS": _gen_address,
-    "ICE.SENSITIVE.PID.IDENTITY.FULLNAME": _gen_full_name,
-    "ICE.SENSITIVE.PID.IDENTITY.DOB": _gen_dob,
-    "ICE.SENSITIVE.PID.IDENTITY.GOVID": _gen_ssn,
-    "ICE.SENSITIVE.PID.FINANCIAL.PAN": _gen_credit_card,
-    "ICE.SENSITIVE.PID.FINANCIAL.BAN": _gen_bank_account,
-    "ICE.SENSITIVE.PID.FINANCIAL.TXNAMT": _gen_amount,
-    "ICE.SENSITIVE.TECHNICAL.IPADDR": _gen_ipv4,
-    "ICE.SENSITIVE.TECHNICAL.DEVID": _gen_uuid,
-    "ICE.SENSITIVE.TECHNICAL.URL": _gen_url,
-    "ICE.METADATA.TIMESTAMP": _gen_timestamp,
-    "ICE.METADATA.RECID": _gen_record_id,
-    "ICE.METADATA.STATUS": _gen_status,
-}
-
-
 # ── Template-based fallback generator ──────────────────────────
 
 
@@ -376,6 +194,7 @@ def generate_synth_tables(
     output_dir: str | Path,
     *,
     value_templates: dict[str, list[str]] | None = None,
+    registry=None,
     tables_per_category: int = 2,
     columns_per_table: int = 50,
     rows_per_table: int = 100,
@@ -391,8 +210,8 @@ def generate_synth_tables(
         category_set: HierarchicalCategorySet with leaf categories.
         output_dir: Directory to write CSV + ground_truth.json.
         value_templates: Optional {code: [values...]} for template-based generators.
-            When provided, categories without hand-coded generators use template
-            sampling with mild perturbation.
+        registry: Optional GeneratorRegistry. When provided, uses registry's
+            generators instead of the default GENERATORS dict.
         tables_per_category: Ignored (kept for API compat). Use variants_per_category.
         columns_per_table: Max columns per CSV file.
         rows_per_table: Rows per column.
@@ -407,19 +226,29 @@ def generate_synth_tables(
 
     rng = random.Random(seed)
 
-    # Build merged generator registry: hand-coded + template fallbacks
-    generators = dict(_GENERATORS)
-    template_count = 0
-    if value_templates:
-        for code, values in value_templates.items():
-            if code not in generators and len(values) >= 3:
-                generators[code] = _make_template_generator(values)
-                template_count += 1
-        if template_count:
-            logger.info(
-                "Added %d template generators (%d hand-coded + %d template = %d total)",
-                template_count, len(_GENERATORS), template_count, len(generators),
-            )
+    # Build merged generator lookup: registry > hand-coded > template fallbacks
+    generators: dict[str, Callable[[random.Random], str]] = {}
+
+    if registry is not None:
+        # Use registry generators
+        for cat in category_set.categories:
+            spec = registry.get(cat.code)
+            if spec:
+                generators[cat.code] = spec.generator
+    else:
+        # Fall back to GENERATORS dict + template fallbacks
+        generators = dict(GENERATORS)
+        template_count = 0
+        if value_templates:
+            for code, values in value_templates.items():
+                if code not in generators and len(values) >= 3:
+                    generators[code] = _make_template_generator(values)
+                    template_count += 1
+            if template_count:
+                logger.info(
+                    "Added %d template generators (%d hand-coded + %d template = %d total)",
+                    template_count, len(GENERATORS), template_count, len(generators),
+                )
 
     # Collect leaf categories that have generators
     leaf_specs: list[dict] = []
@@ -505,3 +334,41 @@ def generate_synth_tables(
     )
 
     return results
+
+
+def generate_for_vocabulary(
+    category_set,
+    output_dir: str | Path,
+    *,
+    value_templates: dict[str, list[str]] | None = None,
+    seed: int = 42,
+    rows_per_table: int = 100,
+    columns_per_table: int = 50,
+    variants_per_category: int = 30,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Generate synthetic data for any vocabulary using the full registry.
+
+    Convenience function that builds a GeneratorRegistry, generates data,
+    and returns both the table metadata and a coverage report.
+
+    Returns:
+        (table_metadata, coverage_report) where coverage_report maps
+        each leaf code to its generator source ("hand-coded", "template",
+        "inferred", or "missing").
+    """
+    from atelier.classify.synth_registry import GeneratorRegistry
+
+    registry = GeneratorRegistry.from_vocabulary(category_set, value_templates)
+    coverage = registry.coverage_report(category_set)
+
+    results = generate_synth_tables(
+        category_set,
+        output_dir,
+        registry=registry,
+        seed=seed,
+        rows_per_table=rows_per_table,
+        columns_per_table=columns_per_table,
+        variants_per_category=variants_per_category,
+    )
+
+    return results, coverage

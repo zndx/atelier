@@ -1,101 +1,101 @@
-ajlfjr69,diagnosis,dim_555,insurance_id,bplace,drug,dim_iv,photograph,insurance_claim,fax,allergy,bloodType,gender,p_disab,periodInterval,ethnicityRace,vitalSign
-Colonoscopy,Asthma,Cholesterol: 290.1 g/dL,INS-881853,Boston,Metformin 500mg,MRN-115920,photo_4a4fc490.jpg,CLM-561834,+1-384-464-5524,Latex,O-,Male,Visual,FY 2025,Black,BP 169/101 HR 61
-X-Ray Chest,Hypertension,Glucose: 96.1 K/uL,INS-561697,Tokyo,Albuterol 90mcg,MRN-143993,photo_83fff0dd.jpg,CLM-268100,+1-577-245-5765,Peanuts,A+,Male,Cognitive,FY 2025,Hispanic,BP 155/105 HR 120
-Colonoscopy,Anxiety,Hemoglobin: 285.0 g/dL,INS-971080,Tokyo,Lisinopril 10mg,MRN-788976,photo_b6f11e38.jpg,CLM-529838,+1-570-281-6766,Pollen,A-,Female,Mobility,Jan-Mar,Black,BP 147/110 HR 108
-X-Ray Chest,Arthritis,Cholesterol: 281.4 mg/dL,INS-914165,San Francisco,Omeprazole 20mg,MRN-798249,photo_244516f9.jpg,CLM-964776,+1-544-805-2765,None,A+,Male,Hearing,2020-2025,White,BP 170/88 HR 110
-MRI Brain,Depression,WBC: 225.0 K/uL,INS-292362,Tokyo,Omeprazole 20mg,MRN-187859,photo_209a752b.jpg,CLM-610274,+1-649-429-3774,Latex,AB+,Unisex,None,FY 2025,Other,BP 125/69 HR 67
-X-Ray Chest,Arthritis,Cholesterol: 56.8 mg/dL,INS-666052,Berlin,Metformin 500mg,MRN-106988,photo_7d54f672.jpg,CLM-430102,+1-239-643-2645,None,AB-,Male,Cognitive,Q1 2024,Other,BP 170/60 HR 86
-X-Ray Chest,Arthritis,WBC: 268.0 mg/dL,INS-806056,Denver,Albuterol 90mcg,MRN-592951,photo_2db43efd.jpg,CLM-329565,+1-315-973-5706,Shellfish,O-,Female,Visual,2020-2025,Asian,BP 112/89 HR 95
-Physical Exam,Hypertension,Hemoglobin: 224.2 K/uL,INS-234278,London,Ibuprofen 200mg,MRN-730255,photo_6348ec0c.jpg,CLM-194636,+1-999-921-6460,Latex,A-,Unisex,None,Jan-Mar,Black,BP 136/94 HR 80
-X-Ray Chest,Depression,WBC: 264.9 mg/dL,INS-404283,Seattle,Albuterol 90mcg,MRN-447605,photo_6830dc88.jpg,CLM-716767,+1-600-398-6114,Latex,O+,Unisex,None,H2 2023,Hispanic,BP 148/72 HR 67
-MRI Brain,Anxiety,WBC: 144.1 g/dL,INS-197582,Boston,Ibuprofen 200mg,MRN-688247,photo_44b86fbf.jpg,CLM-343720,+1-260-985-9084,Latex,O+,Female,Hearing,FY 2025,Asian,BP 131/104 HR 107
-Blood Draw,Asthma,Cholesterol: 238.8 g/dL,INS-672091,London,Albuterol 90mcg,MRN-783680,photo_3778bbe6.jpg,CLM-489684,+1-777-865-3718,Peanuts,AB+,Unisex,Visual,Jan-Mar,Other,BP 137/93 HR 87
-ECG,Migraine,Cholesterol: 284.1 K/uL,INS-855111,Phoenix,Metformin 500mg,MRN-649850,photo_b7527f0b.jpg,CLM-326955,+1-486-382-5307,Pollen,A-,Male,Cognitive,Jan-Mar,Other,BP 139/81 HR 90
-Physical Exam,Depression,WBC: 102.3 mg/dL,INS-921417,Boston,Metformin 500mg,MRN-195775,photo_e92701f2.jpg,CLM-226080,+1-771-645-6704,Peanuts,A+,Female,Mobility,H2 2023,Other,BP 144/73 HR 79
-ECG,Asthma,Cholesterol: 283.3 mg/dL,INS-305349,Toronto,Albuterol 90mcg,MRN-651553,photo_395ee804.jpg,CLM-238043,+1-284-629-2956,Penicillin,O-,Unisex,None,H2 2023,Asian,BP 159/77 HR 79
-Physical Exam,Arthritis,Glucose: 133.2 K/uL,INS-989433,Miami,Metformin 500mg,MRN-715354,photo_b50a6a03.jpg,CLM-719864,+1-841-220-3774,Penicillin,B-,Unisex,Hearing,2020-2025,Asian,BP 121/79 HR 79
-Physical Exam,Depression,Cholesterol: 127.6 g/dL,INS-840204,Portland,Metformin 500mg,MRN-392514,photo_2533e24b.jpg,CLM-910978,+1-415-464-4575,Shellfish,AB+,Male,None,Jan-Mar,Other,BP 170/71 HR 115
-X-Ray Chest,Migraine,Hemoglobin: 143.1 g/dL,INS-790282,Tokyo,Lisinopril 10mg,MRN-438031,photo_bad065a1.jpg,CLM-705540,+1-610-807-1467,Peanuts,B+,Female,Cognitive,Jan-Mar,Black,BP 162/108 HR 72
-X-Ray Chest,Anxiety,Hemoglobin: 247.1 mg/dL,INS-194789,Portland,Metformin 500mg,MRN-940422,photo_567a3242.jpg,CLM-959613,+1-890-947-7956,Pollen,O+,Unisex,None,H2 2023,White,BP 175/107 HR 58
-X-Ray Chest,Arthritis,Cholesterol: 242.0 g/dL,INS-479878,Miami,Omeprazole 20mg,MRN-963227,photo_09613704.jpg,CLM-576779,+1-211-697-7581,Shellfish,A+,Female,Mobility,H2 2023,Other,BP 171/67 HR 112
-Colonoscopy,Asthma,WBC: 228.0 K/uL,INS-482585,Houston,Metformin 500mg,MRN-544664,photo_86a25e93.jpg,CLM-657075,+1-956-605-5073,Peanuts,A-,Unisex,None,FY 2025,Other,BP 108/100 HR 118
-ECG,Asthma,Hemoglobin: 293.0 K/uL,INS-747224,Boston,Omeprazole 20mg,MRN-696711,photo_7152fae6.jpg,CLM-558170,+1-481-964-4042,Latex,A+,Unisex,Mobility,FY 2025,Other,BP 126/77 HR 55
-ECG,Type 2 Diabetes,Glucose: 245.5 K/uL,INS-236070,Austin,Albuterol 90mcg,MRN-584904,photo_9f530514.jpg,CLM-187128,+1-412-965-9676,Latex,AB+,Female,Hearing,2020-2025,Other,BP 149/61 HR 74
-Colonoscopy,Arthritis,Cholesterol: 206.1 K/uL,INS-552492,San Francisco,Lisinopril 10mg,MRN-887887,photo_f873e29d.jpg,CLM-893591,+1-675-493-8363,Peanuts,B+,Female,Hearing,Q1 2024,Mixed,BP 132/108 HR 114
-Physical Exam,Type 2 Diabetes,Glucose: 145.8 K/uL,INS-538409,San Francisco,Ibuprofen 200mg,MRN-298049,photo_a929f9bf.jpg,CLM-732552,+1-654-447-3897,Shellfish,A-,Unisex,Hearing,FY 2025,Black,BP 149/106 HR 63
-Blood Draw,Anxiety,Glucose: 220.5 g/dL,INS-645015,London,Ibuprofen 200mg,MRN-173783,photo_cfe8b9fb.jpg,CLM-320290,+1-470-299-6407,None,A-,Female,Mobility,FY 2025,Hispanic,BP 133/78 HR 111
-MRI Brain,Depression,WBC: 224.9 K/uL,INS-388671,Sydney,Lisinopril 10mg,MRN-898304,photo_280e9b4b.jpg,CLM-715656,+1-713-521-9574,Latex,O+,Female,Visual,Jan-Mar,White,BP 112/90 HR 103
-Blood Draw,Anxiety,Glucose: 135.6 g/dL,INS-316456,Boston,Metformin 500mg,MRN-391835,photo_9b1379a0.jpg,CLM-339431,+1-906-934-8472,Peanuts,A+,Unisex,Hearing,Jan-Mar,Hispanic,BP 101/107 HR 79
-Physical Exam,Depression,Glucose: 276.5 mg/dL,INS-647941,Portland,Lisinopril 10mg,MRN-317822,photo_39978c5a.jpg,CLM-639178,+1-490-860-5909,Latex,B-,Female,Hearing,Jan-Mar,Mixed,BP 129/100 HR 111
-Blood Draw,Depression,Cholesterol: 171.9 g/dL,INS-634299,London,Ibuprofen 200mg,MRN-271055,photo_2ca1d5ad.jpg,CLM-339834,+1-469-683-5974,Latex,B+,Female,Hearing,H2 2023,Other,BP 130/88 HR 94
-ECG,Arthritis,WBC: 240.7 mg/dL,INS-899248,Atlanta,Lisinopril 10mg,MRN-528645,photo_5cfc0b3b.jpg,CLM-736176,+1-800-584-1971,Penicillin,A+,Unisex,Hearing,H2 2023,Mixed,BP 137/88 HR 91
-Blood Draw,Migraine,Cholesterol: 270.2 mg/dL,INS-440310,San Francisco,Metformin 500mg,MRN-257726,photo_998758a8.jpg,CLM-609982,+1-249-741-1987,Pollen,AB-,Male,Cognitive,2020-2025,Asian,BP 154/80 HR 117
-MRI Brain,Arthritis,Hemoglobin: 208.6 K/uL,INS-179222,Tokyo,Lisinopril 10mg,MRN-685410,photo_c8cd1e9f.jpg,CLM-333717,+1-798-890-6351,Pollen,O-,Unisex,Visual,Jan-Mar,Hispanic,BP 163/69 HR 79
-X-Ray Chest,Type 2 Diabetes,Hemoglobin: 95.4 mg/dL,INS-659333,Sydney,Lisinopril 10mg,MRN-917326,photo_251dea32.jpg,CLM-227615,+1-366-974-4434,Penicillin,O-,Unisex,Cognitive,H2 2023,Other,BP 130/86 HR 79
-X-Ray Chest,Hypertension,Hemoglobin: 169.5 K/uL,INS-217432,Toronto,Lisinopril 10mg,MRN-107608,photo_66f1541f.jpg,CLM-963240,+1-361-629-3824,Peanuts,B+,Unisex,Visual,H2 2023,Asian,BP 110/61 HR 118
-X-Ray Chest,Asthma,WBC: 206.3 g/dL,INS-752123,Miami,Lisinopril 10mg,MRN-921316,photo_007b268c.jpg,CLM-616740,+1-966-784-4215,Peanuts,B-,Unisex,Visual,FY 2025,Black,BP 174/65 HR 67
-Physical Exam,Migraine,Hemoglobin: 271.7 mg/dL,INS-361912,Boston,Albuterol 90mcg,MRN-293595,photo_b4b798f4.jpg,CLM-325272,+1-664-836-5305,Pollen,O-,Male,Hearing,Jan-Mar,Hispanic,BP 133/71 HR 87
-MRI Brain,Depression,WBC: 243.0 g/dL,INS-795466,Houston,Albuterol 90mcg,MRN-900345,photo_815af237.jpg,CLM-149278,+1-745-571-9838,Peanuts,B+,Female,Visual,Q1 2024,Other,BP 111/100 HR 83
-Physical Exam,Type 2 Diabetes,WBC: 264.6 g/dL,INS-151288,Atlanta,Albuterol 90mcg,MRN-508705,photo_efe72f04.jpg,CLM-861244,+1-957-799-3487,Peanuts,O-,Male,Hearing,H2 2023,Asian,BP 171/67 HR 94
-Colonoscopy,Hypertension,WBC: 108.0 g/dL,INS-413337,Houston,Omeprazole 20mg,MRN-878999,photo_92ecbef0.jpg,CLM-859223,+1-950-482-5123,None,AB-,Female,Hearing,H2 2023,Asian,BP 91/66 HR 117
-X-Ray Chest,Arthritis,WBC: 105.3 g/dL,INS-797962,Austin,Lisinopril 10mg,MRN-918855,photo_d7999da0.jpg,CLM-761149,+1-536-301-5788,Shellfish,A+,Unisex,Mobility,H2 2023,Hispanic,BP 177/82 HR 100
-X-Ray Chest,Asthma,WBC: 245.9 g/dL,INS-580462,Austin,Metformin 500mg,MRN-319551,photo_8dabcc27.jpg,CLM-630704,+1-917-857-5853,Pollen,B+,Female,Cognitive,Q1 2024,Black,BP 101/65 HR 106
-MRI Brain,Type 2 Diabetes,Hemoglobin: 183.2 g/dL,INS-239494,Atlanta,Lisinopril 10mg,MRN-986056,photo_fde491f7.jpg,CLM-703410,+1-596-964-5284,None,AB-,Female,Mobility,H2 2023,Hispanic,BP 120/80 HR 100
-Blood Draw,Anxiety,Cholesterol: 130.4 K/uL,INS-358888,Berlin,Omeprazole 20mg,MRN-235019,photo_1efb81d3.jpg,CLM-863112,+1-228-930-9041,Shellfish,B+,Female,Visual,2020-2025,Hispanic,BP 158/104 HR 93
-MRI Brain,Type 2 Diabetes,WBC: 86.1 K/uL,INS-814417,Tokyo,Albuterol 90mcg,MRN-107104,photo_f0c9c116.jpg,CLM-195142,+1-388-466-7576,Peanuts,B-,Female,None,H2 2023,White,BP 102/93 HR 87
-Blood Draw,Arthritis,Glucose: 295.5 mg/dL,INS-815873,Dallas,Lisinopril 10mg,MRN-276698,photo_0f054c95.jpg,CLM-405587,+1-310-557-3955,Pollen,B+,Male,Mobility,FY 2025,Mixed,BP 109/99 HR 98
-ECG,Anxiety,WBC: 246.0 mg/dL,INS-801188,Berlin,Lisinopril 10mg,MRN-454779,photo_32f7c00f.jpg,CLM-437132,+1-774-695-7370,Latex,O-,Female,None,Jan-Mar,Asian,BP 114/65 HR 94
-Colonoscopy,Anxiety,Cholesterol: 210.2 K/uL,INS-150285,Berlin,Lisinopril 10mg,MRN-149500,photo_f658da68.jpg,CLM-508856,+1-433-580-7585,Penicillin,B+,Male,Cognitive,FY 2025,Mixed,BP 175/76 HR 109
-Physical Exam,Arthritis,Hemoglobin: 101.2 K/uL,INS-872416,Austin,Ibuprofen 200mg,MRN-823812,photo_0d6d3c40.jpg,CLM-311944,+1-288-768-9158,Peanuts,B+,Unisex,None,2020-2025,White,BP 103/67 HR 84
-Blood Draw,Depression,WBC: 96.1 K/uL,INS-945581,Chicago,Metformin 500mg,MRN-557125,photo_97290ec3.jpg,CLM-268923,+1-346-760-6202,Penicillin,A-,Unisex,None,2020-2025,Mixed,BP 158/61 HR 76
-Physical Exam,Asthma,Hemoglobin: 59.6 mg/dL,INS-817557,Boston,Lisinopril 10mg,MRN-499731,photo_0069dc08.jpg,CLM-485957,+1-957-221-8073,Latex,B+,Male,Mobility,2020-2025,Other,BP 159/74 HR 106
-X-Ray Chest,Depression,Hemoglobin: 102.0 g/dL,INS-541597,San Francisco,Ibuprofen 200mg,MRN-869077,photo_7f75a283.jpg,CLM-552758,+1-384-653-1390,None,B-,Female,Cognitive,FY 2025,Hispanic,BP 177/96 HR 74
-Physical Exam,Migraine,Cholesterol: 87.7 g/dL,INS-591341,Boston,Metformin 500mg,MRN-899665,photo_e5e9beac.jpg,CLM-224193,+1-745-833-7712,Peanuts,O-,Unisex,Hearing,FY 2025,Asian,BP 174/69 HR 111
-Blood Draw,Depression,Glucose: 83.9 g/dL,INS-595780,Atlanta,Ibuprofen 200mg,MRN-278738,photo_c9f57970.jpg,CLM-277272,+1-573-458-4146,Pollen,AB+,Unisex,None,2020-2025,Hispanic,BP 111/63 HR 85
-Physical Exam,Asthma,Hemoglobin: 162.2 g/dL,INS-453913,Los Angeles,Albuterol 90mcg,MRN-886429,photo_faa50de0.jpg,CLM-434090,+1-721-316-1376,Peanuts,A-,Male,None,FY 2025,Hispanic,BP 98/69 HR 85
-Blood Draw,Depression,Glucose: 52.4 mg/dL,INS-872279,Miami,Omeprazole 20mg,MRN-173801,photo_2ad7dc11.jpg,CLM-183422,+1-380-402-5313,Peanuts,B-,Unisex,None,Q1 2024,Black,BP 113/80 HR 84
-X-Ray Chest,Migraine,Hemoglobin: 200.4 K/uL,INS-771712,Portland,Metformin 500mg,MRN-547242,photo_4530ea42.jpg,CLM-900496,+1-700-520-9944,None,B-,Male,Cognitive,FY 2025,Asian,BP 178/82 HR 107
-ECG,Migraine,Hemoglobin: 280.9 g/dL,INS-586144,Toronto,Ibuprofen 200mg,MRN-260101,photo_2c6025fa.jpg,CLM-798130,+1-261-561-2736,Penicillin,AB-,Unisex,Mobility,Jan-Mar,Hispanic,BP 108/75 HR 118
-X-Ray Chest,Migraine,WBC: 53.2 g/dL,INS-762184,Seattle,Albuterol 90mcg,MRN-761084,photo_4999855b.jpg,CLM-738988,+1-442-455-9005,Pollen,O-,Male,Hearing,Jan-Mar,Asian,BP 139/108 HR 73
-Colonoscopy,Asthma,Glucose: 182.3 g/dL,INS-731871,Austin,Lisinopril 10mg,MRN-571319,photo_63cb5c73.jpg,CLM-111444,+1-505-467-4346,Peanuts,AB+,Male,None,2020-2025,Asian,BP 137/89 HR 73
-ECG,Anxiety,WBC: 188.8 K/uL,INS-565713,Miami,Lisinopril 10mg,MRN-386840,photo_73949500.jpg,CLM-848529,+1-440-294-6903,Latex,AB-,Male,Mobility,H2 2023,Asian,BP 153/85 HR 62
-Colonoscopy,Migraine,WBC: 223.6 K/uL,INS-962816,Chicago,Metformin 500mg,MRN-570284,photo_2cd30a0a.jpg,CLM-709834,+1-576-721-3689,Shellfish,B-,Male,Cognitive,Q1 2024,Other,BP 169/78 HR 89
-Colonoscopy,Asthma,WBC: 90.0 mg/dL,INS-890806,Sydney,Albuterol 90mcg,MRN-450733,photo_3e6a77fa.jpg,CLM-623860,+1-937-597-6363,Shellfish,O+,Unisex,Visual,2020-2025,White,BP 161/98 HR 91
-Physical Exam,Depression,Cholesterol: 69.4 mg/dL,INS-100283,New York,Omeprazole 20mg,MRN-152458,photo_dfe46920.jpg,CLM-346208,+1-666-793-5475,Latex,A+,Unisex,Cognitive,2020-2025,Asian,BP 178/69 HR 82
-Blood Draw,Migraine,WBC: 57.5 g/dL,INS-553496,Toronto,Ibuprofen 200mg,MRN-283524,photo_f901c447.jpg,CLM-677790,+1-753-349-6254,None,AB-,Female,Visual,Jan-Mar,White,BP 137/89 HR 99
-MRI Brain,Type 2 Diabetes,WBC: 218.9 g/dL,INS-477832,San Francisco,Lisinopril 10mg,MRN-731402,photo_42ea78ae.jpg,CLM-925988,+1-542-700-2915,Latex,AB-,Unisex,Mobility,Jan-Mar,Other,BP 140/74 HR 99
-Physical Exam,Migraine,Glucose: 106.5 K/uL,INS-575690,Phoenix,Metformin 500mg,MRN-850992,photo_0c8121f3.jpg,CLM-766076,+1-829-807-1686,None,O-,Male,Mobility,H2 2023,Hispanic,BP 93/76 HR 115
-ECG,Depression,Glucose: 155.7 K/uL,INS-750360,Dallas,Ibuprofen 200mg,MRN-128655,photo_6fc1413d.jpg,CLM-714110,+1-320-914-9466,Shellfish,B+,Female,Hearing,FY 2025,Asian,BP 127/98 HR 97
-ECG,Hypertension,Cholesterol: 292.1 mg/dL,INS-308795,London,Ibuprofen 200mg,MRN-361140,photo_0ccec025.jpg,CLM-170190,+1-266-289-5305,None,AB-,Female,Mobility,Jan-Mar,Black,BP 107/67 HR 58
-X-Ray Chest,Hypertension,Cholesterol: 216.2 g/dL,INS-791915,Berlin,Albuterol 90mcg,MRN-684443,photo_41c26832.jpg,CLM-999516,+1-722-348-2114,Shellfish,A-,Unisex,Visual,FY 2025,Other,BP 142/100 HR 101
-X-Ray Chest,Depression,Hemoglobin: 151.6 g/dL,INS-144993,Miami,Ibuprofen 200mg,MRN-129009,photo_3b57d3e7.jpg,CLM-442976,+1-515-681-9379,Shellfish,O+,Unisex,Cognitive,Jan-Mar,Other,BP 167/98 HR 72
-ECG,Asthma,Glucose: 222.9 g/dL,INS-658617,Paris,Omeprazole 20mg,MRN-762035,photo_1aed93e5.jpg,CLM-405619,+1-853-452-4370,Pollen,AB-,Male,Mobility,H2 2023,Black,BP 140/90 HR 89
-Colonoscopy,Migraine,Hemoglobin: 86.6 K/uL,INS-175550,Austin,Lisinopril 10mg,MRN-494853,photo_df03ee7f.jpg,CLM-792371,+1-780-261-1161,Penicillin,AB-,Unisex,Hearing,H2 2023,White,BP 120/74 HR 83
-Colonoscopy,Arthritis,Hemoglobin: 282.0 g/dL,INS-981609,Boston,Metformin 500mg,MRN-124069,photo_853cd39f.jpg,CLM-257690,+1-956-593-7228,Penicillin,AB+,Male,Mobility,2020-2025,Mixed,BP 133/80 HR 57
-ECG,Arthritis,WBC: 259.6 K/uL,INS-315450,Dallas,Metformin 500mg,MRN-837627,photo_1da26354.jpg,CLM-995113,+1-799-860-9473,Pollen,B-,Male,Mobility,H2 2023,Asian,BP 119/65 HR 75
-Blood Draw,Arthritis,Glucose: 112.6 K/uL,INS-367539,Toronto,Metformin 500mg,MRN-407393,photo_26d2621d.jpg,CLM-295881,+1-451-208-6332,Peanuts,AB+,Unisex,None,Jan-Mar,Mixed,BP 97/85 HR 72
-X-Ray Chest,Hypertension,WBC: 89.0 mg/dL,INS-353677,Sydney,Albuterol 90mcg,MRN-701740,photo_c77bb290.jpg,CLM-485353,+1-505-318-7756,Shellfish,O+,Female,Hearing,Q1 2024,Hispanic,BP 152/72 HR 57
-X-Ray Chest,Migraine,Cholesterol: 162.5 K/uL,INS-928924,Phoenix,Albuterol 90mcg,MRN-515614,photo_3037777e.jpg,CLM-111593,+1-303-349-5417,Penicillin,A+,Unisex,Visual,Jan-Mar,Hispanic,BP 93/88 HR 106
-MRI Brain,Depression,WBC: 136.7 g/dL,INS-398767,Dallas,Lisinopril 10mg,MRN-940144,photo_8177c0cb.jpg,CLM-320846,+1-200-267-3677,Penicillin,AB+,Unisex,Mobility,Q1 2024,Black,BP 149/70 HR 118
-Blood Draw,Hypertension,WBC: 252.9 g/dL,INS-746759,Dallas,Ibuprofen 200mg,MRN-370620,photo_98eba52a.jpg,CLM-260702,+1-300-914-9883,Pollen,AB-,Female,Mobility,2020-2025,Mixed,BP 132/79 HR 65
-X-Ray Chest,Type 2 Diabetes,WBC: 287.1 K/uL,INS-169542,Miami,Lisinopril 10mg,MRN-556784,photo_666f5547.jpg,CLM-594097,+1-381-233-3186,Latex,AB-,Unisex,Hearing,Jan-Mar,Asian,BP 95/70 HR 94
-MRI Brain,Hypertension,Glucose: 299.1 mg/dL,INS-141433,Sydney,Lisinopril 10mg,MRN-961331,photo_eced744d.jpg,CLM-988272,+1-516-882-6351,Peanuts,B-,Female,Visual,FY 2025,Asian,BP 100/63 HR 70
-X-Ray Chest,Hypertension,WBC: 81.5 K/uL,INS-177009,Portland,Albuterol 90mcg,MRN-821132,photo_5376eaab.jpg,CLM-694090,+1-916-388-1121,Peanuts,AB+,Female,None,2020-2025,Hispanic,BP 108/62 HR 72
-X-Ray Chest,Arthritis,WBC: 289.3 mg/dL,INS-855797,Seattle,Ibuprofen 200mg,MRN-140316,photo_cabc507d.jpg,CLM-586060,+1-823-785-4783,Latex,B-,Female,Hearing,H2 2023,Other,BP 94/74 HR 87
-ECG,Asthma,Glucose: 182.7 mg/dL,INS-332575,Toronto,Metformin 500mg,MRN-516263,photo_001c8ef0.jpg,CLM-885813,+1-948-464-3769,None,AB+,Unisex,Hearing,2020-2025,Black,BP 144/73 HR 75
-MRI Brain,Hypertension,Hemoglobin: 127.4 K/uL,INS-825150,Berlin,Lisinopril 10mg,MRN-179928,photo_fdd03ccf.jpg,CLM-252895,+1-550-364-9553,None,B-,Female,Hearing,Q1 2024,Hispanic,BP 139/110 HR 110
-Blood Draw,Depression,WBC: 103.1 mg/dL,INS-751244,London,Omeprazole 20mg,MRN-884056,photo_bfbdec87.jpg,CLM-755303,+1-233-853-6194,Peanuts,AB+,Unisex,Mobility,H2 2023,Asian,BP 103/63 HR 93
-Physical Exam,Type 2 Diabetes,Hemoglobin: 253.9 mg/dL,INS-394301,Miami,Ibuprofen 200mg,MRN-178011,photo_f57b6042.jpg,CLM-679198,+1-873-504-2645,Shellfish,A+,Female,Mobility,Q1 2024,Other,BP 132/77 HR 61
-X-Ray Chest,Hypertension,Glucose: 287.2 K/uL,INS-104204,Houston,Ibuprofen 200mg,MRN-144590,photo_758498c1.jpg,CLM-301821,+1-740-499-6640,Peanuts,O+,Unisex,Mobility,Jan-Mar,Hispanic,BP 124/75 HR 70
-Physical Exam,Migraine,Hemoglobin: 212.1 g/dL,INS-101523,Houston,Ibuprofen 200mg,MRN-719433,photo_3422a1a2.jpg,CLM-564950,+1-879-406-3390,Peanuts,O+,Female,Visual,FY 2025,White,BP 152/77 HR 110
-Blood Draw,Asthma,Glucose: 158.3 mg/dL,INS-164387,Los Angeles,Ibuprofen 200mg,MRN-649749,photo_46e2460c.jpg,CLM-203635,+1-478-874-9462,Latex,O+,Male,None,Jan-Mar,Asian,BP 120/78 HR 87
-X-Ray Chest,Depression,Cholesterol: 206.9 K/uL,INS-103534,Phoenix,Lisinopril 10mg,MRN-443279,photo_cc6572bb.jpg,CLM-530687,+1-244-409-8652,Shellfish,A-,Male,Cognitive,2020-2025,Other,BP 107/74 HR 82
-X-Ray Chest,Asthma,Glucose: 59.2 mg/dL,INS-716038,San Francisco,Lisinopril 10mg,MRN-394032,photo_aee1e914.jpg,CLM-874793,+1-299-842-1349,None,AB+,Male,Visual,FY 2025,Black,BP 95/106 HR 77
-X-Ray Chest,Depression,Cholesterol: 99.4 g/dL,INS-583241,Los Angeles,Ibuprofen 200mg,MRN-336585,photo_90bb5ccd.jpg,CLM-714067,+1-537-663-3578,Pollen,B-,Female,Mobility,FY 2025,Mixed,BP 146/77 HR 95
-MRI Brain,Arthritis,Cholesterol: 281.6 mg/dL,INS-305803,Atlanta,Albuterol 90mcg,MRN-493767,photo_c719c20b.jpg,CLM-286971,+1-245-637-9036,Peanuts,B+,Male,None,Jan-Mar,Black,BP 169/88 HR 64
-ECG,Anxiety,Glucose: 234.4 g/dL,INS-583287,Seattle,Albuterol 90mcg,MRN-988380,photo_5000a0c0.jpg,CLM-189171,+1-758-351-9847,Shellfish,AB+,Female,Cognitive,Q1 2024,Black,BP 112/108 HR 91
-Colonoscopy,Arthritis,Glucose: 128.5 g/dL,INS-142344,Paris,Ibuprofen 200mg,MRN-590012,photo_09043555.jpg,CLM-472325,+1-217-990-9615,Peanuts,B+,Male,None,H2 2023,Asian,BP 105/85 HR 87
-Colonoscopy,Hypertension,Glucose: 115.4 K/uL,INS-371226,Seattle,Omeprazole 20mg,MRN-596649,photo_7e86c814.jpg,CLM-762314,+1-599-360-6811,Latex,AB+,Male,Visual,2020-2025,Black,BP 176/83 HR 98
-Colonoscopy,Anxiety,Cholesterol: 123.5 K/uL,INS-124394,Chicago,Ibuprofen 200mg,MRN-495597,photo_4cd8f8e0.jpg,CLM-430378,+1-925-325-7467,None,B-,Male,None,Q1 2024,Asian,BP 166/89 HR 114
-Physical Exam,Depression,Glucose: 186.1 K/uL,INS-308266,Boston,Omeprazole 20mg,MRN-195859,photo_a33653ed.jpg,CLM-978283,+1-811-736-1214,Peanuts,O+,Female,Mobility,2020-2025,Hispanic,BP 126/98 HR 70
-Physical Exam,Migraine,Glucose: 270.6 K/uL,INS-324082,Atlanta,Albuterol 90mcg,MRN-739361,photo_c204118c.jpg,CLM-662146,+1-617-965-1702,Latex,A+,Female,Visual,2020-2025,White,BP 144/87 HR 60
+medical_procedure,diag,urinalysis,d_zu,photograph,prescription,f_827,ethnic,insurance_claim,fax_number,allergies,var_blood,gender,disabilityStatus,period_interval,birthPlace,vital_sign
+X-Ray Chest,Hypertension,WBC: 189.7 mg/dL,INS-464488,photo_7b15f44e.jpg,Lisinopril 10mg,MRN-743668,Asian,CLM-655506,+1-623-947-3641,None,B-,Male,Cognitive,FY 2025,Seattle,BP 93/101 HR 118
+Physical Exam,Hypertension,Hemoglobin: 72.3 g/dL,INS-701885,photo_bac67d24.jpg,Omeprazole 20mg,MRN-493044,Asian,CLM-280767,+1-393-851-9162,Peanuts,B-,Female,None,FY 2025,Sydney,BP 137/96 HR 77
+ECG,Anxiety,Cholesterol: 176.8 g/dL,INS-131815,photo_9eec1ee1.jpg,Ibuprofen 200mg,MRN-950297,Other,CLM-842011,+1-972-805-2618,Pollen,A-,Unisex,Hearing,Jan-Mar,Tokyo,BP 163/104 HR 105
+Colonoscopy,Anxiety,Cholesterol: 120.6 mg/dL,INS-569661,photo_c4a66775.jpg,Ibuprofen 200mg,MRN-874415,Mixed,CLM-649437,+1-382-720-7075,None,A+,Male,None,2020-2025,Seattle,BP 118/105 HR 95
+Blood Draw,Anxiety,Cholesterol: 173.8 K/uL,INS-771530,photo_906e14ea.jpg,Albuterol 90mcg,MRN-983566,Black,CLM-956397,+1-997-699-5152,Pollen,A+,Unisex,Mobility,Q1 2024,Toronto,BP 106/102 HR 83
+Blood Draw,Anxiety,Glucose: 78.8 g/dL,INS-169730,photo_25f4ae68.jpg,Omeprazole 20mg,MRN-904037,Black,CLM-905882,+1-415-942-6208,Penicillin,A+,Male,Hearing,H2 2023,Seattle,BP 134/89 HR 80
+Physical Exam,Hypertension,WBC: 145.0 g/dL,INS-630154,photo_123a7d13.jpg,Lisinopril 10mg,MRN-120754,Other,CLM-964024,+1-687-785-7325,Latex,O+,Female,Visual,2020-2025,Sydney,BP 122/82 HR 113
+ECG,Type 2 Diabetes,WBC: 184.1 g/dL,INS-334713,photo_2a2ffe50.jpg,Omeprazole 20mg,MRN-481068,White,CLM-674835,+1-982-618-7140,None,AB+,Male,Mobility,FY 2025,London,BP 103/94 HR 112
+MRI Brain,Depression,WBC: 62.7 mg/dL,INS-454086,photo_826827b6.jpg,Lisinopril 10mg,MRN-447611,Asian,CLM-428512,+1-565-407-3467,Peanuts,AB+,Male,Hearing,Jan-Mar,Miami,BP 164/88 HR 115
+MRI Brain,Anxiety,Cholesterol: 122.4 mg/dL,INS-941310,photo_8e268928.jpg,Albuterol 90mcg,MRN-456281,Asian,CLM-487939,+1-270-381-3210,Pollen,AB+,Unisex,Mobility,FY 2025,Houston,BP 175/72 HR 96
+MRI Brain,Anxiety,Glucose: 138.7 g/dL,INS-116730,photo_99f548fe.jpg,Albuterol 90mcg,MRN-830706,White,CLM-451938,+1-575-724-7955,Shellfish,AB-,Male,Hearing,H2 2023,Berlin,BP 114/91 HR 91
+MRI Brain,Hypertension,WBC: 279.7 mg/dL,INS-944601,photo_a581cc11.jpg,Lisinopril 10mg,MRN-104027,White,CLM-930045,+1-902-438-4444,Penicillin,A-,Female,Hearing,Jan-Mar,Denver,BP 150/72 HR 118
+Colonoscopy,Anxiety,Cholesterol: 167.3 K/uL,INS-809004,photo_9d781f4e.jpg,Lisinopril 10mg,MRN-617915,Hispanic,CLM-868516,+1-261-834-8046,Penicillin,O-,Male,None,H2 2023,Tokyo,BP 136/104 HR 63
+Colonoscopy,Asthma,Hemoglobin: 162.7 K/uL,INS-950358,photo_77c5f390.jpg,Metformin 500mg,MRN-327534,Asian,CLM-117185,+1-600-683-3455,Latex,AB-,Male,None,2020-2025,Atlanta,BP 110/79 HR 90
+X-Ray Chest,Type 2 Diabetes,WBC: 201.7 g/dL,INS-553882,photo_6d7a51fb.jpg,Albuterol 90mcg,MRN-821715,Black,CLM-427718,+1-849-687-5596,Pollen,AB-,Unisex,Hearing,FY 2025,Phoenix,BP 131/110 HR 84
+Physical Exam,Arthritis,Cholesterol: 253.3 mg/dL,INS-612321,photo_9e5e6258.jpg,Metformin 500mg,MRN-726615,Mixed,CLM-226209,+1-502-951-1992,None,B-,Unisex,Cognitive,H2 2023,Boston,BP 138/87 HR 56
+MRI Brain,Asthma,Cholesterol: 86.0 mg/dL,INS-130221,photo_ac17e2a8.jpg,Albuterol 90mcg,MRN-439753,Mixed,CLM-893238,+1-782-240-9383,Penicillin,B+,Female,None,Q1 2024,Phoenix,BP 109/66 HR 75
+Physical Exam,Type 2 Diabetes,Glucose: 238.7 g/dL,INS-454584,photo_151606cb.jpg,Albuterol 90mcg,MRN-616137,Asian,CLM-802170,+1-931-913-7798,Pollen,A-,Male,Visual,Jan-Mar,Los Angeles,BP 116/74 HR 117
+Blood Draw,Asthma,Glucose: 195.4 g/dL,INS-633881,photo_e238eb48.jpg,Metformin 500mg,MRN-722076,Hispanic,CLM-478471,+1-674-255-4765,Pollen,AB+,Male,Cognitive,Q1 2024,Portland,BP 91/73 HR 78
+MRI Brain,Type 2 Diabetes,WBC: 286.7 g/dL,INS-854942,photo_5f92784f.jpg,Albuterol 90mcg,MRN-248728,Hispanic,CLM-579123,+1-409-323-1497,Shellfish,B+,Male,None,Q1 2024,Boston,BP 148/97 HR 89
+MRI Brain,Hypertension,WBC: 65.8 K/uL,INS-260741,photo_36606720.jpg,Albuterol 90mcg,MRN-192710,Mixed,CLM-485138,+1-667-683-9922,Peanuts,AB-,Unisex,Hearing,Jan-Mar,Berlin,BP 108/80 HR 99
+ECG,Type 2 Diabetes,WBC: 143.0 g/dL,INS-904586,photo_4dc78569.jpg,Omeprazole 20mg,MRN-670421,Asian,CLM-644807,+1-306-789-1066,Latex,B+,Unisex,Visual,H2 2023,London,BP 104/80 HR 102
+Colonoscopy,Migraine,WBC: 104.8 g/dL,INS-886249,photo_6c1a7de3.jpg,Ibuprofen 200mg,MRN-111081,Other,CLM-726587,+1-507-551-7352,Latex,B-,Female,Mobility,Jan-Mar,Tokyo,BP 151/100 HR 60
+Physical Exam,Migraine,Glucose: 175.0 g/dL,INS-132548,photo_47ccc69e.jpg,Lisinopril 10mg,MRN-817041,Black,CLM-722255,+1-891-999-1462,Pollen,O-,Male,Cognitive,FY 2025,Toronto,BP 125/104 HR 104
+Colonoscopy,Anxiety,Glucose: 113.3 mg/dL,INS-832133,photo_827d096a.jpg,Ibuprofen 200mg,MRN-620246,Hispanic,CLM-932923,+1-915-640-1336,None,AB-,Unisex,Cognitive,Q1 2024,San Francisco,BP 150/62 HR 90
+ECG,Arthritis,WBC: 66.7 mg/dL,INS-375540,photo_ea783e20.jpg,Albuterol 90mcg,MRN-355512,White,CLM-940145,+1-418-393-8778,Shellfish,O-,Male,None,FY 2025,Atlanta,BP 160/100 HR 64
+X-Ray Chest,Anxiety,Cholesterol: 264.5 mg/dL,INS-897460,photo_18f93cd5.jpg,Lisinopril 10mg,MRN-537588,Asian,CLM-688971,+1-286-921-3384,None,A+,Female,Hearing,2020-2025,Austin,BP 149/101 HR 98
+MRI Brain,Depression,Hemoglobin: 279.8 g/dL,INS-636283,photo_7cd98a9c.jpg,Metformin 500mg,MRN-905635,Mixed,CLM-925117,+1-342-988-5833,Peanuts,AB-,Unisex,Cognitive,Jan-Mar,Miami,BP 116/89 HR 77
+Blood Draw,Anxiety,Hemoglobin: 209.6 mg/dL,INS-727186,photo_cd2a7374.jpg,Ibuprofen 200mg,MRN-428353,Asian,CLM-246514,+1-385-325-6920,Penicillin,A+,Male,Hearing,Q1 2024,Berlin,BP 158/77 HR 71
+Blood Draw,Anxiety,WBC: 101.2 K/uL,INS-694088,photo_01fb4339.jpg,Metformin 500mg,MRN-331044,Hispanic,CLM-212603,+1-203-444-6054,Shellfish,O+,Female,Visual,FY 2025,Houston,BP 100/86 HR 111
+ECG,Type 2 Diabetes,WBC: 262.6 g/dL,INS-124145,photo_84e7c857.jpg,Lisinopril 10mg,MRN-507759,Mixed,CLM-461951,+1-568-590-1335,Shellfish,O+,Unisex,Mobility,2020-2025,Chicago,BP 145/76 HR 99
+X-Ray Chest,Asthma,Hemoglobin: 277.9 g/dL,INS-601775,photo_23988306.jpg,Metformin 500mg,MRN-402244,Mixed,CLM-593091,+1-633-371-4870,Penicillin,B-,Unisex,None,Q1 2024,Houston,BP 124/110 HR 77
+Colonoscopy,Hypertension,WBC: 188.4 g/dL,INS-858339,photo_282c524d.jpg,Omeprazole 20mg,MRN-861512,White,CLM-650555,+1-677-862-9514,Latex,O+,Female,Cognitive,2020-2025,Seattle,BP 154/91 HR 71
+Blood Draw,Type 2 Diabetes,Glucose: 199.9 g/dL,INS-982844,photo_49665530.jpg,Albuterol 90mcg,MRN-155699,Hispanic,CLM-587681,+1-595-869-8100,Penicillin,AB+,Female,Cognitive,Jan-Mar,London,BP 95/90 HR 63
+MRI Brain,Asthma,Cholesterol: 127.6 K/uL,INS-274006,photo_01b808a5.jpg,Metformin 500mg,MRN-249119,Black,CLM-197716,+1-831-593-5518,Shellfish,B-,Male,None,H2 2023,New York,BP 107/72 HR 108
+Colonoscopy,Type 2 Diabetes,WBC: 249.9 mg/dL,INS-547649,photo_84e01d47.jpg,Omeprazole 20mg,MRN-916102,Black,CLM-337186,+1-222-644-8919,Latex,AB-,Unisex,Hearing,2020-2025,Atlanta,BP 96/97 HR 93
+MRI Brain,Hypertension,Cholesterol: 188.8 mg/dL,INS-360820,photo_72185b65.jpg,Metformin 500mg,MRN-452438,Black,CLM-727029,+1-534-807-7174,Penicillin,A-,Male,None,Q1 2024,Phoenix,BP 159/87 HR 118
+Blood Draw,Depression,Cholesterol: 298.0 mg/dL,INS-594097,photo_22f5ad59.jpg,Ibuprofen 200mg,MRN-735944,Black,CLM-822502,+1-490-232-7445,Latex,B+,Unisex,Mobility,2020-2025,Dallas,BP 155/79 HR 92
+Physical Exam,Anxiety,WBC: 154.5 mg/dL,INS-932839,photo_f4532219.jpg,Albuterol 90mcg,MRN-508482,Black,CLM-951987,+1-709-674-7512,None,AB-,Female,Visual,H2 2023,San Francisco,BP 174/80 HR 78
+Blood Draw,Depression,Cholesterol: 288.6 g/dL,INS-197744,photo_7f2e39fe.jpg,Lisinopril 10mg,MRN-577052,Other,CLM-719682,+1-760-497-9827,Shellfish,A+,Female,Hearing,Q1 2024,San Francisco,BP 165/100 HR 63
+ECG,Depression,WBC: 282.3 K/uL,INS-699678,photo_35974a03.jpg,Omeprazole 20mg,MRN-323781,Mixed,CLM-793411,+1-765-494-2898,Peanuts,O+,Unisex,Hearing,FY 2025,Berlin,BP 173/72 HR 56
+Physical Exam,Migraine,Glucose: 132.2 mg/dL,INS-603174,photo_02b4aa6e.jpg,Omeprazole 20mg,MRN-228028,White,CLM-800447,+1-829-484-2364,Latex,A-,Female,Visual,2020-2025,Denver,BP 159/76 HR 57
+Colonoscopy,Depression,Glucose: 298.0 mg/dL,INS-252895,photo_58b3fc55.jpg,Albuterol 90mcg,MRN-117953,Other,CLM-490633,+1-864-546-7808,None,A+,Female,Mobility,Q1 2024,Phoenix,BP 102/98 HR 69
+Colonoscopy,Type 2 Diabetes,WBC: 173.6 K/uL,INS-861165,photo_c1cca386.jpg,Lisinopril 10mg,MRN-480142,Asian,CLM-199779,+1-470-986-6468,Latex,A-,Male,Cognitive,FY 2025,Tokyo,BP 100/74 HR 61
+MRI Brain,Asthma,Glucose: 252.9 K/uL,INS-705407,photo_d8ea16e4.jpg,Lisinopril 10mg,MRN-593161,Black,CLM-864148,+1-925-329-3774,None,B-,Female,None,Jan-Mar,Austin,BP 163/110 HR 79
+ECG,Arthritis,Cholesterol: 64.8 mg/dL,INS-743047,photo_a38569e4.jpg,Albuterol 90mcg,MRN-218083,Mixed,CLM-102954,+1-867-415-2814,None,A+,Female,None,H2 2023,Denver,BP 147/69 HR 73
+Physical Exam,Anxiety,Glucose: 267.2 g/dL,INS-531097,photo_684ad263.jpg,Albuterol 90mcg,MRN-775545,Black,CLM-571170,+1-405-904-5515,Shellfish,O+,Female,Visual,2020-2025,Boston,BP 146/68 HR 57
+X-Ray Chest,Anxiety,WBC: 146.1 K/uL,INS-634456,photo_a24541d8.jpg,Ibuprofen 200mg,MRN-302814,Black,CLM-213735,+1-950-513-7960,Latex,AB+,Unisex,Visual,2020-2025,Sydney,BP 162/96 HR 100
+Blood Draw,Migraine,WBC: 206.2 mg/dL,INS-440488,photo_057353f0.jpg,Albuterol 90mcg,MRN-348207,Mixed,CLM-224548,+1-295-456-9796,None,B-,Male,Mobility,H2 2023,Berlin,BP 111/102 HR 55
+ECG,Depression,Cholesterol: 248.9 g/dL,INS-204955,photo_19e46557.jpg,Ibuprofen 200mg,MRN-261406,Other,CLM-166341,+1-362-685-7194,Penicillin,B+,Female,None,Jan-Mar,Seattle,BP 177/86 HR 68
+Blood Draw,Depression,Cholesterol: 102.9 mg/dL,INS-535214,photo_13d488af.jpg,Lisinopril 10mg,MRN-935297,Other,CLM-232937,+1-255-435-9741,Penicillin,O-,Female,Cognitive,FY 2025,Los Angeles,BP 156/71 HR 84
+X-Ray Chest,Type 2 Diabetes,Glucose: 177.1 K/uL,INS-670079,photo_e3858452.jpg,Lisinopril 10mg,MRN-187696,Hispanic,CLM-272935,+1-975-960-2328,Penicillin,B-,Female,None,2020-2025,Berlin,BP 172/83 HR 62
+Physical Exam,Anxiety,Glucose: 229.8 g/dL,INS-428040,photo_61eac41d.jpg,Metformin 500mg,MRN-524865,White,CLM-690349,+1-325-441-7766,Peanuts,AB+,Unisex,Visual,H2 2023,Dallas,BP 174/63 HR 101
+MRI Brain,Depression,Cholesterol: 246.3 g/dL,INS-865040,photo_0ba036d8.jpg,Ibuprofen 200mg,MRN-622659,Black,CLM-640712,+1-398-587-4075,Pollen,A-,Female,Hearing,FY 2025,Phoenix,BP 176/64 HR 73
+Physical Exam,Migraine,Hemoglobin: 231.5 K/uL,INS-699177,photo_aa440ec2.jpg,Lisinopril 10mg,MRN-801145,Asian,CLM-592654,+1-586-515-7736,Latex,AB+,Unisex,Cognitive,Jan-Mar,Paris,BP 92/109 HR 83
+Physical Exam,Hypertension,Hemoglobin: 110.4 K/uL,INS-625304,photo_8d4b29ba.jpg,Metformin 500mg,MRN-352807,Mixed,CLM-195859,+1-846-895-4243,Shellfish,B-,Male,Mobility,H2 2023,Boston,BP 95/86 HR 59
+Physical Exam,Hypertension,Glucose: 279.5 K/uL,INS-898337,photo_8c567868.jpg,Lisinopril 10mg,MRN-751226,Other,CLM-324082,+1-601-576-6665,Peanuts,A+,Male,Hearing,Jan-Mar,Chicago,BP 105/93 HR 91
+Blood Draw,Arthritis,Hemoglobin: 106.5 g/dL,INS-655628,photo_7d9c62bf.jpg,Lisinopril 10mg,MRN-222172,Other,CLM-235042,+1-636-999-1294,Penicillin,B-,Male,Cognitive,FY 2025,Dallas,BP 139/85 HR 66
+Blood Draw,Migraine,Cholesterol: 221.2 mg/dL,INS-435940,photo_f3fc4506.jpg,Omeprazole 20mg,MRN-243125,White,CLM-148360,+1-417-439-7132,Pollen,A-,Male,None,H2 2023,Toronto,BP 178/104 HR 57
+Colonoscopy,Depression,Glucose: 176.8 K/uL,INS-709058,photo_bc420ff9.jpg,Omeprazole 20mg,MRN-360257,Black,CLM-446401,+1-778-305-5823,Penicillin,AB+,Unisex,Cognitive,FY 2025,Seattle,BP 114/66 HR 78
+X-Ray Chest,Asthma,Cholesterol: 244.1 g/dL,INS-523847,photo_9f09082a.jpg,Lisinopril 10mg,MRN-249376,Other,CLM-693774,+1-824-644-6592,Penicillin,B+,Female,Cognitive,H2 2023,Berlin,BP 176/69 HR 110
+Physical Exam,Asthma,Glucose: 245.9 g/dL,INS-700743,photo_661d076a.jpg,Omeprazole 20mg,MRN-555342,Mixed,CLM-509650,+1-598-264-1903,Penicillin,O+,Unisex,Visual,Q1 2024,Chicago,BP 175/72 HR 97
+Blood Draw,Hypertension,Glucose: 143.8 mg/dL,INS-741799,photo_a1a1b062.jpg,Lisinopril 10mg,MRN-882094,White,CLM-860205,+1-840-685-7299,Penicillin,B+,Unisex,Cognitive,Q1 2024,Austin,BP 92/85 HR 88
+Blood Draw,Type 2 Diabetes,Cholesterol: 100.7 mg/dL,INS-193519,photo_ef5b25f1.jpg,Albuterol 90mcg,MRN-721338,Asian,CLM-861252,+1-372-792-6292,Penicillin,B+,Female,Hearing,Jan-Mar,Los Angeles,BP 102/87 HR 90
+MRI Brain,Hypertension,Cholesterol: 162.9 K/uL,INS-362276,photo_d68eeb78.jpg,Lisinopril 10mg,MRN-989272,Mixed,CLM-285825,+1-756-897-6217,Shellfish,A+,Female,Visual,Jan-Mar,Toronto,BP 92/91 HR 109
+ECG,Anxiety,Glucose: 163.4 K/uL,INS-164056,photo_6f36c2c5.jpg,Metformin 500mg,MRN-443295,Mixed,CLM-517260,+1-667-973-1646,Pollen,AB+,Male,Mobility,Jan-Mar,Sydney,BP 159/78 HR 57
+X-Ray Chest,Type 2 Diabetes,Glucose: 262.7 mg/dL,INS-734563,photo_b3d6bb4f.jpg,Metformin 500mg,MRN-127491,Mixed,CLM-573963,+1-481-589-2277,Pollen,A-,Unisex,Mobility,2020-2025,Sydney,BP 158/91 HR 104
+Colonoscopy,Type 2 Diabetes,WBC: 176.5 K/uL,INS-986582,photo_2d597bc8.jpg,Metformin 500mg,MRN-649018,White,CLM-583064,+1-807-603-4213,Peanuts,AB-,Unisex,Hearing,FY 2025,Boston,BP 171/68 HR 89
+ECG,Depression,Cholesterol: 266.6 mg/dL,INS-672713,photo_fee521a5.jpg,Albuterol 90mcg,MRN-505042,Mixed,CLM-440133,+1-216-824-6250,Shellfish,AB+,Female,Visual,Q1 2024,Denver,BP 129/100 HR 70
+Physical Exam,Arthritis,Glucose: 281.6 mg/dL,INS-604592,photo_923d53c1.jpg,Lisinopril 10mg,MRN-397249,Asian,CLM-136901,+1-994-562-3905,Shellfish,O+,Unisex,Cognitive,Q1 2024,Tokyo,BP 157/90 HR 62
+Colonoscopy,Anxiety,Cholesterol: 239.4 mg/dL,INS-384879,photo_5388c6ee.jpg,Albuterol 90mcg,MRN-925866,Other,CLM-982456,+1-828-494-3912,Pollen,B+,Female,Cognitive,Q1 2024,Chicago,BP 178/87 HR 97
+Blood Draw,Type 2 Diabetes,Glucose: 270.6 mg/dL,INS-263518,photo_c53a3f2e.jpg,Metformin 500mg,MRN-543623,White,CLM-768280,+1-651-936-5795,None,O+,Male,None,FY 2025,Dallas,BP 155/107 HR 76
+MRI Brain,Asthma,Cholesterol: 287.4 mg/dL,INS-651370,photo_3dbc12d2.jpg,Albuterol 90mcg,MRN-883104,Hispanic,CLM-689343,+1-842-472-8927,Peanuts,O+,Male,Cognitive,Q1 2024,Miami,BP 108/99 HR 66
+Colonoscopy,Depression,WBC: 145.6 K/uL,INS-680701,photo_310dbfa2.jpg,Metformin 500mg,MRN-680005,Mixed,CLM-250861,+1-442-370-6326,None,AB-,Unisex,Visual,Jan-Mar,Berlin,BP 116/80 HR 94
+MRI Brain,Migraine,Glucose: 172.3 K/uL,INS-585519,photo_be3c4f94.jpg,Omeprazole 20mg,MRN-354832,Black,CLM-256489,+1-228-891-2614,Peanuts,AB-,Female,None,Jan-Mar,Denver,BP 112/62 HR 60
+MRI Brain,Depression,WBC: 201.6 K/uL,INS-588219,photo_88953bb5.jpg,Lisinopril 10mg,MRN-123950,Black,CLM-774141,+1-791-371-6705,None,A+,Male,Hearing,FY 2025,London,BP 125/101 HR 120
+X-Ray Chest,Hypertension,Cholesterol: 277.9 K/uL,INS-535771,photo_f1a7916a.jpg,Metformin 500mg,MRN-307567,Mixed,CLM-883048,+1-947-419-1606,Latex,B-,Female,Mobility,H2 2023,Denver,BP 158/60 HR 77
+ECG,Anxiety,Hemoglobin: 244.2 mg/dL,INS-256900,photo_c414caa2.jpg,Lisinopril 10mg,MRN-914075,Asian,CLM-339980,+1-664-321-3324,Latex,B-,Female,Hearing,Jan-Mar,Miami,BP 159/83 HR 104
+MRI Brain,Depression,Cholesterol: 103.0 mg/dL,INS-371955,photo_fec0fe65.jpg,Albuterol 90mcg,MRN-133956,Black,CLM-161496,+1-327-217-6950,Shellfish,O-,Unisex,Mobility,H2 2023,San Francisco,BP 129/99 HR 63
+MRI Brain,Migraine,Hemoglobin: 143.0 g/dL,INS-984479,photo_2371d461.jpg,Albuterol 90mcg,MRN-838516,Asian,CLM-585968,+1-286-400-9329,Penicillin,O+,Female,None,FY 2025,Los Angeles,BP 149/105 HR 84
+MRI Brain,Hypertension,Glucose: 253.2 g/dL,INS-478662,photo_ff736130.jpg,Lisinopril 10mg,MRN-470392,Mixed,CLM-167187,+1-737-446-3264,None,O-,Male,None,Q1 2024,Austin,BP 141/86 HR 109
+Blood Draw,Asthma,Hemoglobin: 206.7 mg/dL,INS-891775,photo_11777e0b.jpg,Omeprazole 20mg,MRN-616763,Other,CLM-334546,+1-863-266-4254,Shellfish,O-,Unisex,None,2020-2025,Atlanta,BP 167/95 HR 92
+Blood Draw,Migraine,WBC: 288.9 mg/dL,INS-326789,photo_7f793dc6.jpg,Metformin 500mg,MRN-792852,Other,CLM-791288,+1-228-845-5251,Penicillin,A-,Male,Hearing,Jan-Mar,Tokyo,BP 155/98 HR 119
+Colonoscopy,Migraine,Cholesterol: 274.4 mg/dL,INS-566046,photo_fb8afe8d.jpg,Lisinopril 10mg,MRN-969070,Black,CLM-983025,+1-393-589-2394,Latex,O+,Male,None,FY 2025,Paris,BP 153/103 HR 89
+X-Ray Chest,Arthritis,WBC: 189.9 K/uL,INS-257744,photo_7c9fe7a4.jpg,Ibuprofen 200mg,MRN-290552,Hispanic,CLM-771087,+1-246-819-7908,None,AB+,Unisex,Mobility,2020-2025,Berlin,BP 121/106 HR 88
+Colonoscopy,Migraine,Glucose: 116.4 K/uL,INS-427568,photo_272562e9.jpg,Lisinopril 10mg,MRN-414467,Asian,CLM-324869,+1-315-800-5067,Latex,B+,Male,Mobility,Q1 2024,Boston,BP 117/90 HR 107
+Blood Draw,Asthma,Cholesterol: 295.3 mg/dL,INS-366875,photo_586cbe5f.jpg,Omeprazole 20mg,MRN-864921,Asian,CLM-520169,+1-672-764-3383,Penicillin,AB+,Male,Mobility,H2 2023,San Francisco,BP 156/66 HR 83
+MRI Brain,Arthritis,Cholesterol: 279.8 K/uL,INS-494822,photo_f898c3f6.jpg,Lisinopril 10mg,MRN-173802,White,CLM-182424,+1-632-899-2013,Peanuts,O+,Male,Mobility,H2 2023,Boston,BP 142/105 HR 71
+Blood Draw,Arthritis,Hemoglobin: 131.9 K/uL,INS-158522,photo_600a9c4f.jpg,Albuterol 90mcg,MRN-331454,Black,CLM-919209,+1-718-823-1473,Shellfish,B+,Male,Hearing,H2 2023,Atlanta,BP 138/110 HR 71
+Physical Exam,Type 2 Diabetes,WBC: 134.1 g/dL,INS-156824,photo_1a95e0e6.jpg,Omeprazole 20mg,MRN-770478,White,CLM-162881,+1-206-978-9795,Penicillin,A-,Female,Cognitive,Jan-Mar,Atlanta,BP 151/105 HR 118
+Colonoscopy,Type 2 Diabetes,Cholesterol: 268.7 mg/dL,INS-705908,photo_9f7c0c7f.jpg,Omeprazole 20mg,MRN-283320,Hispanic,CLM-234130,+1-326-887-4810,Pollen,AB-,Female,Hearing,H2 2023,Los Angeles,BP 94/103 HR 109
+MRI Brain,Asthma,Hemoglobin: 121.3 g/dL,INS-454984,photo_bdd123ef.jpg,Albuterol 90mcg,MRN-848910,Asian,CLM-786874,+1-755-262-2102,Pollen,O+,Male,None,H2 2023,Miami,BP 171/72 HR 59
+ECG,Arthritis,Cholesterol: 131.2 K/uL,INS-627477,photo_d4e5340e.jpg,Omeprazole 20mg,MRN-212358,Asian,CLM-772962,+1-902-866-6251,Peanuts,A-,Male,Cognitive,2020-2025,Paris,BP 155/102 HR 87
+Colonoscopy,Anxiety,WBC: 251.0 K/uL,INS-707418,photo_6982eb0f.jpg,Lisinopril 10mg,MRN-258280,Asian,CLM-777454,+1-875-762-9191,Penicillin,O+,Male,Cognitive,FY 2025,Seattle,BP 156/92 HR 61
+Physical Exam,Arthritis,Cholesterol: 91.9 mg/dL,INS-146957,photo_d03e0b66.jpg,Lisinopril 10mg,MRN-924357,White,CLM-389788,+1-631-969-3265,Peanuts,AB-,Female,Mobility,Jan-Mar,Miami,BP 176/110 HR 67
+Blood Draw,Hypertension,Cholesterol: 233.3 mg/dL,INS-579245,photo_d625dff9.jpg,Omeprazole 20mg,MRN-381924,Mixed,CLM-592236,+1-242-735-1246,Latex,B-,Female,Mobility,Jan-Mar,Denver,BP 127/95 HR 73
+ECG,Arthritis,WBC: 89.8 K/uL,INS-581415,photo_c8888a18.jpg,Metformin 500mg,MRN-498606,Asian,CLM-417430,+1-280-766-1095,Pollen,AB-,Male,None,2020-2025,Dallas,BP 132/92 HR 95
+Blood Draw,Migraine,WBC: 164.2 K/uL,INS-194594,photo_a249c1ad.jpg,Lisinopril 10mg,MRN-434454,White,CLM-917367,+1-717-329-1047,Pollen,B+,Male,Hearing,2020-2025,New York,BP 180/96 HR 57
+Physical Exam,Hypertension,Glucose: 208.0 mg/dL,INS-838330,photo_e6f732d7.jpg,Lisinopril 10mg,MRN-161779,Hispanic,CLM-689780,+1-856-914-1966,Penicillin,A-,Unisex,Hearing,Q1 2024,Sydney,BP 112/89 HR 68
+Physical Exam,Hypertension,Hemoglobin: 96.5 mg/dL,INS-883843,photo_eb3dc093.jpg,Albuterol 90mcg,MRN-595155,Asian,CLM-533501,+1-950-290-9432,Peanuts,O-,Male,Hearing,Jan-Mar,Chicago,BP 117/109 HR 64

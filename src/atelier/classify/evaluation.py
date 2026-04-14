@@ -239,6 +239,106 @@ def compute_hierarchical_accuracy(
     return correct / len(y_true)
 
 
+def epistemic_evaluation(
+    classifications: list[dict[str, Any]],
+    category_set=None,
+) -> dict[str, Any]:
+    """Evaluate using belief paths — epistemic hierarchical metrics.
+
+    Each classification dict should have a ``belief_path`` key (list of
+    dicts with code/bel/pl/depth, leaf-first). Falls back gracefully when
+    belief paths are absent.
+
+    Returns:
+      per_depth: {depth: {mean_bel, mean_pl, mean_gap, count}}
+      cautious_accuracy: accuracy when only committing where Bel > τ
+      mean_commitment_depth: average depth of cautious code
+      belief_convergence: fraction of columns where leaf Bel > 0.7
+    """
+    TAU = 0.7
+    with_gt = [
+        c for c in classifications
+        if c.get("ground_truth") and c.get("predicted_code")
+    ]
+    if not with_gt:
+        return {
+            "per_depth": {},
+            "cautious_accuracy": 0.0,
+            "mean_commitment_depth": 0.0,
+            "belief_convergence": 0.0,
+        }
+
+    # Per-depth aggregation
+    depth_bels: dict[int, list[float]] = {}
+    depth_pls: dict[int, list[float]] = {}
+
+    # Cautious classification
+    cautious_correct = 0
+    cautious_total = 0
+    commitment_depths: list[int] = []
+    leaf_converged = 0
+
+    for c in with_gt:
+        bp = c.get("belief_path", [])
+        gt = c["ground_truth"]
+
+        if bp:
+            # Leaf is first entry
+            leaf_bel = bp[0].get("bel", 0.0)
+            if leaf_bel >= TAU:
+                leaf_converged += 1
+
+            # Per-depth stats
+            for entry in bp:
+                d = entry.get("depth", 0)
+                depth_bels.setdefault(d, []).append(entry.get("bel", 0.0))
+                depth_pls.setdefault(d, []).append(entry.get("pl", 1.0))
+
+            # Cautious code: deepest with Bel >= TAU
+            cautious = None
+            for entry in bp:  # leaf-first
+                if entry.get("bel", 0.0) >= TAU:
+                    cautious = entry["code"]
+                    commitment_depths.append(entry.get("depth", 0))
+                    break
+
+            if cautious is not None:
+                cautious_total += 1
+                # Correct if cautious code is the ground truth or an ancestor of it
+                if cautious == gt:
+                    cautious_correct += 1
+                elif category_set is not None:
+                    ancestors = category_set.ancestors(gt)
+                    if cautious in ancestors:
+                        cautious_correct += 1
+
+    # Build per-depth summary
+    per_depth: dict[int, dict[str, float]] = {}
+    for d in sorted(set(depth_bels.keys()) | set(depth_pls.keys())):
+        bels = depth_bels.get(d, [])
+        pls = depth_pls.get(d, [])
+        mean_b = sum(bels) / len(bels) if bels else 0.0
+        mean_p = sum(pls) / len(pls) if pls else 0.0
+        per_depth[d] = {
+            "mean_bel": round(mean_b, 4),
+            "mean_pl": round(mean_p, 4),
+            "mean_gap": round(mean_p - mean_b, 4),
+            "count": len(bels),
+        }
+
+    return {
+        "per_depth": per_depth,
+        "cautious_accuracy": (
+            round(cautious_correct / cautious_total, 4) if cautious_total > 0 else 0.0
+        ),
+        "mean_commitment_depth": (
+            round(sum(commitment_depths) / len(commitment_depths), 2)
+            if commitment_depths else 0.0
+        ),
+        "belief_convergence": round(leaf_converged / len(with_gt), 4),
+    }
+
+
 # ── Internal helpers ──────────────────────────────────────────────
 
 

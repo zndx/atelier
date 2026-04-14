@@ -183,8 +183,8 @@ def build_system_prompt(category_table: str) -> str:
         "\n"
         "## Response Format\n"
         "\n"
-        '[{"column_name": "ssn", "category_code": "ICE.SENSITIVE.PID.IDENTITY.GOVID", "confidence": 0.95, '
-        '"evidence": "SSN pattern", "alternatives": [{"code": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "confidence": 0.03}]}]'
+        '[{"column_name": "ssn", "category_code": "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN", "confidence": 0.95, '
+        '"evidence": "SSN pattern", "alternatives": [{"code": "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME", "confidence": 0.03}]}]'
     )
 
 

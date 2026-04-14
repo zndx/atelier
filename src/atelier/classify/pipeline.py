@@ -201,6 +201,8 @@ def run_classification_pipeline(
             _llm_sweep,
             _mean_k,
             _run_ml_validation,
+            record_iteration_metrics,
+            should_stop_early,
         )
         from atelier.classify.llm_backend import (
             build_category_table,
@@ -269,67 +271,76 @@ def run_classification_pipeline(
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
-        iteration_metrics: list[dict[str, Any]] = [{
-            "iteration": 0,
-            "mean_k": round(mean_k, 4),
-            "disagreements": len(disagreements),
-            "coverage": round(coverage, 4),
-        }]
+        # Record iteration-0 metrics from initial ML validation
+        record_iteration_metrics(state, column_names, len(disagreements))
 
-        for iteration in range(1, boot_cfg.max_iterations + 1):
-            if not disagreements:
-                logger.info("No disagreements — converged")
-                break
-
-            if state.llm_calls_total >= boot_cfg.max_total_llm_calls:
-                logger.info("Budget exhausted (%d calls)", state.llm_calls_total)
-                break
-
-            if mean_k < boot_cfg.k_threshold:
-                logger.info("Mean K=%.3f < threshold — converged", mean_k)
-                break
-
-            state.iteration = iteration
-
+        # Agent-driven convergence (when configured and credentials available)
+        if cfg.classify_agent_enabled and (cfg.has_anthropic or cfg.has_bedrock):
+            from atelier.classify.agent_loop import run_agent_loop
+            logger.info("Using agent-driven convergence loop")
             fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
-                "phase": "revisit",
-                "iteration": iteration,
+                "phase": "agent_convergence",
                 "disagreements": len(disagreements),
                 "mean_k": round(mean_k, 4),
             })
-
-            _llm_revisit(
-                state, boot_cfg, llm_backend, system_prompt,
-                disagreements, samples_by_name, column_table, category_set,
+            run_agent_loop(
+                state, cfg, boot_cfg, llm_backend, system_prompt,
+                column_names, samples_by_name, column_table,
+                category_set, frame, has_embeddings, discounts,
             )
+        else:
+            # Programmatic convergence loop (default)
+            for iteration in range(1, boot_cfg.max_iterations + 1):
+                if not disagreements:
+                    logger.info("No disagreements — converged")
+                    break
 
-            fsm.advance(run_id, FSMState.VALIDATING, progress={
-                "phase": "revalidation",
-                "iteration": iteration,
-                "llm_calls": state.llm_calls_total,
-            })
+                if state.llm_calls_total >= boot_cfg.max_total_llm_calls:
+                    logger.info("Budget exhausted (%d calls)", state.llm_calls_total)
+                    break
 
-            _run_ml_validation(
-                state, boot_cfg, column_names, samples_by_name,
-                category_set, frame, has_embeddings, discounts=discounts,
-            )
+                if mean_k < boot_cfg.k_threshold:
+                    logger.info("Mean K=%.3f < threshold — converged", mean_k)
+                    break
 
-            disagreements = _identify_disagreements(state, column_names, boot_cfg)
-            mean_k = _mean_k(state, column_names)
-            coverage = _coverage(state, column_names)
+                # Early termination: K no longer decreasing
+                if should_stop_early(state):
+                    logger.info(
+                        "K not decreasing for 2 iterations — early stop (mean_K=%.3f)",
+                        mean_k,
+                    )
+                    break
 
-            logger.info(
-                "Revisit %d: mean K=%.3f, disagreements=%d, coverage=%.1f%%, calls=%d",
-                iteration, mean_k, len(disagreements),
-                coverage * 100, state.llm_calls_total,
-            )
+                state.iteration = iteration
 
-            iteration_metrics.append({
-                "iteration": iteration,
-                "mean_k": round(mean_k, 4),
-                "disagreements": len(disagreements),
-                "coverage": round(coverage, 4),
-            })
+                fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
+                    "phase": "revisit",
+                    "iteration": iteration,
+                    "disagreements": len(disagreements),
+                    "mean_k": round(mean_k, 4),
+                })
+
+                _llm_revisit(
+                    state, boot_cfg, llm_backend, system_prompt,
+                    disagreements, samples_by_name, column_table, category_set,
+                )
+
+                fsm.advance(run_id, FSMState.VALIDATING, progress={
+                    "phase": "revalidation",
+                    "iteration": iteration,
+                    "llm_calls": state.llm_calls_total,
+                })
+
+                _run_ml_validation(
+                    state, boot_cfg, column_names, samples_by_name,
+                    category_set, frame, has_embeddings, discounts=discounts,
+                )
+
+                disagreements = _identify_disagreements(state, column_names, boot_cfg)
+                mean_k = _mean_k(state, column_names)
+                coverage = _coverage(state, column_names)
+
+                record_iteration_metrics(state, column_names, len(disagreements))
 
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         coverage = _coverage(state, column_names)
@@ -371,14 +382,29 @@ def run_classification_pipeline(
 
         summary = _evaluate_results(classifications)
         eval_report = evaluate_classifications(classifications, category_set)
+        from atelier.classify.evaluation import epistemic_evaluation
+        epistemic = epistemic_evaluation(classifications, category_set)
         summary["converged"] = converged
+        summary["epistemic_evaluation"] = epistemic
+        from atelier.classify.bootstrap import k_convergence_rate
         summary["bootstrap_iterations"] = state.iteration
         summary["llm_calls"] = state.llm_calls_total
         summary["tokens_input"] = state.tokens_input
         summary["tokens_output"] = state.tokens_output
         summary["mean_k"] = round(mean_k, 4)
         summary["bootstrap_coverage"] = round(coverage, 4)
-        summary["iteration_metrics"] = iteration_metrics
+        summary["k_convergence_rate"] = round(k_convergence_rate(state), 4)
+        summary["iteration_metrics"] = [
+            {
+                "iteration": m.iteration,
+                "mean_k": m.mean_k,
+                "max_k": m.max_k,
+                "disagreements": m.disagreements,
+                "coverage": m.coverage,
+                "llm_calls": m.llm_calls,
+            }
+            for m in state.iteration_metrics
+        ]
 
         # Write results
         results_path = results_dir / "classifications.json"
@@ -623,6 +649,7 @@ def _classify_column(
 
     best_code = hc.category.code
     bel, pl = hc.interval_at(best_code)
+    belief_path = hc.belief_path()
 
     return {
         "table_name": col.table_name,
@@ -640,6 +667,8 @@ def _classify_column(
         "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
+        "belief_path": belief_path,
+        "cautious_code": hc.cautious_code(0.7),
         "ground_truth": col.ground_truth,
         "is_correct": (
             col.ground_truth == best_code
@@ -833,6 +862,8 @@ def _write_parquet(
             "is_correct": c["is_correct"] if c["is_correct"] is not None else False,
             "embedding_text": c.get("embedding_text", ""),
             "pattern_signals": ", ".join(c.get("pattern_signals", [])),
+            "dst_belief_path": json.dumps(c.get("belief_path", [])),
+            "cautious_code": c.get("cautious_code", ""),
         }
         # SHAP columns (present when SHAP analysis ran)
         for rank in range(1, 4):

@@ -15,8 +15,8 @@ Feature: LLM bootstrap convergence loop
 
   Scenario: LLM mass function handles alternatives
     Given a frame of discernment from the vocabulary
-    When I compute llm_to_mass for "ICE.SENSITIVE.PID.CONTACT.EMAIL" with confidence 0.7 and alternative "ICE.SENSITIVE.PID.FINANCIAL.PAN" at 0.2
-    Then the LLM mass should have "ICE.SENSITIVE.PID.FINANCIAL.PAN" as a focal element
+    When I compute llm_to_mass for "ICE.SENSITIVE.PID.CONTACT.EMAIL" with confidence 0.7 and alternative "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN" at 0.2
+    Then the LLM mass should have "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN" as a focal element
     And the total LLM mass should sum to 1.0
 
   Scenario: LLM mass function returns vacuous for unknown code
@@ -42,6 +42,20 @@ Feature: LLM bootstrap convergence loop
     When I run the bootstrap pipeline with mock data and realistic mock LLM
     Then the bootstrap pipeline should reach CONVERGED state
     And the number of disagreements should decrease across iterations
+
+  @slow
+  Scenario: Mean K decreases across bootstrap iterations
+    When I run the bootstrap pipeline with mock data and realistic mock LLM
+    Then the bootstrap pipeline should reach CONVERGED state
+    And the k_convergence_rate should be negative or zero
+
+  Scenario: K convergence tracker detects plateau
+    Given a bootstrap state with metrics showing K plateau
+    Then should_stop_early should return true
+
+  Scenario: K convergence tracker allows decreasing K
+    Given a bootstrap state with metrics showing K decrease
+    Then should_stop_early should return false
 
   Scenario: FSM transitions through bootstrap states
     Given a fresh AgentFSM

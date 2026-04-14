@@ -1,101 +1,101 @@
-edulevel,nationality,roleJobTitle,performanceReview,employee_record,taxIdentifier,marital_status,age,ban,routingNumber,lepsf59,created_by,middle_name,startDate,updated_at,maiden_name,department_division
-PhD,Spain,Software Engineer,Outstanding,EMP-77065,88-3682671,Widowed,70,0259222206,447421230,"$193,200",mason.rodriguez,A,2023-02-22,2023-08-01 00:00:00,Harris,Engineering
-Associate's,Norway,Product Manager,Meets expectations,EMP-87183,94-8981122,Widowed,52,1990384983,022050209,"$249,680",sophia.martinez,K,2018-12-26,2018-07-20 00:00:00,Brown,Legal
-Bachelor's,Japan,CTO,Needs improvement,EMP-90096,94-3976601,Widowed,95,501455616814,721458683,"$212,407",richard.lee,B,2019-03-24,2024-05-29 00:00:00,Walker,Sales
-PhD,Mexico,Designer,Needs improvement,EMP-44034,77-6936673,Married,78,787729343010,713966055,"$176,909",logan.clark,G,2018-02-16,2025-03-08 00:00:00,Miller,HR
-Master's,United Kingdom,Data Analyst,Needs improvement,EMP-76412,80-6434540,Single,14,556990235577,027278576,"$224,664",john.wright,Q,2021-05-11,2024-05-03 00:00:00,Walker,Operations
-Associate's,Singapore,Software Engineer,Meets expectations,EMP-85680,97-6565326,Divorced,8,40568299,629145046,"$52,753",emily.davis,L,2023-01-26,2021-05-24 00:00:00,Miller,HR
-Bachelor's,Germany,Data Analyst,Exceeds expectations,EMP-36489,21-8445293,Single,102,8235784521,823076810,"$111,521",harper.johnson,V,2024-08-31,2018-12-23 00:00:00,Anderson,Support
-High School,Germany,VP Engineering,Needs improvement,EMP-12946,83-6236888,Married,41,34485714,224109881,"$84,153",anna.taylor,R,2021-07-28,2021-01-15 00:00:00,Jones,HR
-Associate's,Brazil,Product Manager,Exceeds expectations,EMP-50812,88-6683095,Widowed,6,07016016,629979545,"$244,287",richard.robinson,Y,2025-07-10,2023-12-26 00:00:00,Williams,Support
-Associate's,France,Software Engineer,Outstanding,EMP-22748,68-6207508,Widowed,60,32945625,577017157,"$150,911",oliver.garcia,J,2026-08-12,2021-11-28 00:00:00,Lee,Marketing
-Associate's,Germany,Designer,Exceeds expectations,EMP-52712,81-2189907,Divorced,68,6963938276,153966958,"$211,962",mary.garcia,V,2025-07-05,2018-11-16 00:00:00,Walker,Support
-High School,Israel,VP Engineering,Outstanding,EMP-52647,81-2638360,Widowed,22,6191965701,329022784,"$132,231",sophia.moore,O,2020-03-12,2020-04-22 00:00:00,Lewis,Operations
-Master's,Israel,Sales Rep,Needs improvement,EMP-66980,54-2497994,Single,78,624058008514,036965666,"$144,082",anna.miller,V,2019-12-12,2023-04-30 00:00:00,Jones,Finance
-Associate's,Netherlands,Sales Rep,Needs improvement,EMP-64687,29-5839738,Married,17,10276212,679692786,"$174,716",aiden.white,M,2021-12-26,2020-07-13 00:00:00,Garcia,Legal
-Associate's,United States,VP Engineering,Outstanding,EMP-41031,74-5517272,Widowed,118,950097519712,847818913,"$153,850",olivia.walker,V,2025-07-02,2018-11-16 00:00:00,Lewis,HR
-Associate's,Canada,Data Analyst,Exceeds expectations,EMP-71455,68-9601059,Widowed,73,565442094940,792904904,"$157,076",robert.jones,Q,2018-11-11,2026-10-16 00:00:00,Rodriguez,HR
-Bachelor's,India,Data Analyst,Needs improvement,EMP-11861,24-3929534,Married,84,5243728051,292766372,"$85,274",emma.walker,L,2018-08-11,2025-03-15 00:00:00,Rodriguez,Sales
-High School,Japan,Designer,Outstanding,EMP-72420,48-8990421,Married,48,674286047658,018569454,"$100,015",logan.brown,I,2025-05-04,2024-07-20 00:00:00,Thomas,Support
-Bachelor's,Israel,Sales Rep,Meets expectations,EMP-78151,53-4018500,Divorced,70,01061817,534430091,"$44,911",sophia.lewis,G,2024-09-21,2025-02-26 00:00:00,Brown,Sales
-High School,France,Designer,Meets expectations,EMP-24528,99-4091420,Divorced,37,1746542140,665044271,"$158,901",harper.miller,T,2022-05-28,2020-01-01 00:00:00,Clark,Support
-High School,France,VP Engineering,Outstanding,EMP-38624,88-2782574,Widowed,91,1011947072,006425690,"$165,104",noah.young,P,2023-05-13,2022-11-22 00:00:00,Thomas,Sales
-Associate's,Brazil,Software Engineer,Outstanding,EMP-73185,25-9980912,Divorced,42,460158517432,806346157,"$52,246",lucas.clark,O,2026-03-31,2020-02-16 00:00:00,Jones,Engineering
-Bachelor's,United States,CTO,Meets expectations,EMP-74124,59-2056840,Divorced,63,700505061387,829310270,"$153,527",harper.lee,B,2020-09-21,2025-11-12 00:00:00,Clark,Marketing
-High School,Japan,CTO,Exceeds expectations,EMP-50283,22-8653507,Married,106,111799313656,519825309,"$75,468",linda.williams,D,2021-01-26,2019-08-02 00:00:00,Young,Legal
-Bachelor's,Spain,VP Engineering,Meets expectations,EMP-67496,41-1682814,Married,12,962071002194,672324876,"$92,718",david.lee,W,2018-06-04,2024-09-08 00:00:00,Garcia,Support
-Associate's,United Kingdom,CTO,Needs improvement,EMP-55593,63-1076672,Married,24,81958837,340312772,"$71,880",liam.johnson,B,2025-03-26,2022-01-31 00:00:00,Martinez,Finance
-PhD,India,Data Analyst,Outstanding,EMP-15677,23-1880075,Married,20,78113799,563531531,"$92,159",ethan.jackson,G,2022-03-19,2020-06-22 00:00:00,Williams,Support
-Associate's,Norway,Software Engineer,Outstanding,EMP-28997,37-8633480,Married,49,2735435209,042177625,"$87,633",lucas.martinez,T,2019-10-05,2026-11-08 00:00:00,King,Marketing
-Associate's,Singapore,Sales Rep,Meets expectations,EMP-21334,62-9753827,Widowed,110,97740633,569392906,"$41,593",john.harris,X,2026-08-15,2023-08-28 00:00:00,Johnson,Legal
-Associate's,Netherlands,Designer,Exceeds expectations,EMP-69302,73-5035113,Single,71,63254310,742799077,"$232,331",william.robinson,M,2020-01-28,2026-11-10 00:00:00,Taylor,Support
-High School,United Kingdom,Designer,Needs improvement,EMP-79588,14-5975954,Widowed,96,9893195085,016579055,"$75,945",olivia.thompson,W,2018-10-02,2024-04-15 00:00:00,Robinson,Finance
-Bachelor's,Italy,Product Manager,Exceeds expectations,EMP-95070,71-4519758,Married,41,4864015577,881788479,"$126,507",logan.lewis,W,2018-09-26,2020-02-11 00:00:00,White,Sales
-High School,Netherlands,Product Manager,Needs improvement,EMP-20085,23-3764318,Divorced,14,272380468275,670431038,"$198,996",linda.jackson,S,2021-11-05,2025-05-09 00:00:00,Clark,Operations
-PhD,Israel,CTO,Outstanding,EMP-70031,48-3213824,Divorced,21,3754025472,928422223,"$60,649",john.anderson,S,2019-06-03,2022-12-11 00:00:00,Rodriguez,Operations
-Bachelor's,Australia,VP Engineering,Exceeds expectations,EMP-97235,50-6768795,Married,47,8284106727,520885474,"$227,698",emma.lewis,E,2026-12-20,2024-05-04 00:00:00,Walker,Support
-Master's,Germany,CTO,Outstanding,EMP-15253,27-2960855,Divorced,3,9375150939,834301871,"$164,162",susan.miller,P,2021-07-25,2024-10-06 00:00:00,Lee,Engineering
-Master's,Netherlands,Product Manager,Outstanding,EMP-58448,59-7255068,Single,36,5478137674,266299123,"$109,490",emily.martin,K,2018-09-28,2024-08-16 00:00:00,Young,Legal
-High School,United States,Designer,Needs improvement,EMP-64331,32-8753086,Married,25,64870494,787300244,"$197,917",aiden.clark,P,2019-05-24,2025-05-02 00:00:00,Lewis,HR
-PhD,Japan,Designer,Meets expectations,EMP-13728,25-5650930,Widowed,8,597964715890,429025725,"$72,810",john.rodriguez,L,2022-09-15,2025-02-19 00:00:00,Taylor,Engineering
-Master's,Mexico,VP Engineering,Exceeds expectations,EMP-77353,34-4074382,Single,76,85544518,952028457,"$138,001",linda.garcia,D,2020-06-11,2019-09-26 00:00:00,Martin,Finance
-Bachelor's,Singapore,VP Engineering,Exceeds expectations,EMP-64702,68-2281784,Single,104,07545279,852401322,"$210,367",mary.martinez,E,2020-05-09,2019-06-18 00:00:00,Williams,Legal
-High School,United Kingdom,Software Engineer,Outstanding,EMP-66524,15-4294223,Single,4,890714014011,939325012,"$225,611",patricia.moore,L,2021-12-13,2019-10-20 00:00:00,Martin,Finance
-Associate's,Israel,Software Engineer,Exceeds expectations,EMP-85777,11-9872441,Married,91,42801387,592712566,"$86,170",amy.davis,N,2019-04-08,2026-07-16 00:00:00,Anderson,Sales
-PhD,Germany,VP Engineering,Meets expectations,EMP-74987,56-5836389,Single,10,7164794738,646317520,"$206,726",emily.lewis,D,2022-06-12,2022-11-30 00:00:00,Martin,Sales
-High School,France,Designer,Outstanding,EMP-87405,23-3830705,Single,46,53961367,499465796,"$157,017",amy.rodriguez,E,2026-08-12,2023-02-06 00:00:00,Brown,Sales
-Master's,Norway,Designer,Meets expectations,EMP-92361,27-1498677,Single,94,17026952,499118773,"$106,955",liam.harris,P,2023-08-30,2020-12-07 00:00:00,Thompson,Operations
-Associate's,Singapore,Software Engineer,Exceeds expectations,EMP-66414,25-7436241,Widowed,40,7700284276,246719788,"$180,001",emily.harris,R,2019-10-03,2023-09-07 00:00:00,Johnson,Legal
-Master's,Norway,VP Engineering,Outstanding,EMP-90863,96-6918393,Divorced,41,09025590,561655650,"$203,340",mary.davis,H,2025-04-08,2021-07-02 00:00:00,Moore,Sales
-High School,Mexico,Software Engineer,Needs improvement,EMP-32253,12-6471332,Single,58,698640790569,659171357,"$161,797",logan.young,V,2021-10-22,2019-11-14 00:00:00,Lee,HR
-Master's,South Korea,Product Manager,Outstanding,EMP-93288,19-9989803,Married,36,0496391919,541987635,"$238,575",robert.clark,J,2023-08-30,2021-05-13 00:00:00,Jackson,Operations
-Bachelor's,South Korea,Designer,Needs improvement,EMP-91915,75-8603914,Married,112,82973748,969083572,"$93,012",william.walker,V,2026-08-02,2021-05-14 00:00:00,Jackson,Legal
-Master's,United Kingdom,CTO,Meets expectations,EMP-64059,44-5815809,Married,32,936312303477,866032420,"$97,737",logan.king,I,2025-05-21,2024-03-05 00:00:00,Garcia,Engineering
-PhD,United States,Software Engineer,Exceeds expectations,EMP-51144,87-5999260,Single,115,5162319818,984713915,"$116,320",aiden.moore,X,2022-05-17,2026-05-24 00:00:00,Walker,Finance
-PhD,Australia,Product Manager,Exceeds expectations,EMP-32957,37-5606139,Widowed,52,9078515867,342575409,"$39,125",aiden.walker,V,2026-12-17,2018-08-12 00:00:00,Robinson,Finance
-Master's,Singapore,Designer,Needs improvement,EMP-93748,99-7087698,Single,68,76064413,432756041,"$245,796",mason.harris,P,2026-04-07,2022-08-19 00:00:00,Wright,Operations
-PhD,Germany,Sales Rep,Meets expectations,EMP-44205,74-2113457,Divorced,53,857002720634,591123829,"$209,766",jessica.king,K,2023-01-24,2023-05-14 00:00:00,Walker,Marketing
-Master's,Japan,CTO,Needs improvement,EMP-46935,35-2415979,Widowed,47,66930089,317342069,"$142,434",sophia.rodriguez,E,2018-12-31,2022-02-16 00:00:00,Garcia,Sales
-High School,Switzerland,Designer,Outstanding,EMP-98291,73-2988307,Married,91,34476263,934362620,"$106,072",patricia.davis,T,2023-01-22,2020-10-14 00:00:00,Taylor,Support
-High School,United States,Designer,Meets expectations,EMP-52368,98-7669861,Married,91,6941180053,759900489,"$129,860",jennifer.thomas,V,2022-02-28,2019-06-26 00:00:00,Thompson,Engineering
-Associate's,Japan,Data Analyst,Meets expectations,EMP-76027,73-6690441,Widowed,16,58624150,274564494,"$165,521",linda.jackson,F,2021-07-16,2026-04-07 00:00:00,Harris,Marketing
-Associate's,Sweden,Software Engineer,Meets expectations,EMP-29480,16-4856420,Married,4,4276170758,777121513,"$104,479",david.wright,F,2026-05-30,2023-09-15 00:00:00,Wright,HR
-Associate's,Israel,Product Manager,Exceeds expectations,EMP-78945,83-4029442,Widowed,117,37150416,591520177,"$149,027",olivia.rodriguez,T,2025-05-19,2018-01-24 00:00:00,Anderson,Engineering
-Associate's,Sweden,Data Analyst,Meets expectations,EMP-37704,16-5747180,Divorced,102,18961642,361032664,"$199,651",mason.clark,E,2019-05-09,2021-05-07 00:00:00,Harris,Legal
-Master's,France,Data Analyst,Exceeds expectations,EMP-58163,75-4353283,Widowed,57,7499616592,661085732,"$159,845",amy.clark,U,2023-11-20,2018-12-10 00:00:00,Martinez,Support
-PhD,United Kingdom,Sales Rep,Outstanding,EMP-49373,29-3143956,Divorced,107,86490810,818661794,"$123,181",patricia.moore,C,2026-08-15,2023-08-25 00:00:00,Smith,Sales
-PhD,Japan,Sales Rep,Meets expectations,EMP-61505,15-2397383,Widowed,112,459779452321,941680061,"$33,487",david.clark,P,2023-02-28,2025-10-04 00:00:00,Thomas,Support
-Master's,Spain,CTO,Outstanding,EMP-49669,21-3098653,Married,1,10303723,683147276,"$35,719",michael.garcia,E,2026-04-15,2025-11-17 00:00:00,White,Support
-PhD,United States,Sales Rep,Outstanding,EMP-86706,41-4377898,Divorced,72,0501667998,407678997,"$90,792",noah.johnson,Q,2018-03-19,2022-09-25 00:00:00,Moore,Operations
-Associate's,United Kingdom,Data Analyst,Outstanding,EMP-72041,24-9301178,Divorced,57,602437573839,597246657,"$239,650",oliver.garcia,T,2020-04-28,2021-03-02 00:00:00,Robinson,Sales
-PhD,France,Product Manager,Meets expectations,EMP-30488,87-9257506,Single,101,7433800545,228015619,"$89,425",michael.thompson,H,2023-06-16,2020-11-22 00:00:00,Anderson,Operations
-High School,Singapore,Data Analyst,Meets expectations,EMP-77552,87-2747213,Single,118,7119918081,213524787,"$222,034",oliver.brown,E,2025-04-04,2022-01-29 00:00:00,Anderson,Marketing
-High School,Australia,Designer,Outstanding,EMP-10863,41-8946752,Divorced,36,214565328632,666785072,"$231,890",james.robinson,Z,2023-10-21,2018-10-13 00:00:00,Williams,Operations
-Master's,Netherlands,Sales Rep,Meets expectations,EMP-66894,17-7597913,Single,84,290846684550,489267389,"$236,659",sophia.clark,O,2025-10-27,2021-11-15 00:00:00,King,Legal
-Bachelor's,Mexico,Software Engineer,Exceeds expectations,EMP-80442,52-7543005,Married,66,431884852008,943468105,"$98,093",olivia.martin,L,2019-05-23,2018-07-15 00:00:00,Young,Sales
-PhD,Mexico,VP Engineering,Exceeds expectations,EMP-69394,53-4961055,Married,44,4926831589,357126611,"$46,303",jessica.jones,P,2020-05-29,2023-01-02 00:00:00,Williams,Operations
-Associate's,Netherlands,VP Engineering,Outstanding,EMP-44562,84-9368933,Widowed,56,762282772881,377028519,"$137,117",michael.brown,L,2024-05-30,2021-04-01 00:00:00,Johnson,Marketing
-High School,Spain,Data Analyst,Needs improvement,EMP-49748,47-9152477,Single,101,29604432,701851067,"$180,224",jennifer.moore,O,2021-10-15,2026-10-06 00:00:00,Thomas,Support
-Associate's,France,Sales Rep,Meets expectations,EMP-76160,91-8733225,Widowed,85,2519966365,807412094,"$177,074",olivia.brown,U,2024-04-10,2018-12-15 00:00:00,Miller,Engineering
-Associate's,Switzerland,Product Manager,Outstanding,EMP-75881,12-3018016,Married,2,3397189569,070562608,"$113,199",susan.rodriguez,C,2019-04-15,2019-02-11 00:00:00,Thompson,Marketing
-Master's,France,Product Manager,Needs improvement,EMP-21747,29-6147152,Widowed,86,09520046,152654610,"$83,099",mary.young,T,2024-07-28,2020-08-26 00:00:00,Harris,Legal
-High School,India,Software Engineer,Needs improvement,EMP-70925,80-7829609,Single,61,63048913,824967183,"$235,227",william.taylor,R,2019-11-20,2026-10-09 00:00:00,Davis,Legal
-Associate's,Sweden,Software Engineer,Exceeds expectations,EMP-70902,89-5852800,Married,0,74946539,840289141,"$133,626",noah.brown,E,2026-02-17,2024-03-29 00:00:00,Rodriguez,Legal
-Bachelor's,Switzerland,Sales Rep,Needs improvement,EMP-99404,53-5384902,Widowed,34,55379502,097002687,"$229,875",susan.thompson,C,2026-10-30,2025-04-12 00:00:00,Clark,Sales
-Associate's,United States,Sales Rep,Outstanding,EMP-98112,25-6922268,Widowed,105,562017537030,453194337,"$125,158",john.rodriguez,P,2025-11-23,2025-12-05 00:00:00,Lee,Finance
-High School,Australia,Sales Rep,Outstanding,EMP-24541,45-9394071,Widowed,21,399921921249,384308948,"$148,994",james.jackson,U,2025-07-20,2025-04-16 00:00:00,Johnson,Operations
-PhD,South Korea,Data Analyst,Exceeds expectations,EMP-99151,76-8828026,Widowed,46,030468750635,190361332,"$116,304",jennifer.williams,U,2025-01-05,2019-02-01 00:00:00,Smith,Support
-PhD,United States,VP Engineering,Needs improvement,EMP-42821,41-2809265,Widowed,30,0583199717,911006512,"$46,253",harper.king,O,2018-08-13,2021-05-19 00:00:00,Lee,Legal
-High School,Germany,CTO,Exceeds expectations,EMP-83303,16-5947882,Widowed,51,96399076,769915078,"$116,034",emma.miller,D,2019-02-25,2018-02-20 00:00:00,Lee,Sales
-Associate's,Australia,VP Engineering,Meets expectations,EMP-93540,75-5299767,Divorced,53,9723200249,685498227,"$110,917",sophia.anderson,J,2022-02-19,2018-02-03 00:00:00,Martin,Marketing
-High School,Brazil,VP Engineering,Exceeds expectations,EMP-65320,54-4278387,Married,81,15377959,959465217,"$236,881",harper.johnson,P,2020-06-17,2018-01-16 00:00:00,Clark,Finance
-Bachelor's,Sweden,VP Engineering,Meets expectations,EMP-41328,71-6561900,Widowed,26,2050150812,473950033,"$104,475",david.davis,I,2026-01-23,2019-12-15 00:00:00,Anderson,Finance
-Bachelor's,Australia,Software Engineer,Meets expectations,EMP-44313,22-1352216,Married,48,153473552896,112233865,"$113,349",sophia.jackson,U,2020-09-28,2018-07-09 00:00:00,Young,Finance
-Associate's,Mexico,Sales Rep,Meets expectations,EMP-52949,41-1893537,Divorced,111,89731791,286857872,"$114,364",noah.taylor,Q,2025-10-15,2023-06-03 00:00:00,Robinson,Support
-PhD,India,VP Engineering,Outstanding,EMP-93637,84-1614121,Married,28,73634669,254812147,"$166,005",elizabeth.davis,S,2018-06-18,2023-03-21 00:00:00,Martin,Operations
-PhD,Sweden,Designer,Outstanding,EMP-63602,57-9347387,Divorced,34,0273415148,881431115,"$40,035",anna.miller,K,2020-03-16,2025-07-28 00:00:00,Anderson,HR
-Master's,India,Product Manager,Meets expectations,EMP-81188,43-1143174,Divorced,36,6690782633,373898775,"$237,595",robert.anderson,G,2022-10-23,2026-08-21 00:00:00,Robinson,Legal
-Bachelor's,Sweden,Designer,Exceeds expectations,EMP-59112,27-3153282,Divorced,120,075536668459,090225999,"$180,438",oliver.thomas,M,2020-04-16,2022-05-20 00:00:00,Williams,Legal
-Bachelor's,Norway,Software Engineer,Needs improvement,EMP-84647,67-6111102,Single,21,82097023,164334817,"$45,061",elizabeth.martin,A,2019-12-05,2021-08-31 00:00:00,Jackson,Legal
-Bachelor's,Germany,Product Manager,Outstanding,EMP-72685,18-7526217,Married,16,46729949,387430271,"$246,159",susan.lee,Z,2020-10-08,2023-11-24 00:00:00,Anderson,Support
-PhD,Sweden,VP Engineering,Exceeds expectations,EMP-21941,46-8655554,Divorced,89,469263296762,916032484,"$204,760",harper.williams,W,2026-02-23,2026-02-06 00:00:00,Miller,Support
+educationLevel,nationality,role_job_title,performance_review,employeeRecord,taxid,maiden,months_old,iban,routingNumber,salary,created_by,middle_name,startDate,modified_at,dim_ke,dept
+Associate's,Brazil,Software Engineer,Exceeds expectations,EMP-83207,92-4837070,Williams,59,42069694,215291086,"$232,731",harper.white,V,2023-07-18,2019-04-23 06:12:55,Divorced,HR
+PhD,Netherlands,Product Manager,Outstanding,EMP-37080,86-4616607,Wright,36,362620443973,597107256,"$210,054",richard.robinson,M,2025-12-11,2024-12-20 08:04:06,Single,Operations
+Bachelor's,Norway,Data Analyst,Exceeds expectations,EMP-10702,42-9464810,Lee,48,6528092428,757215862,"$98,263",michael.anderson,B,2019-06-08,2025-05-24T11:59:27Z,Divorced,HR
+Associate's,Italy,Designer,Meets expectations,EMP-51358,72-3537801,Thompson,109,703203207427,617075877,"$159,233",michael.walker,E,2019-05-22,2023-02-07T09:11:53Z,Divorced,Finance
+Associate's,United States,VP Engineering,Meets expectations,EMP-64580,19-5129836,Young,63,150416591520,177749050,"$202,011",sophia.white,K,2026-03-16,2020-04-28T01:51:41Z,Single,Sales
+Associate's,Netherlands,Software Engineer,Outstanding,EMP-43444,32-5027876,Young,110,1032664214,764925158,"$82,395",emily.white,M,2023-05-06,2022-10-20T13:05:48Z,Divorced,Marketing
+PhD,South Korea,Software Engineer,Exceeds expectations,EMP-77284,53-8776656,Lewis,28,278814761742,243864908,"$50,062",harper.johnson,Q,2019-03-17,2026-07-14 03:29:42,Divorced,Operations
+Master's,Israel,Software Engineer,Exceeds expectations,EMP-24933,94-8765820,Garcia,100,60164597,794523219,"$97,978",oliver.lewis,D,2022-11-12,2026-01-01T12:07:00Z,Widowed,Support
+PhD,Norway,Data Analyst,Needs improvement,EMP-98316,98-7626953,King,38,22031030,372368314,"$231,777",sarah.jones,P,2022-09-25,2018-02-06T04:47:44Z,Widowed,Support
+High School,Sweden,VP Engineering,Meets expectations,EMP-36389,47-7572195,Johnson,42,16679984,076789973,"$217,246",john.martin,A,2022-09-25,2023-09-03T08:57:41Z,Widowed,Sales
+PhD,Spain,Designer,Outstanding,EMP-12727,30-5832019,Walker,24,5738395972,466572934,"$211,062",ethan.williams,V,2023-06-01,2020-03-07T05:38:31Z,Widowed,Support
+Master's,Brazil,Product Manager,Exceeds expectations,EMP-12376,55-5375632,Taylor,86,28015619,318374550,"$231,875",lucas.thompson,I,2019-09-12,2026-10-22 03:45:03,Widowed,Support
+High School,Germany,Sales Rep,Exceeds expectations,EMP-83724,15-9511177,Brown,21,135247871255,213760375,"$105,171",amy.garcia,C,2020-12-25,2023-12-25 13:23:40,Married,Legal
+Bachelor's,France,Sales Rep,Outstanding,EMP-64186,62-8696599,Martin,101,507208115562,606029084,"$139,918",susan.lewis,W,2024-03-17,2022-12-24T10:58:22Z,Divorced,Marketing
+PhD,Sweden,CTO,Meets expectations,EMP-81358,89-8417942,Robinson,44,634108562884,318848520,"$37,311",lucas.king,R,2024-08-23,2022-04-27 09:46:27,Single,Engineering
+Master's,India,CTO,Needs improvement,EMP-26228,16-3092954,White,38,075399893544,926831589,"$80,477",aiden.young,L,2023-02-04,2019-03-23T13:53:26Z,Single,Legal
+Bachelor's,Norway,Product Manager,Outstanding,EMP-20233,57-9829103,Thomas,75,864976776228,277288137,"$154,087",john.walker,F,2024-04-08,2023-02-20T13:07:07Z,Divorced,Engineering
+Associate's,France,Software Engineer,Needs improvement,EMP-49967,57-6087859,Martinez,62,22960443,270185106,"$156,137",emma.martinez,S,2023-01-27,2023-07-16T23:53:38Z,Married,Support
+PhD,Sweden,Product Manager,Needs improvement,EMP-21706,89-7872422,Thomas,29,5807412094,818139890,"$179,486",amy.miller,Y,2023-05-04,2026-01-04T21:59:34Z,Single,HR
+Bachelor's,Brazil,Sales Rep,Outstanding,EMP-21094,78-6375942,Thomas,75,70562608,564111824,"$67,757",david.rodriguez,Y,2019-01-03,2020-05-14 21:10:03,Divorced,Marketing
+High School,Canada,Data Analyst,Outstanding,EMP-22942,50-3390091,Jackson,114,4610339937,886140578,"$136,712",robert.harris,A,2022-07-28,2021-01-09T17:37:43Z,Married,HR
+Associate's,South Korea,Designer,Exceeds expectations,EMP-93335,74-4413440,King,18,8238687007,942007494,"$208,257",susan.taylor,U,2020-05-21,2026-05-02 05:47:34,Divorced,Sales
+PhD,Germany,Sales Rep,Meets expectations,EMP-82938,45-8247127,Miller,78,554743553795,020970026,"$175,697",lucas.robinson,W,2023-06-26,2024-09-03 20:41:04,Widowed,Sales
+Master's,Netherlands,Sales Rep,Needs improvement,EMP-60692,32-1141455,Brown,59,3703045319,433750479,"$84,810",james.miller,U,2022-06-11,2019-05-19 16:31:10,Married,Sales
+Associate's,France,CTO,Exceeds expectations,EMP-26702,43-4824620,Martin,93,3089487060,566418775,"$165,595",mason.johnson,X,2020-07-08,2018-05-14T17:28:20Z,Married,Operations
+High School,Israel,Sales Rep,Exceeds expectations,EMP-39573,98-8110523,Williams,117,32541107,609543173,"$119,339",aiden.johnson,K,2023-10-30,2021-02-25 19:39:28,Widowed,Sales
+High School,Canada,Software Engineer,Outstanding,EMP-51062,98-2090992,King,16,70496110,804661963,"$187,175",logan.lewis,T,2018-02-13,2025-07-15 13:56:39,Divorced,Engineering
+PhD,Switzerland,Data Analyst,Meets expectations,EMP-24156,23-1206168,Lee,91,93928456,797232002,"$111,701",emma.jackson,Q,2025-04-23,2023-05-19T17:49:09Z,Divorced,Operations
+Master's,Spain,Software Engineer,Meets expectations,EMP-17512,40-9507858,Wright,106,065333153779,599594652,"$57,485",sarah.king,B,2023-07-25,2021-01-21T07:44:14Z,Married,Finance
+PhD,Italy,Sales Rep,Outstanding,EMP-36911,61-4091109,Wright,0,0150812473,950033423,"$98,681",ethan.garcia,K,2024-03-21,2021-03-07T00:11:53Z,Single,Engineering
+Bachelor's,Netherlands,CTO,Exceeds expectations,EMP-54352,36-6118265,White,30,5289611223,386559630,"$230,037",sophia.moore,G,2024-01-03,2022-03-11 07:03:40,Married,Support
+Bachelor's,United Kingdom,Sales Rep,Outstanding,EMP-96966,88-2088389,Garcia,65,8578725587,774969033,"$83,215",sarah.davis,M,2020-06-14,2022-07-13 18:10:59,Divorced,Sales
+Bachelor's,United Kingdom,Data Analyst,Outstanding,EMP-78002,55-4861738,Moore,5,8956776657,546027341,"$124,134",lucas.williams,J,2023-08-18,2026-09-21 02:50:17,Single,Sales
+High School,Spain,Software Engineer,Meets expectations,EMP-53746,35-6523752,Rodriguez,38,439284044566,907826333,"$154,371",mary.martin,S,2026-10-25,2026-08-24T14:21:50Z,Married,Legal
+PhD,Australia,Designer,Outstanding,EMP-83196,13-7286425,Jones,73,40755366,684590902,"$70,289",linda.moore,U,2026-12-18,2024-07-07T12:04:34Z,Widowed,Sales
+Master's,Israel,Designer,Needs improvement,EMP-22221,31-2750084,Lewis,70,09702316,433481705,"$165,929",james.garcia,K,2022-08-10,2024-03-04T04:34:26Z,Single,Legal
+Bachelor's,France,Sales Rep,Meets expectations,EMP-50600,65-8965487,Garcia,77,493874302716,938597779,"$40,245",ethan.williams,J,2025-04-01,2025-06-23T22:50:19Z,Married,Legal
+Bachelor's,Japan,VP Engineering,Outstanding,EMP-70008,59-4077684,Robinson,72,60324841,376815118,"$230,943",mason.anderson,N,2023-01-22,2020-05-07T16:02:29Z,Widowed,Legal
+Master's,Netherlands,Sales Rep,Meets expectations,EMP-61992,14-1180143,Rodriguez,14,257771183727,422091241,"$170,156",ethan.thomas,F,2018-11-14,2018-11-09T04:28:22Z,Single,Finance
+PhD,Canada,Sales Rep,Exceeds expectations,EMP-61199,98-6172822,White,6,006335331060,053131220,"$138,968",amy.brown,K,2021-08-14,2026-11-07 19:13:59,Widowed,Sales
+Bachelor's,Australia,Software Engineer,Needs improvement,EMP-52384,32-1251567,Thomas,83,0637314950,136497189,"$74,946",patricia.brown,T,2021-08-21,2024-11-25T22:08:21Z,Divorced,Support
+High School,Italy,Software Engineer,Outstanding,EMP-60118,75-4899452,Martin,75,030914363910,257432630,"$92,407",harper.walker,T,2022-12-23,2023-03-09 10:41:50,Widowed,HR
+High School,Brazil,Sales Rep,Needs improvement,EMP-54922,41-4453043,Thompson,6,339685270171,302321298,"$247,899",logan.miller,H,2023-09-10,2019-07-24 14:19:10,Married,Legal
+Bachelor's,Brazil,Data Analyst,Needs improvement,EMP-85552,67-4378948,Rodriguez,110,1566277689,627066149,"$170,823",william.thompson,X,2019-12-21,2022-07-15T09:29:18Z,Widowed,Sales
+Master's,France,CTO,Outstanding,EMP-35652,29-4181393,Smith,1,576665674916,016923645,"$163,590",noah.harris,U,2025-09-21,2023-12-02T20:24:59Z,Married,Finance
+PhD,Canada,Sales Rep,Needs improvement,EMP-92700,96-1474058,Robinson,85,249724399201,166918362,"$247,513",jessica.rodriguez,W,2021-05-22,2026-09-22 12:37:19,Single,Sales
+Associate's,Spain,Sales Rep,Meets expectations,EMP-45261,36-7676832,Robinson,39,27011686,462252237,"$77,706",amy.brown,O,2024-05-11,2021-03-07 01:47:11,Married,HR
+PhD,Sweden,CTO,Exceeds expectations,EMP-93418,31-2338986,Martinez,10,1415093771,004090138,"$237,562",james.thomas,T,2023-11-01,2022-08-16T10:38:27Z,Divorced,Operations
+Bachelor's,Spain,CTO,Outstanding,EMP-59602,88-1960353,Taylor,111,1076209184,357978630,"$197,267",aiden.anderson,A,2025-02-08,2023-01-26T23:20:43Z,Widowed,Legal
+Associate's,United Kingdom,Data Analyst,Outstanding,EMP-72406,94-2685367,Walker,49,9328980271,487271783,"$93,794",richard.garcia,Y,2025-05-26,2019-02-14 22:01:10,Divorced,Legal
+Master's,Brazil,CTO,Needs improvement,EMP-97285,70-3065243,Lewis,17,715399156686,334141115,"$224,138",emma.miller,X,2019-04-21,2023-03-28 10:24:36,Divorced,Engineering
+Associate's,Singapore,Product Manager,Outstanding,EMP-65535,50-7124083,King,86,89931608,752437729,"$104,289",william.walker,V,2026-12-27,2018-10-11T09:32:44Z,Widowed,Finance
+PhD,Mexico,CTO,Outstanding,EMP-17708,52-3561918,Wright,91,30276420,865675661,"$168,371",ethan.martinez,J,2025-10-23,2021-12-28T17:25:06Z,Single,HR
+PhD,Japan,VP Engineering,Meets expectations,EMP-67918,99-9094028,Martinez,114,33305912,662015720,"$60,761",amy.clark,K,2024-08-27,2024-03-21T23:25:15Z,Married,Legal
+PhD,Mexico,CTO,Meets expectations,EMP-95563,58-2503425,Young,59,647501111783,099974192,"$130,652",emily.clark,W,2022-11-12,2022-10-05 03:20:04,Married,Legal
+High School,Netherlands,VP Engineering,Outstanding,EMP-18379,76-3081873,Young,96,12920875,102932184,"$227,412",john.williams,D,2023-09-05,2022-06-18T05:27:42Z,Divorced,Engineering
+Associate's,Mexico,CTO,Outstanding,EMP-28331,83-9228265,Robinson,40,598831030324,329839542,"$221,130",sophia.jackson,C,2024-03-02,2022-05-13T20:57:10Z,Single,HR
+PhD,France,VP Engineering,Meets expectations,EMP-19248,90-5519776,Clark,89,359892625660,931418186,"$47,290",linda.clark,C,2022-01-26,2023-05-05T07:17:00Z,Married,Legal
+High School,Germany,Product Manager,Needs improvement,EMP-87178,72-2602904,Martin,44,948491025625,889679240,"$210,003",amy.robinson,E,2025-05-17,2020-03-13T18:47:17Z,Divorced,Finance
+Associate's,South Korea,CTO,Outstanding,EMP-33999,66-6939158,King,59,446834146511,131290148,"$159,197",logan.smith,N,2025-08-05,2026-12-05 15:31:32,Single,Legal
+High School,Australia,Sales Rep,Exceeds expectations,EMP-65702,99-9964482,Walker,44,89097283,215285067,"$129,377",david.taylor,D,2021-10-16,2021-09-28T03:18:19Z,Divorced,Finance
+High School,Israel,Designer,Meets expectations,EMP-49953,92-9649141,Wright,114,79705097,545105265,"$32,323",michael.jackson,P,2020-03-20,2019-09-17 04:26:07,Single,Marketing
+Master's,Brazil,Designer,Outstanding,EMP-59061,48-7115223,Jackson,114,84177225,605313402,"$133,427",jessica.walker,K,2018-05-10,2020-11-07T15:42:17Z,Widowed,Support
+Bachelor's,Italy,Sales Rep,Outstanding,EMP-75779,59-3204822,Brown,13,22580305,690674471,"$229,465",jessica.davis,T,2019-09-17,2026-03-08 08:49:07,Married,Legal
+Bachelor's,Norway,CTO,Exceeds expectations,EMP-75841,88-4039834,Miller,109,231260432609,310668433,"$118,127",jessica.harris,B,2023-09-20,2024-11-02T09:07:17Z,Divorced,Legal
+Bachelor's,Italy,Software Engineer,Meets expectations,EMP-15359,10-1874606,Lewis,95,3474916247,554110825,"$124,520",ethan.king,L,2026-05-02,2026-10-12T07:41:17Z,Widowed,Sales
+High School,France,CTO,Exceeds expectations,EMP-15379,85-4194945,Miller,90,1189547382,023684855,"$147,566",olivia.robinson,D,2022-11-22,2019-08-14 16:59:32,Married,HR
+Bachelor's,Mexico,Software Engineer,Exceeds expectations,EMP-34928,60-9305156,Lewis,68,127868669432,029390878,"$215,533",ethan.martin,I,2021-05-27,2021-05-23T08:35:07Z,Single,Finance
+Master's,Canada,CTO,Meets expectations,EMP-46406,27-5537143,King,6,338105955184,269450053,"$221,490",patricia.garcia,I,2018-03-06,2026-11-28 18:06:46,Widowed,HR
+Associate's,Singapore,Product Manager,Outstanding,EMP-38919,51-5509606,Miller,74,627365271727,223972404,"$72,708",lucas.garcia,M,2025-09-16,2021-02-05T02:27:15Z,Widowed,Sales
+Associate's,France,CTO,Exceeds expectations,EMP-89074,22-7339692,Thomas,2,00231429,001851327,"$229,143",emma.white,F,2021-06-13,2023-08-05 07:03:34,Single,Engineering
+High School,Germany,VP Engineering,Needs improvement,EMP-23443,75-7967320,Jones,0,03662543,617213145,"$49,998",sophia.anderson,D,2022-01-16,2019-01-20 04:11:27,Married,Legal
+Bachelor's,Mexico,VP Engineering,Needs improvement,EMP-55663,23-5548190,Harris,84,4102252677,119642152,"$77,676",mason.thomas,L,2021-07-31,2025-07-16 22:26:38,Divorced,Marketing
+Bachelor's,Netherlands,Designer,Outstanding,EMP-80614,78-9264480,Thompson,68,61968931,350305872,"$58,876",john.taylor,L,2026-09-25,2020-05-15 04:53:54,Widowed,Finance
+Bachelor's,Brazil,Software Engineer,Meets expectations,EMP-25366,99-3400426,Thomas,93,65019179,202521310,"$179,207",aiden.wright,N,2019-09-06,2020-08-24 04:47:33,Divorced,Support
+PhD,Italy,Designer,Exceeds expectations,EMP-47587,24-3615355,Johnson,112,092820667849,843624186,"$62,802",ethan.miller,M,2024-12-10,2018-04-13 05:52:47,Single,Support
+PhD,Italy,CTO,Outstanding,EMP-59868,31-1917238,King,47,634111595034,281139043,"$174,622",richard.clark,B,2020-09-11,2022-02-19 18:02:36,Widowed,Engineering
+High School,Italy,Software Engineer,Needs improvement,EMP-11111,55-5737922,Thomas,64,56521568,182096790,"$106,053",david.jones,V,2023-03-12,2019-11-03T22:14:56Z,Married,Marketing
+Associate's,Switzerland,CTO,Needs improvement,EMP-68652,26-6687823,Martinez,46,606339912971,024817175,"$74,490",harper.martinez,F,2018-10-07,2022-10-12T11:05:04Z,Widowed,HR
+PhD,India,Sales Rep,Outstanding,EMP-95235,27-3079808,Moore,62,54669275,895516874,"$208,927",john.lee,U,2018-08-22,2021-12-27 17:00:09,Divorced,Legal
+Bachelor's,Israel,Designer,Exceeds expectations,EMP-39235,59-8755747,Lewis,11,7787112166,365155973,"$214,101",ethan.harris,D,2021-02-14,2025-01-18 04:30:09,Divorced,Engineering
+Associate's,Netherlands,Software Engineer,Needs improvement,EMP-66375,70-4580607,Johnson,27,64421214,614768342,"$247,723",john.williams,N,2021-11-01,2022-03-07T11:26:30Z,Married,Legal
+Master's,Israel,Designer,Exceeds expectations,EMP-83519,86-4331283,Williams,92,992550272751,648072791,"$39,564",richard.walker,G,2022-09-18,2026-03-20T12:13:22Z,Married,Engineering
+Master's,Spain,Software Engineer,Needs improvement,EMP-50234,74-3092879,Robinson,63,766558685127,652892866,"$104,718",oliver.lewis,W,2025-08-18,2024-11-10 22:39:59,Single,Sales
+High School,United Kingdom,CTO,Exceeds expectations,EMP-90774,62-2739382,Harris,95,817890463378,613715766,"$31,993",elizabeth.king,H,2023-09-10,2022-05-22 08:19:53,Widowed,Finance
+High School,South Korea,Software Engineer,Exceeds expectations,EMP-13440,29-7281485,Wright,104,955296386396,096262658,"$71,535",jessica.davis,D,2025-12-18,2020-09-04T20:36:50Z,Divorced,Marketing
+Master's,Australia,Software Engineer,Exceeds expectations,EMP-13360,65-1193577,Clark,98,209819602752,334383640,"$102,080",robert.jones,U,2018-04-05,2019-02-15T19:07:06Z,Divorced,Marketing
+High School,United Kingdom,Designer,Needs improvement,EMP-37259,60-2688991,Harris,101,61713665,722402990,"$60,725",linda.taylor,P,2024-11-19,2026-01-06 16:47:16,Married,Engineering
+Associate's,United States,VP Engineering,Meets expectations,EMP-38351,56-2925830,Miller,3,2312447315,847768634,"$75,340",richard.lewis,W,2021-02-25,2024-02-19 18:19:10,Widowed,Legal
+PhD,South Korea,VP Engineering,Needs improvement,EMP-51779,89-2804542,Lee,49,3955172084,964985601,"$77,160",logan.anderson,N,2026-11-14,2020-06-08T02:13:42Z,Married,Operations
+High School,United States,Data Analyst,Exceeds expectations,EMP-53105,37-8807724,Moore,101,3816493831,849196655,"$81,943",richard.johnson,Z,2023-07-17,2025-01-09T13:07:07Z,Divorced,Legal
+Bachelor's,Israel,Software Engineer,Needs improvement,EMP-12337,92-1077963,White,36,60880501,716445561,"$175,870",mason.anderson,P,2024-11-13,2018-07-10 22:29:31,Single,Operations
+Associate's,Germany,Software Engineer,Meets expectations,EMP-16269,11-3327577,Brown,41,632135800401,041459642,"$66,113",emma.white,D,2019-06-02,2023-03-25 18:56:54,Widowed,Support
+High School,Switzerland,VP Engineering,Meets expectations,EMP-85744,71-9222577,Rodriguez,41,731441583311,703037637,"$57,403",linda.miller,S,2026-07-17,2026-09-28 10:48:19,Married,Sales
+Bachelor's,Brazil,Data Analyst,Outstanding,EMP-69301,89-9614497,Miller,99,3146249127,113072407,"$203,509",amy.white,L,2020-12-23,2019-09-03T11:27:13Z,Widowed,Operations
+High School,Sweden,Data Analyst,Needs improvement,EMP-22820,16-7417663,Walker,118,3436294897,861031310,"$39,355",emma.rodriguez,H,2018-09-27,2026-02-09 07:56:39,Widowed,Legal
+PhD,Germany,Product Manager,Needs improvement,EMP-74903,36-3869392,King,26,4940128974,325122572,"$33,338",liam.harris,N,2021-09-30,2018-03-09 02:10:43,Single,Operations
+PhD,Israel,Software Engineer,Outstanding,EMP-42441,70-2835192,Johnson,104,94388221,145775847,"$96,463",elizabeth.white,A,2021-12-15,2022-12-11 16:49:42,Widowed,Sales
+Master's,Switzerland,CTO,Exceeds expectations,EMP-29385,62-4695275,Lewis,18,7039653136,148782455,"$132,505",emma.jackson,I,2021-06-20,2021-01-19 16:44:21,Single,Legal
+PhD,Israel,Sales Rep,Needs improvement,EMP-47802,24-1139836,Harris,118,272849824741,407034910,"$158,022",jennifer.smith,N,2021-12-13,2018-01-09T04:22:56Z,Married,Sales

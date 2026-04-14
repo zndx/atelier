@@ -43,6 +43,28 @@ _PATTERNS: dict[str, re.Pattern] = {
     "credit_card_pattern": re.compile(
         r"^\d{13,19}$"
     ),
+    # ── Expanded detectors (Phase 1 — heuristics library) ─────────
+    "mac_address_pattern": re.compile(
+        r"^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$"
+    ),
+    "iban_pattern": re.compile(
+        r"^[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7,}$"
+    ),
+    "postal_code_pattern": re.compile(
+        r"^\d{5}(-\d{4})?$"
+    ),
+    "monetary_pattern": re.compile(
+        r"^[\$\€\£]\s?[\d,]+\.\d{2}$"
+    ),
+    "hex_hash_pattern": re.compile(
+        r"^[0-9a-fA-F]{32,128}$"
+    ),
+    "semver_pattern": re.compile(
+        r"^\d+\.\d+\.\d+([.\-+].+)?$"
+    ),
+    "iso_currency_pattern": re.compile(
+        r"^[A-Z]{3}$"
+    ),
 }
 
 FEATURE_NAMES: list[str] = [

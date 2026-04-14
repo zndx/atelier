@@ -320,6 +320,51 @@ class HierarchicalClassification:
         """True when uncertainty gap > 0.3 or conflict > 0.2."""
         return self.uncertainty_gap > 0.3 or self.conflict > 0.2
 
+    def belief_path(self) -> list[dict]:
+        """Trace [Bel, Pl] from predicted leaf to root.
+
+        Returns list of dicts from leaf (most specific) to root (least specific):
+        [{"code": "ICE...PAN", "label": "...", "bel": 0.45, "pl": 0.90, "depth": 7}, ...]
+
+        Key property: Bel increases (or stays same) ascending — coarser
+        categories are always at least as certain as finer ones.
+        """
+        if self.category is None or self._category_set is None:
+            return []
+        path = [{
+            "code": self.category.code,
+            "label": getattr(self.category, "label", self.category.code),
+            "bel": round(self.belief_at(self.category.code), 3),
+            "pl": round(self.plausibility_at(self.category.code), 3),
+            "depth": self.category.code.count("."),
+        }]
+        ancestors = self._category_set.ancestors(self.category.code)
+        for anc_code in ancestors:
+            anc_cat = (
+                getattr(self._category_set, "all_by_code", {}).get(anc_code)
+                or getattr(self._category_set, "by_code", {}).get(anc_code)
+            )
+            path.append({
+                "code": anc_code,
+                "label": anc_cat.label if anc_cat else anc_code,
+                "bel": round(self.belief_at(anc_code), 3),
+                "pl": round(self.plausibility_at(anc_code), 3),
+                "depth": anc_code.count("."),
+            })
+        return path
+
+    def cautious_code(self, bel_threshold: float = 0.7) -> str:
+        """Return deepest code where Bel exceeds threshold.
+
+        Answers: 'At what taxonomy level is evidence unambiguous?'
+        May return a parent code when leaf-level evidence is ambiguous.
+        """
+        path = self.belief_path()
+        for entry in path:  # leaf-first ordering
+            if entry["bel"] >= bel_threshold:
+                return entry["code"]
+        return path[-1]["code"] if path else ""  # fall back to root
+
     @classmethod
     def from_combined_evidence(
         cls,

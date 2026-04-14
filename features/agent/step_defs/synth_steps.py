@@ -19,7 +19,7 @@ def step_generate_synth(context, n):
 
 @then("every leaf category should have at least {n:d} columns")
 def step_check_leaf_coverage(context, n):
-    from atelier.classify.synth import _GENERATORS
+    from atelier.classify.synth_generators import GENERATORS
 
     # Collect all ground truth
     all_gt = {}
@@ -32,7 +32,7 @@ def step_check_leaf_coverage(context, n):
         counts[code] = counts.get(code, 0) + 1
 
     # Check every generator-supported leaf has at least n columns
-    for code in _GENERATORS:
+    for code in GENERATORS:
         # Only check codes that exist in the loaded vocabulary
         has_code = any(c.code == code for c in context.category_set.categories)
         if has_code:

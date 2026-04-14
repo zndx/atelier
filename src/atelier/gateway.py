@@ -733,16 +733,27 @@ def fsm_runs():
 
 # ── Orchestration WebSocket ────────────────────────────────────────
 
+_orchestration_clients: set[WebSocket] = set()
+
+
+async def broadcast_orchestration_event(event: dict):
+    """Push an event to all connected orchestration WebSocket clients."""
+    for ws in list(_orchestration_clients):
+        try:
+            await ws.send_json(event)
+        except Exception:
+            _orchestration_clients.discard(ws)
+
 
 @app.websocket("/ws/orchestration")
 async def orchestration_ws(websocket: WebSocket):
     """Live orchestration events for the XYFlow canvas.
 
-    Placeholder — sends a greeting and keeps the connection alive.
-    Future: stream agent_spawned, agent_active, artifact_produced events
-    as Claude orchestrates keystone agents via the SDK.
+    Streams agent_spawned, agent_reasoning, agent_tool_call,
+    agent_completed events from the classification agent loop.
     """
     await websocket.accept()
+    _orchestration_clients.add(websocket)
     await websocket.send_json({
         "type": "topology_reset",
         "message": "Orchestration channel connected.",
@@ -751,7 +762,7 @@ async def orchestration_ws(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        pass
+        _orchestration_clients.discard(websocket)
 
 
 # ── Serve React build (production) ───────────────────────────────

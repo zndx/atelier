@@ -1,101 +1,101 @@
-disease_name,foodname,tvtq43,d_klxf,rule,typecls,col_227,drug_medication_name
-Influenza,Steak,A = πr²,Mix 2 cups sugar with 1 tbsp oil.,age >= 18,Standard,Spouse,Metformin
-Malaria,Pizza,F = ma,Mix 1 cups rice with 2 tbsp oil.,age >= 18,Premium,Parent,Lisinopril
-Tuberculosis,Steak,E = mc²,Mix 1 cups sugar with 2 tbsp butter.,age >= 18,Basic,Child,Ibuprofen
-Tuberculosis,Steak,PV = nRT,Mix 1 cups sugar with 2 tbsp water.,"status IN ('active','pending')",Premium,Spouse,Lisinopril
-Diabetes Mellitus,Curry,BMI = kg/m²,Mix 2 cups sugar with 1 tbsp water.,amount <= 10000,Free,Child,Ibuprofen
-COVID-19,Curry,BMI = kg/m²,Mix 3 cups sugar with 2 tbsp oil.,amount <= 10000,Enterprise,Spouse,Amoxicillin
-Influenza,Pasta,E = mc²,Mix 1 cups sugar with 1 tbsp oil.,age >= 18,Premium,Parent,Amoxicillin
-Diabetes Mellitus,Tacos,F = ma,Mix 2 cups sugar with 2 tbsp butter.,amount <= 10000,Enterprise,Manager,Metformin
-Diabetes Mellitus,Pizza,PV = nRT,Mix 1 cups rice with 2 tbsp water.,NOT NULL,Enterprise,Child,Metformin
-Malaria,Salad,PV = nRT,Mix 1 cups rice with 2 tbsp butter.,amount <= 10000,Trial,Spouse,Aspirin
-Influenza,Salad,A = πr²,Mix 3 cups flour with 1 tbsp water.,"status IN ('active','pending')",Premium,Child,Lisinopril
-Malaria,Steak,E = mc²,Mix 2 cups rice with 1 tbsp butter.,amount <= 10000,Trial,Peer,Lisinopril
-Malaria,Steak,BMI = kg/m²,Mix 3 cups sugar with 1 tbsp butter.,amount <= 10000,Free,Child,Aspirin
-Influenza,Tacos,A = πr²,Mix 2 cups rice with 2 tbsp oil.,age >= 18,Enterprise,Peer,Lisinopril
-COVID-19,Curry,E = mc²,Mix 1 cups rice with 2 tbsp oil.,amount <= 10000,Basic,Manager,Aspirin
-COVID-19,Pizza,BMI = kg/m²,Mix 1 cups rice with 2 tbsp oil.,amount <= 10000,Basic,Child,Ibuprofen
-Influenza,Steak,E = mc²,Mix 1 cups flour with 2 tbsp water.,NOT NULL,Trial,Child,Lisinopril
-Influenza,Salad,A = πr²,Mix 3 cups flour with 1 tbsp oil.,"status IN ('active','pending')",Enterprise,Child,Amoxicillin
-COVID-19,Tacos,BMI = kg/m²,Mix 3 cups rice with 2 tbsp butter.,NOT NULL,Enterprise,Manager,Lisinopril
-Tuberculosis,Tacos,PV = nRT,Mix 1 cups flour with 1 tbsp oil.,NOT NULL,Standard,Sibling,Lisinopril
-Diabetes Mellitus,Tacos,F = ma,Mix 2 cups sugar with 2 tbsp butter.,NOT NULL,Free,Spouse,Metformin
-Malaria,Pasta,PV = nRT,Mix 1 cups flour with 1 tbsp butter.,age >= 18,Standard,Parent,Aspirin
-Influenza,Pasta,F = ma,Mix 2 cups flour with 1 tbsp butter.,age >= 18,Premium,Manager,Ibuprofen
-Malaria,Steak,F = ma,Mix 1 cups sugar with 2 tbsp butter.,amount <= 10000,Premium,Parent,Aspirin
-COVID-19,Steak,E = mc²,Mix 3 cups sugar with 2 tbsp water.,amount <= 10000,Basic,Manager,Lisinopril
-Influenza,Curry,E = mc²,Mix 1 cups sugar with 2 tbsp butter.,amount <= 10000,Standard,Spouse,Metformin
-Influenza,Pizza,F = ma,Mix 3 cups rice with 1 tbsp water.,amount <= 10000,Premium,Parent,Ibuprofen
-Tuberculosis,Pasta,A = πr²,Mix 2 cups rice with 1 tbsp butter.,age >= 18,Standard,Spouse,Aspirin
-Malaria,Curry,PV = nRT,Mix 3 cups sugar with 1 tbsp butter.,"status IN ('active','pending')",Free,Manager,Aspirin
-Tuberculosis,Tacos,F = ma,Mix 2 cups flour with 1 tbsp water.,amount <= 10000,Standard,Manager,Metformin
-Tuberculosis,Steak,E = mc²,Mix 1 cups sugar with 1 tbsp water.,age >= 18,Basic,Parent,Ibuprofen
-COVID-19,Tacos,A = πr²,Mix 1 cups rice with 2 tbsp water.,"status IN ('active','pending')",Enterprise,Parent,Amoxicillin
-Diabetes Mellitus,Steak,E = mc²,Mix 2 cups rice with 2 tbsp oil.,"status IN ('active','pending')",Basic,Sibling,Amoxicillin
-Malaria,Sushi,F = ma,Mix 1 cups sugar with 2 tbsp oil.,"status IN ('active','pending')",Premium,Child,Amoxicillin
-Malaria,Steak,F = ma,Mix 1 cups flour with 1 tbsp butter.,age >= 18,Free,Manager,Ibuprofen
-Influenza,Pasta,BMI = kg/m²,Mix 3 cups sugar with 1 tbsp water.,age >= 18,Premium,Peer,Aspirin
-Influenza,Curry,A = πr²,Mix 3 cups flour with 1 tbsp oil.,"status IN ('active','pending')",Standard,Manager,Amoxicillin
-Tuberculosis,Sushi,BMI = kg/m²,Mix 1 cups flour with 2 tbsp oil.,NOT NULL,Trial,Manager,Metformin
-COVID-19,Pizza,A = πr²,Mix 1 cups sugar with 2 tbsp water.,"status IN ('active','pending')",Standard,Manager,Lisinopril
-Malaria,Pizza,BMI = kg/m²,Mix 2 cups sugar with 1 tbsp oil.,NOT NULL,Basic,Parent,Amoxicillin
-Tuberculosis,Pasta,E = mc²,Mix 3 cups rice with 2 tbsp butter.,"status IN ('active','pending')",Trial,Child,Aspirin
-Influenza,Tacos,F = ma,Mix 3 cups rice with 1 tbsp oil.,"status IN ('active','pending')",Basic,Sibling,Metformin
-Diabetes Mellitus,Curry,A = πr²,Mix 1 cups rice with 1 tbsp butter.,age >= 18,Enterprise,Parent,Ibuprofen
-COVID-19,Pizza,PV = nRT,Mix 2 cups flour with 2 tbsp water.,NOT NULL,Enterprise,Parent,Lisinopril
-COVID-19,Pizza,A = πr²,Mix 2 cups sugar with 2 tbsp butter.,age >= 18,Basic,Peer,Amoxicillin
-Malaria,Sushi,A = πr²,Mix 3 cups flour with 2 tbsp butter.,age >= 18,Standard,Manager,Lisinopril
-Malaria,Pizza,F = ma,Mix 1 cups flour with 1 tbsp oil.,NOT NULL,Enterprise,Manager,Amoxicillin
-COVID-19,Salad,A = πr²,Mix 3 cups sugar with 2 tbsp oil.,"status IN ('active','pending')",Basic,Sibling,Aspirin
-Diabetes Mellitus,Steak,F = ma,Mix 2 cups flour with 2 tbsp oil.,"status IN ('active','pending')",Standard,Peer,Ibuprofen
-Influenza,Pizza,E = mc²,Mix 1 cups flour with 2 tbsp water.,age >= 18,Free,Manager,Aspirin
-COVID-19,Salad,E = mc²,Mix 3 cups flour with 1 tbsp butter.,amount <= 10000,Basic,Sibling,Amoxicillin
-Diabetes Mellitus,Curry,BMI = kg/m²,Mix 2 cups sugar with 2 tbsp oil.,NOT NULL,Premium,Parent,Amoxicillin
-Diabetes Mellitus,Pizza,F = ma,Mix 3 cups sugar with 1 tbsp oil.,amount <= 10000,Premium,Parent,Lisinopril
-Influenza,Pizza,PV = nRT,Mix 3 cups sugar with 2 tbsp butter.,NOT NULL,Free,Manager,Lisinopril
-Malaria,Curry,F = ma,Mix 2 cups flour with 2 tbsp butter.,"status IN ('active','pending')",Premium,Parent,Metformin
-Influenza,Sushi,BMI = kg/m²,Mix 2 cups flour with 1 tbsp oil.,age >= 18,Premium,Peer,Lisinopril
-Malaria,Tacos,PV = nRT,Mix 3 cups flour with 2 tbsp butter.,NOT NULL,Free,Child,Lisinopril
-Diabetes Mellitus,Curry,A = πr²,Mix 3 cups rice with 1 tbsp oil.,NOT NULL,Free,Peer,Metformin
-Malaria,Tacos,PV = nRT,Mix 3 cups rice with 2 tbsp water.,age >= 18,Enterprise,Manager,Lisinopril
-Tuberculosis,Steak,A = πr²,Mix 2 cups rice with 2 tbsp oil.,"status IN ('active','pending')",Premium,Sibling,Aspirin
-Influenza,Salad,E = mc²,Mix 3 cups rice with 1 tbsp water.,"status IN ('active','pending')",Trial,Manager,Lisinopril
-Tuberculosis,Pizza,A = πr²,Mix 3 cups rice with 1 tbsp oil.,NOT NULL,Basic,Parent,Lisinopril
-Influenza,Steak,BMI = kg/m²,Mix 2 cups sugar with 1 tbsp water.,age >= 18,Enterprise,Peer,Amoxicillin
-Influenza,Pizza,PV = nRT,Mix 2 cups sugar with 1 tbsp butter.,NOT NULL,Basic,Parent,Aspirin
-Malaria,Curry,A = πr²,Mix 3 cups flour with 1 tbsp oil.,amount <= 10000,Standard,Spouse,Amoxicillin
-Malaria,Curry,F = ma,Mix 2 cups sugar with 2 tbsp water.,amount <= 10000,Basic,Peer,Ibuprofen
-COVID-19,Steak,A = πr²,Mix 2 cups flour with 2 tbsp butter.,age >= 18,Free,Manager,Aspirin
-COVID-19,Tacos,E = mc²,Mix 2 cups flour with 2 tbsp water.,"status IN ('active','pending')",Premium,Sibling,Amoxicillin
-Malaria,Tacos,E = mc²,Mix 2 cups flour with 1 tbsp butter.,NOT NULL,Basic,Peer,Aspirin
-Tuberculosis,Curry,E = mc²,Mix 3 cups flour with 2 tbsp oil.,"status IN ('active','pending')",Free,Peer,Metformin
-Influenza,Pasta,BMI = kg/m²,Mix 2 cups flour with 1 tbsp butter.,"status IN ('active','pending')",Standard,Peer,Ibuprofen
-COVID-19,Sushi,A = πr²,Mix 3 cups flour with 2 tbsp butter.,NOT NULL,Standard,Spouse,Metformin
-Tuberculosis,Pasta,F = ma,Mix 1 cups flour with 1 tbsp oil.,"status IN ('active','pending')",Premium,Child,Metformin
-Tuberculosis,Tacos,BMI = kg/m²,Mix 1 cups rice with 1 tbsp butter.,NOT NULL,Standard,Manager,Aspirin
-Tuberculosis,Tacos,A = πr²,Mix 3 cups sugar with 1 tbsp water.,age >= 18,Enterprise,Peer,Ibuprofen
-Diabetes Mellitus,Salad,PV = nRT,Mix 1 cups rice with 1 tbsp oil.,amount <= 10000,Premium,Manager,Metformin
-Tuberculosis,Curry,PV = nRT,Mix 1 cups flour with 1 tbsp butter.,age >= 18,Trial,Sibling,Lisinopril
-Malaria,Pasta,E = mc²,Mix 3 cups sugar with 2 tbsp butter.,"status IN ('active','pending')",Enterprise,Child,Amoxicillin
-Malaria,Pizza,F = ma,Mix 3 cups sugar with 2 tbsp water.,age >= 18,Basic,Child,Amoxicillin
-COVID-19,Sushi,BMI = kg/m²,Mix 3 cups flour with 2 tbsp butter.,NOT NULL,Free,Manager,Metformin
-Influenza,Steak,F = ma,Mix 3 cups flour with 1 tbsp water.,amount <= 10000,Free,Manager,Metformin
-Influenza,Tacos,F = ma,Mix 2 cups sugar with 1 tbsp water.,"status IN ('active','pending')",Trial,Parent,Aspirin
-Tuberculosis,Salad,F = ma,Mix 2 cups flour with 1 tbsp oil.,amount <= 10000,Basic,Manager,Lisinopril
-COVID-19,Salad,F = ma,Mix 2 cups rice with 2 tbsp water.,amount <= 10000,Enterprise,Spouse,Lisinopril
-Influenza,Tacos,PV = nRT,Mix 3 cups flour with 1 tbsp oil.,age >= 18,Premium,Child,Lisinopril
-Diabetes Mellitus,Sushi,BMI = kg/m²,Mix 2 cups flour with 2 tbsp butter.,age >= 18,Trial,Parent,Metformin
-Malaria,Curry,F = ma,Mix 3 cups rice with 1 tbsp water.,"status IN ('active','pending')",Enterprise,Manager,Metformin
-Tuberculosis,Tacos,F = ma,Mix 2 cups rice with 1 tbsp water.,"status IN ('active','pending')",Free,Child,Ibuprofen
-Malaria,Pizza,PV = nRT,Mix 2 cups flour with 2 tbsp water.,age >= 18,Premium,Parent,Metformin
-COVID-19,Sushi,E = mc²,Mix 1 cups sugar with 2 tbsp butter.,amount <= 10000,Enterprise,Sibling,Ibuprofen
-COVID-19,Sushi,BMI = kg/m²,Mix 3 cups sugar with 2 tbsp water.,amount <= 10000,Basic,Child,Lisinopril
-COVID-19,Sushi,A = πr²,Mix 1 cups rice with 2 tbsp water.,amount <= 10000,Basic,Child,Aspirin
-Influenza,Sushi,A = πr²,Mix 2 cups rice with 2 tbsp water.,amount <= 10000,Premium,Child,Amoxicillin
-Malaria,Tacos,F = ma,Mix 1 cups sugar with 2 tbsp butter.,NOT NULL,Standard,Peer,Aspirin
-Influenza,Sushi,F = ma,Mix 1 cups sugar with 1 tbsp oil.,age >= 18,Premium,Sibling,Aspirin
-Malaria,Tacos,BMI = kg/m²,Mix 3 cups sugar with 1 tbsp oil.,NOT NULL,Basic,Child,Ibuprofen
-COVID-19,Pizza,A = πr²,Mix 1 cups rice with 2 tbsp water.,"status IN ('active','pending')",Premium,Parent,Ibuprofen
-Diabetes Mellitus,Steak,E = mc²,Mix 1 cups rice with 1 tbsp water.,NOT NULL,Standard,Parent,Amoxicillin
-Malaria,Pasta,F = ma,Mix 3 cups flour with 2 tbsp butter.,amount <= 10000,Trial,Child,Metformin
-Influenza,Salad,F = ma,Mix 1 cups sugar with 1 tbsp oil.,"status IN ('active','pending')",Premium,Child,Aspirin
+disease_name,foodname,var_685,x_203,ruleConstraint,type,xgts95,drugname
+Diabetes Mellitus,Salad,E = mc²,Mix 3 cups sugar with 2 tbsp water.,NOT NULL,Enterprise,Parent,Lisinopril
+COVID-19,Steak,PV = nRT,Mix 1 cups flour with 1 tbsp butter.,age >= 18,Basic,Manager,Metformin
+Malaria,Sushi,A = πr²,Mix 3 cups rice with 1 tbsp water.,"status IN ('active','pending')",Trial,Sibling,Aspirin
+Tuberculosis,Pizza,E = mc²,Mix 2 cups rice with 2 tbsp butter.,amount <= 10000,Premium,Sibling,Lisinopril
+Diabetes Mellitus,Steak,F = ma,Mix 1 cups flour with 2 tbsp water.,NOT NULL,Free,Peer,Ibuprofen
+Tuberculosis,Tacos,F = ma,Mix 1 cups sugar with 1 tbsp water.,age >= 18,Trial,Sibling,Lisinopril
+Diabetes Mellitus,Pizza,A = πr²,Mix 2 cups sugar with 2 tbsp water.,NOT NULL,Enterprise,Parent,Metformin
+COVID-19,Pizza,A = πr²,Mix 1 cups sugar with 1 tbsp water.,amount <= 10000,Basic,Child,Ibuprofen
+Malaria,Salad,PV = nRT,Mix 1 cups rice with 2 tbsp butter.,"status IN ('active','pending')",Trial,Spouse,Ibuprofen
+Malaria,Pizza,A = πr²,Mix 3 cups flour with 1 tbsp oil.,"status IN ('active','pending')",Enterprise,Child,Lisinopril
+Influenza,Curry,BMI = kg/m²,Mix 3 cups flour with 2 tbsp water.,NOT NULL,Trial,Peer,Amoxicillin
+Tuberculosis,Tacos,PV = nRT,Mix 1 cups rice with 1 tbsp oil.,amount <= 10000,Standard,Peer,Ibuprofen
+Malaria,Pizza,E = mc²,Mix 2 cups flour with 2 tbsp butter.,amount <= 10000,Basic,Parent,Aspirin
+Tuberculosis,Sushi,PV = nRT,Mix 2 cups flour with 1 tbsp water.,"status IN ('active','pending')",Premium,Peer,Ibuprofen
+Malaria,Curry,F = ma,Mix 1 cups rice with 2 tbsp oil.,"status IN ('active','pending')",Trial,Sibling,Metformin
+Tuberculosis,Curry,PV = nRT,Mix 3 cups sugar with 1 tbsp oil.,"status IN ('active','pending')",Premium,Manager,Ibuprofen
+COVID-19,Tacos,E = mc²,Mix 2 cups sugar with 2 tbsp butter.,age >= 18,Standard,Manager,Aspirin
+Tuberculosis,Pizza,BMI = kg/m²,Mix 2 cups flour with 2 tbsp water.,amount <= 10000,Enterprise,Peer,Amoxicillin
+Influenza,Steak,PV = nRT,Mix 1 cups rice with 2 tbsp oil.,amount <= 10000,Enterprise,Spouse,Ibuprofen
+COVID-19,Curry,PV = nRT,Mix 1 cups flour with 2 tbsp oil.,"status IN ('active','pending')",Standard,Peer,Ibuprofen
+Diabetes Mellitus,Steak,E = mc²,Mix 2 cups flour with 2 tbsp water.,NOT NULL,Premium,Child,Metformin
+Diabetes Mellitus,Curry,BMI = kg/m²,Mix 3 cups sugar with 1 tbsp butter.,age >= 18,Free,Parent,Aspirin
+Malaria,Salad,BMI = kg/m²,Mix 3 cups rice with 1 tbsp oil.,NOT NULL,Free,Spouse,Ibuprofen
+Diabetes Mellitus,Tacos,A = πr²,Mix 2 cups rice with 2 tbsp water.,NOT NULL,Basic,Manager,Metformin
+Diabetes Mellitus,Pizza,E = mc²,Mix 2 cups flour with 2 tbsp butter.,NOT NULL,Standard,Spouse,Amoxicillin
+Influenza,Tacos,E = mc²,Mix 2 cups flour with 2 tbsp butter.,age >= 18,Enterprise,Manager,Aspirin
+COVID-19,Curry,E = mc²,Mix 2 cups sugar with 1 tbsp butter.,age >= 18,Trial,Peer,Lisinopril
+COVID-19,Pasta,PV = nRT,Mix 3 cups sugar with 2 tbsp water.,NOT NULL,Trial,Child,Lisinopril
+Diabetes Mellitus,Pizza,E = mc²,Mix 1 cups flour with 1 tbsp butter.,age >= 18,Standard,Manager,Aspirin
+Influenza,Pizza,PV = nRT,Mix 2 cups rice with 1 tbsp butter.,amount <= 10000,Free,Sibling,Aspirin
+Malaria,Tacos,BMI = kg/m²,Mix 3 cups sugar with 1 tbsp oil.,age >= 18,Trial,Sibling,Lisinopril
+Malaria,Pizza,BMI = kg/m²,Mix 1 cups sugar with 2 tbsp butter.,NOT NULL,Enterprise,Parent,Metformin
+Malaria,Pasta,A = πr²,Mix 2 cups flour with 1 tbsp butter.,amount <= 10000,Standard,Manager,Amoxicillin
+COVID-19,Curry,PV = nRT,Mix 2 cups flour with 1 tbsp water.,NOT NULL,Standard,Child,Aspirin
+Tuberculosis,Steak,F = ma,Mix 3 cups flour with 1 tbsp water.,age >= 18,Basic,Child,Aspirin
+Influenza,Tacos,BMI = kg/m²,Mix 2 cups flour with 1 tbsp oil.,"status IN ('active','pending')",Trial,Peer,Lisinopril
+Influenza,Pasta,PV = nRT,Mix 2 cups rice with 1 tbsp water.,"status IN ('active','pending')",Basic,Spouse,Aspirin
+Malaria,Pasta,BMI = kg/m²,Mix 2 cups flour with 1 tbsp oil.,age >= 18,Free,Sibling,Aspirin
+COVID-19,Salad,PV = nRT,Mix 2 cups sugar with 2 tbsp oil.,NOT NULL,Free,Child,Metformin
+Malaria,Pizza,E = mc²,Mix 3 cups sugar with 2 tbsp water.,"status IN ('active','pending')",Standard,Parent,Metformin
+Influenza,Sushi,F = ma,Mix 1 cups flour with 2 tbsp water.,amount <= 10000,Basic,Spouse,Lisinopril
+Diabetes Mellitus,Steak,E = mc²,Mix 3 cups flour with 1 tbsp butter.,"status IN ('active','pending')",Standard,Manager,Metformin
+Tuberculosis,Pasta,BMI = kg/m²,Mix 3 cups flour with 2 tbsp oil.,"status IN ('active','pending')",Free,Spouse,Lisinopril
+Tuberculosis,Pasta,A = πr²,Mix 1 cups sugar with 1 tbsp butter.,amount <= 10000,Enterprise,Spouse,Metformin
+Influenza,Pasta,E = mc²,Mix 3 cups sugar with 2 tbsp water.,age >= 18,Premium,Peer,Amoxicillin
+Diabetes Mellitus,Pasta,F = ma,Mix 3 cups flour with 2 tbsp butter.,NOT NULL,Premium,Spouse,Metformin
+COVID-19,Pasta,A = πr²,Mix 1 cups rice with 1 tbsp oil.,"status IN ('active','pending')",Standard,Spouse,Ibuprofen
+Tuberculosis,Pasta,A = πr²,Mix 2 cups flour with 1 tbsp oil.,NOT NULL,Free,Manager,Ibuprofen
+Malaria,Steak,A = πr²,Mix 3 cups sugar with 1 tbsp butter.,age >= 18,Standard,Child,Aspirin
+Diabetes Mellitus,Pasta,A = πr²,Mix 1 cups sugar with 2 tbsp oil.,"status IN ('active','pending')",Premium,Peer,Ibuprofen
+Malaria,Curry,E = mc²,Mix 2 cups rice with 1 tbsp butter.,amount <= 10000,Free,Peer,Aspirin
+Tuberculosis,Tacos,A = πr²,Mix 1 cups rice with 1 tbsp oil.,age >= 18,Enterprise,Manager,Metformin
+Diabetes Mellitus,Pasta,E = mc²,Mix 3 cups rice with 1 tbsp water.,NOT NULL,Free,Parent,Ibuprofen
+Tuberculosis,Salad,A = πr²,Mix 3 cups flour with 2 tbsp oil.,amount <= 10000,Basic,Spouse,Aspirin
+Influenza,Tacos,BMI = kg/m²,Mix 3 cups rice with 1 tbsp oil.,age >= 18,Premium,Sibling,Aspirin
+Influenza,Curry,PV = nRT,Mix 1 cups sugar with 1 tbsp water.,"status IN ('active','pending')",Free,Spouse,Lisinopril
+COVID-19,Salad,PV = nRT,Mix 1 cups sugar with 1 tbsp butter.,"status IN ('active','pending')",Basic,Child,Amoxicillin
+Malaria,Salad,A = πr²,Mix 2 cups rice with 2 tbsp oil.,age >= 18,Standard,Spouse,Amoxicillin
+Tuberculosis,Sushi,A = πr²,Mix 1 cups sugar with 2 tbsp oil.,"status IN ('active','pending')",Enterprise,Parent,Amoxicillin
+Influenza,Pasta,F = ma,Mix 1 cups rice with 1 tbsp butter.,amount <= 10000,Basic,Child,Metformin
+Tuberculosis,Tacos,E = mc²,Mix 3 cups sugar with 2 tbsp water.,NOT NULL,Premium,Peer,Amoxicillin
+Influenza,Sushi,PV = nRT,Mix 3 cups flour with 2 tbsp butter.,amount <= 10000,Enterprise,Sibling,Amoxicillin
+Diabetes Mellitus,Pizza,A = πr²,Mix 1 cups flour with 2 tbsp butter.,NOT NULL,Trial,Manager,Amoxicillin
+Diabetes Mellitus,Steak,F = ma,Mix 1 cups sugar with 2 tbsp butter.,amount <= 10000,Premium,Manager,Aspirin
+Diabetes Mellitus,Steak,BMI = kg/m²,Mix 3 cups rice with 2 tbsp butter.,age >= 18,Standard,Child,Amoxicillin
+Diabetes Mellitus,Pasta,A = πr²,Mix 1 cups sugar with 2 tbsp water.,"status IN ('active','pending')",Enterprise,Spouse,Amoxicillin
+COVID-19,Tacos,PV = nRT,Mix 3 cups rice with 2 tbsp butter.,NOT NULL,Trial,Spouse,Lisinopril
+Tuberculosis,Curry,F = ma,Mix 2 cups rice with 1 tbsp oil.,NOT NULL,Trial,Child,Amoxicillin
+Diabetes Mellitus,Steak,E = mc²,Mix 2 cups rice with 1 tbsp butter.,amount <= 10000,Enterprise,Parent,Metformin
+Malaria,Curry,E = mc²,Mix 3 cups sugar with 2 tbsp oil.,NOT NULL,Premium,Spouse,Ibuprofen
+Malaria,Pizza,A = πr²,Mix 3 cups flour with 2 tbsp butter.,amount <= 10000,Standard,Spouse,Aspirin
+Diabetes Mellitus,Salad,E = mc²,Mix 3 cups flour with 2 tbsp water.,age >= 18,Premium,Sibling,Aspirin
+Malaria,Steak,BMI = kg/m²,Mix 1 cups sugar with 2 tbsp butter.,amount <= 10000,Standard,Spouse,Lisinopril
+COVID-19,Curry,F = ma,Mix 1 cups flour with 1 tbsp butter.,"status IN ('active','pending')",Premium,Spouse,Amoxicillin
+Diabetes Mellitus,Sushi,F = ma,Mix 3 cups rice with 1 tbsp butter.,"status IN ('active','pending')",Basic,Child,Aspirin
+Tuberculosis,Salad,F = ma,Mix 1 cups sugar with 1 tbsp oil.,age >= 18,Enterprise,Manager,Amoxicillin
+Influenza,Pizza,BMI = kg/m²,Mix 3 cups rice with 1 tbsp butter.,amount <= 10000,Standard,Parent,Ibuprofen
+Diabetes Mellitus,Salad,A = πr²,Mix 3 cups sugar with 1 tbsp oil.,amount <= 10000,Premium,Parent,Amoxicillin
+Malaria,Steak,PV = nRT,Mix 3 cups sugar with 2 tbsp oil.,amount <= 10000,Premium,Parent,Ibuprofen
+COVID-19,Salad,F = ma,Mix 2 cups flour with 1 tbsp butter.,age >= 18,Premium,Child,Amoxicillin
+Influenza,Pizza,F = ma,Mix 2 cups flour with 1 tbsp water.,"status IN ('active','pending')",Free,Peer,Lisinopril
+Diabetes Mellitus,Pizza,BMI = kg/m²,Mix 1 cups rice with 1 tbsp water.,age >= 18,Premium,Sibling,Ibuprofen
+Malaria,Salad,A = πr²,Mix 1 cups flour with 2 tbsp butter.,amount <= 10000,Trial,Peer,Ibuprofen
+Tuberculosis,Salad,PV = nRT,Mix 3 cups flour with 2 tbsp butter.,amount <= 10000,Enterprise,Peer,Amoxicillin
+Influenza,Pizza,PV = nRT,Mix 3 cups sugar with 1 tbsp water.,"status IN ('active','pending')",Enterprise,Peer,Ibuprofen
+Diabetes Mellitus,Sushi,F = ma,Mix 2 cups rice with 1 tbsp butter.,age >= 18,Enterprise,Sibling,Metformin
+Influenza,Pasta,PV = nRT,Mix 1 cups rice with 2 tbsp butter.,amount <= 10000,Free,Sibling,Ibuprofen
+COVID-19,Tacos,F = ma,Mix 3 cups flour with 2 tbsp butter.,"status IN ('active','pending')",Basic,Peer,Amoxicillin
+Tuberculosis,Curry,F = ma,Mix 1 cups rice with 1 tbsp oil.,NOT NULL,Basic,Sibling,Aspirin
+Diabetes Mellitus,Pasta,BMI = kg/m²,Mix 1 cups sugar with 1 tbsp oil.,age >= 18,Enterprise,Parent,Aspirin
+Influenza,Pizza,E = mc²,Mix 1 cups flour with 2 tbsp oil.,NOT NULL,Trial,Spouse,Lisinopril
+Influenza,Pizza,BMI = kg/m²,Mix 2 cups sugar with 2 tbsp oil.,age >= 18,Trial,Parent,Ibuprofen
+Malaria,Sushi,F = ma,Mix 1 cups flour with 2 tbsp water.,NOT NULL,Trial,Spouse,Amoxicillin
+Malaria,Sushi,F = ma,Mix 3 cups flour with 1 tbsp water.,amount <= 10000,Standard,Manager,Amoxicillin
+Tuberculosis,Tacos,A = πr²,Mix 3 cups sugar with 1 tbsp butter.,amount <= 10000,Premium,Peer,Ibuprofen
+Tuberculosis,Curry,A = πr²,Mix 3 cups rice with 1 tbsp oil.,NOT NULL,Standard,Sibling,Metformin
+Influenza,Pizza,E = mc²,Mix 3 cups rice with 1 tbsp butter.,amount <= 10000,Standard,Peer,Lisinopril
+Tuberculosis,Pasta,BMI = kg/m²,Mix 1 cups rice with 2 tbsp butter.,NOT NULL,Premium,Parent,Lisinopril
+Influenza,Sushi,PV = nRT,Mix 1 cups flour with 2 tbsp water.,amount <= 10000,Enterprise,Spouse,Amoxicillin
+Malaria,Sushi,A = πr²,Mix 2 cups rice with 2 tbsp water.,NOT NULL,Basic,Child,Aspirin

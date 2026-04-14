@@ -45,17 +45,22 @@ def cat(
     abbrev: str,
     description: str,
     common_names: str = "",
+    notation: str = "",
 ) -> dict:
     """Build a category dict matching universal_vocabulary.json schema."""
-    return {
+    result = {
         "code": code,
         "label": label,
         "parent_code": parent_code,
         "taxonomy": "universal",
         "abbrev": abbrev,
         "description": description,
-        **({"common_names": common_names} if common_names else {}),
     }
+    if common_names:
+        result["common_names"] = common_names
+    if notation:
+        result["notation"] = notation
+    return result
 
 
 # ── Vocabulary definition ────────────────────────────────────────
@@ -72,9 +77,16 @@ def cat(
 def build_vocabulary() -> list[dict]:
     """Build the complete expanded vocabulary."""
     cats: list[dict] = []
+    notations: dict[str, str] = {}
 
     def add(code, label, parent, abbrev, desc, names=""):
-        cats.append(cat(code, label, parent, abbrev, desc, names))
+        notation = ""
+        if parent is None:
+            notation = "0"
+        elif parent in notations:
+            notation = _next_notation(notations[parent])
+        notations[code] = notation
+        cats.append(cat(code, label, parent, abbrev, desc, names, notation))
 
     # ════════════════════════════════════════════════════════════
     # ROOT
@@ -863,27 +875,56 @@ def build_vocabulary() -> list[dict]:
         "Data that identifies a specific person.")
 
     SI = "ICE.SENSITIVE.PID.IDENTITY"
-    add(f"{SI}.FULLNAME", "Full Name", SI, "FULLNAME",
+
+    # ── Name (depth 6) ──
+    add(f"{SI}.NAME", "Person Name", SI, "C_PERSNAME",
+        "Data identifying a person by name.")
+
+    SNAME = f"{SI}.NAME"
+    add(f"{SNAME}.FULLNAME", "Full Name", SNAME, "FULLNAME",
         "A person's complete legal name.",
         "name, person name, legal name")
-    add(f"{SI}.FIRST_NAME", "First Name", SI, "FNAME",
+    add(f"{SNAME}.FIRST_NAME", "First Name", SNAME, "FNAME",
         "A person's given name.",
         "first name, given name, forename")
-    add(f"{SI}.LAST_NAME", "Last Name", SI, "LNAME",
+    add(f"{SNAME}.LAST_NAME", "Last Name", SNAME, "LNAME",
         "A person's family name.",
         "last name, surname, family name")
-    add(f"{SI}.MIDDLE_NAME", "Middle Name", SI, "MNAME",
+    add(f"{SNAME}.MIDDLE_NAME", "Middle Name", SNAME, "MNAME",
         "A person's middle name or initial.",
         "middle name, middle initial")
-    add(f"{SI}.MAIDEN_NAME", "Maiden Name", SI, "MAIDEN",
+    add(f"{SNAME}.MAIDEN_NAME", "Maiden Name", SNAME, "MAIDEN",
         "A person's birth surname before marriage.",
         "maiden name, birth name, nee")
+    add(f"{SNAME}.TITLE_PREFIX", "Title Prefix", SNAME, "TITLEPREFIX",
+        "A name prefix or honorific (Mr, Mrs, Dr, Prof).",
+        "title, prefix, honorific, salutation, mr, mrs, dr")
+
+    # ── Government ID (depth 6-7) ──
+    add(f"{SI}.GOVID", "Government Identifier", SI, "C_GOVID",
+        "Government-issued identifiers for a person.")
+
+    SGOV = f"{SI}.GOVID"
+    add(f"{SGOV}.SSN", "Social Security Number", SGOV, "SSN",
+        "A US Social Security Number.",
+        "ssn, social security, social security number")
+    add(f"{SGOV}.DLN", "Driver's License Number", SGOV, "DLN",
+        "A driver's license or state ID number.",
+        "driver's license, dl, dln, state id, driver license")
+    add(f"{SGOV}.PASSPORT", "Passport Number", SGOV, "PASSPORT",
+        "A passport document number.",
+        "passport, passport number, travel document")
+    add(f"{SGOV}.WORK_PERMIT", "Work Permit", SGOV, "WORKPERMIT",
+        "A work authorization or visa permit number.",
+        "work permit, visa, work authorization, h1b, green card")
+    add(f"{SGOV}.TAX_ID", "Tax Identifier", SGOV, "TAXID",
+        "A tax identification number (EIN, TIN, VAT number).",
+        "tax id, ein, tin, vat number, tax number")
+
+    # ── Direct identity attributes ──
     add(f"{SI}.DOB", "Date of Birth", SI, "DOB",
         "The date on which a person was born.",
         "DOB, birthday, birth date")
-    add(f"{SI}.GOVID", "Government Identifier", SI, "GOVID",
-        "A government-issued identifier (SSN, passport, driver's license).",
-        "SSN, social security, tax id, passport number")
     add(f"{SI}.GENDER_PII", "Gender (PII)", SI, "GENDERPII",
         "A person's gender identity (PII context).",
         "gender, sex, m/f, male, female")
@@ -899,57 +940,140 @@ def build_vocabulary() -> list[dict]:
     add(f"{SI}.MARITAL_STATUS", "Marital Status", SI, "MARITAL",
         "A person's marital status.",
         "marital status, married, single, divorced, widowed")
-    add(f"{SI}.PHOTO", "Photograph", SI, "PHOTO",
+
+    # ── Platform Identity (depth 6) ──
+    add(f"{SI}.PLATFORM_ID", "Platform Identity", SI, "C_PLATID",
+        "Digital platform account identifiers.")
+
+    SPLAT = f"{SI}.PLATFORM_ID"
+    add(f"{SPLAT}.USERNAME", "Username", SPLAT, "USERNAME",
+        "A user account name or login identifier.",
+        "username, user, login, handle, screen name")
+    add(f"{SPLAT}.EMPLOYEE_ID", "Employee ID", SPLAT, "EMPID",
+        "An employee or personnel identifier.",
+        "employee id, emp id, badge number, staff id, personnel number")
+    add(f"{SPLAT}.ADVERTISER_ID", "Advertiser ID", SPLAT, "ADVID",
+        "A mobile advertising identifier (IDFA, GAID).",
+        "advertiser id, idfa, gaid, ad id, device advertising id")
+
+    # ── Biometric (depth 6) ──
+    add(f"{SI}.BIOMETRIC", "Biometric Data", SI, "C_BIO",
+        "Biometric identification data.")
+
+    SBIO = f"{SI}.BIOMETRIC"
+    add(f"{SBIO}.PHOTO", "Photograph", SBIO, "PHOTO",
         "A photograph or biometric image of a person.",
         "photo, image, headshot, portrait, biometric")
-    add(f"{SI}.SIGNATURE", "Signature", SI, "SIG",
+    add(f"{SBIO}.SIGNATURE", "Signature", SBIO, "SIG",
         "A person's handwritten or digital signature.",
         "signature, autograph, signed, digital signature")
-    add(f"{SI}.VOICEPRINT", "Voiceprint", SI, "VOICEPR",
+    add(f"{SBIO}.VOICEPRINT", "Voiceprint", SBIO, "VOICEPR",
         "A biometric voiceprint or voice recording.",
         "voiceprint, voice, audio, speech sample")
+    add(f"{SBIO}.FINGERPRINT", "Fingerprint", SBIO, "FINGERPR",
+        "A fingerprint biometric template or scan.",
+        "fingerprint, thumbprint, biometric template, finger scan")
 
     # ── Financial ──
     add("ICE.SENSITIVE.PID.FINANCIAL", "Financial Data", "ICE.SENSITIVE.PID", "C_FD",
         "Data relating to financial accounts or transactions.")
 
     SF = "ICE.SENSITIVE.PID.FINANCIAL"
-    add(f"{SF}.PAN", "Payment Card Number", SF, "PAN",
+
+    # ── Payment (depth 6-7) ──
+    add(f"{SF}.PAYMENT", "Payment Data", SF, "C_PAY",
+        "Data relating to payment instruments and transactions.")
+
+    SPAY = f"{SF}.PAYMENT"
+
+    # ── Payment Card (depth 7) ──
+    add(f"{SPAY}.CARD", "Payment Card", SPAY, "C_CARD",
+        "Data from credit, debit, or prepaid payment cards.")
+
+    SCARD = f"{SPAY}.CARD"
+    add(f"{SCARD}.PAN", "Payment Card Number", SCARD, "PAN",
         "A credit or debit card primary account number.",
         "PAN, credit card, card number, CC number")
-    add(f"{SF}.BAN", "Bank Account Number", SF, "BAN",
-        "A unique identifier for a bank account.",
-        "account number, IBAN, routing number")
-    add(f"{SF}.TXNAMT", "Transaction Amount", SF, "TXNAMT",
-        "The monetary value of a financial transaction.",
-        "amount, payment, price")
-    add(f"{SF}.CVV", "Card Verification Value", SF, "CVV",
+    add(f"{SCARD}.CVV", "Card Verification Value", SCARD, "CVV",
         "A card verification value or security code.",
         "cvv, cvc, security code, card verification")
-    add(f"{SF}.EXPIRY", "Card Expiry Date", SF, "CARDEXP",
+    add(f"{SCARD}.EXPIRY", "Card Expiry Date", SCARD, "CARDEXP",
         "A payment card expiration date.",
         "expiry, expiration, exp date, valid thru")
-    add(f"{SF}.TAX_ID", "Tax Identifier", SF, "TAXID",
-        "A tax identification number (EIN, TIN, VAT number).",
-        "tax id, ein, tin, vat number, tax number")
-    add(f"{SF}.SALARY", "Salary / Compensation", SF, "SALARY",
-        "A person's salary, wage, or compensation amount.",
-        "salary, wage, compensation, pay, income")
-    add(f"{SF}.CREDIT_SCORE", "Credit Score", SF, "CREDSCORE",
-        "A person's credit score or credit rating.",
-        "credit score, fico, credit rating, credit history")
-    add(f"{SF}.INVESTMENT", "Investment Account", SF, "INVEST",
-        "An investment or brokerage account identifier.",
-        "investment, brokerage, portfolio, 401k, ira, pension")
-    add(f"{SF}.INSURANCE_ID", "Insurance ID", SF, "INSID",
-        "An insurance policy number or member ID.",
-        "insurance id, policy number, member id, claim number")
-    add(f"{SF}.ROUTING_NUM", "Routing Number", SF, "ROUTNUM",
+    add(f"{SCARD}.BIN", "Bank Identification Number", SCARD, "BIN",
+        "The first 6-8 digits of a card number identifying the issuing bank.",
+        "bin, bank identification, issuer, iin")
+    add(f"{SCARD}.LAST4", "Card Last Four", SCARD, "LAST4",
+        "The last four digits of a masked payment card number.",
+        "last 4, last four, masked card, card ending")
+    add(f"{SCARD}.MAGSTRIPE", "Magnetic Stripe Data", SCARD, "MAGSTRIPE",
+        "Raw magnetic stripe data from a payment card.",
+        "magstripe, track data, swipe data, mag stripe")
+
+    # ── Billing ──
+    add(f"{SPAY}.BILLING", "Billing Information", SPAY, "C_BILL",
+        "Billing account and payment service identifiers.")
+
+    SBILL = f"{SPAY}.BILLING"
+    add(f"{SBILL}.PAYPAL", "PayPal Account", SBILL, "PAYPAL",
+        "A PayPal account identifier or email.",
+        "paypal, paypal id, paypal email")
+    add(f"{SBILL}.BILLING_ACCT", "Billing Account", SBILL, "BILLACCT",
+        "A billing account number or reference.",
+        "billing account, billing id, invoice account")
+
+    # ── Transaction Amount ──
+    add(f"{SPAY}.TXNAMT", "Transaction Amount", SPAY, "TXNAMT",
+        "The monetary value of a financial transaction.",
+        "amount, payment, price")
+
+    # ── Account (depth 6) ──
+    add(f"{SF}.ACCOUNT", "Financial Account", SF, "C_ACCT",
+        "Bank and investment account identifiers.")
+
+    SACCT = f"{SF}.ACCOUNT"
+    add(f"{SACCT}.BAN", "Bank Account Number", SACCT, "BAN",
+        "A unique identifier for a bank account.",
+        "account number, IBAN, routing number")
+    add(f"{SACCT}.ROUTING_NUM", "Routing Number", SACCT, "ROUTNUM",
         "A bank routing or transit number.",
         "routing number, aba, sort code, swift, bic")
-    add(f"{SF}.CRYPTO_ADDR", "Cryptocurrency Address", SF, "CRYPTOADDR",
+    add(f"{SACCT}.CRYPTO_ADDR", "Cryptocurrency Address", SACCT, "CRYPTOADDR",
         "A cryptocurrency wallet address.",
         "wallet address, bitcoin, ethereum, crypto address")
+    add(f"{SACCT}.INVESTMENT", "Investment Account", SACCT, "INVEST",
+        "An investment or brokerage account identifier.",
+        "investment, brokerage, portfolio, 401k, ira, pension")
+
+    # ── Income (depth 6) ──
+    add(f"{SF}.INCOME", "Income Data", SF, "C_INCOME",
+        "Salary, compensation, and income information.")
+
+    SINC = f"{SF}.INCOME"
+    add(f"{SINC}.SALARY", "Salary / Compensation", SINC, "SALARY",
+        "A person's salary, wage, or compensation amount.",
+        "salary, wage, compensation, pay, income")
+    add(f"{SINC}.STOCK_RSU", "Stock / RSU Grant", SINC, "STOCKRSU",
+        "Restricted stock units or equity compensation.",
+        "rsu, stock grant, equity, vesting, shares")
+    add(f"{SINC}.BONUS", "Bonus / Variable Pay", SINC, "BONUS",
+        "A bonus, commission, or variable compensation amount.",
+        "bonus, commission, incentive, variable pay")
+
+    # ── Credit / Risk (depth 6) ──
+    add(f"{SF}.CREDIT", "Credit / Risk", SF, "C_CREDIT",
+        "Credit scores, risk assessments, and insurance identifiers.")
+
+    SCRED = f"{SF}.CREDIT"
+    add(f"{SCRED}.CREDIT_SCORE", "Credit Score", SCRED, "CREDSCORE",
+        "A person's credit score or credit rating.",
+        "credit score, fico, credit rating, credit history")
+    add(f"{SCRED}.FRAUD_SCORE", "Fraud Score", SCRED, "FRAUDSCORE",
+        "A fraud risk score or assessment.",
+        "fraud score, risk score, fraud detection, anomaly score")
+    add(f"{SCRED}.INSURANCE_ID", "Insurance ID", SCRED, "INSID",
+        "An insurance policy number or member ID.",
+        "insurance id, policy number, member id, claim number")
 
     # ── Health ──
     add("ICE.SENSITIVE.PID.HEALTH", "Health Data", "ICE.SENSITIVE.PID", "C_HEALTH",

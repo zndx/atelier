@@ -374,6 +374,30 @@ def step_check_confidence_differs(context):
     )
 
 
+# ── Pattern Mass Functions ───────────────────────────────────────────
+
+
+@when('I compute pattern_to_mass for signals {signals_str}')
+def step_compute_pattern_mass(context, signals_str):
+    import json
+    from atelier.classify.mass_functions import pattern_to_mass
+    signals = json.loads(signals_str)
+    context.pattern_mass = pattern_to_mass(signals, context.frame)
+
+
+@then('the pattern mass should assign weight to "{code}"')
+def step_pattern_mass_weight(context, code):
+    singleton = context.frame.singleton(code)
+    mass = context.pattern_mass.masses.get(singleton, 0.0)
+    assert mass > 0, f"No mass on {code}, masses: {context.pattern_mass.masses}"
+
+
+@then("the pattern mass should not be vacuous")
+def step_pattern_mass_not_vacuous(context):
+    masses = context.pattern_mass.masses
+    assert len(masses) > 1, f"Mass function has only {len(masses)} focal elements (vacuous)"
+
+
 # ── FSM ──────────────────────────────────────────────────────────────
 
 

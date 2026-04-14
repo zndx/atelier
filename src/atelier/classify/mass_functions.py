@@ -154,8 +154,27 @@ def cosine_to_mass(
 # ── Pattern detection ────────────────────────────────────────────────
 
 
-# Pattern → annotation code mapping (populated by pipeline from vocabulary)
-DEFAULT_PATTERN_MAP: dict[str, str] = {}
+# Pattern → annotation code mapping.  Keys are pattern names from
+# features.detect_patterns(); values are ICE.* leaf codes.
+DEFAULT_PATTERN_MAP: dict[str, str] = {
+    # ── Existing 8 detectors from features.py ─────────────────────
+    "email_pattern": "ICE.SENSITIVE.PID.CONTACT.EMAIL",
+    "phone_pattern": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "ssn_pattern": "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN",
+    "ipv4_pattern": "ICE.SENSITIVE.TECHNICAL.IPADDR",
+    "uuid_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
+    "date_iso_pattern": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.DATE",
+    "url_pattern": "ICE.SENSITIVE.TECHNICAL.URL",
+    "credit_card_pattern": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN",
+    # ── New detectors (added alongside features.py expansion) ─────
+    "mac_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
+    "iban_pattern": "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN",
+    "postal_code_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.POSTAL",
+    "monetary_pattern": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT",
+    "hex_hash_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.HASH_ID",
+    "semver_pattern": "ICE.METADATA.VERSION",
+    "iso_currency_pattern": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.CURRENCY_CODE",
+}
 
 
 def pattern_to_mass(

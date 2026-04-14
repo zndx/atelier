@@ -2,6 +2,7 @@
 
 import logging
 import os
+import subprocess
 
 log = logging.getLogger("atelier.bdd")
 
@@ -28,18 +29,74 @@ def _max_tier():
     return int(raw)
 
 
+# ── Stack lifecycle ────────────────────────────────────────────
+
+
+def _stack_is_reachable():
+    """Quick probe: is the gateway responding?"""
+    import urllib.request
+    from atelier.config import load_config
+    cfg = load_config()
+    try:
+        urllib.request.urlopen(
+            f"http://localhost:{cfg.gateway_port}/api/health", timeout=3,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _start_devenv_stack(project_root):
+    """Bring down any existing devenv processes and start fresh.
+
+    Runs ``devenv processes down`` then ``devenv up -d`` (detached mode).
+    The caller should use ``_wait_for`` on health probes to know when
+    the stack is ready.
+    """
+    log.info("Stack not reachable — starting devenv stack")
+    subprocess.run(
+        ["devenv", "processes", "down"],
+        cwd=str(project_root),
+        capture_output=True,
+        timeout=30,
+    )
+    log.info("Previous devenv processes stopped")
+
+    # Start in detached mode — devenv manages the process lifecycle.
+    subprocess.run(
+        ["devenv", "up", "-d"],
+        cwd=str(project_root),
+        capture_output=True,
+        timeout=30,
+    )
+    log.info("devenv up -d launched")
+
+
 # ── Stack health (cached, one-time) ────────────────────────────
 
 
 def _ensure_stack_healthy(context):
-    """Verify devenv services are reachable. Called once per session."""
+    """Verify devenv services are reachable; start them if needed.
+
+    Called once per session on the first tier-1 scenario. If the stack
+    is not reachable, automatically runs ``devenv processes down`` then
+    ``devenv up`` and waits for health probes.
+    """
     if getattr(context, "_stack_verified", False):
         return
+
+    if not _stack_is_reachable():
+        _start_devenv_stack(context.project_root)
+
     from atelier.config import load_config
     cfg = load_config()
-    _wait_for("PostgreSQL", lambda: _check_pg(cfg.db_url))
+    _wait_for("PostgreSQL", lambda: _check_pg(cfg.db_url), timeout=90)
     _wait_for("Qdrant",
-              lambda: _check_qdrant(cfg.qdrant_host, cfg.qdrant_http_port))
+              lambda: _check_qdrant(cfg.qdrant_host, cfg.qdrant_http_port),
+              timeout=90)
+    _wait_for("Gateway",
+              lambda: _check_gateway(cfg.gateway_port),
+              timeout=90)
     context._stack_verified = True
     log.info("Stack health verified")
 
@@ -71,6 +128,14 @@ def _check_qdrant(host, port):
     import urllib.request
     urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=5)
     return True
+
+
+def _check_gateway(port):
+    import json
+    import urllib.request
+    resp = urllib.request.urlopen(f"http://localhost:{port}/api/health", timeout=5)
+    body = json.loads(resp.read().decode())
+    return body.get("ok", False)
 
 
 # ── Hooks ───────────────────────────────────────────────────────

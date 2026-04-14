@@ -201,3 +201,50 @@ def step_disagreements_decrease(context):
         f"Disagreements did not decrease: first={first_disagreements}, "
         f"last={last_disagreements}"
     )
+
+
+@then("the k_convergence_rate should be negative or zero")
+def step_k_convergence_rate(context):
+    rate = context.bootstrap_result.get("k_convergence_rate", 1.0)
+    assert rate <= 0.001, (
+        f"k_convergence_rate = {rate}, expected <= 0 (K should decrease over iterations)"
+    )
+
+
+# ── K convergence unit scenarios ─────────────────────────────────
+
+
+@given("a bootstrap state with metrics showing K plateau")
+def step_k_plateau(context):
+    from atelier.classify.bootstrap import BootstrapState, IterationMetrics
+    state = BootstrapState()
+    state.iteration_metrics = [
+        IterationMetrics(iteration=0, mean_k=0.3, max_k=0.5, disagreements=10, coverage=0.95, llm_calls=1),
+        IterationMetrics(iteration=1, mean_k=0.3, max_k=0.5, disagreements=10, coverage=0.95, llm_calls=2),
+        IterationMetrics(iteration=2, mean_k=0.3, max_k=0.5, disagreements=10, coverage=0.95, llm_calls=3),
+    ]
+    context.k_state = state
+
+
+@then("should_stop_early should return true")
+def step_should_stop(context):
+    from atelier.classify.bootstrap import should_stop_early
+    assert should_stop_early(context.k_state), "Expected should_stop_early to return True"
+
+
+@given("a bootstrap state with metrics showing K decrease")
+def step_k_decrease(context):
+    from atelier.classify.bootstrap import BootstrapState, IterationMetrics
+    state = BootstrapState()
+    state.iteration_metrics = [
+        IterationMetrics(iteration=0, mean_k=0.5, max_k=0.8, disagreements=20, coverage=0.90, llm_calls=1),
+        IterationMetrics(iteration=1, mean_k=0.4, max_k=0.6, disagreements=15, coverage=0.92, llm_calls=2),
+        IterationMetrics(iteration=2, mean_k=0.3, max_k=0.5, disagreements=10, coverage=0.95, llm_calls=3),
+    ]
+    context.k_state = state
+
+
+@then("should_stop_early should return false")
+def step_should_not_stop(context):
+    from atelier.classify.bootstrap import should_stop_early
+    assert not should_stop_early(context.k_state), "Expected should_stop_early to return False"

@@ -4,7 +4,7 @@
     "database": "default",
     "columns": [
       {"name": "customer_id", "type": "INTEGER", "values": ["1001", "1002", "1003", "1004", "1005"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 10000},
-      {"name": "full_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "distinct_count": 9500},
+      {"name": "full_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME", "distinct_count": 9500},
       {"name": "email", "type": "VARCHAR", "values": ["alice@example.com", "bob@company.org", "carol@mail.net", "david@test.io", "eva@corp.com"], "ground_truth": "ICE.SENSITIVE.PID.CONTACT.EMAIL", "distinct_count": 9800},
       {"name": "phone_number", "type": "VARCHAR", "values": ["555-0101", "555-0102", "(555) 0103", "+1-555-0104", "555.0105"], "ground_truth": "ICE.SENSITIVE.PID.CONTACT.PHONE", "distinct_count": 9200},
       {"name": "date_of_birth", "type": "DATE", "values": ["1985-03-15", "1990-07-22", "1978-11-08", "1995-01-30", "1982-06-14"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.DOB", "distinct_count": 8500},
@@ -19,8 +19,8 @@
       {"name": "order_id", "type": "INTEGER", "values": ["5001", "5002", "5003", "5004", "5005"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 50000},
       {"name": "customer_id", "type": "INTEGER", "values": ["1001", "1003", "1001", "1005", "1002"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 8500},
       {"name": "order_date", "type": "DATE", "values": ["2024-06-01", "2024-06-02", "2024-06-03", "2024-06-04", "2024-06-05"], "ground_truth": "ICE.METADATA.TIMESTAMP", "distinct_count": 365},
-      {"name": "total_amount", "type": "DECIMAL", "values": ["149.99", "289.50", "75.00", "432.25", "18.99"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.TXNAMT", "distinct_count": 12000},
-      {"name": "payment_card_number", "type": "VARCHAR", "values": ["4111111111111111", "5500000000000004", "3400000000000009", "6011000000000004", "4222222222222"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.PAN", "distinct_count": 7200},
+      {"name": "total_amount", "type": "DECIMAL", "values": ["149.99", "289.50", "75.00", "432.25", "18.99"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT", "distinct_count": 12000},
+      {"name": "payment_card_number", "type": "VARCHAR", "values": ["4111111111111111", "5500000000000004", "3400000000000009", "6011000000000004", "4222222222222"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN", "distinct_count": 7200},
       {"name": "shipping_address", "type": "VARCHAR", "values": ["123 Main St, NY", "456 Oak Ave, CA", "789 Pine Rd, TX", "321 Elm Dr, FL", "654 Maple Ln, WA"], "ground_truth": "ICE.SENSITIVE.PID.CONTACT.ADDRESS", "distinct_count": 6800},
       {"name": "status", "type": "VARCHAR", "values": ["shipped", "delivered", "processing", "shipped", "cancelled"], "ground_truth": "ICE.METADATA.STATUS", "distinct_count": 5}
     ]
@@ -30,12 +30,12 @@
     "database": "default",
     "columns": [
       {"name": "employee_id", "type": "INTEGER", "values": ["2001", "2002", "2003", "2004", "2005"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 500},
-      {"name": "first_name", "type": "VARCHAR", "values": ["John", "Jane", "Michael", "Sarah", "Robert"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "distinct_count": 320},
-      {"name": "last_name", "type": "VARCHAR", "values": ["Doe", "Smith", "Johnson", "Williams", "Brown"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "distinct_count": 410},
-      {"name": "ssn", "type": "VARCHAR", "values": ["123-45-6789", "234-56-7890", "345-67-8901", "456-78-9012", "567-89-0123"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.GOVID", "distinct_count": 500},
+      {"name": "first_name", "type": "VARCHAR", "values": ["John", "Jane", "Michael", "Sarah", "Robert"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME", "distinct_count": 320},
+      {"name": "last_name", "type": "VARCHAR", "values": ["Doe", "Smith", "Johnson", "Williams", "Brown"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME", "distinct_count": 410},
+      {"name": "ssn", "type": "VARCHAR", "values": ["123-45-6789", "234-56-7890", "345-67-8901", "456-78-9012", "567-89-0123"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN", "distinct_count": 500},
       {"name": "work_email", "type": "VARCHAR", "values": ["john.doe@company.com", "jane.smith@company.com", "michael.j@company.com", "sarah.w@company.com", "robert.b@company.com"], "ground_truth": "ICE.SENSITIVE.PID.CONTACT.EMAIL", "distinct_count": 500},
       {"name": "hire_date", "type": "DATE", "values": ["2020-01-15", "2019-06-01", "2021-03-10", "2018-11-20", "2022-07-05"], "ground_truth": "ICE.METADATA.TIMESTAMP", "distinct_count": 480},
-      {"name": "salary", "type": "DECIMAL", "values": ["85000.00", "92000.00", "78000.00", "105000.00", "71000.00"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.TXNAMT", "distinct_count": 350},
+      {"name": "salary", "type": "DECIMAL", "values": ["85000.00", "92000.00", "78000.00", "105000.00", "71000.00"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT", "distinct_count": 350},
       {"name": "department", "type": "VARCHAR", "values": ["Engineering", "Marketing", "Engineering", "Management", "Sales"], "ground_truth": "ICE.METADATA.STATUS", "distinct_count": 8}
     ]
   },
@@ -55,8 +55,8 @@
     "database": "default",
     "columns": [
       {"name": "txn_id", "type": "INTEGER", "values": ["90001", "90002", "90003", "90004", "90005"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 100000},
-      {"name": "account_number", "type": "VARCHAR", "values": ["1234567890", "2345678901", "3456789012", "4567890123", "5678901234"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.BAN", "distinct_count": 15000},
-      {"name": "amount", "type": "DECIMAL", "values": ["1250.00", "89.99", "3400.50", "200.00", "15.75"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.TXNAMT", "distinct_count": 45000},
+      {"name": "account_number", "type": "VARCHAR", "values": ["1234567890", "2345678901", "3456789012", "4567890123", "5678901234"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN", "distinct_count": 15000},
+      {"name": "amount", "type": "DECIMAL", "values": ["1250.00", "89.99", "3400.50", "200.00", "15.75"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT", "distinct_count": 45000},
       {"name": "transaction_date", "type": "TIMESTAMP", "values": ["2024-06-01 09:00:00", "2024-06-01 10:30:00", "2024-06-02 14:15:00", "2024-06-03 08:45:00", "2024-06-03 16:00:00"], "ground_truth": "ICE.METADATA.TIMESTAMP", "distinct_count": 90000},
       {"name": "description", "type": "VARCHAR", "values": ["Monthly subscription payment", "Coffee shop purchase", "Quarterly insurance premium", "ATM cash withdrawal", "Online grocery delivery"], "ground_truth": "ICE.NONSENSITIVE", "distinct_count": 5000},
       {"name": "status", "type": "VARCHAR", "values": ["completed", "completed", "pending", "completed", "failed"], "ground_truth": "ICE.METADATA.STATUS", "distinct_count": 4}
@@ -68,7 +68,7 @@
     "columns": [
       {"name": "product_id", "type": "INTEGER", "values": ["3001", "3002", "3003", "3004", "3005"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 1200},
       {"name": "product_name", "type": "VARCHAR", "values": ["Wireless Mouse", "USB-C Hub", "Mechanical Keyboard", "27-inch Monitor", "Webcam HD"], "ground_truth": "ICE.NONSENSITIVE", "distinct_count": 1200},
-      {"name": "price", "type": "DECIMAL", "values": ["29.99", "49.99", "129.99", "349.99", "79.99"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.TXNAMT", "distinct_count": 800},
+      {"name": "price", "type": "DECIMAL", "values": ["29.99", "49.99", "129.99", "349.99", "79.99"], "ground_truth": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT", "distinct_count": 800},
       {"name": "category", "type": "VARCHAR", "values": ["Peripherals", "Accessories", "Peripherals", "Displays", "Accessories"], "ground_truth": "ICE.METADATA.STATUS", "distinct_count": 12},
       {"name": "created_date", "type": "DATE", "values": ["2024-01-10", "2024-02-15", "2024-03-20", "2024-04-25", "2024-05-30"], "ground_truth": "ICE.METADATA.TIMESTAMP", "distinct_count": 600},
       {"name": "sku", "type": "VARCHAR", "values": ["WM-001-BLK", "UH-002-GRY", "MK-003-RGB", "MN-004-4K", "WC-005-HD"], "ground_truth": "ICE.METADATA.RECID", "distinct_count": 1200}
@@ -91,7 +91,7 @@
     "database": "default",
     "columns": [
       {"name": "device_uuid", "type": "VARCHAR", "values": ["f47ac10b-58cc-4372-a567-0e02b2c3d479", "550e8400-e29b-41d4-a716-446655440000", "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "6ba7b811-9dad-11d1-80b4-00c04fd430c8", "6ba7b812-9dad-11d1-80b4-00c04fd430c8"], "ground_truth": "ICE.SENSITIVE.TECHNICAL.DEVID", "distinct_count": 5000},
-      {"name": "owner_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.FULLNAME", "distinct_count": 3500},
+      {"name": "owner_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME", "distinct_count": 3500},
       {"name": "device_ip", "type": "VARCHAR", "values": ["192.168.1.101", "192.168.1.102", "10.0.0.50", "172.16.0.25", "192.168.2.200"], "ground_truth": "ICE.SENSITIVE.TECHNICAL.IPADDR", "distinct_count": 4800},
       {"name": "registered_on", "type": "DATE", "values": ["2024-01-05", "2024-02-10", "2024-03-15", "2024-04-20", "2024-05-25"], "ground_truth": "ICE.METADATA.TIMESTAMP", "distinct_count": 1200},
       {"name": "is_active", "type": "VARCHAR", "values": ["true", "true", "false", "true", "true"], "ground_truth": "ICE.METADATA.STATUS", "distinct_count": 2}

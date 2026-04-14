@@ -1,101 +1,101 @@
-district_borough,lat,f_post,fips_code,loctxt,iso_3166,measelev,nicw19,addrline,airport,port_harbor,region,continent,v_487,landmark,longitude
-East Side,82.198259,AR1 5RU,41014,"Berlin, Switzerland",AU,1195,1073.2,6019 Pine Rd,JFK,Shanghai,WA,Oceania,"68.353549, -158.372256",Golden Gate Bridge,65.310617
-East Side,76.066621,23097,09456,"Houston, Netherlands",IN,1631,8.0,8697 Main St,SIN,Singapore,CO,Europe,"74.314673, -133.669638",Golden Gate Bridge,-125.19319
-East Side,-2.881046,OD2 1OY,01959,"Atlanta, Singapore",AU,8517,6447.8,4491 Cedar Ln,NRT,Port of LA,WA,Africa,"69.547007, -54.029566",Statue of Liberty,122.367427
-East Side,8.866076,93335,30299,"Seattle, Italy",GB,5102,4593.7,6224 Pine Rd,SIN,Busan,MA,Antarctica,"45.61114, 64.985319",Statue of Liberty,-45.386241
-East Side,22.767916,39432,47165,"Boston, Norway",US,1535,2650.5,279 Pine Rd,SFO,Busan,OH,North America,"32.199354, 106.567843",Central Park,-53.587093
-Downtown,21.777301,XV4 3HB,42315,"London, Norway",GB,5417,7177.3,6858 Main St,LAX,Shanghai,OH,Oceania,"19.55546, 73.852888",Eiffel Tower,-97.162585
-North Shore,49.241238,26476,49700,"Tokyo, United States",AU,2934,5475.5,8338 Main St,SFO,Busan,NC,Oceania,"-16.446606, -160.714966",Eiffel Tower,-170.383634
-North Shore,6.326382,20990,41535,"Denver, India",DE,4391,8156.8,3356 Cedar Ln,LHR,Shanghai,CO,South America,"-78.977387, 178.649363",Statue of Liberty,-0.441211
-North Shore,23.219249,HJ8 3JW,17097,"San Francisco, Sweden",AU,2263,943.5,8795 Cedar Ln,NRT,Rotterdam,CA,South America,"-16.72631, -0.08057",Eiffel Tower,36.973974
-Midtown,-64.789376,XJ9 8AT,47973,"Seattle, Israel",JP,1607,4206.3,2766 Pine Rd,JFK,Hamburg,WA,Asia,"-42.333627, 104.263961",Big Ben,-129.651934
-East Side,73.040234,34542,22534,"Houston, France",IN,7517,3933.6,6594 Oak Ave,NRT,Port of LA,WA,Antarctica,"-71.228546, -20.763377",Golden Gate Bridge,-85.955377
-East Side,-13.441398,YE5 7TM,34818,"Miami, Germany",AU,2816,665.4,6074 Main St,SIN,Port of LA,FL,Asia,"33.781326, -128.31022",Statue of Liberty,-73.054068
-West End,25.631445,92074,54335,"New York, United States",JP,7102,2598.2,5449 Elm St,JFK,Singapore,CO,Africa,"-33.767419, -14.533741",Golden Gate Bridge,-138.588733
-North Shore,29.968205,69786,28048,"London, Singapore",DE,3119,3501.5,4689 Pine Rd,ORD,Busan,NY,Asia,"-24.784583, -76.70245",Statue of Liberty,13.230369
-East Side,67.077261,LZ4 5DP,28717,"Dallas, Mexico",AU,1647,8074.1,1618 Main St,LAX,Port of LA,OH,North America,"-37.277791, 99.315249",Eiffel Tower,24.542091
-South Bay,32.492439,32206,54591,"Paris, Brazil",JP,8416,2504.1,9176 Elm St,JFK,Busan,TX,Europe,"-7.436594, -153.545058",Big Ben,172.672689
-South Bay,-71.080159,94826,33347,"Denver, United States",MX,1474,6811.5,4617 Maple Dr,SIN,Hamburg,WA,North America,"74.186126, -179.282993",Eiffel Tower,-169.633507
-North Shore,17.118229,84209,41046,"Atlanta, India",CA,6274,3258.0,4841 Main St,ORD,Busan,PA,Europe,"-6.374967, -89.34116",Eiffel Tower,115.713784
-South Bay,-32.582558,26973,34015,"Seattle, Brazil",IN,6205,3202.5,2924 Cedar Ln,JFK,Port of LA,GA,North America,"-24.289951, 15.749947",Central Park,130.682841
-North Shore,2.062361,42431,01001,"Miami, Australia",BR,8715,1537.8,6510 Park Blvd,SIN,Busan,NY,Antarctica,"40.420718, 124.924831",Eiffel Tower,-161.598198
-Midtown,-88.185434,81092,05922,"San Francisco, Israel",GB,2624,2050.8,9672 Cedar Ln,CDG,Busan,CO,Europe,"-69.687281, -83.118964",Golden Gate Bridge,126.439379
-South Bay,-77.802893,RB8 1YV,09466,"Phoenix, Japan",MX,4950,8488.9,2535 Elm St,CDG,Rotterdam,IL,South America,"48.403955, -94.424008",Statue of Liberty,-119.702199
-East Side,-53.958032,UR8 5TK,23624,"Chicago, Canada",MX,2206,7712.5,3764 Oak Ave,SFO,Shanghai,GA,South America,"-27.281178, 124.283819",Eiffel Tower,141.202156
-South Bay,-50.208207,38252,42529,"Sydney, Germany",AU,1237,6626.2,439 Maple Dr,SFO,Hamburg,MA,Asia,"-52.567859, 71.352174",Eiffel Tower,31.326872
-Downtown,-41.0627,VY1 5CN,30580,"Miami, Japan",US,2965,4642.1,8324 Pine Rd,LAX,Shanghai,IL,Antarctica,"-42.613349, 14.907592",Central Park,22.472767
-North Shore,82.512058,31199,33287,"Miami, Switzerland",FR,8682,7386.8,4432 Pine Rd,NRT,Port of LA,CA,South America,"66.375, -28.480242",Statue of Liberty,148.073708
-North Shore,84.628477,80787,54023,"London, Japan",US,814,5574.5,369 Maple Dr,SIN,Port of LA,TX,South America,"72.61964, -77.319144",Eiffel Tower,167.191934
-South Bay,29.589337,52140,44151,"Sydney, France",JP,5533,9944.6,6122 Park Blvd,CDG,Hamburg,CA,Oceania,"33.762803, -83.327363",Statue of Liberty,82.410883
-Downtown,-71.29052,RD3 4ME,18721,"Seattle, Mexico",MX,4576,7847.2,610 Main St,ORD,Shanghai,TX,South America,"34.671445, -38.467268",Big Ben,145.493084
-West End,34.994022,BT6 8WP,11858,"Portland, Singapore",BR,7836,2888.5,6330 Oak Ave,JFK,Busan,GA,Europe,"-30.005896, -132.468779",Statue of Liberty,37.15871
-North Shore,-72.991719,BB7 4IU,30315,"Chicago, Switzerland",US,4227,8893.8,2206 Main St,ORD,Rotterdam,FL,North America,"-33.114322, 132.45984",Big Ben,135.22772
-East Side,-45.145371,NR3 9PM,23981,"Toronto, Spain",JP,5585,1387.9,8339 Cedar Ln,SFO,Singapore,GA,Asia,"-85.595391, 164.336193",Big Ben,-83.745604
-North Shore,-4.1484,62541,20896,"Paris, Norway",CA,3572,449.7,881 Oak Ave,SFO,Shanghai,WA,Africa,"25.393393, -57.394113",Eiffel Tower,-94.079245
-East Side,21.906739,86672,17651,"Paris, Mexico",FR,7356,60.6,1938 Elm St,NRT,Shanghai,CA,Asia,"29.944518, -41.170722",Eiffel Tower,-6.342306
-East Side,18.604388,23881,55068,"Paris, Germany",MX,6353,6483.4,3242 Pine Rd,SIN,Shanghai,OH,South America,"-27.313946, 22.985277",Eiffel Tower,-115.860828
-North Shore,79.057295,HU3 5CT,43630,"Toronto, Sweden",CA,1226,5198.1,1769 Elm St,CDG,Singapore,NC,Antarctica,"-7.058933, 158.700269",Eiffel Tower,-43.553254
-West End,8.190705,SQ6 3OD,17229,"San Francisco, Israel",FR,7605,2529.0,9904 Oak Ave,NRT,Singapore,CO,Oceania,"80.729022, 11.956858",Eiffel Tower,77.518516
-East Side,-75.330782,CW9 8ZO,25315,"Miami, Switzerland",US,8741,2929.2,1332 Park Blvd,CDG,Busan,IL,Europe,"40.61412, 145.86765",Big Ben,121.401921
-South Bay,-83.469492,KG2 3NA,24327,"London, Mexico",US,2192,9066.8,8709 Park Blvd,NRT,Shanghai,PA,Asia,"6.795416, 168.66945",Big Ben,-27.554718
-West End,-22.620642,DU3 7QC,15036,"London, Switzerland",DE,7289,8668.2,1790 Park Blvd,LHR,Shanghai,PA,Asia,"-70.359636, 85.167757",Golden Gate Bridge,-61.998407
-South Bay,-58.962958,58467,45529,"Los Angeles, Japan",FR,5593,3192.6,8192 Main St,LAX,Singapore,NY,Antarctica,"35.901453, -82.803207",Eiffel Tower,-60.140632
-West End,17.447258,NG3 8WB,10211,"Houston, Sweden",FR,445,1297.2,1217 Main St,CDG,Port of LA,OH,Antarctica,"-2.772804, -96.330204",Golden Gate Bridge,-81.434102
-Midtown,-39.629704,33784,42990,"Atlanta, Australia",DE,5907,3980.9,1210 Elm St,CDG,Busan,NY,South America,"54.844639, 59.02909",Big Ben,-166.417396
-Midtown,-30.460654,21552,18695,"Boston, Spain",CA,7679,1307.2,3244 Elm St,CDG,Hamburg,IL,North America,"-42.617159, 87.998846",Golden Gate Bridge,12.954336
-Midtown,-20.077205,YE4 6JU,31158,"Seattle, India",US,5135,9276.0,5902 Park Blvd,LHR,Port of LA,CO,North America,"83.015705, 177.628504",Statue of Liberty,-173.878451
-West End,-24.197238,TE8 6UF,13275,"Los Angeles, Switzerland",BR,485,7520.1,6863 Pine Rd,LHR,Rotterdam,IL,Asia,"81.004074, -35.335762",Statue of Liberty,-46.571523
-North Shore,-78.604827,RI4 8JQ,51399,"Tokyo, Singapore",US,617,8742.3,5892 Cedar Ln,LHR,Rotterdam,GA,North America,"-7.047105, 170.493491",Eiffel Tower,-33.81983
-East Side,-89.82555,AJ5 8LA,07466,"Miami, United States",JP,6656,6794.1,6418 Maple Dr,SFO,Hamburg,PA,Antarctica,"20.150195, 167.904696",Central Park,52.389275
-West End,6.283332,87430,32887,"Phoenix, Japan",DE,2672,2894.8,691 Maple Dr,LHR,Port of LA,CA,Africa,"-46.965881, -156.933395",Central Park,132.265271
-East Side,63.463779,23202,48869,"Boston, Netherlands",DE,5468,5917.4,1490 Park Blvd,NRT,Busan,NY,Antarctica,"-81.105861, 121.081632",Statue of Liberty,-36.757587
-Midtown,56.831015,82584,27696,"Houston, India",US,2056,6360.2,5405 Maple Dr,ORD,Rotterdam,WA,Oceania,"17.031675, -118.508587",Eiffel Tower,-171.950645
-Midtown,34.442386,BA1 2GE,29540,"Sydney, Japan",IN,2539,2647.6,3864 Maple Dr,JFK,Busan,PA,Antarctica,"-2.104652, -145.482218",Eiffel Tower,-59.165786
-Midtown,18.749895,DU8 7FS,18916,"Paris, India",AU,7898,7998.5,4684 Main St,SIN,Singapore,PA,Asia,"-51.204441, -155.118681",Golden Gate Bridge,-178.748598
-Midtown,-89.951953,88304,04402,"Boston, Brazil",AU,797,1288.7,3076 Main St,SFO,Singapore,MA,Antarctica,"40.326069, -28.297149",Big Ben,88.519262
-Midtown,-12.722101,JK9 8WO,56466,"Denver, Singapore",GB,4827,1942.5,8233 Oak Ave,LAX,Shanghai,CO,Europe,"16.921423, -120.328614",Eiffel Tower,160.611578
-Midtown,-54.577199,CG9 6FX,11223,"Miami, United States",AU,2268,4853.5,450 Park Blvd,NRT,Port of LA,NC,Oceania,"-72.738858, -79.95584",Central Park,-118.162791
-West End,76.399566,30295,17831,"Dallas, Netherlands",BR,330,5224.1,9295 Oak Ave,LHR,Busan,OH,Asia,"-83.770996, -30.606062",Eiffel Tower,69.889609
-North Shore,34.482124,70172,18116,"Dallas, Australia",JP,3738,2072.3,8558 Cedar Ln,SFO,Hamburg,TX,Oceania,"73.016286, 153.441211",Central Park,-57.475643
-Downtown,14.275039,KR8 6SL,04521,"Seattle, Spain",BR,2015,2250.0,3131 Main St,JFK,Singapore,CA,South America,"-14.153265, 139.853307",Statue of Liberty,-23.136602
-West End,0.531958,99295,30292,"Toronto, Spain",GB,1505,2688.8,4090 Elm St,SFO,Busan,CO,Antarctica,"-24.649611, 20.159554",Big Ben,25.695418
-South Bay,60.908446,96584,01765,"Seattle, Italy",GB,5945,8028.5,4329 Elm St,LAX,Port of LA,NC,Oceania,"-78.822005, 90.156383",Golden Gate Bridge,-52.168821
-East Side,-57.970921,19398,10433,"San Francisco, Sweden",AU,8213,261.8,9333 Park Blvd,NRT,Port of LA,NC,Asia,"12.316353, -71.201828",Central Park,-90.592137
-East Side,57.869017,47887,54785,"Miami, Australia",GB,284,4301.8,4435 Park Blvd,LHR,Rotterdam,CO,Oceania,"-77.912563, 175.876102",Golden Gate Bridge,132.651563
-South Bay,29.835218,YG8 2LE,54729,"Austin, Australia",CA,604,6087.0,5492 Elm St,CDG,Hamburg,FL,Oceania,"73.863104, 42.874585",Golden Gate Bridge,-93.322727
-Downtown,44.539233,57638,11756,"Atlanta, India",MX,7178,2817.3,8996 Cedar Ln,JFK,Singapore,MA,Oceania,"22.692397, -42.719081",Golden Gate Bridge,-121.202748
-East Side,22.905958,BO1 8QC,48041,"Chicago, Canada",CA,2115,2943.3,4752 Pine Rd,JFK,Shanghai,CO,South America,"25.230551, 159.280075",Central Park,-139.510631
-North Shore,-3.174044,UA1 5IS,05847,"Los Angeles, Canada",BR,2677,6986.4,1170 Elm St,NRT,Hamburg,NY,North America,"-39.018732, 36.341798",Central Park,76.658856
-East Side,-37.950622,CE2 1OB,43868,"Austin, Australia",CA,378,8007.2,6070 Park Blvd,JFK,Rotterdam,TX,Asia,"41.029203, 4.883035",Statue of Liberty,-66.060933
-East Side,-15.25388,OZ6 2ID,17535,"Boston, Spain",CA,5341,4031.4,9287 Maple Dr,LAX,Shanghai,NC,Europe,"77.639755, -9.313566",Eiffel Tower,-156.585546
-Midtown,7.178949,53903,08121,"Chicago, South Korea",GB,7614,8460.7,4196 Oak Ave,SFO,Hamburg,FL,Asia,"-69.86479, -38.560823",Big Ben,166.854618
-Downtown,23.724729,PF6 6GD,55716,"Los Angeles, Norway",DE,8079,8966.9,3063 Oak Ave,JFK,Singapore,NY,Asia,"42.059242, 16.466501",Golden Gate Bridge,-64.48288
-South Bay,44.570715,12621,36530,"San Francisco, Canada",MX,6920,6742.6,2103 Maple Dr,LHR,Rotterdam,CO,North America,"-72.155799, -174.623595",Statue of Liberty,84.737972
-North Shore,13.516635,SD5 1AZ,39626,"Paris, Germany",GB,7300,9414.9,1813 Park Blvd,ORD,Busan,NC,Antarctica,"52.641702, -113.496603",Statue of Liberty,-18.912833
-West End,41.93672,87484,56926,"Austin, France",JP,4236,6359.3,4881 Elm St,SFO,Port of LA,NY,Africa,"-13.252902, 52.119104",Big Ben,-92.574388
-South Bay,-11.971212,MN5 9CC,03343,"Chicago, Japan",MX,2122,6988.4,7674 Oak Ave,NRT,Rotterdam,CA,Oceania,"-13.30795, -10.53136",Statue of Liberty,5.995711
-South Bay,-20.625519,18735,01506,"New York, Switzerland",GB,4019,9606.4,8247 Pine Rd,LHR,Busan,IL,North America,"38.854509, 130.04567",Eiffel Tower,-111.241661
-Downtown,88.805746,33385,04576,"Seattle, Brazil",AU,6213,839.1,6347 Elm St,ORD,Port of LA,TX,Africa,"58.727849, 150.137983",Statue of Liberty,112.155669
-West End,42.029692,MU7 1VR,56429,"Tokyo, South Korea",CA,1332,8508.6,327 Pine Rd,NRT,Port of LA,OH,Europe,"22.46127, 87.222333",Eiffel Tower,56.98405
-South Bay,80.298442,73361,14776,"San Francisco, United States",IN,6739,2285.3,3388 Oak Ave,SFO,Port of LA,CO,Africa,"36.397661, 51.396331",Big Ben,-25.84494
-South Bay,-28.733665,94618,02665,"Los Angeles, Italy",US,773,5484.0,706 Cedar Ln,ORD,Shanghai,CA,Oceania,"37.746228, 94.187941",Central Park,-53.465502
-West End,70.40517,JZ2 5YC,55130,"Austin, Australia",AU,978,3924.4,6092 Main St,ORD,Hamburg,OH,Antarctica,"81.455029, 39.607349",Central Park,-21.521551
-Downtown,14.626983,QD5 9GN,32535,"Austin, United States",DE,2094,8375.9,1535 Cedar Ln,SIN,Shanghai,PA,Antarctica,"82.018931, -146.312783",Central Park,96.056866
-East Side,-11.000479,97540,51042,"Austin, Australia",BR,5454,6416.9,3262 Elm St,LAX,Shanghai,MA,Asia,"26.032378, 59.335441",Eiffel Tower,141.527942
-North Shore,-31.996432,HR7 1GS,04219,"San Francisco, Norway",FR,6934,4421.1,5900 Cedar Ln,SIN,Shanghai,FL,Antarctica,"53.047464, 159.299695",Golden Gate Bridge,-90.600127
-South Bay,35.769884,JG3 8AQ,07175,"Los Angeles, Sweden",IN,633,7625.6,423 Oak Ave,SIN,Hamburg,TX,Antarctica,"-89.61626, -178.898676",Eiffel Tower,108.793173
-Downtown,0.500048,ID7 1TV,40026,"Tokyo, Sweden",JP,7912,7043.0,8762 Park Blvd,SFO,Port of LA,CO,Africa,"-74.813829, -173.348531",Big Ben,-86.136854
-West End,71.243202,39279,51605,"Portland, Netherlands",CA,7013,9586.1,2316 Oak Ave,ORD,Singapore,NC,Antarctica,"68.678259, -132.395885",Central Park,-173.284504
-West End,50.494059,BF7 1XF,34666,"Portland, South Korea",JP,5324,5847.3,1492 Elm St,SFO,Singapore,GA,South America,"55.494263, 145.161319",Statue of Liberty,27.407254
-Midtown,62.965924,OI6 4TC,35044,"Seattle, Brazil",IN,4717,5564.6,6728 Main St,NRT,Shanghai,WA,Europe,"41.745218, 125.000851",Big Ben,145.438978
-East Side,48.804654,TB9 6OK,15797,"Toronto, Mexico",BR,6328,7537.6,1716 Pine Rd,LHR,Busan,WA,Europe,"37.886485, -174.226473",Eiffel Tower,-77.21609
-North Shore,-60.130785,54812,11868,"Denver, Mexico",AU,1184,3173.5,2616 Main St,CDG,Singapore,CO,Oceania,"-89.184731, 8.294763",Statue of Liberty,-32.796614
-Downtown,-86.448296,NK9 8QV,11723,"Portland, France",JP,6806,3605.4,2143 Park Blvd,LHR,Hamburg,IL,Asia,"36.440322, 149.958406",Golden Gate Bridge,79.883639
-South Bay,-29.38529,SR7 4QG,48260,"Atlanta, Netherlands",MX,271,5231.8,4219 Maple Dr,CDG,Port of LA,NY,South America,"38.004826, 105.716077",Eiffel Tower,-114.009012
-North Shore,37.74149,20056,23679,"Denver, United States",BR,172,4663.0,9846 Park Blvd,LAX,Hamburg,CA,Antarctica,"-37.532289, 9.66888",Big Ben,5.898898
-Downtown,-76.373509,93529,52232,"Boston, India",JP,1054,1793.6,8648 Oak Ave,NRT,Shanghai,WA,Antarctica,"-74.346858, -104.855293",Big Ben,21.624443
-Downtown,-35.222502,50313,10905,"Dallas, United States",BR,4954,2223.8,2178 Main St,LHR,Hamburg,IL,Antarctica,"31.197107, 54.131419",Central Park,-20.417934
-East Side,-9.497208,KA1 6GX,21496,"Atlanta, Canada",DE,6330,8586.3,3424 Oak Ave,CDG,Port of LA,WA,Europe,"84.97756, -10.1654",Central Park,178.23334
-Downtown,59.575507,ET6 7NW,05657,"Austin, Switzerland",GB,4232,6525.9,6826 Maple Dr,SFO,Port of LA,MA,South America,"-60.846632, -18.143509",Golden Gate Bridge,88.048836
-East Side,-53.466106,CI7 1CP,43262,"Chicago, Netherlands",FR,320,8981.6,987 Main St,ORD,Shanghai,CO,Oceania,"1.935594, -107.187783",Golden Gate Bridge,153.798306
-South Bay,75.748236,OQ4 9PP,31392,"Miami, India",US,2096,2244.2,7719 Park Blvd,LAX,Shanghai,IL,North America,"69.470663, -17.38659",Central Park,100.639964
+district_borough,latitude,csmm16,fips,loctxt,iso_country_code,elevation_altitude,jio76,address_line,airport,port_harbor,regionStateProvince,continent,p_coo,landmark_poi,longitude
+Midtown,9.304243,78746,31949,"Seattle, Israel",IN,878,6631.6,369 Oak Ave,LAX,Busan,MA,Europe,"-20.887461, 98.975844",Eiffel Tower,78.837843
+Midtown,-84.104763,PQ2 4DJ,24982,"Atlanta, France",JP,3621,605.7,991 Oak Ave,NRT,Port of LA,FL,North America,"-87.262555, -139.276339",Central Park,-78.591142
+West End,59.91085,46961,16477,"London, Switzerland",US,5983,3358.2,2263 Elm St,ORD,Singapore,MA,North America,"79.636761, -134.321075",Central Park,86.575952
+North Shore,-6.051704,UP9 8WF,23413,"Tokyo, South Korea",FR,1175,636.5,5697 Main St,SIN,Busan,CO,Antarctica,"-37.807752, 44.122927",Big Ben,-119.55866
+East Side,37.17843,84021,27519,"New York, Canada",BR,1754,9107.4,4632 Cedar Ln,SFO,Port of LA,OH,Antarctica,"-25.88746, -113.754919",Central Park,-145.745876
+Midtown,69.184659,PZ1 5EE,45379,"Tokyo, Brazil",DE,2165,2102.4,9043 Main St,NRT,Rotterdam,FL,North America,"-16.869304, 171.684878",Central Park,-24.702944
+East Side,42.956714,VP5 5NS,32041,"London, Germany",CA,8535,8070.9,9504 Maple Dr,LAX,Port of LA,TX,Asia,"-1.064172, 144.942263",Eiffel Tower,-93.644402
+Downtown,74.430777,52200,42378,"Paris, Netherlands",US,2878,4023.5,2134 Oak Ave,CDG,Rotterdam,NC,Antarctica,"-35.579267, 106.916804",Statue of Liberty,79.672189
+West End,38.026946,GO2 5OU,36509,"Dallas, United States",IN,277,3569.8,7529 Elm St,LAX,Port of LA,MA,South America,"-43.529534, -69.548791",Central Park,-158.239157
+South Bay,-2.277459,76710,39262,"Seattle, India",FR,3685,4415.7,3357 Cedar Ln,CDG,Singapore,CA,Asia,"-34.279505, 92.081838",Big Ben,-137.978013
+North Shore,4.324591,78954,11758,"London, Sweden",DE,4747,8236.3,7597 Maple Dr,CDG,Singapore,GA,Oceania,"-37.496847, 72.094045",Big Ben,142.552187
+South Bay,87.781024,UD9 9DK,27508,"Miami, Mexico",CA,3399,7911.4,4544 Elm St,SFO,Shanghai,OH,Africa,"17.49102, 49.238684",Central Park,80.596989
+North Shore,51.063421,67929,42057,"Portland, Spain",JP,3348,268.1,323 Main St,SIN,Rotterdam,TX,Antarctica,"77.059125, -142.441295",Big Ben,-118.048163
+West End,15.795111,34043,37642,"Berlin, Spain",AU,7236,6906.6,4233 Main St,SFO,Shanghai,IL,Antarctica,"26.232412, 45.532317",Golden Gate Bridge,126.456713
+Downtown,-0.347848,79702,23442,"Miami, France",AU,4946,9125.4,4419 Oak Ave,SIN,Shanghai,NY,South America,"43.993949, 101.558916",Central Park,-113.458879
+Downtown,-40.463851,48347,37416,"Los Angeles, Sweden",GB,6060,3404.6,1011 Park Blvd,LAX,Busan,WA,South America,"-6.9609, -163.044296",Big Ben,-17.490256
+Midtown,-10.958206,17201,37245,"Seattle, Germany",MX,5511,3897.3,3197 Park Blvd,ORD,Port of LA,IL,Oceania,"-89.807438, 82.183811",Central Park,-37.094034
+North Shore,-20.111803,VX6 9QI,18686,"Dallas, France",DE,6403,2500.5,4332 Main St,LAX,Busan,CA,Antarctica,"-84.015576, 139.919862",Eiffel Tower,-168.052554
+North Shore,-22.446476,14468,20060,"San Francisco, France",DE,2955,966.0,5941 Main St,SIN,Shanghai,TX,South America,"-22.264606, 32.486644",Eiffel Tower,140.606604
+East Side,-85.056722,LH2 5VZ,14277,"Seattle, Japan",US,8014,8268.1,4699 Oak Ave,LAX,Busan,CA,Africa,"-7.66565, -120.25101",Statue of Liberty,-11.958237
+North Shore,77.611709,KQ4 7PJ,11554,"Atlanta, Canada",CA,7865,7737.6,7720 Elm St,SIN,Rotterdam,GA,Antarctica,"67.55385, -159.352634",Central Park,-157.053603
+Midtown,-84.044523,86091,10968,"Denver, Switzerland",DE,5865,9238.3,2694 Oak Ave,LHR,Singapore,MA,Asia,"-82.037528, -76.851533",Statue of Liberty,108.679832
+East Side,27.537509,II9 7RI,27036,"Austin, Germany",GB,6750,1048.4,6004 Maple Dr,NRT,Rotterdam,MA,South America,"-45.426287, 57.127961",Statue of Liberty,-11.221697
+Midtown,-68.261951,VM2 7TX,49036,"Portland, Norway",AU,1093,504.7,7001 Elm St,SFO,Shanghai,WA,North America,"15.660129, -163.980411",Golden Gate Bridge,-108.572748
+East Side,66.037094,96538,27470,"Los Angeles, Italy",US,3268,3213.9,2759 Oak Ave,SIN,Rotterdam,WA,Africa,"30.158654, 97.78379",Big Ben,-176.540607
+North Shore,46.805678,CC1 7KY,26750,"Boston, Japan",GB,6523,4852.2,1168 Park Blvd,LAX,Port of LA,MA,South America,"-29.37865, -115.305957",Statue of Liberty,76.112464
+South Bay,-8.261067,SC7 5EY,10134,"Sydney, France",JP,3942,5462.9,1159 Pine Rd,SIN,Shanghai,MA,Africa,"-74.405017, -34.122813",Big Ben,-121.753272
+South Bay,-43.496324,LQ9 4NN,01512,"Tokyo, Singapore",DE,3748,9970.8,4631 Main St,LHR,Busan,FL,Africa,"2.024037, -38.748482",Central Park,-53.39421
+South Bay,13.734544,NQ7 7UQ,02556,"New York, Norway",MX,5949,4170.9,3909 Main St,JFK,Port of LA,NY,Antarctica,"-64.238337, 179.556581",Central Park,41.728701
+South Bay,-16.350203,IP1 3RB,16917,"Boston, Sweden",CA,4239,1420.2,1827 Oak Ave,SIN,Shanghai,MA,Antarctica,"-58.221996, 118.019942",Eiffel Tower,28.362395
+South Bay,-64.10151,75968,40286,"Tokyo, Italy",FR,2485,4987.5,6826 Elm St,ORD,Hamburg,FL,Oceania,"41.20279, -91.242866",Big Ben,83.146523
+North Shore,-51.432085,AV8 3ZQ,06801,"Sydney, Spain",MX,8130,1048.3,6824 Main St,JFK,Hamburg,GA,Antarctica,"45.209084, 35.927601",Statue of Liberty,80.579157
+West End,-86.505663,61647,47182,"Toronto, France",FR,4850,3293.2,2082 Oak Ave,SIN,Shanghai,PA,Asia,"-65.504569, -4.130655",Eiffel Tower,68.221755
+South Bay,37.091019,29359,07820,"Miami, Spain",DE,2292,3200.9,1579 Cedar Ln,LHR,Rotterdam,PA,Africa,"-44.351569, -145.223046",Big Ben,-58.229425
+South Bay,87.963997,NA9 7FY,19854,"Tokyo, Italy",CA,3582,1993.0,6968 Cedar Ln,JFK,Busan,IL,Antarctica,"-6.427931, 123.780272",Statue of Liberty,-33.802463
+South Bay,-35.131347,CV2 9CG,09675,"New York, Sweden",GB,3067,7368.2,1945 Pine Rd,LAX,Hamburg,WA,Africa,"-30.669074, -48.619609",Central Park,99.10068
+Midtown,-12.126406,QK2 7OX,56431,"Dallas, Spain",MX,1132,9415.5,9781 Cedar Ln,CDG,Hamburg,MA,Africa,"-78.940429, -113.837773",Eiffel Tower,-43.834046
+West End,12.978143,ZL2 5HO,43005,"Austin, Australia",FR,2440,2967.6,1698 Park Blvd,CDG,Rotterdam,CO,Europe,"-68.464638, -11.54951",Golden Gate Bridge,74.952855
+West End,-63.375426,34370,44309,"Phoenix, Germany",MX,7757,1918.1,8409 Main St,JFK,Rotterdam,WA,Africa,"-53.279554, -16.667517",Central Park,-168.748204
+Midtown,16.365846,40986,47573,"Miami, United States",IN,3271,2351.6,7766 Main St,JFK,Shanghai,IL,Europe,"42.488491, -63.854792",Eiffel Tower,-65.582221
+East Side,41.735665,WJ4 2WO,05620,"Chicago, Netherlands",DE,3104,7597.0,4280 Cedar Ln,LAX,Busan,IL,Antarctica,"-43.115657, 176.778882",Eiffel Tower,157.24314
+South Bay,1.063631,KJ2 8ZN,35586,"Phoenix, France",US,6421,9230.5,2179 Pine Rd,NRT,Shanghai,GA,Oceania,"-82.520118, 154.529672",Golden Gate Bridge,-55.234195
+Downtown,31.370644,23104,49578,"Paris, United Kingdom",AU,2783,3691.5,4807 Pine Rd,LHR,Port of LA,WA,Asia,"-45.214793, -29.437278",Central Park,-107.888995
+North Shore,83.943086,39233,27478,"Portland, Netherlands",CA,6962,1004.8,178 Maple Dr,NRT,Rotterdam,FL,Africa,"32.751458, -5.724079",Eiffel Tower,-42.280829
+Downtown,-67.130335,PA7 6HZ,05179,"Houston, Sweden",IN,4857,8562.7,6355 Pine Rd,SIN,Rotterdam,PA,Africa,"-9.665218, -129.308546",Central Park,-81.773203
+North Shore,-12.594087,CT2 7OR,41464,"Miami, Singapore",AU,4124,4914.0,4236 Main St,LAX,Hamburg,NY,Oceania,"-24.548012, -91.165275",Central Park,-16.901605
+West End,-31.283288,61261,54106,"San Francisco, Germany",FR,3733,5415.1,4455 Main St,LHR,Hamburg,MA,Europe,"62.171433, -8.364031",Golden Gate Bridge,-55.550084
+East Side,57.334414,SJ2 5EL,43771,"Los Angeles, Spain",AU,3121,4086.9,922 Oak Ave,SFO,Busan,IL,Europe,"1.276456, 8.22611",Eiffel Tower,-138.280986
+Midtown,-63.257591,NP9 4JG,23549,"Dallas, Israel",CA,7489,8820.4,7638 Cedar Ln,LHR,Hamburg,IL,South America,"77.611053, 73.300719",Statue of Liberty,-126.709294
+West End,38.272609,IH8 7GN,26181,"Paris, Norway",CA,1158,4614.6,1899 Park Blvd,CDG,Shanghai,FL,Oceania,"-28.351333, 92.658094",Golden Gate Bridge,171.802875
+North Shore,-41.517958,16246,28682,"Tokyo, Switzerland",MX,5419,5025.6,2105 Pine Rd,NRT,Hamburg,CO,Europe,"50.723189, -157.989923",Statue of Liberty,83.165336
+South Bay,-62.915574,92296,18125,"Toronto, Israel",DE,4802,9123.7,1396 Maple Dr,LAX,Shanghai,NY,North America,"-25.879849, -68.392136",Central Park,28.725813
+East Side,61.674196,28691,36977,"Dallas, Norway",FR,440,3092.4,6063 Oak Ave,SIN,Busan,NC,Africa,"88.526797, 104.497729",Eiffel Tower,-47.455041
+East Side,-12.418952,ZH1 8ZV,29585,"Sydney, Norway",JP,1160,6671.0,8 Pine Rd,JFK,Singapore,NC,Oceania,"-26.345532, 114.116664",Central Park,43.725215
+West End,-85.839471,39945,18974,"San Francisco, Germany",JP,584,2719.5,1025 Cedar Ln,JFK,Hamburg,NY,South America,"-62.721855, -161.046463",Eiffel Tower,116.253176
+Downtown,46.271343,13719,01184,"Tokyo, Spain",US,948,7830.5,1535 Maple Dr,SIN,Shanghai,OH,Antarctica,"62.251702, -116.465537",Statue of Liberty,-160.266935
+West End,89.859154,41540,31517,"Denver, United States",FR,8002,3449.4,4800 Maple Dr,CDG,Hamburg,WA,Asia,"-65.447514, -42.416759",Eiffel Tower,-104.134716
+Midtown,49.831264,RR5 7KC,37941,"Los Angeles, Australia",FR,3174,7919.9,9162 Oak Ave,NRT,Port of LA,FL,North America,"-68.848347, 106.073374",Big Ben,58.257158
+West End,29.066577,ZS1 4LU,48580,"Boston, Mexico",CA,7851,6828.5,3186 Oak Ave,NRT,Busan,OH,Oceania,"-47.929941, 90.339006",Central Park,164.56221
+South Bay,60.16545,DR3 2UR,11095,"Atlanta, United States",AU,2985,5689.8,3601 Main St,CDG,Singapore,OH,Oceania,"3.78488, 63.05812",Central Park,15.849797
+Downtown,-62.234739,RR4 7SV,31932,"New York, France",JP,7268,6081.5,5185 Oak Ave,SFO,Singapore,WA,Asia,"28.684084, 145.266362",Statue of Liberty,55.974485
+Midtown,-27.23767,OW3 9MH,38580,"Atlanta, Japan",FR,172,6635.7,3794 Pine Rd,NRT,Hamburg,NY,North America,"-49.413926, -9.041644",Golden Gate Bridge,44.294467
+West End,-32.260179,TU1 4TV,24786,"London, France",IN,6065,6157.2,5571 Oak Ave,LAX,Port of LA,CO,Antarctica,"39.226265, -98.467108",Eiffel Tower,151.08386
+Midtown,-9.964014,KG5 9VB,55183,"Portland, Israel",AU,6309,5211.4,9419 Elm St,ORD,Rotterdam,GA,Asia,"8.611545, 80.839369",Eiffel Tower,-170.201247
+Downtown,32.417346,93160,45974,"Dallas, Mexico",FR,4949,5505.7,5080 Cedar Ln,ORD,Port of LA,MA,Asia,"-79.750286, -142.254671",Statue of Liberty,127.972647
+East Side,-87.494042,27651,11106,"Toronto, Sweden",JP,795,1339.6,4115 Elm St,LHR,Hamburg,TX,North America,"83.009336, -104.83077",Central Park,68.809182
+Downtown,40.15896,73803,09521,"Chicago, Canada",GB,7336,1723.3,5597 Park Blvd,SIN,Shanghai,IL,North America,"-61.962916, -102.742082",Central Park,51.693616
+East Side,47.273916,95882,48217,"Denver, United States",GB,2494,3489.6,7651 Cedar Ln,CDG,Singapore,GA,South America,"20.008322, -137.491378",Eiffel Tower,-3.923358
+East Side,-61.131776,GJ6 6RF,41638,"Dallas, Netherlands",JP,6416,1596.3,9504 Oak Ave,SFO,Hamburg,CA,South America,"71.312308, 24.055349",Golden Gate Bridge,-152.96931
+West End,-0.277615,YO7 4YO,49569,"Seattle, Spain",AU,4685,7696.5,5799 Pine Rd,CDG,Shanghai,MA,Africa,"-14.815216, -51.08328",Golden Gate Bridge,63.714028
+East Side,40.124407,83496,27883,"Dallas, Canada",AU,7501,5990.8,9521 Cedar Ln,NRT,Shanghai,TX,North America,"-22.669889, 50.818513",Golden Gate Bridge,41.848193
+West End,-15.690568,50685,56170,"San Francisco, India",AU,8084,6173.3,760 Park Blvd,JFK,Shanghai,NC,Africa,"-16.698233, -177.577915",Big Ben,-100.66606
+South Bay,50.797364,QL1 5DN,10782,"Toronto, Italy",US,2566,276.1,2588 Oak Ave,SFO,Rotterdam,TX,Europe,"47.871597, 112.845185",Statue of Liberty,-175.497622
+North Shore,57.062893,IW7 3PM,16332,"Houston, Mexico",IN,7502,2635.6,7722 Elm St,LAX,Shanghai,OH,North America,"-66.320329, 35.0542",Golden Gate Bridge,-80.712534
+North Shore,17.692872,RK4 4KQ,56677,"Portland, Israel",MX,990,4332.6,5693 Oak Ave,SFO,Busan,OH,South America,"38.215306, -128.465001",Statue of Liberty,77.57797
+South Bay,32.318953,10919,37710,"Los Angeles, United Kingdom",IN,1371,4965.4,4947 Park Blvd,SIN,Rotterdam,TX,North America,"-75.679185, 141.726746",Big Ben,-94.026049
+East Side,63.109901,TW2 1KV,01289,"Miami, Netherlands",CA,7310,8998.7,4411 Main St,JFK,Busan,IL,South America,"-1.664671, 99.555242",Eiffel Tower,-85.778968
+South Bay,88.572829,45723,11092,"New York, Mexico",GB,173,6759.1,4824 Park Blvd,LAX,Hamburg,NY,South America,"22.892909, 161.722469",Golden Gate Bridge,-82.283978
+Downtown,59.968689,FK6 1WL,20123,"Miami, Germany",MX,688,5737.7,7504 Maple Dr,SIN,Singapore,CA,Antarctica,"63.8747, 118.223648",Statue of Liberty,178.3107
+South Bay,72.485022,VM2 7SI,08217,"Dallas, Germany",GB,8779,2625.6,9120 Oak Ave,CDG,Hamburg,IL,Antarctica,"51.269063, 31.668294",Golden Gate Bridge,13.714371
+Midtown,-2.81195,WN3 3NT,54673,"Houston, Spain",AU,4025,5980.4,7127 Main St,ORD,Singapore,CO,North America,"-86.501325, -118.904614",Eiffel Tower,-52.517433
+Downtown,28.443884,91777,49889,"Austin, Spain",MX,6187,5835.4,5478 Park Blvd,SIN,Rotterdam,NC,Asia,"18.162168, 137.091829",Statue of Liberty,-55.408009
+South Bay,28.880375,72476,23581,"Paris, India",MX,1293,2427.5,8858 Elm St,SIN,Busan,GA,Africa,"66.727312, -139.320656",Statue of Liberty,-148.115813
+South Bay,33.932626,CD4 4ZP,40334,"Seattle, Australia",DE,1436,2659.6,2727 Maple Dr,LAX,Busan,MA,North America,"30.449605, 136.185664",Central Park,-127.961472
+North Shore,-2.671172,HH9 8YT,42042,"Paris, United Kingdom",DE,2720,1726.9,828 Park Blvd,ORD,Rotterdam,CA,Asia,"-39.25342, -74.2535",Eiffel Tower,130.149078
+Downtown,18.670376,YR2 7IS,23488,"Houston, Canada",FR,2213,6686.2,5583 Pine Rd,JFK,Port of LA,NC,Antarctica,"65.805675, -112.904033",Golden Gate Bridge,-120.937497
+West End,47.67534,26305,35820,"Boston, Germany",DE,8000,4922.0,4519 Oak Ave,NRT,Port of LA,FL,North America,"61.132942, 85.989394",Big Ben,26.630356
+West End,37.297709,PH4 4LQ,08239,"San Francisco, Switzerland",GB,2558,468.9,5484 Park Blvd,ORD,Hamburg,NC,Africa,"20.928469, 19.092794",Golden Gate Bridge,-34.543909
+Downtown,-73.365561,AU1 7FB,33141,"Houston, France",FR,61,4570.7,6185 Cedar Ln,NRT,Busan,OH,Oceania,"-29.186977, 114.183966",Big Ben,-125.148349
+North Shore,-66.983539,HX6 1UD,07246,"Austin, India",MX,6076,5417.7,9503 Maple Dr,JFK,Hamburg,NY,Antarctica,"11.415582, 123.066039",Statue of Liberty,-77.291397
+North Shore,77.471594,45595,43934,"Tokyo, India",MX,7095,1408.1,4830 Cedar Ln,ORD,Busan,CA,Asia,"-1.890757, 103.278165",Golden Gate Bridge,176.986871
+South Bay,-70.603091,NH5 1IM,21104,"Portland, Mexico",FR,4899,4206.5,5950 Cedar Ln,NRT,Hamburg,TX,Antarctica,"-37.366515, -65.44752",Golden Gate Bridge,-131.533012
+North Shore,46.117261,ZM5 7KA,36626,"Boston, United States",FR,3803,9812.0,7794 Pine Rd,NRT,Rotterdam,TX,Europe,"79.043945, -144.749623",Big Ben,73.045799
+North Shore,80.717346,79066,15631,"Denver, Norway",BR,7825,8954.6,2171 Elm St,SIN,Busan,TX,Asia,"-44.755343, -125.420131",Golden Gate Bridge,-138.389177
+West End,84.724151,AW4 9VG,18776,"Houston, Japan",FR,7679,1374.5,3762 Park Blvd,SIN,Rotterdam,CA,Africa,"-36.446004, -155.217924",Big Ben,-55.606535
+East Side,-81.126558,NH3 4TT,36680,"Berlin, Norway",BR,3336,2261.2,6109 Oak Ave,LAX,Port of LA,GA,Asia,"74.892048, -111.891715",Big Ben,-48.345746
+South Bay,77.19293,ZF7 4FC,34619,"Austin, Spain",CA,898,5567.8,5680 Park Blvd,LAX,Hamburg,TX,North America,"53.821458, 36.590418",Golden Gate Bridge,-114.716155
+Downtown,-0.555087,RH5 3YU,01422,"Austin, Australia",DE,5129,3394.1,5058 Oak Ave,LHR,Shanghai,PA,Oceania,"-8.326198, -144.435226",Statue of Liberty,-19.867819
+South Bay,-87.735361,84069,44967,"Denver, Japan",FR,2330,2770.4,3211 Park Blvd,JFK,Port of LA,PA,Oceania,"-75.411365, 86.567486",Big Ben,-99.010167
+East Side,-55.311233,94927,15004,"Paris, Norway",GB,4909,2545.0,8237 Oak Ave,JFK,Singapore,TX,Europe,"-74.959062, 145.767932",Golden Gate Bridge,-1.526843

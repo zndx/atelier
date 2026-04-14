@@ -72,8 +72,8 @@ Feature: Dempster-Shafer classification pipeline
   Scenario: Mock annotations map ontology to label and annotation to formal code
     Then category "ICE.SENSITIVE.PID.CONTACT.EMAIL" label should be "Email Address"
     And category "ICE.SENSITIVE.PID.CONTACT.EMAIL" abbrev should be "EMAIL"
-    And category "ICE.SENSITIVE.PID.FINANCIAL.PAN" label should be "Payment Card Number"
-    And category "ICE.SENSITIVE.PID.FINANCIAL.PAN" abbrev should be "PAN"
+    And category "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN" label should be "Payment Card Number"
+    And category "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN" abbrev should be "PAN"
 
   @slow
   Scenario: Structured evaluation produces per-category metrics
@@ -82,6 +82,12 @@ Feature: Dempster-Shafer classification pipeline
     And the evaluation report should contain per-category metrics
     And every category with support > 0 should have precision and recall
     And the evaluation report should contain a confusion matrix
+
+  Scenario: Pattern map produces non-vacuous mass for email pattern
+    Given a frame of discernment from the vocabulary
+    When I compute pattern_to_mass for signals ["email_pattern"]
+    Then the pattern mass should assign weight to "ICE.SENSITIVE.PID.CONTACT.EMAIL"
+    And the pattern mass should not be vacuous
 
   Scenario: FSM rejects invalid transitions
     Given a fresh AgentFSM in "IDLE" state
