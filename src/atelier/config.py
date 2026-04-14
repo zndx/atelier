@@ -120,6 +120,15 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.agent.enabled": ("classify_agent_enabled", bool),
     "classify.agent.max_turns": ("classify_agent_max_turns", int),
     "classify.agent.model": ("classify_agent_model", str),
+    # Monte Carlo sampling
+    "classify.monte_carlo.min_corpus_size": ("mc_min_corpus_size", int),
+    "classify.monte_carlo.sample_fraction": ("mc_sample_fraction", float),
+    "classify.monte_carlo.min_per_stratum": ("mc_min_per_stratum", int),
+    "classify.monte_carlo.max_frontier_columns": ("mc_max_frontier_columns", int),
+    "classify.monte_carlo.propagation_threshold": ("mc_propagation_threshold", float),
+    "classify.monte_carlo.propagation_discount": ("mc_propagation_discount", float),
+    # Background feature analysis
+    "classify.background_analysis": ("classify_background_analysis", bool),
 }
 
 # Reverse: field_name → ENV var name
@@ -278,6 +287,17 @@ class AtelierConfig:
     classify_agent_enabled: bool = False
     classify_agent_max_turns: int = 10
     classify_agent_model: str | None = None  # falls back to agent_model
+
+    # Monte Carlo sampling
+    mc_min_corpus_size: int = 200
+    mc_sample_fraction: float = 0.15
+    mc_min_per_stratum: int = 3
+    mc_max_frontier_columns: int = 500
+    mc_propagation_threshold: float = 0.85
+    mc_propagation_discount: float = 0.30
+
+    # Background feature analysis
+    classify_background_analysis: bool = True
 
     @property
     def has_classify_llm(self) -> bool:

@@ -237,24 +237,72 @@ def run_classification_pipeline(
         except ImportError:
             logger.warning("sentence-transformers not available; using name+pattern only")
 
+        # ── MC Stratification ──────────────────────────────────────
+        from atelier.classify.monte_carlo import MCConfig as _MCConfig
+        mc_cfg = _MCConfig.from_cfg(cfg)
+        mc_plan = None
+
+        if total_columns >= mc_cfg.min_corpus_size and has_embeddings:
+            from atelier.classify.monte_carlo import (
+                pre_classify as _pre_classify,
+                stratify as _stratify,
+                select_sample as _select_sample,
+            )
+            logger.info(
+                "MC sampling: %d columns >= threshold %d",
+                total_columns, mc_cfg.min_corpus_size,
+            )
+            fsm.advance(run_id, FSMState.SAMPLING, progress={
+                "phase": "mc_stratification",
+                "columns_total": total_columns,
+            })
+            pre_results = _pre_classify(
+                column_names, samples_by_name, category_set, frame,
+                has_embeddings,
+            )
+            strata = _stratify(pre_results, mc_cfg)
+            mc_plan = _select_sample(strata, mc_cfg, total=total_columns)
+            logger.info(
+                "MC plan: %d frontier + %d propagation across %d strata",
+                len(mc_plan.frontier_columns),
+                len(mc_plan.propagation_columns),
+                len(mc_plan.strata),
+            )
+
         # ── LLM SWEEP ────────────────────────────────────────────
+        # When MC is active, sweep only frontier columns
+        sweep_columns = (
+            list(mc_plan.frontier_columns)
+            if mc_plan and not mc_plan.is_passthrough
+            else column_names
+        )
+
         fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
             "columns_total": total_columns,
             "phase": "llm_sweep",
+            "mc_frontier": len(sweep_columns),
         })
 
         state = BootstrapState()
+        if mc_plan and not mc_plan.is_passthrough:
+            state.mc_strata_count = len(mc_plan.strata)
+            state.mc_sample_fraction = mc_plan.effective_sample_fraction
 
         _llm_sweep(
             state, boot_cfg, llm_backend, system_prompt,
-            column_names, samples_by_name, column_table,
+            sweep_columns, samples_by_name, column_table,
         )
+
+        # ── Label Propagation ──────────────────────────────────────
+        if mc_plan and not mc_plan.is_passthrough:
+            from atelier.classify.monte_carlo import propagate_labels as _propagate
+            _propagate(state, mc_plan, samples_by_name, mc_cfg)
 
         coverage = _coverage(state, column_names)
         logger.info(
-            "LLM sweep: labeled %d/%d (coverage=%.1f%%, calls=%d)",
+            "LLM sweep: labeled %d/%d (coverage=%.1f%%, calls=%d, propagated=%d)",
             len(state.labels), total_columns,
-            coverage * 100, state.llm_calls_total,
+            coverage * 100, state.llm_calls_total, state.propagated_count,
         )
 
         # ── VALIDATING ───────────────────────────────────────────
@@ -264,9 +312,13 @@ def run_classification_pipeline(
             "coverage": round(coverage, 4),
         })
 
+        # MC-aware discount: propagated labels get higher discount
+        prop_discount = mc_cfg.propagation_discount if mc_plan and not mc_plan.is_passthrough else None
+
         _run_ml_validation(
             state, boot_cfg, column_names, samples_by_name,
             category_set, frame, has_embeddings, discounts=discounts,
+            propagation_discount=prop_discount,
         )
 
         disagreements = _identify_disagreements(state, column_names, boot_cfg)
@@ -341,6 +393,7 @@ def run_classification_pipeline(
                 _run_ml_validation(
                     state, boot_cfg, column_names, samples_by_name,
                     category_set, frame, has_embeddings, discounts=discounts,
+                    propagation_discount=prop_discount,
                 )
 
                 disagreements = _identify_disagreements(state, column_names, boot_cfg)
@@ -380,7 +433,7 @@ def run_classification_pipeline(
         })
 
         # ── Feature analysis (SHAP + SAGE, config-gated) ──────────
-        _run_feature_analysis(cfg, classifications, all_samples, category_set, results_dir)
+        _run_feature_analysis(cfg, classifications, all_samples, category_set, results_dir, mc_plan=mc_plan)
 
         # ── EVALUATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.EVALUATING, progress={
@@ -404,6 +457,17 @@ def run_classification_pipeline(
         summary["agent_turns"] = state.agent_turns
         summary["agent_converged_reason"] = state.agent_converged_reason
         summary["agent_reasoning"] = state.agent_reasoning
+        # Monte Carlo sampling metadata
+        summary["mc_enabled"] = mc_plan is not None and not mc_plan.is_passthrough
+        summary["mc_strata"] = len(mc_plan.strata) if mc_plan else 0
+        summary["mc_frontier_columns"] = (
+            len(mc_plan.frontier_columns) if mc_plan else total_columns
+        )
+        summary["mc_propagated_columns"] = state.propagated_count
+        summary["mc_escalated_columns"] = state.escalated_count
+        summary["mc_sample_fraction"] = (
+            mc_plan.effective_sample_fraction if mc_plan else 1.0
+        )
         summary["iteration_metrics"] = [
             {
                 "iteration": m.iteration,
@@ -734,12 +798,17 @@ def _run_feature_analysis(
     all_samples: list[TableSample],
     category_set: HierarchicalCategorySet,
     results_dir: Path,
+    mc_plan=None,
 ) -> None:
     """Run SHAP and SAGE feature analysis, mutating classifications in-place.
 
     Both are gated by config (classify_shap_enabled, classify_sage_enabled).
     SAGE uses predicted class indices as supervision — it measures feature
     contribution to the model's own decisions, not external ground truth.
+
+    When MC is active and ``classify_background_analysis`` is true, SHAP runs
+    in a background daemon thread. SAGE runs on the frontier sample only
+    (representative subset).
     """
     all_features = [
         extract_features(
@@ -757,24 +826,41 @@ def _run_feature_analysis(
 
     # ── SHAP (per-item explanations) ────────────────────────
     if cfg.classify_shap_enabled:
-        try:
-            from atelier.classify.shap_explanations import run_shap_analysis
-            shap_result = run_shap_analysis(all_features, category_set)
-            if shap_result:
-                shap_records = shap_result.to_records(k=cfg.classify_shap_top_k)
-                for cls_dict, shap_row in zip(classifications, shap_records):
-                    cls_dict.update(shap_row)
-                logger.info("SHAP: %s method, %d items", shap_result.method, shap_result.n_items)
-                shap_path = results_dir / "shap_summary.json"
-                shap_path.write_text(json.dumps(shap_result.to_dict(), indent=2) + "\n")
-        except Exception as e:
-            logger.warning("SHAP analysis failed: %s", e)
+        if cfg.classify_background_analysis and mc_plan and not mc_plan.is_passthrough:
+            # Background SHAP for large corpora
+            import threading
+            def _shap_background():
+                try:
+                    _run_shap(cfg, all_features, category_set, classifications, results_dir)
+                except Exception as e:
+                    logger.warning("Background SHAP failed: %s", e)
+            t = threading.Thread(target=_shap_background, daemon=True)
+            t.start()
+            logger.info("SHAP started in background thread")
+        else:
+            _run_shap(cfg, all_features, category_set, classifications, results_dir)
 
     # ── SAGE (global feature importance) ────────────────────
     # SAGE is critical — it quantifies per-feature contribution to
     # classification. The config flag gates runtime cost for dev/UI
     # testing, not because SAGE is optional. See config/base.conf.
     if cfg.classify_sage_enabled:
+        # When MC active, run SAGE on frontier sample only (representative)
+        sage_features = all_features
+        sage_classifications = classifications
+        if mc_plan and not mc_plan.is_passthrough:
+            frontier_set = mc_plan.frontier_columns
+            sage_pairs = [
+                (feat, cls) for feat, cls in zip(all_features, classifications)
+                if cls["column_name"] in frontier_set
+            ]
+            if sage_pairs:
+                sage_features, sage_classifications = zip(*sage_pairs)
+                sage_features = list(sage_features)
+                sage_classifications = list(sage_classifications)
+                logger.info("SAGE: using %d frontier columns (of %d total)",
+                            len(sage_features), len(all_features))
+
         try:
             import numpy as np
             from atelier.classify.sage import run_sage_analysis
@@ -782,11 +868,11 @@ def _run_feature_analysis(
             code_to_idx = {cat.code: i for i, cat in enumerate(category_set.categories)}
             gt_indices = np.array([
                 code_to_idx.get(c["predicted_code"], 0)
-                for c in classifications
+                for c in sage_classifications
             ])
 
             sage_result = run_sage_analysis(
-                all_features, gt_indices, category_set,
+                sage_features, gt_indices, category_set,
                 n_permutations=cfg.classify_sage_permutations,
                 detect_convergence=True,
             )
@@ -795,6 +881,22 @@ def _run_feature_analysis(
             sage_path.write_text(json.dumps(sage_result.to_dict(), indent=2) + "\n")
         except Exception as e:
             logger.warning("SAGE analysis failed: %s", e)
+
+
+def _run_shap(cfg, all_features, category_set, classifications, results_dir):
+    """Run SHAP analysis synchronously."""
+    try:
+        from atelier.classify.shap_explanations import run_shap_analysis
+        shap_result = run_shap_analysis(all_features, category_set)
+        if shap_result:
+            shap_records = shap_result.to_records(k=cfg.classify_shap_top_k)
+            for cls_dict, shap_row in zip(classifications, shap_records):
+                cls_dict.update(shap_row)
+            logger.info("SHAP: %s method, %d items", shap_result.method, shap_result.n_items)
+            shap_path = results_dir / "shap_summary.json"
+            shap_path.write_text(json.dumps(shap_result.to_dict(), indent=2) + "\n")
+    except Exception as e:
+        logger.warning("SHAP analysis failed: %s", e)
 
 
 def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:

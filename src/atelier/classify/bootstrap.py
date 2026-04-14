@@ -76,6 +76,10 @@ class IterationMetrics:
     disagreements: int
     coverage: float
     llm_calls: int
+    # MC-aware metrics (populated when MC sampling is active)
+    frontier_columns: int = 0
+    propagated_columns: int = 0
+    escalated_columns: int = 0
 
 
 @dataclass
@@ -98,6 +102,11 @@ class BootstrapState:
     agent_reasoning: list[str] = field(default_factory=list)
     agent_turns: int = 0
     agent_converged_reason: str | None = None
+    # Monte Carlo sampling metadata
+    propagated_count: int = 0
+    escalated_count: int = 0
+    mc_strata_count: int = 0
+    mc_sample_fraction: float = 1.0
 
 
 # ── Phase helpers ────────────────────────────────────────────────
@@ -156,8 +165,15 @@ def _run_ml_validation(
     frame: FrameOfDiscernment,
     has_embeddings: bool,
     discounts: DiscountConfig | None = None,
+    propagation_discount: float | None = None,
 ) -> None:
-    """Phase 2: Run ML classification on all columns, compute K."""
+    """Phase 2: Run ML classification on all columns, compute K.
+
+    When ``propagation_discount`` is set, propagated labels (label_source
+    == "propagated") use a higher discount factor, giving less mass to
+    LLM evidence and more to Theta. This lets DST conflict detection
+    automatically escalate uncertain propagations.
+    """
     from atelier.classify.pipeline import _classify_column
 
     for name in column_names:
@@ -165,11 +181,16 @@ def _run_ml_validation(
         llm_code = state.labels.get(name)
         llm_conf = state.confidence.get(name, 0.0)
 
+        # Use higher discount for propagated labels
+        llm_disc = cfg.llm_discount
+        if propagation_discount is not None and state.label_source.get(name) == "propagated":
+            llm_disc = propagation_discount
+
         result = _classify_column(
             col, category_set, frame,
             llm_code=llm_code,
             llm_confidence=llm_conf,
-            llm_discount=cfg.llm_discount,
+            llm_discount=llm_disc,
             use_cosine=has_embeddings,
             discounts=discounts,
         )

@@ -100,3 +100,40 @@ Feature: Dempster-Shafer classification pipeline
     When I run the classification pipeline with custom discounts
     Then the pipeline should reach CONVERGED state
     And the average confidence should differ from default discounts
+
+  # ── Monte Carlo Sampling ─────────────────────────────────────
+
+  Scenario: MC config loads from HOCON with defaults
+    Then MC config should load from HOCON with default values
+
+  Scenario: MC passthrough when corpus below threshold
+    Given the fixture corpus with 50 columns
+    And an MC config with min_corpus_size 200
+    When I run pre-classification on the corpus
+    And I stratify the pre-classified columns
+    And I select the MC sample
+    Then the MC plan should be passthrough
+    And frontier + propagation should cover all columns
+
+  Scenario: MC activates when corpus exceeds threshold
+    Given the fixture corpus with 50 columns
+    And an MC config with min_corpus_size 5
+    When I run pre-classification on the corpus
+    And I stratify the pre-classified columns
+    And I select the MC sample
+    Then the MC plan should NOT be passthrough
+    And frontier columns should be a subset of all columns
+    And frontier + propagation should cover all columns
+
+  Scenario: Pre-classification assigns every column
+    Given the fixture corpus with 50 columns
+    And an MC config with min_corpus_size 5
+    When I run pre-classification on the corpus
+    Then every column should have a pre-classification
+
+  Scenario: Stratification produces meaningful strata
+    Given the fixture corpus with 50 columns
+    And an MC config with min_corpus_size 5
+    When I run pre-classification on the corpus
+    And I stratify the pre-classified columns
+    Then there should be at least 2 strata
