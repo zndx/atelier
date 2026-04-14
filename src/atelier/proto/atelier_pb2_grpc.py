@@ -51,6 +51,11 @@ class AtelierStub(object):
                 request_serializer=atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.SerializeToString,
                 response_deserializer=atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.FromString,
                 _registered_method=True)
+        self.ListDataSources = channel.unary_unary(
+                '/atelier.Atelier/ListDataSources',
+                request_serializer=atelier_dot_proto_dot_atelier__pb2.ListDataSourcesRequest.SerializeToString,
+                response_deserializer=atelier_dot_proto_dot_atelier__pb2.ListDataSourcesResponse.FromString,
+                _registered_method=True)
         self.ListDatasets = channel.unary_unary(
                 '/atelier.Atelier/ListDatasets',
                 request_serializer=atelier_dot_proto_dot_atelier__pb2.ListDatasetsRequest.SerializeToString,
@@ -91,6 +96,12 @@ class AtelierServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListDataSources(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListDatasets(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -126,6 +137,11 @@ def add_AtelierServicer_to_server(servicer, server):
                     servicer.GetAgent,
                     request_deserializer=atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.FromString,
                     response_serializer=atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.SerializeToString,
+            ),
+            'ListDataSources': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListDataSources,
+                    request_deserializer=atelier_dot_proto_dot_atelier__pb2.ListDataSourcesRequest.FromString,
+                    response_serializer=atelier_dot_proto_dot_atelier__pb2.ListDataSourcesResponse.SerializeToString,
             ),
             'ListDatasets': grpc.unary_unary_rpc_method_handler(
                     servicer.ListDatasets,
@@ -226,6 +242,33 @@ class Atelier(object):
             '/atelier.Atelier/GetAgent',
             atelier_dot_proto_dot_atelier__pb2.GetAgentRequest.SerializeToString,
             atelier_dot_proto_dot_atelier__pb2.GetAgentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListDataSources(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/atelier.Atelier/ListDataSources',
+            atelier_dot_proto_dot_atelier__pb2.ListDataSourcesRequest.SerializeToString,
+            atelier_dot_proto_dot_atelier__pb2.ListDataSourcesResponse.FromString,
             options,
             channel_credentials,
             insecure,

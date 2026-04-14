@@ -7,68 +7,139 @@ import {
   type ReactNode,
 } from "react";
 
+export interface DataSourceInfo {
+  id: string;
+  source_type: string;
+  source_uri: string;
+  display_name: string;
+  vocabulary_mode: string;
+  created_at: string;
+  metadata: string;
+}
+
 export interface DatasetInfo {
   id: string;
   name: string;
   description: string;
   row_count: number;
+  source_id: string;
+  version_number: number;
+  is_active: boolean;
+  summary: string;
+  fsm_run_id: string;
+  created_at: string;
 }
 
 interface DatasetContextValue {
+  sources: DataSourceInfo[];
+  activeSourceId: string | null;
+  setActiveSourceId: (id: string | null) => void;
+  datasets: DatasetInfo[];
   activeDatasetId: string | null;
   setActiveDatasetId: (id: string | null) => void;
-  datasets: DatasetInfo[];
+  refreshSources: () => Promise<void>;
   refreshDatasets: () => Promise<void>;
 }
 
 const DatasetContext = createContext<DatasetContextValue | null>(null);
 
-const STORAGE_KEY = "atelier:activeDatasetId";
+const SOURCE_KEY = "atelier:activeSourceId";
+const DATASET_KEY = "atelier:activeDatasetId";
 
 export function DatasetProvider({ children }: { children: ReactNode }) {
+  const [sources, setSources] = useState<DataSourceInfo[]>([]);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
-  const [activeDatasetId, setActiveRaw] = useState<string | null>(() =>
-    localStorage.getItem(STORAGE_KEY),
+  const [activeSourceId, setActiveSourceRaw] = useState<string | null>(
+    () => localStorage.getItem(SOURCE_KEY),
+  );
+  const [activeDatasetId, setActiveDatasetRaw] = useState<string | null>(
+    () => localStorage.getItem(DATASET_KEY),
   );
 
-  const setActiveDatasetId = useCallback((id: string | null) => {
-    setActiveRaw(id);
+  const setActiveSourceId = useCallback((id: string | null) => {
+    setActiveSourceRaw(id);
     if (id) {
-      localStorage.setItem(STORAGE_KEY, id);
+      localStorage.setItem(SOURCE_KEY, id);
     } else {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SOURCE_KEY);
+    }
+  }, []);
+
+  const setActiveDatasetId = useCallback((id: string | null) => {
+    setActiveDatasetRaw(id);
+    if (id) {
+      localStorage.setItem(DATASET_KEY, id);
+    } else {
+      localStorage.removeItem(DATASET_KEY);
+    }
+  }, []);
+
+  const refreshSources = useCallback(async () => {
+    try {
+      const r = await fetch("/api/data-sources");
+      const data = await r.json();
+      setSources(data.sources || []);
+    } catch {
+      setSources([]);
     }
   }, []);
 
   const refreshDatasets = useCallback(async () => {
     try {
-      const r = await fetch("/api/datasets");
+      const url = activeSourceId
+        ? `/api/datasets?source_id=${encodeURIComponent(activeSourceId)}`
+        : "/api/datasets";
+      const r = await fetch(url);
       const data = await r.json();
       setDatasets(data.datasets || []);
     } catch {
       setDatasets([]);
     }
-  }, []);
+  }, [activeSourceId]);
 
-  // Fetch on mount
+  // Fetch sources on mount
+  useEffect(() => {
+    refreshSources();
+  }, [refreshSources]);
+
+  // Fetch datasets when source changes
   useEffect(() => {
     refreshDatasets();
   }, [refreshDatasets]);
 
-  // Auto-select most recent when none active; clear stale IDs
+  // Auto-select first source if none active
+  useEffect(() => {
+    if (sources.length === 0) return;
+    if (activeSourceId == null || !sources.some((s) => s.id === activeSourceId)) {
+      setActiveSourceId(sources[0].id);
+    }
+  }, [activeSourceId, sources, setActiveSourceId]);
+
+  // Auto-select active dataset version (or most recent)
   useEffect(() => {
     if (datasets.length === 0) return;
-
-    if (activeDatasetId == null) {
-      setActiveDatasetId(datasets[datasets.length - 1].id);
-    } else if (!datasets.some((d) => d.id === activeDatasetId)) {
-      setActiveDatasetId(datasets[datasets.length - 1].id);
+    const activeVersion = datasets.find((d) => d.is_active);
+    const target = activeVersion ?? datasets[0];
+    if (
+      activeDatasetId == null ||
+      !datasets.some((d) => d.id === activeDatasetId)
+    ) {
+      setActiveDatasetId(target.id);
     }
   }, [activeDatasetId, datasets, setActiveDatasetId]);
 
   return (
     <DatasetContext.Provider
-      value={{ activeDatasetId, setActiveDatasetId, datasets, refreshDatasets }}
+      value={{
+        sources,
+        activeSourceId,
+        setActiveSourceId,
+        datasets,
+        activeDatasetId,
+        setActiveDatasetId,
+        refreshSources,
+        refreshDatasets,
+      }}
     >
       {children}
     </DatasetContext.Provider>

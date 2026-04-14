@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1fsrc/atelier/proto/atelier.proto\x12\x07\x61telier\"\x14\n\x12HealthCheckRequest\"6\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\"^\n\rAgentMetadata\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x0c\n\x04role\x18\x04 \x01(\t\x12\x10\n\x08tool_ids\x18\x05 \x03(\t\"\x13\n\x11ListAgentsRequest\"<\n\x12ListAgentsResponse\x12&\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x16.atelier.AgentMetadata\"\x1d\n\x0fGetAgentRequest\x12\n\n\x02id\x18\x01 \x01(\t\"9\n\x10GetAgentResponse\x12%\n\x05\x61gent\x18\x01 \x01(\x0b\x32\x16.atelier.AgentMetadata\"o\n\x15\x43lassificationDataset\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x14\n\x0cparquet_path\x18\x03 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x04 \x01(\t\x12\x11\n\trow_count\x18\x05 \x01(\x03\"\x15\n\x13ListDatasetsRequest\"H\n\x14ListDatasetsResponse\x12\x30\n\x08\x64\x61tasets\x18\x01 \x03(\x0b\x32\x1e.atelier.ClassificationDataset\"\x12\n\x10\x46SMStatusRequest\"\x80\x01\n\x11\x46SMStatusResponse\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\r\n\x05state\x18\x02 \x01(\t\x12\x12\n\nstarted_at\x18\x03 \x01(\t\x12\x12\n\nupdated_at\x18\x04 \x01(\t\x12\x15\n\rprogress_json\x18\x05 \x01(\t\x12\r\n\x05\x65rror\x18\x06 \x01(\t\"l\n\x1aStartClassificationRequest\x12\x17\n\x0f\x63onnection_name\x18\x01 \x01(\t\x12\x10\n\x08\x64\x61tabase\x18\x02 \x01(\t\x12\x13\n\x0bsample_size\x18\x03 \x01(\x05J\x04\x08\x04\x10\x05R\x08use_mock\"M\n\x1bStartClassificationResponse\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\x0f\n\x07started\x18\x02 \x01(\x08\x12\r\n\x05\x65rror\x18\x03 \x01(\t2\xdd\x03\n\x07\x41telier\x12J\n\x0bHealthCheck\x12\x1b.atelier.HealthCheckRequest\x1a\x1c.atelier.HealthCheckResponse\"\x00\x12G\n\nListAgents\x12\x1a.atelier.ListAgentsRequest\x1a\x1b.atelier.ListAgentsResponse\"\x00\x12\x41\n\x08GetAgent\x12\x18.atelier.GetAgentRequest\x1a\x19.atelier.GetAgentResponse\"\x00\x12M\n\x0cListDatasets\x12\x1c.atelier.ListDatasetsRequest\x1a\x1d.atelier.ListDatasetsResponse\"\x00\x12G\n\x0cGetFSMStatus\x12\x19.atelier.FSMStatusRequest\x1a\x1a.atelier.FSMStatusResponse\"\x00\x12\x62\n\x13StartClassification\x12#.atelier.StartClassificationRequest\x1a$.atelier.StartClassificationResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1fsrc/atelier/proto/atelier.proto\x12\x07\x61telier\"\x14\n\x12HealthCheckRequest\"6\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\"^\n\rAgentMetadata\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x0c\n\x04role\x18\x04 \x01(\t\x12\x10\n\x08tool_ids\x18\x05 \x03(\t\"\x13\n\x11ListAgentsRequest\"<\n\x12ListAgentsResponse\x12&\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x16.atelier.AgentMetadata\"\x1d\n\x0fGetAgentRequest\x12\n\n\x02id\x18\x01 \x01(\t\"9\n\x10GetAgentResponse\x12%\n\x05\x61gent\x18\x01 \x01(\x0b\x32\x16.atelier.AgentMetadata\"\x9b\x01\n\nDataSource\x12\n\n\x02id\x18\x01 \x01(\t\x12\x13\n\x0bsource_type\x18\x02 \x01(\t\x12\x12\n\nsource_uri\x18\x03 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x04 \x01(\t\x12\x17\n\x0fvocabulary_mode\x18\x05 \x01(\t\x12\x12\n\ncreated_at\x18\x06 \x01(\t\x12\x15\n\rmetadata_json\x18\x07 \x01(\t\"\x18\n\x16ListDataSourcesRequest\"?\n\x17ListDataSourcesResponse\x12$\n\x07sources\x18\x01 \x03(\x0b\x32\x13.atelier.DataSource\"\xe6\x01\n\x15\x43lassificationDataset\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x14\n\x0cparquet_path\x18\x03 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x04 \x01(\t\x12\x11\n\trow_count\x18\x05 \x01(\x03\x12\x11\n\tsource_id\x18\x06 \x01(\t\x12\x16\n\x0eversion_number\x18\x07 \x01(\x05\x12\x11\n\tis_active\x18\x08 \x01(\x08\x12\x0f\n\x07summary\x18\t \x01(\t\x12\x12\n\nfsm_run_id\x18\n \x01(\t\x12\x12\n\ncreated_at\x18\x0b \x01(\t\"(\n\x13ListDatasetsRequest\x12\x11\n\tsource_id\x18\x01 \x01(\t\"H\n\x14ListDatasetsResponse\x12\x30\n\x08\x64\x61tasets\x18\x01 \x03(\x0b\x32\x1e.atelier.ClassificationDataset\"\x12\n\x10\x46SMStatusRequest\"\x80\x01\n\x11\x46SMStatusResponse\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\r\n\x05state\x18\x02 \x01(\t\x12\x12\n\nstarted_at\x18\x03 \x01(\t\x12\x12\n\nupdated_at\x18\x04 \x01(\t\x12\x15\n\rprogress_json\x18\x05 \x01(\t\x12\r\n\x05\x65rror\x18\x06 \x01(\t\"\x7f\n\x1aStartClassificationRequest\x12\x17\n\x0f\x63onnection_name\x18\x01 \x01(\t\x12\x10\n\x08\x64\x61tabase\x18\x02 \x01(\t\x12\x13\n\x0bsample_size\x18\x03 \x01(\x05\x12\x11\n\tsource_id\x18\x05 \x01(\tJ\x04\x08\x04\x10\x05R\x08use_mock\"M\n\x1bStartClassificationResponse\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\x0f\n\x07started\x18\x02 \x01(\x08\x12\r\n\x05\x65rror\x18\x03 \x01(\t2\xb5\x04\n\x07\x41telier\x12J\n\x0bHealthCheck\x12\x1b.atelier.HealthCheckRequest\x1a\x1c.atelier.HealthCheckResponse\"\x00\x12G\n\nListAgents\x12\x1a.atelier.ListAgentsRequest\x1a\x1b.atelier.ListAgentsResponse\"\x00\x12\x41\n\x08GetAgent\x12\x18.atelier.GetAgentRequest\x1a\x19.atelier.GetAgentResponse\"\x00\x12V\n\x0fListDataSources\x12\x1f.atelier.ListDataSourcesRequest\x1a .atelier.ListDataSourcesResponse\"\x00\x12M\n\x0cListDatasets\x12\x1c.atelier.ListDatasetsRequest\x1a\x1d.atelier.ListDatasetsResponse\"\x00\x12G\n\x0cGetFSMStatus\x12\x19.atelier.FSMStatusRequest\x1a\x1a.atelier.FSMStatusResponse\"\x00\x12\x62\n\x13StartClassification\x12#.atelier.StartClassificationRequest\x1a$.atelier.StartClassificationResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -45,20 +45,26 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_GETAGENTREQUEST']._serialized_end=330
   _globals['_GETAGENTRESPONSE']._serialized_start=332
   _globals['_GETAGENTRESPONSE']._serialized_end=389
-  _globals['_CLASSIFICATIONDATASET']._serialized_start=391
-  _globals['_CLASSIFICATIONDATASET']._serialized_end=502
-  _globals['_LISTDATASETSREQUEST']._serialized_start=504
-  _globals['_LISTDATASETSREQUEST']._serialized_end=525
-  _globals['_LISTDATASETSRESPONSE']._serialized_start=527
-  _globals['_LISTDATASETSRESPONSE']._serialized_end=599
-  _globals['_FSMSTATUSREQUEST']._serialized_start=601
-  _globals['_FSMSTATUSREQUEST']._serialized_end=619
-  _globals['_FSMSTATUSRESPONSE']._serialized_start=622
-  _globals['_FSMSTATUSRESPONSE']._serialized_end=750
-  _globals['_STARTCLASSIFICATIONREQUEST']._serialized_start=752
-  _globals['_STARTCLASSIFICATIONREQUEST']._serialized_end=860
-  _globals['_STARTCLASSIFICATIONRESPONSE']._serialized_start=862
-  _globals['_STARTCLASSIFICATIONRESPONSE']._serialized_end=939
-  _globals['_ATELIER']._serialized_start=942
-  _globals['_ATELIER']._serialized_end=1419
+  _globals['_DATASOURCE']._serialized_start=392
+  _globals['_DATASOURCE']._serialized_end=547
+  _globals['_LISTDATASOURCESREQUEST']._serialized_start=549
+  _globals['_LISTDATASOURCESREQUEST']._serialized_end=573
+  _globals['_LISTDATASOURCESRESPONSE']._serialized_start=575
+  _globals['_LISTDATASOURCESRESPONSE']._serialized_end=638
+  _globals['_CLASSIFICATIONDATASET']._serialized_start=641
+  _globals['_CLASSIFICATIONDATASET']._serialized_end=871
+  _globals['_LISTDATASETSREQUEST']._serialized_start=873
+  _globals['_LISTDATASETSREQUEST']._serialized_end=913
+  _globals['_LISTDATASETSRESPONSE']._serialized_start=915
+  _globals['_LISTDATASETSRESPONSE']._serialized_end=987
+  _globals['_FSMSTATUSREQUEST']._serialized_start=989
+  _globals['_FSMSTATUSREQUEST']._serialized_end=1007
+  _globals['_FSMSTATUSRESPONSE']._serialized_start=1010
+  _globals['_FSMSTATUSRESPONSE']._serialized_end=1138
+  _globals['_STARTCLASSIFICATIONREQUEST']._serialized_start=1140
+  _globals['_STARTCLASSIFICATIONREQUEST']._serialized_end=1267
+  _globals['_STARTCLASSIFICATIONRESPONSE']._serialized_start=1269
+  _globals['_STARTCLASSIFICATIONRESPONSE']._serialized_end=1346
+  _globals['_ATELIER']._serialized_start=1349
+  _globals['_ATELIER']._serialized_end=1914
 # @@protoc_insertion_point(module_scope)

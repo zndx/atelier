@@ -35,6 +35,24 @@ message GetAgentResponse {
   AgentMetadata agent = 1;
 }
 
+// ── Data Sources ─────────────────────────────────────────────────
+
+message DataSource {
+  string id = 1;
+  string source_type = 2;           // 'sample' | 'hive'
+  string source_uri = 3;
+  string display_name = 4;
+  string vocabulary_mode = 5;       // 'universal' | 'hive'
+  string created_at = 6;
+  string metadata_json = 7;         // JSON
+}
+
+message ListDataSourcesRequest {}
+
+message ListDataSourcesResponse {
+  repeated DataSource sources = 1;
+}
+
 // ── Classification Datasets ───────────────────────────────────────
 
 message ClassificationDataset {
@@ -43,9 +61,17 @@ message ClassificationDataset {
   string parquet_path = 3;
   string description = 4;
   int64 row_count = 5;
+  string source_id = 6;
+  int32 version_number = 7;
+  bool is_active = 8;
+  string summary = 9;
+  string fsm_run_id = 10;
+  string created_at = 11;
 }
 
-message ListDatasetsRequest {}
+message ListDatasetsRequest {
+  string source_id = 1;             // optional: filter by source
+}
 
 message ListDatasetsResponse {
   repeated ClassificationDataset datasets = 1;
@@ -70,6 +96,7 @@ message StartClassificationRequest {
   int32 sample_size = 3;
   reserved 4;
   reserved "use_mock";
+  string source_id = 5;
 }
 
 message StartClassificationResponse {
@@ -84,6 +111,7 @@ service Atelier {
   rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse) {}
   rpc ListAgents (ListAgentsRequest) returns (ListAgentsResponse) {}
   rpc GetAgent (GetAgentRequest) returns (GetAgentResponse) {}
+  rpc ListDataSources (ListDataSourcesRequest) returns (ListDataSourcesResponse) {}
   rpc ListDatasets (ListDatasetsRequest) returns (ListDatasetsResponse) {}
   rpc GetFSMStatus (FSMStatusRequest) returns (FSMStatusResponse) {}
   rpc StartClassification (StartClassificationRequest) returns (StartClassificationResponse) {}

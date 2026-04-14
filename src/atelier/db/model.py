@@ -1,12 +1,26 @@
 """SQLAlchemy ORM models for Atelier state."""
 
-from sqlalchemy import BigInteger, Column, DateTime, Float, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class DataSource(Base):
+    """A data source (OOTB sample, hive connection, etc.)."""
+
+    __tablename__ = "data_sources"
+
+    id = Column(String, primary_key=True, nullable=False)
+    source_type = Column(String, nullable=False)      # 'sample' | 'hive'
+    source_uri = Column(String, nullable=False, default="")
+    display_name = Column(String, nullable=False)
+    vocabulary_mode = Column(String, nullable=False, default="universal")
+    created_at = Column(DateTime, server_default=func.now())
+    metadata = Column(Text, nullable=True)             # JSON
 
 
 class Agent(Base):
@@ -22,7 +36,7 @@ class Agent(Base):
 
 
 class Dataset(Base):
-    """Reference to a classification parquet dataset."""
+    """Reference to a classification parquet dataset (versioned under a source)."""
 
     __tablename__ = "datasets"
 
@@ -31,6 +45,12 @@ class Dataset(Base):
     parquet_path = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     row_count = Column(BigInteger, nullable=True)
+    source_id = Column(String, nullable=True)          # FK → data_sources.id
+    version_number = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True)
+    summary = Column(Text, nullable=True)
+    fsm_run_id = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class FSMRun(Base):
@@ -46,6 +66,7 @@ class FSMRun(Base):
     progress = Column(Text, nullable=True)     # JSON
     error = Column(Text, nullable=True)
     result_path = Column(Text, nullable=True)
+    source_id = Column(String, nullable=True)  # FK → data_sources.id
 
 
 class ClassificationRun(Base):

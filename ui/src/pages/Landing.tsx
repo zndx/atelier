@@ -32,7 +32,7 @@ function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [termCount, setTermCount] = useState<number | null>(null);
-  const { activeDatasetId, datasets } = useDataset();
+  const { activeDatasetId, datasets, sources } = useDataset();
 
   useEffect(() => {
     fetch("/api/status")
@@ -149,6 +149,13 @@ function Landing() {
               title="Terms"
               value={termCount ?? "—"}
               prefix={<BookOutlined />}
+              suffix={
+                sources.length > 1 ? (
+                  <span style={{ fontSize: 12, color: "#8c8c8c" }}>
+                    {sources.length} sources
+                  </span>
+                ) : null
+              }
             />
           </Card>
         </Col>

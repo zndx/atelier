@@ -292,25 +292,40 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   );
 }
 
-function ActiveDatasetCard() {
-  const { activeDatasetId, setActiveDatasetId, datasets } = useDataset();
+function DataSourceCard() {
+  const {
+    sources,
+    activeSourceId,
+    setActiveSourceId,
+    datasets,
+    activeDatasetId,
+    setActiveDatasetId,
+  } = useDataset();
+
+  const activateVersion = (datasetId: string) => {
+    fetch(`/api/datasets/${encodeURIComponent(datasetId)}/activate`, {
+      method: "POST",
+    })
+      .then((r) => r.json())
+      .then(() => setActiveDatasetId(datasetId))
+      .catch(() => {});
+  };
 
   return (
     <Card
-      title="Active Dataset"
+      title="Data Source"
       extra={
         <Space>
           <Select
-            value={activeDatasetId ?? undefined}
-            onChange={(v) => setActiveDatasetId(v ?? null)}
+            value={activeSourceId ?? undefined}
+            onChange={(v) => setActiveSourceId(v ?? null)}
             style={{ minWidth: 240 }}
-            placeholder="No dataset selected"
-            options={datasets.map((d) => ({
-              label: `${d.name} (${d.row_count.toLocaleString()} rows)`,
-              value: d.id,
+            placeholder="No source selected"
+            options={sources.map((s) => ({
+              label: s.display_name,
+              value: s.id,
             }))}
-            disabled={datasets.length === 0}
-            allowClear
+            disabled={sources.length === 0}
             size="small"
           />
           {activeDatasetId && (
@@ -323,11 +338,66 @@ function ActiveDatasetCard() {
         </Space>
       }
     >
-      <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        Select a classification result dataset for embedding visualization.
-        {datasets.length === 0 &&
-          " Run the classification pipeline to generate datasets."}
-      </Paragraph>
+      {datasets.length === 0 ? (
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          No dataset versions yet. Run the classification pipeline to create one.
+        </Paragraph>
+      ) : (
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="id"
+          dataSource={datasets}
+          onRow={(record) => ({
+            style: {
+              cursor: "pointer",
+              background: record.id === activeDatasetId ? "#e6f4ff" : undefined,
+            },
+            onClick: () => activateVersion(record.id),
+          })}
+          columns={[
+            {
+              title: "Version",
+              dataIndex: "version_number",
+              key: "version",
+              width: 80,
+              render: (v: number, record: { id: string; is_active: boolean }) => (
+                <Space>
+                  <Text strong>v{v}</Text>
+                  {record.is_active && <Tag color="blue">active</Tag>}
+                </Space>
+              ),
+            },
+            {
+              title: "Columns",
+              dataIndex: "row_count",
+              key: "rows",
+              width: 100,
+              render: (v: number) => v?.toLocaleString() ?? "—",
+            },
+            {
+              title: "Created",
+              dataIndex: "created_at",
+              key: "created",
+              render: (v: string) => {
+                if (!v) return "—";
+                try {
+                  return new Date(v).toLocaleString();
+                } catch {
+                  return v;
+                }
+              },
+            },
+            {
+              title: "Summary",
+              dataIndex: "summary",
+              key: "summary",
+              ellipsis: true,
+              render: (v: string) => v || "—",
+            },
+          ]}
+        />
+      )}
     </Card>
   );
 }
@@ -563,10 +633,10 @@ export default function Status() {
         </Col>
       </Row>
 
-      {/* ── Active Dataset ───────────────────────── */}
+      {/* ── Data Source + Versions ───────────────── */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24}>
-          <ActiveDatasetCard />
+          <DataSourceCard />
         </Col>
       </Row>
 

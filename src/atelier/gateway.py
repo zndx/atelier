@@ -174,13 +174,41 @@ def get_skill(skill_id: str):
     return {"id": skill_id, "title": title, "description": description, "content": content}
 
 
-@app.get("/api/datasets")
-def list_datasets():
+@app.get("/api/data-sources")
+def list_data_sources():
+    """Return registered data sources (OOTB sample, hive connections)."""
     try:
         client = _get_client()
-        resp = client.stub.ListDatasets(
-            atelier_pb2.ListDatasetsRequest(), timeout=5
+        resp = client.stub.ListDataSources(
+            atelier_pb2.ListDataSourcesRequest(), timeout=5
         )
+    except Exception as exc:
+        _reset_client()
+        return _error_envelope(f"ListDataSources failed: {exc}")
+    return {
+        "sources": [
+            {
+                "id": s.id,
+                "source_type": s.source_type,
+                "source_uri": s.source_uri,
+                "display_name": s.display_name,
+                "vocabulary_mode": s.vocabulary_mode,
+                "created_at": s.created_at,
+                "metadata": s.metadata_json,
+            }
+            for s in resp.sources
+        ]
+    }
+
+
+@app.get("/api/datasets")
+def list_datasets(source_id: str | None = None):
+    try:
+        client = _get_client()
+        req = atelier_pb2.ListDatasetsRequest()
+        if source_id:
+            req.source_id = source_id
+        resp = client.stub.ListDatasets(req, timeout=5)
     except Exception as exc:
         _reset_client()
         return _error_envelope(f"ListDatasets failed: {exc}")
@@ -192,10 +220,33 @@ def list_datasets():
                 "description": d.description,
                 "parquet_path": d.parquet_path,
                 "row_count": d.row_count,
+                "source_id": d.source_id,
+                "version_number": d.version_number,
+                "is_active": d.is_active,
+                "summary": d.summary,
+                "fsm_run_id": d.fsm_run_id,
+                "created_at": d.created_at,
             }
             for d in resp.datasets
         ]
     }
+
+
+@app.post("/api/datasets/{dataset_id}/activate")
+def activate_dataset(dataset_id: str):
+    """Set a dataset version as active for its source."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        ds = dao.get_dataset(dataset_id)
+        if ds is None:
+            return _error_envelope("Dataset not found", status=404)
+        if not ds.get("source_id"):
+            return _error_envelope("Dataset has no source", status=400)
+        dao.set_active_version(ds["source_id"], dataset_id)
+        return {"ok": True, "dataset_id": dataset_id, "source_id": ds["source_id"]}
+    except Exception as exc:
+        return _error_envelope(f"activate_dataset failed: {exc}")
 
 
 @app.get("/api/datasets/{dataset_id}/data")

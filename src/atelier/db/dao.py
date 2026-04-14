@@ -55,16 +55,68 @@ class AtelierDao:
         finally:
             session.close()
 
-    def list_datasets(self) -> list[dict]:
-        """Return all registered datasets as dicts."""
-        from atelier.db.model import Dataset
+    # ── Data source operations ────────────────────────────────────
+
+    def list_data_sources(self) -> list[dict]:
+        """Return all data sources as dicts."""
+        from atelier.db.model import DataSource
         with self.get_session() as session:
-            rows = session.query(Dataset).all()
+            rows = session.query(DataSource).order_by(DataSource.created_at).all()
             return [
-                {"id": r.id, "name": r.name, "parquet_path": r.parquet_path,
-                 "description": r.description, "row_count": r.row_count}
+                {"id": r.id, "source_type": r.source_type,
+                 "source_uri": r.source_uri, "display_name": r.display_name,
+                 "vocabulary_mode": r.vocabulary_mode,
+                 "created_at": str(r.created_at or ""),
+                 "metadata": r.metadata}
                 for r in rows
             ]
+
+    def get_data_source(self, source_id: str) -> dict | None:
+        """Return a data source by ID as dict, or None."""
+        from atelier.db.model import DataSource
+        with self.get_session() as session:
+            r = session.query(DataSource).filter_by(id=source_id).first()
+            if r is None:
+                return None
+            return {"id": r.id, "source_type": r.source_type,
+                    "source_uri": r.source_uri, "display_name": r.display_name,
+                    "vocabulary_mode": r.vocabulary_mode,
+                    "created_at": str(r.created_at or ""),
+                    "metadata": r.metadata}
+
+    def get_or_create_data_source(self, source_id: str, source_type: str,
+                                  display_name: str, source_uri: str = "",
+                                  vocabulary_mode: str = "universal",
+                                  metadata: str | None = None) -> dict:
+        """Get existing or create a new data source. Returns the source dict."""
+        from atelier.db.model import DataSource
+        with self.get_session() as session:
+            r = session.query(DataSource).filter_by(id=source_id).first()
+            if r is None:
+                r = DataSource(
+                    id=source_id, source_type=source_type,
+                    source_uri=source_uri, display_name=display_name,
+                    vocabulary_mode=vocabulary_mode, metadata=metadata,
+                )
+                session.add(r)
+                session.flush()
+            return {"id": r.id, "source_type": r.source_type,
+                    "source_uri": r.source_uri, "display_name": r.display_name,
+                    "vocabulary_mode": r.vocabulary_mode,
+                    "created_at": str(r.created_at or ""),
+                    "metadata": r.metadata}
+
+    # ── Dataset operations (version-aware) ─────────────────────
+
+    def list_datasets(self, source_id: str | None = None) -> list[dict]:
+        """Return datasets, optionally filtered by source_id."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            q = session.query(Dataset)
+            if source_id is not None:
+                q = q.filter_by(source_id=source_id)
+            rows = q.order_by(Dataset.created_at.desc()).all()
+            return [self._dataset_to_dict(r) for r in rows]
 
     def get_dataset(self, dataset_id: str) -> dict | None:
         """Return a dataset by ID as dict, or None."""
@@ -73,12 +125,14 @@ class AtelierDao:
             r = session.query(Dataset).filter_by(id=dataset_id).first()
             if r is None:
                 return None
-            return {"id": r.id, "name": r.name, "parquet_path": r.parquet_path,
-                    "description": r.description, "row_count": r.row_count}
+            return self._dataset_to_dict(r)
 
     def upsert_dataset(self, dataset_id: str, name: str,
                        parquet_path: str, description: str = "",
-                       row_count: int = 0):
+                       row_count: int = 0, source_id: str | None = None,
+                       version_number: int = 1, is_active: bool = True,
+                       summary: str | None = None,
+                       fsm_run_id: str | None = None):
         """Insert or update a dataset record."""
         from atelier.db.model import Dataset
         with self.get_session() as session:
@@ -87,6 +141,9 @@ class AtelierDao:
                 ds = Dataset(
                     id=dataset_id, name=name, parquet_path=parquet_path,
                     description=description, row_count=row_count,
+                    source_id=source_id, version_number=version_number,
+                    is_active=is_active, summary=summary,
+                    fsm_run_id=fsm_run_id,
                 )
                 session.add(ds)
             else:
@@ -94,6 +151,66 @@ class AtelierDao:
                 ds.parquet_path = parquet_path
                 ds.description = description
                 ds.row_count = row_count
+                if source_id is not None:
+                    ds.source_id = source_id
+                ds.version_number = version_number
+                ds.is_active = is_active
+                ds.summary = summary
+                ds.fsm_run_id = fsm_run_id
+
+    def list_dataset_versions(self, source_id: str) -> list[dict]:
+        """Return all dataset versions for a source, newest first."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            rows = (session.query(Dataset)
+                    .filter_by(source_id=source_id)
+                    .order_by(Dataset.version_number.desc())
+                    .all())
+            return [self._dataset_to_dict(r) for r in rows]
+
+    def next_version_number(self, source_id: str) -> int:
+        """Return the next version number for a source."""
+        from sqlalchemy import func as sa_func
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            max_v = (session.query(sa_func.max(Dataset.version_number))
+                     .filter_by(source_id=source_id)
+                     .scalar())
+            return (max_v or 0) + 1
+
+    def get_active_version(self, source_id: str) -> dict | None:
+        """Return the active dataset version for a source, or None."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            r = (session.query(Dataset)
+                 .filter_by(source_id=source_id, is_active=True)
+                 .order_by(Dataset.version_number.desc())
+                 .first())
+            if r is None:
+                return None
+            return self._dataset_to_dict(r)
+
+    def set_active_version(self, source_id: str, dataset_id: str):
+        """Set one version as active, deactivating all others for the source."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            session.query(Dataset).filter_by(
+                source_id=source_id
+            ).update({"is_active": False})
+            session.query(Dataset).filter_by(
+                id=dataset_id
+            ).update({"is_active": True})
+
+    @staticmethod
+    def _dataset_to_dict(r) -> dict:
+        return {
+            "id": r.id, "name": r.name, "parquet_path": r.parquet_path,
+            "description": r.description, "row_count": r.row_count,
+            "source_id": r.source_id, "version_number": r.version_number,
+            "is_active": r.is_active, "summary": r.summary,
+            "fsm_run_id": r.fsm_run_id,
+            "created_at": str(r.created_at or ""),
+        }
 
     # ── Agent operations ──────────────────────────────────────────
 
