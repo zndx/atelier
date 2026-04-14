@@ -21,6 +21,7 @@ export interface DatasetInfo {
   id: string;
   name: string;
   description: string;
+  parquet_path: string;
   row_count: number;
   source_id: string;
   version_number: number;
@@ -63,6 +64,9 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
     } else {
       localStorage.removeItem(SOURCE_KEY);
     }
+    // Clear stale dataset selection — refreshDatasets will auto-select
+    setActiveDatasetRaw(null);
+    localStorage.removeItem(DATASET_KEY);
   }, []);
 
   const setActiveDatasetId = useCallback((id: string | null) => {

@@ -135,10 +135,12 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
         conn = request.connection_name or None
         db = request.database or "default"
         sample_size = request.sample_size or 50
+        source_id = request.source_id or None
 
         def _background():
             run_classification_pipeline(
                 cfg, fsm,
+                source_id=source_id,
                 connection_name=conn,
                 database=db,
                 sample_size=sample_size,

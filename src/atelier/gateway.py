@@ -123,6 +123,7 @@ def _seed_sample_source() -> None:
         dao.upsert_dataset(
             dataset_id=dataset_id,
             name="OOTB Sample v1",
+            parquet_path="",
             description=f"{stats['table_count']} tables, {stats['column_count']} columns from expanded ontology",
             row_count=stats["column_count"],
             source_id="ootb-sample",
@@ -144,7 +145,7 @@ def _seed_sample_source() -> None:
             stats["table_count"], stats["column_count"],
         )
     except Exception as exc:
-        _log.debug("Sample source seeding failed: %s", exc)
+        _log.warning("Sample source seeding failed: %s", exc)
 
 
 # ── REST → gRPC bridge ────────────────────────────────────────────

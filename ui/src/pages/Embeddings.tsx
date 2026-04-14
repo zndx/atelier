@@ -4,16 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Alert, Spin, Typography, Button } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
+import type { DatasetInfo } from "../contexts/DatasetContext";
 
 const { Title, Paragraph } = Typography;
-
-interface DatasetInfo {
-  id: string;
-  name: string;
-  description: string;
-  parquet_path: string;
-  row_count: number;
-}
 
 export default function Embeddings() {
   const { datasetId } = useParams<{ datasetId: string }>();

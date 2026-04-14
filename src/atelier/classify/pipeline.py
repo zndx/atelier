@@ -388,13 +388,23 @@ def run_classification_pipeline(
             try:
                 from atelier.db.dao import AtelierDao
                 dao = AtelierDao()
+                version_number = 1
+                if source_id:
+                    version_number = dao.next_version_number(source_id)
                 dao.upsert_dataset(
                     dataset_id=run_id,
                     name=f"Classification {run_id[:8]}",
                     parquet_path=str(parquet_path),
-                    description="Classification pipeline results",
+                    description=f"{len(classifications)} columns classified",
                     row_count=len(classifications),
+                    source_id=source_id,
+                    version_number=version_number,
+                    is_active=True,
+                    summary=f"{len(all_samples)} tables, {len(classifications)} columns",
+                    fsm_run_id=run_id,
                 )
+                if source_id:
+                    dao.set_active_version(source_id, run_id)
             except Exception as e:
                 logger.warning("Failed to register dataset: %s", e)
 
