@@ -71,6 +71,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.connection_name": ("classify_connection_name", str),
     "classify.database": ("classify_database", str),
     "classify.sample_size": ("classify_sample_size", int),
+    "classify.column_sample_limit": ("classify_column_sample_limit", int),
     "classify.tables_limit": ("classify_tables_limit", int),
     "classify.embedding_model": ("classify_embedding_model", str),
     "classify.auto_start": ("classify_auto_start", bool),
@@ -215,6 +216,7 @@ class AtelierConfig:
     classify_connection_name: str = ""
     classify_database: str = "default"
     classify_sample_size: int = 50
+    classify_column_sample_limit: int = 1000
     classify_tables_limit: int = 100
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_auto_start: bool = False

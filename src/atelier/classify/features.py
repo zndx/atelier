@@ -266,6 +266,7 @@ def extract_features(
     total_count: int | None = None,
     null_count: int = 0,
     max_values: int = 5,
+    distinct_count: int | None = None,
 ) -> ColumnFeatures:
     """Extract ColumnFeatures from raw column metadata.
 
@@ -281,6 +282,7 @@ def extract_features(
         total_count: Total number of rows sampled.
         null_count: Number of NULL values in the sample.
         max_values: Max sample values to include in text.
+        distinct_count: True COUNT(DISTINCT) from metadata query.
     """
     values = values or []
     siblings = siblings or []
@@ -295,7 +297,10 @@ def extract_features(
     if values:
         sample_text = ", ".join(v[:80] for v in values[:max_values])
 
-    cardinality = len(set(values)) if values else None
+    # Prefer true COUNT(DISTINCT) from metadata; fall back to sample cardinality
+    cardinality = distinct_count if distinct_count is not None else (
+        len(set(values)) if values else None
+    )
 
     null_ratio: float | None = None
     if total_count and total_count > 0:

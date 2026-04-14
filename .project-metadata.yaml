@@ -131,6 +131,12 @@ environment_variables:
       Number of sample values to retrieve per column for classification
       evidence. Higher values improve classification accuracy but increase
       memory usage and API payload size.
+  ATELIER_CLASSIFY_COLUMN_SAMPLE_LIMIT:
+    default: "1000"
+    description: >-
+      Row limit for COUNT(DISTINCT) cardinality queries per table. Higher
+      values give more accurate cardinality but increase query time on
+      large tables.
   ATELIER_CLASSIFY_TABLES_LIMIT:
     default: "100"
     description: >-

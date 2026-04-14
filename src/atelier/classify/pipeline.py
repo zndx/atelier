@@ -484,6 +484,7 @@ def _classify_column(
         source_table=col.table_name,
         total_count=col.total_count,
         null_count=col.null_count,
+        distinct_count=col.distinct_count,
     )
 
     # Collect named evidence sources
@@ -586,6 +587,7 @@ def _classify_column(
         "needs_clarification": hc.needs_clarification,
         "evidence": hc.evidence,
         "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
+        "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         "ground_truth": col.ground_truth,
         "is_correct": (
@@ -610,6 +612,7 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "uncertainty": 1.0,
         "conflict": 0.0,
         "evidence_sources": {},
+        "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         "ground_truth": col.ground_truth,
         "is_correct": None,
@@ -655,6 +658,7 @@ def _run_feature_analysis(
             source_table=col.table_name,
             total_count=col.total_count,
             null_count=col.null_count,
+            distinct_count=col.distinct_count,
         )
         for ts in all_samples for col in ts.columns
     ]
@@ -774,6 +778,7 @@ def _write_parquet(
             "evidence": c.get("evidence", ""),
             "ground_truth": c["ground_truth"] or "",
             "is_correct": c["is_correct"] if c["is_correct"] is not None else False,
+            "embedding_text": c.get("embedding_text", ""),
             "pattern_signals": ", ".join(c.get("pattern_signals", [])),
         }
         # SHAP columns (present when SHAP analysis ran)

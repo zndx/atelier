@@ -152,8 +152,9 @@ export default function Embeddings() {
             projection: { x: "x", y: "y" },
           }}
           defaultChartsConfig={{
-            embedding: { data: { x: "x", y: "y", category: "predicted_label" } },
+            embedding: { data: { x: "x", y: "y", text: "text", category: "conflict" } },
           }}
+          embeddingViewConfig={{ autoLabelEnabled: true }}
           colorScheme="light"
         />
       </div>

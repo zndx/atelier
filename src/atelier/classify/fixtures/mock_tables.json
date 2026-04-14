@@ -3,98 +3,98 @@
     "table_name": "customers",
     "database": "default",
     "columns": [
-      {"name": "customer_id", "type": "INTEGER", "values": ["1001", "1002", "1003", "1004", "1005"], "ground_truth": "2.2"},
-      {"name": "full_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "1.1.2.1"},
-      {"name": "email", "type": "VARCHAR", "values": ["alice@example.com", "bob@company.org", "carol@mail.net", "david@test.io", "eva@corp.com"], "ground_truth": "1.1.1.1"},
-      {"name": "phone_number", "type": "VARCHAR", "values": ["555-0101", "555-0102", "(555) 0103", "+1-555-0104", "555.0105"], "ground_truth": "1.1.1.2"},
-      {"name": "date_of_birth", "type": "DATE", "values": ["1985-03-15", "1990-07-22", "1978-11-08", "1995-01-30", "1982-06-14"], "ground_truth": "1.1.2.2"},
-      {"name": "created_at", "type": "TIMESTAMP", "values": ["2024-01-15 10:30:00", "2024-02-20 14:45:00", "2024-03-10 09:15:00", "2024-04-05 16:00:00", "2024-05-12 11:30:00"], "ground_truth": "2.1"},
-      {"name": "status", "type": "VARCHAR", "values": ["active", "active", "inactive", "active", "suspended"], "ground_truth": "2.3"}
+      {"name": "customer_id", "type": "INTEGER", "values": ["1001", "1002", "1003", "1004", "1005"], "ground_truth": "2.2", "distinct_count": 10000},
+      {"name": "full_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "1.1.2.1", "distinct_count": 9500},
+      {"name": "email", "type": "VARCHAR", "values": ["alice@example.com", "bob@company.org", "carol@mail.net", "david@test.io", "eva@corp.com"], "ground_truth": "1.1.1.1", "distinct_count": 9800},
+      {"name": "phone_number", "type": "VARCHAR", "values": ["555-0101", "555-0102", "(555) 0103", "+1-555-0104", "555.0105"], "ground_truth": "1.1.1.2", "distinct_count": 9200},
+      {"name": "date_of_birth", "type": "DATE", "values": ["1985-03-15", "1990-07-22", "1978-11-08", "1995-01-30", "1982-06-14"], "ground_truth": "1.1.2.2", "distinct_count": 8500},
+      {"name": "created_at", "type": "TIMESTAMP", "values": ["2024-01-15 10:30:00", "2024-02-20 14:45:00", "2024-03-10 09:15:00", "2024-04-05 16:00:00", "2024-05-12 11:30:00"], "ground_truth": "2.1", "distinct_count": 10000},
+      {"name": "status", "type": "VARCHAR", "values": ["active", "active", "inactive", "active", "suspended"], "ground_truth": "2.3", "distinct_count": 3}
     ]
   },
   {
     "table_name": "orders",
     "database": "default",
     "columns": [
-      {"name": "order_id", "type": "INTEGER", "values": ["5001", "5002", "5003", "5004", "5005"], "ground_truth": "2.2"},
-      {"name": "customer_id", "type": "INTEGER", "values": ["1001", "1003", "1001", "1005", "1002"], "ground_truth": "2.2"},
-      {"name": "order_date", "type": "DATE", "values": ["2024-06-01", "2024-06-02", "2024-06-03", "2024-06-04", "2024-06-05"], "ground_truth": "2.1"},
-      {"name": "total_amount", "type": "DECIMAL", "values": ["149.99", "289.50", "75.00", "432.25", "18.99"], "ground_truth": "1.1.3.3"},
-      {"name": "payment_card_number", "type": "VARCHAR", "values": ["4111111111111111", "5500000000000004", "3400000000000009", "6011000000000004", "4222222222222"], "ground_truth": "1.1.3.1"},
-      {"name": "shipping_address", "type": "VARCHAR", "values": ["123 Main St, NY", "456 Oak Ave, CA", "789 Pine Rd, TX", "321 Elm Dr, FL", "654 Maple Ln, WA"], "ground_truth": "1.1.1.3"},
-      {"name": "status", "type": "VARCHAR", "values": ["shipped", "delivered", "processing", "shipped", "cancelled"], "ground_truth": "2.3"}
+      {"name": "order_id", "type": "INTEGER", "values": ["5001", "5002", "5003", "5004", "5005"], "ground_truth": "2.2", "distinct_count": 50000},
+      {"name": "customer_id", "type": "INTEGER", "values": ["1001", "1003", "1001", "1005", "1002"], "ground_truth": "2.2", "distinct_count": 8500},
+      {"name": "order_date", "type": "DATE", "values": ["2024-06-01", "2024-06-02", "2024-06-03", "2024-06-04", "2024-06-05"], "ground_truth": "2.1", "distinct_count": 365},
+      {"name": "total_amount", "type": "DECIMAL", "values": ["149.99", "289.50", "75.00", "432.25", "18.99"], "ground_truth": "1.1.3.3", "distinct_count": 12000},
+      {"name": "payment_card_number", "type": "VARCHAR", "values": ["4111111111111111", "5500000000000004", "3400000000000009", "6011000000000004", "4222222222222"], "ground_truth": "1.1.3.1", "distinct_count": 7200},
+      {"name": "shipping_address", "type": "VARCHAR", "values": ["123 Main St, NY", "456 Oak Ave, CA", "789 Pine Rd, TX", "321 Elm Dr, FL", "654 Maple Ln, WA"], "ground_truth": "1.1.1.3", "distinct_count": 6800},
+      {"name": "status", "type": "VARCHAR", "values": ["shipped", "delivered", "processing", "shipped", "cancelled"], "ground_truth": "2.3", "distinct_count": 5}
     ]
   },
   {
     "table_name": "employees",
     "database": "default",
     "columns": [
-      {"name": "employee_id", "type": "INTEGER", "values": ["2001", "2002", "2003", "2004", "2005"], "ground_truth": "2.2"},
-      {"name": "first_name", "type": "VARCHAR", "values": ["John", "Jane", "Michael", "Sarah", "Robert"], "ground_truth": "1.1.2.1"},
-      {"name": "last_name", "type": "VARCHAR", "values": ["Doe", "Smith", "Johnson", "Williams", "Brown"], "ground_truth": "1.1.2.1"},
-      {"name": "ssn", "type": "VARCHAR", "values": ["123-45-6789", "234-56-7890", "345-67-8901", "456-78-9012", "567-89-0123"], "ground_truth": "1.1.2.3"},
-      {"name": "work_email", "type": "VARCHAR", "values": ["john.doe@company.com", "jane.smith@company.com", "michael.j@company.com", "sarah.w@company.com", "robert.b@company.com"], "ground_truth": "1.1.1.1"},
-      {"name": "hire_date", "type": "DATE", "values": ["2020-01-15", "2019-06-01", "2021-03-10", "2018-11-20", "2022-07-05"], "ground_truth": "2.1"},
-      {"name": "salary", "type": "DECIMAL", "values": ["85000.00", "92000.00", "78000.00", "105000.00", "71000.00"], "ground_truth": "1.1.3.3"},
-      {"name": "department", "type": "VARCHAR", "values": ["Engineering", "Marketing", "Engineering", "Management", "Sales"], "ground_truth": "2.3"}
+      {"name": "employee_id", "type": "INTEGER", "values": ["2001", "2002", "2003", "2004", "2005"], "ground_truth": "2.2", "distinct_count": 500},
+      {"name": "first_name", "type": "VARCHAR", "values": ["John", "Jane", "Michael", "Sarah", "Robert"], "ground_truth": "1.1.2.1", "distinct_count": 320},
+      {"name": "last_name", "type": "VARCHAR", "values": ["Doe", "Smith", "Johnson", "Williams", "Brown"], "ground_truth": "1.1.2.1", "distinct_count": 410},
+      {"name": "ssn", "type": "VARCHAR", "values": ["123-45-6789", "234-56-7890", "345-67-8901", "456-78-9012", "567-89-0123"], "ground_truth": "1.1.2.3", "distinct_count": 500},
+      {"name": "work_email", "type": "VARCHAR", "values": ["john.doe@company.com", "jane.smith@company.com", "michael.j@company.com", "sarah.w@company.com", "robert.b@company.com"], "ground_truth": "1.1.1.1", "distinct_count": 500},
+      {"name": "hire_date", "type": "DATE", "values": ["2020-01-15", "2019-06-01", "2021-03-10", "2018-11-20", "2022-07-05"], "ground_truth": "2.1", "distinct_count": 480},
+      {"name": "salary", "type": "DECIMAL", "values": ["85000.00", "92000.00", "78000.00", "105000.00", "71000.00"], "ground_truth": "1.1.3.3", "distinct_count": 350},
+      {"name": "department", "type": "VARCHAR", "values": ["Engineering", "Marketing", "Engineering", "Management", "Sales"], "ground_truth": "2.3", "distinct_count": 8}
     ]
   },
   {
     "table_name": "web_sessions",
     "database": "default",
     "columns": [
-      {"name": "session_id", "type": "VARCHAR", "values": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f12345678901", "c3d4e5f6-a7b8-9012-cdef-012345678912", "d4e5f6a7-b8c9-0123-defa-123456789023", "e5f6a7b8-c9d0-1234-efab-234567890134"], "ground_truth": "1.2.2"},
-      {"name": "user_ip", "type": "VARCHAR", "values": ["192.168.1.100", "10.0.0.55", "172.16.0.33", "192.168.2.200", "10.1.1.42"], "ground_truth": "1.2.1"},
-      {"name": "page_url", "type": "VARCHAR", "values": ["https://example.com/home", "https://example.com/products", "https://example.com/about", "https://example.com/cart", "https://example.com/checkout"], "ground_truth": "1.2.3"},
-      {"name": "timestamp", "type": "TIMESTAMP", "values": ["2024-06-15 08:30:00", "2024-06-15 09:15:00", "2024-06-15 10:00:00", "2024-06-15 10:45:00", "2024-06-15 11:30:00"], "ground_truth": "2.1"},
-      {"name": "user_agent", "type": "VARCHAR", "values": ["Mozilla/5.0 Chrome/125", "Mozilla/5.0 Firefox/126", "Mozilla/5.0 Safari/17", "Mozilla/5.0 Edge/125", "Mozilla/5.0 Chrome/124"], "ground_truth": "0.1"}
+      {"name": "session_id", "type": "VARCHAR", "values": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f12345678901", "c3d4e5f6-a7b8-9012-cdef-012345678912", "d4e5f6a7-b8c9-0123-defa-123456789023", "e5f6a7b8-c9d0-1234-efab-234567890134"], "ground_truth": "1.2.2", "distinct_count": 1000},
+      {"name": "user_ip", "type": "VARCHAR", "values": ["192.168.1.100", "10.0.0.55", "172.16.0.33", "192.168.2.200", "10.1.1.42"], "ground_truth": "1.2.1", "distinct_count": 450},
+      {"name": "page_url", "type": "VARCHAR", "values": ["https://example.com/home", "https://example.com/products", "https://example.com/about", "https://example.com/cart", "https://example.com/checkout"], "ground_truth": "1.2.3", "distinct_count": 85},
+      {"name": "timestamp", "type": "TIMESTAMP", "values": ["2024-06-15 08:30:00", "2024-06-15 09:15:00", "2024-06-15 10:00:00", "2024-06-15 10:45:00", "2024-06-15 11:30:00"], "ground_truth": "2.1", "distinct_count": 1000},
+      {"name": "user_agent", "type": "VARCHAR", "values": ["Mozilla/5.0 Chrome/125", "Mozilla/5.0 Firefox/126", "Mozilla/5.0 Safari/17", "Mozilla/5.0 Edge/125", "Mozilla/5.0 Chrome/124"], "ground_truth": "0.1", "distinct_count": 25}
     ]
   },
   {
     "table_name": "transactions",
     "database": "default",
     "columns": [
-      {"name": "txn_id", "type": "INTEGER", "values": ["90001", "90002", "90003", "90004", "90005"], "ground_truth": "2.2"},
-      {"name": "account_number", "type": "VARCHAR", "values": ["1234567890", "2345678901", "3456789012", "4567890123", "5678901234"], "ground_truth": "1.1.3.2"},
-      {"name": "amount", "type": "DECIMAL", "values": ["1250.00", "89.99", "3400.50", "200.00", "15.75"], "ground_truth": "1.1.3.3"},
-      {"name": "transaction_date", "type": "TIMESTAMP", "values": ["2024-06-01 09:00:00", "2024-06-01 10:30:00", "2024-06-02 14:15:00", "2024-06-03 08:45:00", "2024-06-03 16:00:00"], "ground_truth": "2.1"},
-      {"name": "description", "type": "VARCHAR", "values": ["Monthly subscription payment", "Coffee shop purchase", "Quarterly insurance premium", "ATM cash withdrawal", "Online grocery delivery"], "ground_truth": "0.1"},
-      {"name": "status", "type": "VARCHAR", "values": ["completed", "completed", "pending", "completed", "failed"], "ground_truth": "2.3"}
+      {"name": "txn_id", "type": "INTEGER", "values": ["90001", "90002", "90003", "90004", "90005"], "ground_truth": "2.2", "distinct_count": 100000},
+      {"name": "account_number", "type": "VARCHAR", "values": ["1234567890", "2345678901", "3456789012", "4567890123", "5678901234"], "ground_truth": "1.1.3.2", "distinct_count": 15000},
+      {"name": "amount", "type": "DECIMAL", "values": ["1250.00", "89.99", "3400.50", "200.00", "15.75"], "ground_truth": "1.1.3.3", "distinct_count": 45000},
+      {"name": "transaction_date", "type": "TIMESTAMP", "values": ["2024-06-01 09:00:00", "2024-06-01 10:30:00", "2024-06-02 14:15:00", "2024-06-03 08:45:00", "2024-06-03 16:00:00"], "ground_truth": "2.1", "distinct_count": 90000},
+      {"name": "description", "type": "VARCHAR", "values": ["Monthly subscription payment", "Coffee shop purchase", "Quarterly insurance premium", "ATM cash withdrawal", "Online grocery delivery"], "ground_truth": "0.1", "distinct_count": 5000},
+      {"name": "status", "type": "VARCHAR", "values": ["completed", "completed", "pending", "completed", "failed"], "ground_truth": "2.3", "distinct_count": 4}
     ]
   },
   {
     "table_name": "products",
     "database": "default",
     "columns": [
-      {"name": "product_id", "type": "INTEGER", "values": ["3001", "3002", "3003", "3004", "3005"], "ground_truth": "2.2"},
-      {"name": "product_name", "type": "VARCHAR", "values": ["Wireless Mouse", "USB-C Hub", "Mechanical Keyboard", "27-inch Monitor", "Webcam HD"], "ground_truth": "0.1"},
-      {"name": "price", "type": "DECIMAL", "values": ["29.99", "49.99", "129.99", "349.99", "79.99"], "ground_truth": "1.1.3.3"},
-      {"name": "category", "type": "VARCHAR", "values": ["Peripherals", "Accessories", "Peripherals", "Displays", "Accessories"], "ground_truth": "2.3"},
-      {"name": "created_date", "type": "DATE", "values": ["2024-01-10", "2024-02-15", "2024-03-20", "2024-04-25", "2024-05-30"], "ground_truth": "2.1"},
-      {"name": "sku", "type": "VARCHAR", "values": ["WM-001-BLK", "UH-002-GRY", "MK-003-RGB", "MN-004-4K", "WC-005-HD"], "ground_truth": "2.2"}
+      {"name": "product_id", "type": "INTEGER", "values": ["3001", "3002", "3003", "3004", "3005"], "ground_truth": "2.2", "distinct_count": 1200},
+      {"name": "product_name", "type": "VARCHAR", "values": ["Wireless Mouse", "USB-C Hub", "Mechanical Keyboard", "27-inch Monitor", "Webcam HD"], "ground_truth": "0.1", "distinct_count": 1200},
+      {"name": "price", "type": "DECIMAL", "values": ["29.99", "49.99", "129.99", "349.99", "79.99"], "ground_truth": "1.1.3.3", "distinct_count": 800},
+      {"name": "category", "type": "VARCHAR", "values": ["Peripherals", "Accessories", "Peripherals", "Displays", "Accessories"], "ground_truth": "2.3", "distinct_count": 12},
+      {"name": "created_date", "type": "DATE", "values": ["2024-01-10", "2024-02-15", "2024-03-20", "2024-04-25", "2024-05-30"], "ground_truth": "2.1", "distinct_count": 600},
+      {"name": "sku", "type": "VARCHAR", "values": ["WM-001-BLK", "UH-002-GRY", "MK-003-RGB", "MN-004-4K", "WC-005-HD"], "ground_truth": "2.2", "distinct_count": 1200}
     ]
   },
   {
     "table_name": "audit_log",
     "database": "default",
     "columns": [
-      {"name": "log_id", "type": "INTEGER", "values": ["1", "2", "3", "4", "5"], "ground_truth": "2.2"},
-      {"name": "event_timestamp", "type": "TIMESTAMP", "values": ["2024-06-15 08:00:01", "2024-06-15 08:00:02", "2024-06-15 08:00:03", "2024-06-15 08:00:04", "2024-06-15 08:00:05"], "ground_truth": "2.1"},
-      {"name": "actor_email", "type": "VARCHAR", "values": ["admin@company.com", "user1@company.com", "admin@company.com", "user2@company.com", "service@company.com"], "ground_truth": "1.1.1.1"},
-      {"name": "source_ip", "type": "VARCHAR", "values": ["10.0.0.1", "192.168.1.50", "10.0.0.1", "172.16.0.100", "10.0.0.5"], "ground_truth": "1.2.1"},
-      {"name": "action", "type": "VARCHAR", "values": ["login", "update_profile", "delete_user", "view_report", "api_call"], "ground_truth": "2.3"},
-      {"name": "resource_url", "type": "VARCHAR", "values": ["https://app.internal/admin", "https://app.internal/profile", "https://app.internal/users/42", "https://app.internal/reports/q2", "https://api.internal/v1/data"], "ground_truth": "1.2.3"}
+      {"name": "log_id", "type": "INTEGER", "values": ["1", "2", "3", "4", "5"], "ground_truth": "2.2", "distinct_count": 500000},
+      {"name": "event_timestamp", "type": "TIMESTAMP", "values": ["2024-06-15 08:00:01", "2024-06-15 08:00:02", "2024-06-15 08:00:03", "2024-06-15 08:00:04", "2024-06-15 08:00:05"], "ground_truth": "2.1", "distinct_count": 500000},
+      {"name": "actor_email", "type": "VARCHAR", "values": ["admin@company.com", "user1@company.com", "admin@company.com", "user2@company.com", "service@company.com"], "ground_truth": "1.1.1.1", "distinct_count": 50},
+      {"name": "source_ip", "type": "VARCHAR", "values": ["10.0.0.1", "192.168.1.50", "10.0.0.1", "172.16.0.100", "10.0.0.5"], "ground_truth": "1.2.1", "distinct_count": 30},
+      {"name": "action", "type": "VARCHAR", "values": ["login", "update_profile", "delete_user", "view_report", "api_call"], "ground_truth": "2.3", "distinct_count": 15},
+      {"name": "resource_url", "type": "VARCHAR", "values": ["https://app.internal/admin", "https://app.internal/profile", "https://app.internal/users/42", "https://app.internal/reports/q2", "https://api.internal/v1/data"], "ground_truth": "1.2.3", "distinct_count": 2000}
     ]
   },
   {
     "table_name": "user_devices",
     "database": "default",
     "columns": [
-      {"name": "device_uuid", "type": "VARCHAR", "values": ["f47ac10b-58cc-4372-a567-0e02b2c3d479", "550e8400-e29b-41d4-a716-446655440000", "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "6ba7b811-9dad-11d1-80b4-00c04fd430c8", "6ba7b812-9dad-11d1-80b4-00c04fd430c8"], "ground_truth": "1.2.2"},
-      {"name": "owner_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "1.1.2.1"},
-      {"name": "device_ip", "type": "VARCHAR", "values": ["192.168.1.101", "192.168.1.102", "10.0.0.50", "172.16.0.25", "192.168.2.200"], "ground_truth": "1.2.1"},
-      {"name": "registered_on", "type": "DATE", "values": ["2024-01-05", "2024-02-10", "2024-03-15", "2024-04-20", "2024-05-25"], "ground_truth": "2.1"},
-      {"name": "is_active", "type": "VARCHAR", "values": ["true", "true", "false", "true", "true"], "ground_truth": "2.3"}
+      {"name": "device_uuid", "type": "VARCHAR", "values": ["f47ac10b-58cc-4372-a567-0e02b2c3d479", "550e8400-e29b-41d4-a716-446655440000", "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "6ba7b811-9dad-11d1-80b4-00c04fd430c8", "6ba7b812-9dad-11d1-80b4-00c04fd430c8"], "ground_truth": "1.2.2", "distinct_count": 5000},
+      {"name": "owner_name", "type": "VARCHAR", "values": ["Alice Johnson", "Bob Smith", "Carol Williams", "David Brown", "Eva Martinez"], "ground_truth": "1.1.2.1", "distinct_count": 3500},
+      {"name": "device_ip", "type": "VARCHAR", "values": ["192.168.1.101", "192.168.1.102", "10.0.0.50", "172.16.0.25", "192.168.2.200"], "ground_truth": "1.2.1", "distinct_count": 4800},
+      {"name": "registered_on", "type": "DATE", "values": ["2024-01-05", "2024-02-10", "2024-03-15", "2024-04-20", "2024-05-25"], "ground_truth": "2.1", "distinct_count": 1200},
+      {"name": "is_active", "type": "VARCHAR", "values": ["true", "true", "false", "true", "true"], "ground_truth": "2.3", "distinct_count": 2}
     ]
   }
 ]

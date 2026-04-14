@@ -25,9 +25,10 @@ class ColumnSample:
     database: str = ""
     siblings: list[str] = field(default_factory=list)
     ground_truth: str | None = None  # Known annotation code (for validation)
+    distinct_count: int | None = None  # True COUNT(DISTINCT) bounded by column_sample_limit
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "name": self.name,
             "column_type": self.column_type,
             "values": self.values,
@@ -38,6 +39,9 @@ class ColumnSample:
             "siblings": self.siblings,
             "ground_truth": self.ground_truth,
         }
+        if self.distinct_count is not None:
+            d["distinct_count"] = self.distinct_count
+        return d
 
 
 @dataclass
@@ -89,6 +93,7 @@ def sample_table_metadata(
     connection_name: str | None = None,
     database: str = "default",
     sample_size: int = 50,
+    column_sample_limit: int = 1000,
 ) -> TableSample:
     """Sample column metadata from a hive table.
 
@@ -109,6 +114,24 @@ def sample_table_metadata(
         )
 
         column_names = list(df.columns)
+
+        # True cardinality: one query for all columns, bounded by limit
+        distinct_counts: dict[str, int] = {}
+        try:
+            distinct_exprs = ", ".join(
+                f"COUNT(DISTINCT `{col}`) AS `distinct_{col}`"
+                for col in column_names
+            )
+            cardinality_df = conn.get_pandas_dataframe(
+                f"SELECT {distinct_exprs} FROM "
+                f"(SELECT * FROM {database}.{table_name} "
+                f"LIMIT {column_sample_limit}) sub"
+            )
+            for col in column_names:
+                distinct_counts[col] = int(cardinality_df[f"distinct_{col}"].iloc[0])
+        except Exception:
+            pass  # Fall back to sample-based cardinality in features
+
         columns = []
         for col_name in column_names:
             col_values = [str(v) for v in df[col_name].dropna().head(5).tolist()]
@@ -125,6 +148,7 @@ def sample_table_metadata(
                 table_name=table_name,
                 database=database,
                 siblings=column_names,
+                distinct_count=distinct_counts.get(col_name),
             ))
 
         return TableSample(name=table_name, database=database, columns=columns)
@@ -184,6 +208,7 @@ def _mock_table_sample(table_name: str) -> TableSample:
                     database=t.get("database", "default"),
                     siblings=col_names,
                     ground_truth=c.get("ground_truth"),
+                    distinct_count=c.get("distinct_count"),
                 )
                 for c in t["columns"]
             ]
