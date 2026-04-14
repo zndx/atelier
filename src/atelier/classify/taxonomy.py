@@ -497,6 +497,23 @@ def load_universal_vocabulary(*, hierarchical: bool = True) -> CategorySet:
     return load_annotations_from_json(path, hierarchical=hierarchical)
 
 
+def load_sample_vocabulary(*, hierarchical: bool = True) -> CategorySet:
+    """Load the expanded OOTB sample vocabulary from data/sample/ontology.json.
+
+    This is the 300-leaf BFO-grounded vocabulary used for the OOTB sample
+    source. It extends the universal vocabulary with domain-specific categories
+    across the CCO ICE trichotomy.
+    """
+    sample_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "sample"
+    path = sample_dir / "ontology.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Sample vocabulary not found: {path}. "
+            "Run 'uv run python scripts/expand_vocabulary.py' to generate it."
+        )
+    return load_annotations_from_json(path, hierarchical=hierarchical)
+
+
 def compose_vocabularies(
     base: HierarchicalCategorySet,
     domain: list[dict] | CategorySet,

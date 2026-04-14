@@ -32,7 +32,7 @@ function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [termCount, setTermCount] = useState<number | null>(null);
-  const { activeDatasetId, datasets, sources } = useDataset();
+  const { activeDatasetId, activeSourceId, datasets, sources } = useDataset();
 
   useEffect(() => {
     fetch("/api/status")
@@ -45,11 +45,14 @@ function Landing() {
       .then((data) => setAgents(data.agents || []))
       .catch(() => setAgents([]));
 
-    fetch("/api/vocabulary/stats")
+    const vocabParams = activeSourceId
+      ? `?source_id=${encodeURIComponent(activeSourceId)}`
+      : "";
+    fetch(`/api/vocabulary/stats${vocabParams}`)
       .then((r) => r.json())
       .then((data) => setTermCount(data.terms ?? null))
       .catch(() => setTermCount(null));
-  }, []);
+  }, [activeSourceId]);
 
   const skillCount = useMemo(
     () => agents.reduce((n, a) => n + (a.tool_ids?.length || 0), 0),

@@ -106,6 +106,14 @@ class AtelierDao:
                     "created_at": str(r.created_at or ""),
                     "metadata": r.metadata}
 
+    def update_data_source_metadata(self, source_id: str, metadata: str) -> None:
+        """Update the metadata JSON on a data source."""
+        from atelier.db.model import DataSource
+        with self.get_session() as session:
+            r = session.query(DataSource).filter_by(id=source_id).first()
+            if r is not None:
+                r.metadata = metadata
+
     # ── Dataset operations (version-aware) ─────────────────────
 
     def list_datasets(self, source_id: str | None = None) -> list[dict]:

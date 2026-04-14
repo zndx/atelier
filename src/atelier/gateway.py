@@ -7,6 +7,8 @@ requests to the co-located gRPC server.
 
 import asyncio
 import json
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -16,7 +18,20 @@ from fastapi.staticfiles import StaticFiles
 from atelier.client import AtelierClient
 from atelier.proto import atelier_pb2
 
-app = FastAPI(title="Atelier", version="0.1.0")
+_log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Seed OOTB sample data on first boot."""
+    try:
+        _seed_sample_source()
+    except Exception as exc:
+        _log.warning("Sample source seeding skipped: %s", exc)
+    yield
+
+
+app = FastAPI(title="Atelier", version="0.1.0", lifespan=_lifespan)
 
 _project_root = Path(__file__).resolve().parent.parent.parent
 
@@ -76,6 +91,60 @@ def _error_envelope(detail: str, *, status: int = 503) -> "JSONResponse":
     ``Internal Server Error`` as JSON."""
     from fastapi.responses import JSONResponse
     return JSONResponse(status_code=status, content={"error": detail})
+
+
+def _seed_sample_source() -> None:
+    """Register OOTB sample data as version 1 if no datasets exist yet.
+
+    Called once at gateway startup. Checks the database for existing
+    datasets under the 'ootb-sample' source. If none exist and sample
+    CSVs are available, creates a dataset record so the landing page
+    shows stats immediately.
+    """
+    try:
+        from atelier.db.dao import AtelierDao
+        from atelier.classify.sampler import sample_source_stats
+    except Exception:
+        return  # DB not available yet (e.g., migrations haven't run)
+
+    try:
+        dao = AtelierDao()
+        versions = dao.list_dataset_versions("ootb-sample")
+        if versions:
+            return  # Already seeded
+
+        stats = sample_source_stats()
+        if not stats["has_data"]:
+            return  # No sample data to seed
+
+        # Register as version 1
+        import uuid
+        dataset_id = str(uuid.uuid4())[:8]
+        dao.upsert_dataset(
+            dataset_id=dataset_id,
+            name="OOTB Sample v1",
+            description=f"{stats['table_count']} tables, {stats['column_count']} columns from expanded ontology",
+            row_count=stats["column_count"],
+            source_id="ootb-sample",
+            version_number=1,
+            is_active=True,
+            summary=f"{stats['table_count']} tables, {stats['column_count']} columns",
+        )
+
+        # Update source metadata
+        source = dao.get_data_source("ootb-sample")
+        if source:
+            dao.update_data_source_metadata("ootb-sample", json.dumps({
+                "table_count": stats["table_count"],
+                "column_count": stats["column_count"],
+            }))
+
+        _log.info(
+            "Seeded OOTB sample: %d tables, %d columns as version 1",
+            stats["table_count"], stats["column_count"],
+        )
+    except Exception as exc:
+        _log.debug("Sample source seeding failed: %s", exc)
 
 
 # ── REST → gRPC bridge ────────────────────────────────────────────
@@ -470,18 +539,32 @@ def test_data_connection(name: str):
 
 
 @app.get("/api/vocabulary/stats")
-def vocabulary_stats():
-    """Return vocabulary term count from cache, hive, or mock."""
+def vocabulary_stats(source_id: str | None = None):
+    """Return vocabulary term count, source-aware.
+
+    When source_id is 'ootb-sample', returns the expanded ontology count.
+    Otherwise falls back to cache → hive → universal.
+    """
     try:
         from atelier.config import load_config
         from atelier.classify.taxonomy import (
             load_annotations_from_json,
             load_annotations_from_hive as _hive_vocab,
+            load_sample_vocabulary,
             load_universal_vocabulary,
             compose_vocabularies,
         )
 
         cfg = load_config()
+
+        # Sample source uses the expanded ontology
+        if source_id == "ootb-sample":
+            try:
+                sample_vocab = load_sample_vocabulary(hierarchical=True)
+                return {"terms": len(sample_vocab.categories), "source": "sample"}
+            except FileNotFoundError:
+                pass
+
         project_root = Path(__file__).resolve().parent.parent.parent
         cache_path = project_root / "build" / "data" / "annotations" / "annotations.json"
 
@@ -578,7 +661,7 @@ def fsm_status():
 
 
 @app.post("/api/fsm/start")
-def fsm_start():
+def fsm_start(source_id: str | None = None):
     """Start a classification pipeline run.
 
     The pipeline requires an LLM backend.  When ANTHROPIC_API_KEY is
@@ -588,6 +671,10 @@ def fsm_start():
 
     For dev/CI testing without real API calls, inject ``samples=`` and
     ``llm_backend=`` via the Python API.
+
+    Args:
+        source_id: Data source to classify. When "ootb-sample", the
+            pipeline auto-loads sample CSVs and the expanded vocabulary.
     """
     import threading
     try:
@@ -612,12 +699,12 @@ def fsm_start():
         def _background():
             # Pipeline owns run creation via fsm.start_run() — don't
             # create a run here (avoids double-run bug).
-            run_classification_pipeline(cfg, fsm)
+            run_classification_pipeline(cfg, fsm, source_id=source_id)
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()
 
-        return {"started": True}
+        return {"started": True, "source_id": source_id}
     except Exception as exc:
         return _error_envelope(f"FSM start failed: {exc}")
 

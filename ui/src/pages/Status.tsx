@@ -131,7 +131,7 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const [fsm, setFsm] = useState<FSMStatus | null>(null);
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
-  const { refreshDatasets } = useDataset();
+  const { activeSourceId, refreshDatasets } = useDataset();
 
   const fetchFSM = () => {
     setFsmLoading(true);
@@ -150,7 +150,8 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
 
   const startPipeline = () => {
     setStarting(true);
-    fetch("/api/fsm/start", { method: "POST" })
+    const params = activeSourceId ? `?source_id=${encodeURIComponent(activeSourceId)}` : "";
+    fetch(`/api/fsm/start${params}`, { method: "POST" })
       .then((r) => r.json())
       .then(() => {
         setTimeout(fetchFSM, 500);

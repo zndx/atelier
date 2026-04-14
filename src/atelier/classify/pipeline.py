@@ -43,6 +43,7 @@ from atelier.classify.sampler import (
     ColumnSample,
     TableSample,
     discover_tables,
+    load_sample_source,
     sample_table_metadata,
 )
 from atelier.classify.taxonomy import (
@@ -50,6 +51,7 @@ from atelier.classify.taxonomy import (
     compose_vocabularies,
     load_annotations_from_hive,
     load_annotations_from_json,
+    load_sample_vocabulary,
     load_universal_vocabulary,
     save_annotations_json,
 )
@@ -63,6 +65,7 @@ def run_classification_pipeline(
     cfg,
     fsm: AgentFSM,
     *,
+    source_id: str | None = None,
     connection_name: str | None = None,
     database: str = "default",
     sample_size: int = 50,
@@ -84,6 +87,8 @@ def run_classification_pipeline(
     Args:
         cfg: AtelierConfig.
         fsm: AgentFSM instance for state tracking.
+        source_id: Data source to classify. When "ootb-sample", loads
+            sample CSVs and the expanded vocabulary automatically.
         connection_name: CAI data connection name.
         database: Hive database to classify.
         sample_size: Rows to sample per table.
@@ -99,6 +104,12 @@ def run_classification_pipeline(
     Raises:
         ValueError: If no LLM backend is available.
     """
+    # ── Source-based auto-resolution ──────────────────────────
+    # When source_id is provided, auto-load samples and vocabulary
+    if source_id == "ootb-sample" and samples is None:
+        samples = load_sample_source()
+        if category_set is None:
+            category_set = load_sample_vocabulary(hierarchical=True)
     # ── LLM backend resolution ────────────────────────────────
     # The pipeline cannot function without an LLM.  Resolve early
     # so callers get a clear error before any FSM state is created.

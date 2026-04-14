@@ -255,3 +255,99 @@ def load_fixture_samples() -> list[TableSample]:
 
 # Backward-compatible alias
 load_all_mock_samples = load_fixture_samples
+
+
+# ── Sample source data (OOTB onboarding) ─────────────────────────
+
+_SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "sample"
+
+
+def load_sample_source(
+    sample_dir: str | Path | None = None,
+) -> list[TableSample]:
+    """Load OOTB sample tables from data/sample/tables/*.csv.
+
+    Reads all CSVs in the sample tables directory and the ground truth
+    mapping. Returns TableSample objects with ground_truth labels attached
+    to each column — ready to inject into the classification pipeline.
+    """
+    import csv as csv_mod
+
+    base = Path(sample_dir) if sample_dir else _SAMPLE_DIR
+    tables_dir = base / "tables"
+    gt_path = base / "ground_truth.json"
+
+    if not tables_dir.is_dir():
+        log.warning("Sample tables directory not found: %s", tables_dir)
+        return []
+
+    # Load ground truth if available
+    ground_truth: dict[str, str] = {}
+    if gt_path.exists():
+        with open(gt_path) as f:
+            ground_truth = json.load(f)
+
+    samples: list[TableSample] = []
+    for csv_path in sorted(tables_dir.glob("*.csv")):
+        table_name = csv_path.stem
+        with open(csv_path, newline="") as f:
+            reader = csv_mod.reader(f)
+            header = next(reader, None)
+            if not header:
+                continue
+            # Read all rows for sampling
+            rows = list(reader)
+
+        col_names = header
+        columns: list[ColumnSample] = []
+        for i, col_name in enumerate(col_names):
+            values = [row[i] for row in rows[:5] if i < len(row) and row[i]]
+            total_count = len(rows)
+            null_count = sum(1 for row in rows if i >= len(row) or not row[i])
+            gt_key = f"{table_name}.{col_name}"
+
+            columns.append(ColumnSample(
+                name=col_name,
+                column_type="object",
+                values=values,
+                total_count=total_count,
+                null_count=null_count,
+                table_name=table_name,
+                database="sample",
+                siblings=col_names,
+                ground_truth=ground_truth.get(gt_key),
+                distinct_count=len(set(row[i] for row in rows if i < len(row))),
+            ))
+
+        samples.append(TableSample(
+            name=table_name,
+            database="sample",
+            columns=columns,
+        ))
+
+    log.info(
+        "Loaded %d sample tables (%d columns) from %s",
+        len(samples),
+        sum(len(t.columns) for t in samples),
+        tables_dir,
+    )
+    return samples
+
+
+def sample_source_stats(sample_dir: str | Path | None = None) -> dict:
+    """Return summary stats for the sample source without loading all data."""
+    base = Path(sample_dir) if sample_dir else _SAMPLE_DIR
+    tables_dir = base / "tables"
+    gt_path = base / "ground_truth.json"
+
+    table_count = len(list(tables_dir.glob("*.csv"))) if tables_dir.is_dir() else 0
+    column_count = 0
+    if gt_path.exists():
+        with open(gt_path) as f:
+            column_count = len(json.load(f))
+
+    return {
+        "table_count": table_count,
+        "column_count": column_count,
+        "has_data": table_count > 0,
+    }
