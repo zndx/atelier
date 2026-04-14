@@ -127,6 +127,13 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.monte_carlo.max_frontier_columns": ("mc_max_frontier_columns", int),
     "classify.monte_carlo.propagation_threshold": ("mc_propagation_threshold", float),
     "classify.monte_carlo.propagation_discount": ("mc_propagation_discount", float),
+    # Row-level Monte Carlo
+    "classify.row_mc.enabled": ("row_mc_enabled", bool),
+    "classify.row_mc.k": ("row_mc_k", int),
+    "classify.row_mc.strategy": ("row_mc_strategy", str),
+    "classify.row_mc.iterations": ("row_mc_iterations", int),
+    "classify.row_mc.max_iterations": ("row_mc_max_iterations", int),
+    "classify.row_mc.adaptive_escalation": ("row_mc_adaptive_escalation", bool),
     # Background feature analysis
     "classify.background_analysis": ("classify_background_analysis", bool),
 }
@@ -295,6 +302,14 @@ class AtelierConfig:
     mc_max_frontier_columns: int = 500
     mc_propagation_threshold: float = 0.85
     mc_propagation_discount: float = 0.30
+
+    # Row-level Monte Carlo
+    row_mc_enabled: bool = False
+    row_mc_k: int = 10
+    row_mc_strategy: str = "stratified"
+    row_mc_iterations: int = 3
+    row_mc_max_iterations: int = 5
+    row_mc_adaptive_escalation: bool = True
 
     # Background feature analysis
     classify_background_analysis: bool = True

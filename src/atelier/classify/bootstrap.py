@@ -107,6 +107,8 @@ class BootstrapState:
     escalated_count: int = 0
     mc_strata_count: int = 0
     mc_sample_fraction: float = 1.0
+    # Row-level MC: per-column label history across row-sample iterations
+    row_labels_history: dict[str, list[str]] = field(default_factory=dict)
 
 
 # ── Phase helpers ────────────────────────────────────────────────
@@ -380,3 +382,18 @@ def should_stop_early(state: BootstrapState) -> bool:
     delta_2 = metrics[-2].mean_k - metrics[-3].mean_k
     # Both non-negative means K is not decreasing
     return delta_1 >= -1e-6 and delta_2 >= -1e-6
+
+
+def row_stability(state: BootstrapState, name: str) -> float:
+    """Fraction of iterations that produced the most common label. 1.0 = stable.
+
+    Used by the row-level MC adaptive escalation: columns where different
+    row subsets produce different classifications have row_stability < 1.0,
+    indicating the column type depends on which values are observed.
+    """
+    history = state.row_labels_history.get(name, [])
+    if len(history) < 2:
+        return 1.0
+    from collections import Counter
+    most_common_count = Counter(history).most_common(1)[0][1]
+    return most_common_count / len(history)

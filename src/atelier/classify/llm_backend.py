@@ -214,6 +214,8 @@ def build_batch_user_prompt(
         if sample.values:
             preview = sample.values[:10]
             lines.append(f"Values: {preview}")
+            if hasattr(sample, 'all_values') and sample.all_values and len(sample.all_values) > len(preview):
+                lines.append(f"({len(sample.all_values)} total values sampled)")
 
         if sample.siblings:
             lines.append(f"Siblings: {sample.siblings}")

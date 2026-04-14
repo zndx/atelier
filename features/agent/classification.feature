@@ -137,3 +137,33 @@ Feature: Dempster-Shafer classification pipeline
     When I run pre-classification on the corpus
     And I stratify the pre-classified columns
     Then there should be at least 2 strata
+
+  # ── Row-Level Monte Carlo ──────────────────────────────────
+
+  @row-mc
+  Scenario: Row MC config loads from HOCON with defaults
+    Then row MC config should load with default values
+
+  @row-mc
+  Scenario: Row reservoir preserves all values from sample source
+    Given the OOTB sample source is loaded
+    Then each column should have all_values with more entries than values
+
+  @row-mc
+  Scenario: Stratified row selection produces diverse subsets
+    Given a column with 50 distinct values in its reservoir
+    When I select stratified row samples for 3 iterations with k=10
+    Then each iteration should produce a different value subset
+    And each subset should contain 10 values
+
+  @row-mc
+  Scenario: Row MC passthrough when reservoir is small
+    Given a column with 5 values in its reservoir
+    When I select a row sample with k=10
+    Then all 5 values should be returned unchanged
+
+  @row-mc
+  Scenario: Row-unstable columns are detected
+    Given a bootstrap state with varying labels across row iterations
+    Then the row stability for the unstable column should be below 0.5
+    And the row stability for the stable column should be 1.0

@@ -242,6 +242,10 @@ def run_classification_pipeline(
         mc_cfg = _MCConfig.from_cfg(cfg)
         mc_plan = None
 
+        # ── Row-Level MC ──────────────────────────────────────────
+        from atelier.classify.row_sampler import RowMCConfig
+        row_mc_cfg = RowMCConfig.from_cfg(cfg)
+
         if total_columns >= mc_cfg.min_corpus_size and has_embeddings:
             from atelier.classify.monte_carlo import (
                 pre_classify as _pre_classify,
@@ -372,6 +376,27 @@ def run_classification_pipeline(
 
                 state.iteration = iteration
 
+                # Row MC: rotate values for disagreement columns
+                if row_mc_cfg.enabled and disagreements:
+                    from atelier.classify.row_sampler import select_row_sample
+                    rotated = 0
+                    for name in disagreements:
+                        col = samples_by_name[name]
+                        if col.all_values and len(col.all_values) > row_mc_cfg.k:
+                            select_row_sample(
+                                col, k=row_mc_cfg.k,
+                                strategy=row_mc_cfg.strategy,
+                                iteration=iteration,
+                            )
+                            rotated += 1
+                    if rotated:
+                        logger.info(
+                            "Row MC: rotated values for %d/%d disagreement columns "
+                            "(k=%d, strategy=%s, iteration=%d)",
+                            rotated, len(disagreements),
+                            row_mc_cfg.k, row_mc_cfg.strategy, iteration,
+                        )
+
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "phase": "revisit",
                     "iteration": iteration,
@@ -396,9 +421,34 @@ def run_classification_pipeline(
                     propagation_discount=prop_discount,
                 )
 
+                # Row MC: record label history for stability tracking
+                if row_mc_cfg.enabled:
+                    for name in disagreements:
+                        if name in state.labels:
+                            state.row_labels_history.setdefault(name, []).append(
+                                state.labels[name]
+                            )
+
                 disagreements = _identify_disagreements(state, column_names, boot_cfg)
                 mean_k = _mean_k(state, column_names)
                 coverage = _coverage(state, column_names)
+
+                # Row MC: escalate row-unstable columns to full reservoir
+                if row_mc_cfg.enabled and row_mc_cfg.adaptive_escalation:
+                    from atelier.classify.bootstrap import row_stability as _row_stab
+                    escalated = 0
+                    for name in list(disagreements):
+                        if _row_stab(state, name) < 0.5:
+                            col = samples_by_name[name]
+                            if col.all_values:
+                                col.values = list(col.all_values)
+                                escalated += 1
+                    if escalated:
+                        state.escalated_count += escalated
+                        logger.info(
+                            "Row MC: escalated %d row-unstable columns to full reservoir",
+                            escalated,
+                        )
 
                 record_iteration_metrics(state, column_names, len(disagreements))
 

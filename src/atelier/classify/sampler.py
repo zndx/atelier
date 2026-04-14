@@ -22,6 +22,7 @@ class ColumnSample:
     name: str
     column_type: str | None = None
     values: list[str] = field(default_factory=list)
+    all_values: list[str] = field(default_factory=list)  # Full row reservoir (up to sample_size)
     total_count: int = 0
     null_count: int = 0
     table_name: str = ""
@@ -44,6 +45,8 @@ class ColumnSample:
         }
         if self.distinct_count is not None:
             d["distinct_count"] = self.distinct_count
+        if self.all_values and len(self.all_values) > len(self.values):
+            d["all_values"] = self.all_values
         return d
 
 
@@ -145,7 +148,8 @@ def sample_table_metadata(
 
     columns = []
     for col_name in column_names:
-        col_values = [str(v) for v in df[col_name].dropna().head(5).tolist()]
+        all_vals = [str(v) for v in df[col_name].dropna().tolist()]
+        col_values = all_vals[:5]
         null_count = int(df[col_name].isna().sum())
         total_count = len(df)
         col_type = str(df[col_name].dtype)
@@ -154,6 +158,7 @@ def sample_table_metadata(
             name=col_name,
             column_type=col_type,
             values=col_values,
+            all_values=all_vals,
             total_count=total_count,
             null_count=null_count,
             table_name=table_name,
@@ -220,6 +225,7 @@ def _fixture_table_sample(table_name: str) -> TableSample:
                     name=c["name"],
                     column_type=c.get("type"),
                     values=c.get("values", []),
+                    all_values=c.get("values", []),
                     total_count=len(c.get("values", [])),
                     null_count=0,
                     table_name=table_name,
@@ -301,7 +307,8 @@ def load_sample_source(
         col_names = header
         columns: list[ColumnSample] = []
         for i, col_name in enumerate(col_names):
-            values = [row[i] for row in rows[:5] if i < len(row) and row[i]]
+            all_vals = [row[i] for row in rows if i < len(row) and row[i]]
+            values = all_vals[:5]
             total_count = len(rows)
             null_count = sum(1 for row in rows if i >= len(row) or not row[i])
             gt_key = f"{table_name}.{col_name}"
@@ -310,6 +317,7 @@ def load_sample_source(
                 name=col_name,
                 column_type="object",
                 values=values,
+                all_values=all_vals,
                 total_count=total_count,
                 null_count=null_count,
                 table_name=table_name,
