@@ -1,0 +1,101 @@
+field,data_type,record_type_discriminator,col_898,apprvstat,schemaTableName,time_to_live,dataLineage,nullable_flag,x_is_d,permission_level,versionNumber,rowCount,deleted_at
+type,TIMESTAMP,upsert,b768888c37601b1f507899c78de4083e430e8bd9f07156b3703b16820f3b6e30,Approved,analytics.events,202 days,curated.events -> analytics,NO,false,Editor,2.18.56,53409,2024-11-06 00:00:00
+type,TEXT,update,487a0309e2511578262d1086de56802be10d4f346f2129b7a457dba13e1f196e,Approved,analytics.events,257 days,raw.events -> reports,NO,true,Editor,1.0.63,11042,
+amount,VARCHAR,update,f0a368d49973747247f95d4c642764e28711f9d44a893d4002afffb4ff203f60,Approved,hr.employees,288 days,raw.orders -> analytics,false,true,Owner,3.15.40,25956,2024-12-30 00:00:00
+created_at,FLOAT,snapshot,317f90841cc4264ec180347b6c98431c670a2802664569ff9c7fd0f15093711f,In Review,public.users,39 days,curated.orders -> analytics,false,true,Guest,1.17.30,76838,2019-05-25 00:00:00
+name,JSON,update,81eaf4a0c4c68b42370bd5724e47d26e2da3b26cea22767ef53aa170d8d1ccb9,Pending,sales.orders,338 days,raw.orders -> analytics,false,true,Editor,2.19.63,48562,2023-10-02 00:00:00
+amount,FLOAT,update,2c3748dd996751f5c94b2fe732823f4375f7ad381f3e1e632e4fb975751d1918,Pending,analytics.events,119 days,staging.orders -> analytics,YES,false,Admin,0.6.42,99906,
+id,JSON,insert,b34133a0aa21f3dfdac0c8ad8b63c0964f6399d56f99c9f109893d5d3e52b9db,Pending,analytics.events,29 days,curated.users -> analytics,true,true,Viewer,1.6.21,31083,
+status,JSON,snapshot,1186ecf5f6dcdec929ce986080732008c8dae1b471e0588a3c90db2ed366c0fe,Pending,analytics.events,365 days,curated.users -> analytics,false,false,Admin,0.11.96,13049,2022-08-27 00:00:00
+id,JSON,snapshot,789a4a207d7ad6d109439dea2e6b374dc2a0fc3df7f0aede81ecffbe36c11b7b,In Review,analytics.events,16 days,staging.users -> reports,false,false,Viewer,3.11.69,34254,
+status,INTEGER,snapshot,1d1388125782ae3fde563f22de2611af2e5dcc70c1a51441839deeb9319468c2,In Review,hr.employees,150 days,curated.events -> reports,true,false,Owner,3.13.14,19315,
+type,JSON,upsert,ef5b76c9e5aa082d749cf854564caf01763edfb8324e04b3e2aafcd2c78ec0b0,Approved,sales.orders,98 days,raw.users -> reports,NO,false,Admin,5.2.16,11659,
+name,INTEGER,update,84d950cd7803954867b4f29a0dc61526d47302ac1287c8cc084569ca6a8a2edf,Pending,analytics.events,221 days,raw.orders -> analytics,true,false,Owner,3.1.16,83618,
+amount,TIMESTAMP,insert,77e6836970b0ea05931993499a650c7be62f55ee1ebff0a9606491ce1633e364,Pending,public.users,138 days,curated.users -> analytics,false,true,Viewer,2.8.47,66938,2021-05-21 00:00:00
+created_at,BOOLEAN,upsert,ecea61f957a07d41aef00b8f2700b822e9b17f79d0c0a0dab9ec6c7ab6066262,In Review,sales.orders,33 days,raw.orders -> analytics,NO,false,Guest,5.20.3,22940,
+id,JSON,delete,228f4498e3f14c04b35800a2cf21112f9f58b4936ae6db13b967189fe193f229,Approved,public.users,160 days,raw.users -> analytics,true,false,Viewer,3.18.88,59260,
+type,JSON,insert,49a988a3cb260d9d4c285aeda98be41791f8647002d187e6db829d01280c80e3,Pending,public.users,295 days,staging.orders -> exports,true,true,Owner,1.2.64,72948,
+id,TIMESTAMP,upsert,e505554e0c6e11275ade431aa1168ecea152e004f9296d961dc1500dd2ec38b6,Rejected,hr.employees,60 days,curated.orders -> reports,NO,false,Guest,0.6.33,9068,
+created_at,TIMESTAMP,delete,167adfea37c2dc0f5b1cb1e0992d8fd8f1a13587d1e10abd9899e3a5546e96de,Approved,public.users,98 days,staging.users -> reports,false,true,Viewer,3.1.66,9143,
+amount,FLOAT,insert,fc7e3c864d44c5553002668b4f7718f25216397470ab5ad6d492c55cd3cd20d3,Approved,analytics.events,83 days,curated.events -> reports,false,true,Admin,5.10.4,14031,2025-07-14 00:00:00
+name,FLOAT,delete,1aa909077b9e9e34510bed7a241c99cbac72f4e730e2eb7819a290c684d48f4a,In Review,analytics.events,347 days,staging.events -> exports,NO,false,Admin,0.2.27,47947,
+created_at,INTEGER,delete,875ce433e1be162efb9046df6e7474cedc1797c790c85b2715e7b7b3c1f300d6,Pending,analytics.events,88 days,raw.orders -> analytics,true,true,Guest,4.2.13,10755,
+status,INTEGER,upsert,6ccb717f6f712614686b907efef21b2c197a0dc7163492d27617d045f101b873,Approved,public.users,139 days,staging.events -> exports,NO,true,Admin,5.11.67,84947,
+created_at,TEXT,update,cef81ba93b999ea38e411e2c10bb8276e39837ba3c6d4f66731ed52aa30e1bb2,In Review,hr.employees,224 days,staging.orders -> exports,YES,true,Admin,5.10.49,32891,
+id,INTEGER,insert,b66cb9d241f5690ac080659bafada22355ba3fb028efe40e8fd9fb8d02c7c054,Approved,hr.employees,231 days,staging.users -> reports,NO,true,Guest,2.4.36,95086,2024-01-08 00:00:00
+status,TEXT,delete,d5dfaf05f49ad9181624edc64591f60226f5b79264deb178ad8b8b6fa8162fd1,Approved,analytics.events,349 days,staging.events -> reports,YES,true,Viewer,0.5.22,93601,
+status,TIMESTAMP,insert,a4ec89a394886b8c3b57479e9be15ad35ab42662a6e6ce0d9b854111210ced5d,Rejected,analytics.events,238 days,curated.orders -> exports,true,false,Admin,0.9.45,17877,
+created_at,TIMESTAMP,upsert,46f0f9b49565efbfdb6fd7d812148f682548cfbbce7ded5c7d52b4fec90e8b6b,In Review,analytics.events,315 days,curated.users -> exports,YES,true,Admin,1.12.11,42500,
+id,JSON,insert,34a92cf9eec0b7d5e5c52b946edb14585dda0598d99c06dd6d6db513538c30f4,In Review,hr.employees,215 days,curated.events -> exports,NO,true,Admin,3.9.11,7422,
+created_at,TEXT,insert,0ae9624f51d7f4fc1c103a57a58afa494a4566859db263eae3f1155416f6d33f,Rejected,sales.orders,32 days,curated.orders -> exports,NO,false,Admin,2.16.18,50486,
+created_at,INTEGER,upsert,26fde30c2a4c175b671742151bde269309039511ca968f65420cd6757b06f268,Rejected,public.users,223 days,raw.users -> analytics,false,false,Guest,0.9.33,17346,
+created_at,VARCHAR,delete,5437456259d7e2a74a482db8328431291a6040bccb8eb8712fb84ce7c4004faf,Pending,analytics.events,84 days,curated.orders -> reports,false,false,Editor,3.5.38,83138,
+amount,TEXT,delete,de3937af92e25b742ac144c154a2058558591ea9e347e495d839c1cc1ecd2d12,In Review,public.users,332 days,staging.orders -> analytics,YES,false,Guest,3.6.86,13094,
+name,JSON,snapshot,8d316e28007cc98a7e580cdce0e65f1d9f62ecef6c94a65e9d048573596a9077,In Review,analytics.events,187 days,raw.users -> analytics,true,true,Owner,1.14.17,44571,
+status,VARCHAR,insert,20d47e8222459e7e88a74f367b7eaded7ded806eb9946502f722a4ebee302253,Rejected,sales.orders,38 days,staging.events -> reports,NO,true,Viewer,2.18.93,74213,
+created_at,FLOAT,update,6c098feb93094bc1df525b912f525ec38b73bd02f7ff3e1ad8360b985b6f3a08,Pending,analytics.events,201 days,raw.events -> exports,true,true,Viewer,0.13.5,90131,
+amount,TIMESTAMP,insert,880aaa5d39e497304c863f4d0f7b17d416d58983962094a8c5d3e8e362032d47,Approved,sales.orders,61 days,curated.events -> reports,true,false,Admin,3.9.41,48120,2024-09-21 00:00:00
+id,TEXT,insert,392057d0892a6c0f08ca1ac29c62ea7ea1b3c1603892c53af4021308042d1e81,Pending,analytics.events,68 days,raw.orders -> reports,YES,false,Editor,5.6.85,86527,2023-05-10 00:00:00
+amount,TIMESTAMP,snapshot,16cbf75670614135a12e61defb64580a412456f46379387cdc23cdbf708d342b,Approved,hr.employees,31 days,raw.users -> exports,YES,false,Editor,0.11.47,99613,
+name,BOOLEAN,snapshot,930c73c6d80cc1b2da60aa61b29e7fd9704c1cbfb4354054e17568b42bc93cf1,In Review,public.users,301 days,curated.users -> exports,false,true,Editor,2.6.6,78524,2019-10-08 00:00:00
+id,JSON,delete,841e27311897bb2c1a5ff9f9bce3016728fc8a803d39ec8ab49fe8bb5890fbbe,Pending,hr.employees,21 days,curated.events -> reports,YES,true,Owner,5.5.4,6149,
+amount,INTEGER,upsert,ccb9863ec3808771d9efbe5af1bbc362f6ce74e709ff757632e2aa5b757e81dd,Approved,sales.orders,215 days,staging.events -> reports,YES,false,Admin,5.8.2,63199,
+email,INTEGER,snapshot,37e70a5b39d4348f329170381c16cc89be5445cb1d4cc405e70dbe9c872b5959,Pending,analytics.events,127 days,staging.orders -> analytics,YES,false,Guest,5.19.69,30736,
+name,INTEGER,upsert,a7a3b0d89d98b98480f55644de70667480d8afe8f124a73a7c93047030f6041e,In Review,hr.employees,11 days,staging.orders -> exports,NO,false,Admin,0.16.6,95903,2026-05-04 00:00:00
+id,INTEGER,upsert,2de58193213b89e16de0c1c5f24e8bfa5cb98aaf5b454d9eac3a10b9c355d907,Pending,hr.employees,233 days,staging.events -> reports,false,false,Guest,3.4.40,95342,
+created_at,VARCHAR,upsert,ddae75d77d226eff1f183fd5171c2a537a3411b3fc59644059783e27f1076505,Pending,public.users,92 days,curated.users -> analytics,NO,true,Viewer,5.5.24,20509,2019-07-11 00:00:00
+type,VARCHAR,delete,2e7d48f4f0162583bd8ebae5192946309be07ae351bf7860b297382404691517,Rejected,hr.employees,179 days,raw.users -> exports,true,true,Guest,0.11.58,25071,
+email,TEXT,insert,a960209f8fb7046f5d4088e371c341c842c0b60c7d421c3fefe7d25d854432a9,Rejected,hr.employees,182 days,staging.users -> exports,false,false,Admin,3.11.88,33091,2026-11-20 00:00:00
+created_at,JSON,insert,f7dd399b0efe12a7aa2db8f9702a6050d1c810cceb7a5e36a736418bda22bfd4,Pending,hr.employees,309 days,raw.orders -> exports,YES,false,Editor,4.1.97,85071,
+created_at,VARCHAR,snapshot,f898e452753de410b3626f1e270f9a13be6403b76879391e8f45748dee1e1d79,Approved,hr.employees,314 days,raw.users -> analytics,YES,false,Editor,3.7.50,19190,2025-10-08 00:00:00
+email,JSON,upsert,6ec0d2ed918585faf659e34a724b99f346cc6e4434edf5de909a7e8f5c68074b,In Review,public.users,12 days,staging.users -> reports,true,true,Viewer,2.1.22,56020,
+name,INTEGER,update,1eac007576678b4cb7dd626b6a7e62fdff7c7bf445c6fa2db9a1555cf92a132a,Approved,sales.orders,222 days,staging.orders -> exports,false,false,Guest,1.18.43,95703,2025-01-05 00:00:00
+status,FLOAT,upsert,ffa6dd415f3d7f5410e196f365a7cfe71584fcc8401d5220e668b18c653331cd,Rejected,hr.employees,205 days,raw.users -> analytics,true,true,Owner,3.6.82,48165,
+created_at,TIMESTAMP,delete,1e17c7d80729d3252f8f54b7b07a7d12b0804ee68118055ead780b60838a496d,Rejected,public.users,307 days,staging.orders -> reports,YES,true,Guest,0.11.63,75933,2019-11-20 00:00:00
+amount,TEXT,insert,c3568e3936b157c61ae76ca67d6bb79d58cb8b9f62ed3ba88dbfe815114eace1,Approved,analytics.events,75 days,raw.orders -> exports,false,false,Guest,2.20.60,72460,
+amount,FLOAT,update,562f3ee26d6b02fe1ab9df1f8f95606932237e654f0cf7112d2726f7aa9df9a3,Rejected,public.users,311 days,curated.orders -> exports,NO,false,Viewer,2.13.74,24273,
+name,TIMESTAMP,upsert,22bfbffd9d72638a12e0237adad0cfc3473d6293195aaee51ce2ca875fc6b32a,Pending,hr.employees,361 days,curated.users -> exports,true,false,Admin,1.9.50,40934,
+name,FLOAT,insert,b5d3e8debd6091f14c9a49c3d007ec9ae480a0511ed7f73df8e72c5f368bbf3b,Pending,public.users,276 days,raw.events -> exports,false,false,Owner,4.16.17,26141,
+created_at,JSON,snapshot,b3b2a068f35d656e9fcbe5aec60046a0b1f19909cb246767cd53cbdd1db372cf,Pending,sales.orders,277 days,curated.users -> exports,YES,true,Viewer,3.10.11,75279,
+status,TEXT,delete,6e16c28894898f4be2cb582e0a234fd0f50ac9b8026b072547097abac11121e8,Approved,hr.employees,331 days,raw.orders -> reports,NO,true,Viewer,1.5.30,29835,
+created_at,JSON,delete,4417bf4be71f1c4fa4a53f4daae8c1d2d8bcc49e61fe20f8e1e4bea60e5cbbf5,Pending,analytics.events,247 days,raw.events -> reports,false,false,Admin,3.13.97,37187,
+created_at,TIMESTAMP,update,a832c5489cf379c358c388196758ca29d4c602795a354376236024b44a274579,In Review,sales.orders,35 days,raw.events -> reports,false,false,Editor,3.6.78,74198,
+status,VARCHAR,insert,441fb97a14a55b64ee7d181ee40d35f32f6b3a57165fa26d97c93b4a2b91c5cd,Approved,public.users,363 days,staging.events -> exports,NO,false,Admin,5.4.72,54703,
+id,JSON,delete,ba364c72821ab82cc309c72f47c4efbdfe68e428273cc4ec279a47a7478106db,Approved,sales.orders,110 days,raw.orders -> reports,NO,false,Viewer,4.20.33,72076,
+type,TIMESTAMP,delete,347af2a5d892d8a7df82d8903975a9e3785844087d18c23bdb9c7ba7abfe568a,Pending,analytics.events,93 days,staging.users -> reports,NO,true,Owner,3.7.4,69793,
+name,FLOAT,snapshot,50d02610adc63b1ed6249d122faa3a41a94926b518bf02235c2ab8962e2f8d43,In Review,analytics.events,7 days,curated.events -> analytics,NO,false,Owner,1.15.24,68117,2022-09-01 00:00:00
+amount,BOOLEAN,snapshot,453ad40566615ad8ca1b2d6e93ab6146a373a6aa6d400abb7aae9d556714ed84,In Review,hr.employees,184 days,curated.users -> analytics,YES,true,Editor,1.9.97,59518,2018-08-31 00:00:00
+name,TEXT,snapshot,81a4d704ea2060fb57c7cf21867dd193b13acd8f2d6e331d1359c6778d1bc414,In Review,hr.employees,95 days,curated.users -> exports,true,false,Owner,3.1.76,37933,
+created_at,TIMESTAMP,upsert,a1be48464a919e6328ea998cd342df6e8e65957670dde7994f3fad538a36ffe4,In Review,public.users,180 days,raw.users -> exports,false,true,Admin,1.5.94,22246,
+created_at,FLOAT,insert,30e7576ce3d01f7fc48279e722ac194655da37ff1317f7158f73a715481943b8,Rejected,sales.orders,153 days,raw.events -> exports,NO,false,Viewer,2.20.56,45324,
+type,FLOAT,snapshot,7ab204f2e2f9d2aba66a061e65e615e358c80fa0606ac7ca360cbd8ee639e72f,Pending,hr.employees,300 days,curated.users -> analytics,NO,true,Editor,0.18.12,50253,2018-01-28 00:00:00
+amount,TEXT,snapshot,e6180d255e09571ee0a55a0eb780fae9c2254ca42c2cea305ae30612feb04abf,Rejected,sales.orders,255 days,curated.users -> analytics,true,false,Admin,5.14.81,94524,
+type,TEXT,snapshot,7d743e4ab5c83011ca3b6167f0003b5ec13fa7cdf5ea3c2e33a26d2d22e9f7a7,Pending,analytics.events,310 days,staging.events -> analytics,true,true,Viewer,0.2.0,24434,
+created_at,TEXT,delete,f9c66d8ea4b9a81d1e029c4223432ce3000b250023058a00720b5638662dc484,Pending,hr.employees,126 days,raw.orders -> analytics,YES,true,Editor,3.13.30,1877,2024-07-31 00:00:00
+status,TIMESTAMP,update,ea57376f48394d37c94c3d03878293cb789ec84cb8ce5a82851c04148d51e5d4,In Review,public.users,97 days,raw.users -> exports,NO,false,Editor,4.11.93,5357,
+created_at,JSON,snapshot,84ca542c6806156afd2a62651aa2c3adf24b4ea7e94e41330b44b0b70ba628e0,In Review,public.users,56 days,raw.orders -> reports,true,false,Editor,1.11.86,98852,
+created_at,FLOAT,snapshot,e08ef44a4ad4b2f226f6938c1bb9db8682ca65b654e677a85beeec972be87e37,In Review,sales.orders,228 days,raw.events -> reports,NO,false,Editor,3.16.14,30715,
+email,TEXT,snapshot,34760fdf8fb7a9eb6b4ae25e12a1a12c85df5cc448208bf9c2013b19c9ccb844,Pending,sales.orders,70 days,staging.users -> reports,true,true,Owner,5.20.9,36049,
+status,TIMESTAMP,delete,2697d0c22317a9bccbf1054d691cd7d98e2ca93121cd977862efb16686f6aa45,In Review,public.users,213 days,raw.events -> reports,false,true,Owner,2.19.21,73228,
+id,FLOAT,upsert,fc1be654f3f12eb6c57ec3cb90d7b003d9118b277c4d9cb57da409205265708d,Rejected,public.users,227 days,staging.orders -> reports,YES,false,Editor,4.17.16,41417,
+name,TEXT,update,c523380dc7980d3be030fad5764a881a97cf3219091982a8e9efd499d36fe9a6,Approved,public.users,314 days,staging.users -> analytics,false,false,Editor,5.6.70,82696,
+name,INTEGER,delete,35af709c5afda8266dd76fc7e81d84f3700b3969f54f9c37d0b9d7508cea4e81,Pending,public.users,181 days,raw.users -> reports,false,false,Editor,2.17.41,85545,
+email,JSON,update,564e1bf4ed70cb3c79ff65a3d2a6d3a0c2994ca09395c91bb32d4c743a551f8c,Rejected,analytics.events,300 days,curated.users -> exports,false,false,Admin,3.4.68,50046,
+email,INTEGER,insert,a07503bad7a4c14243f25585e579372f050f6c5d94ac3c3959591ff73b9d8c76,Approved,public.users,177 days,curated.users -> reports,NO,false,Owner,2.17.11,16111,
+email,FLOAT,upsert,8d598400d2ce72d3132d03c3a4d53a4cc14cf7bad60e3796850bbf1b64e9c3f2,Approved,hr.employees,35 days,staging.users -> exports,YES,false,Admin,4.2.56,63222,
+created_at,TEXT,upsert,90f7b0f25d0ed51aca092dc3eba77ba6059e23dcd311b582e1b8c1faa4196304,Rejected,hr.employees,267 days,staging.users -> analytics,YES,false,Editor,5.14.81,38184,
+name,FLOAT,insert,d1b554860acb75fd020d93fbc0068c03c8521475dedde26f321605ca5d109a9d,Rejected,analytics.events,341 days,staging.orders -> exports,NO,true,Admin,3.0.27,38222,
+name,VARCHAR,delete,52e2d6e957dc4ab44964d8d94a8661d18ddd79c9068203567d51e39eab4ce065,In Review,public.users,163 days,staging.events -> analytics,NO,true,Viewer,5.3.39,17479,
+amount,FLOAT,insert,7422cfcbc015e229c2e419b583e18600b1403ef3360cb2ca31dc6d623d523016,Approved,public.users,97 days,raw.events -> analytics,NO,false,Editor,3.6.86,37043,2021-12-22 00:00:00
+email,JSON,upsert,51da93e2d1ce2e0fc91709b27ac7575a76117bbf41d54fdee5f92f128f8012a5,Rejected,sales.orders,163 days,staging.users -> reports,false,true,Viewer,0.14.13,91481,
+email,JSON,snapshot,114e570b5443a93d61c429637ef051d9dda227f6542b1ec742388ffc2773e071,Approved,sales.orders,274 days,staging.orders -> analytics,NO,false,Owner,5.8.66,95658,2023-03-18 00:00:00
+name,VARCHAR,upsert,bd5962e4d65967ecad697b29d091121ef744e8ac3402b700e97fa63125fed716,In Review,hr.employees,251 days,curated.orders -> analytics,NO,true,Admin,3.8.70,44339,
+amount,JSON,snapshot,84a4a404986d36fb5252e6ff31554bdfe12ff880f35fa6b7705f8de2e3243988,In Review,public.users,9 days,staging.users -> reports,true,false,Owner,1.15.22,42925,
+type,TIMESTAMP,insert,81a08fb721a412c625a3bf01dac69e9a74c82b3d258456c3a86791b9d551c6bc,Rejected,hr.employees,331 days,staging.users -> exports,true,false,Editor,2.4.41,72938,
+email,FLOAT,snapshot,93c51e8b3dd9c0b47f7f20d77f4fface078f31f87545e6eabf188cd948a2bea1,Rejected,sales.orders,217 days,raw.users -> analytics,true,true,Guest,5.17.32,19334,
+status,FLOAT,insert,17e90cee7a933c9cbbeeae3426b04510961f8d447c8ac03e60774aec6564cb55,Pending,analytics.events,130 days,curated.events -> reports,YES,false,Owner,4.1.0,16441,2018-03-02 00:00:00
+amount,FLOAT,upsert,663b7ab992a7234ae2b4ea73569655f1a196c326e1f94112c52541534aad9188,Rejected,sales.orders,89 days,raw.orders -> analytics,false,true,Admin,0.15.70,75067,
+created_at,JSON,update,5f6e7fe271386f9b8022413219dec4f2a700904714157e3ee6d30fe1307352f1,Pending,analytics.events,113 days,raw.orders -> reports,true,true,Editor,4.18.53,96305,
+created_at,VARCHAR,upsert,c4f4da35e2162af4cdd7ef8ff27851735c9e9d8b07a47ff7a3c399be95700e20,Approved,public.users,133 days,staging.events -> exports,true,false,Guest,4.7.31,9622,
+status,INTEGER,delete,935acb97c0472eedefd30cd6db0fbca21e094d81481ec26d448c1ecbf1d09fbe,In Review,public.users,38 days,curated.users -> reports,false,false,Viewer,1.5.76,29125,
+email,FLOAT,update,9e8225964bd2d247ec315f7efde0724068e0ba5f464dff6e6f777bc212a55419,Approved,public.users,38 days,curated.orders -> exports,true,false,Guest,1.8.1,31198,2019-11-04 00:00:00

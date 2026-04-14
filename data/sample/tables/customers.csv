@@ -1,0 +1,101 @@
+v_fbt,channel,phone_number,email_address,industrySector,tenantid,mailingAddress,full_name,c_872,gender_pii,lastName,dob,attr_965,status
+2020-10-05 00:00:00,In-Store,+1-808-240-2343,jessica.lewis@acme.org,Finance,tenant-017,"3446 Elm St, Miami, FL 44814",Susan Jones,804318,Non-binary,White,1978-05-14,Harper,inactive
+2018-02-08 00:00:00,Phone,+1-836-776-2638,robert.thompson34@outlook.com,Finance,tenant-005,"4102 Maple Dr, Portland, NY 67433",Aiden Thompson,837715,Non-binary,Lee,1997-06-15,James,failed
+2025-06-10 00:00:00,Web,+1-337-470-2891,lucas.brown@outlook.com,Finance,tenant-019,"3550 Elm St, Miami, FL 93130",Oliver Rodriguez,629959,Other,Rodriguez,1954-07-23,Robert,approved
+2021-02-07 00:00:00,Web,+1-203-541-3143,olivia.rodriguez57@acme.org,Energy,tenant-028,"9289 Main St, Houston, TX 29536",Anna Johnson,975136,Non-binary,Moore,1999-07-28,William,approved
+2019-06-07 00:00:00,Web,+1-515-573-1653,lucas.taylor32@example.com,Technology,tenant-023,"9273 Park Blvd, San Francisco, PA 30257",Harper Davis,270395,Female,Jackson,1952-03-23,David,cancelled
+2026-10-10 00:00:00,Phone,+1-885-952-5065,patricia.garcia@gmail.com,Retail,tenant-003,"7811 Oak Ave, Denver, MA 55830",Jennifer Wright,933980,Female,Davis,1952-02-15,Liam,completed
+2022-06-21 00:00:00,Email,+1-485-271-5573,elizabeth.clark@example.com,Education,tenant-035,"5525 Main St, Houston, WA 33405",Emma Rodriguez,140115,Male,Lee,1988-12-26,Elizabeth,cancelled
+2022-11-23 00:00:00,In-Store,+1-723-318-7311,lucas.moore6@example.com,Retail,tenant-001,"8618 Park Blvd, Berlin, OH 97900",Richard Taylor,552248,Male,Lewis,1979-08-16,Sophia,cancelled
+2025-06-10 00:00:00,Chat,+1-327-937-5920,amy.martinez@yahoo.com,Retail,tenant-045,"4944 Pine Rd, Phoenix, FL 65108",Liam Thomas,810219,Female,Lee,2001-01-21,Jennifer,approved
+2024-02-23 00:00:00,Chat,+1-200-511-5700,richard.jackson@acme.org,Energy,tenant-021,"7718 Cedar Ln, Toronto, OH 38010",Amy Harris,932291,Female,Lewis,1957-08-10,Jennifer,cancelled
+2019-01-18 00:00:00,Chat,+1-969-440-6085,mary.king4@gmail.com,Healthcare,tenant-031,"1293 Cedar Ln, San Francisco, OH 85454",Richard Robinson,830180,Other,Harris,1985-11-08,Mary,pending
+2025-05-11 00:00:00,Social Media,+1-205-968-2746,mason.jackson90@acme.org,Retail,tenant-004,"9232 Oak Ave, Houston, MA 27477",Logan White,800005,Non-binary,Young,1989-09-15,Sophia,approved
+2024-02-23 00:00:00,Phone,+1-362-961-8777,sarah.rodriguez@example.com,Finance,tenant-050,"8640 Cedar Ln, Boston, WA 67654",Robert Robinson,399607,Female,Rodriguez,1980-02-18,Linda,inactive
+2019-07-21 00:00:00,Mobile,+1-436-592-3503,noah.miller53@yahoo.com,Manufacturing,tenant-030,"6912 Main St, Denver, CO 61049",Lucas Young,712451,Male,Young,2001-08-25,Susan,rejected
+2018-01-25 00:00:00,Email,+1-505-971-7389,oliver.wright@example.com,Energy,tenant-035,"9983 Oak Ave, London, FL 45774",Jessica Harris,130434,Other,Anderson,1986-04-10,Ethan,pending
+2023-03-30 00:00:00,Mobile,+1-837-746-1441,harper.thomas@example.com,Technology,tenant-006,"7122 Oak Ave, Toronto, NY 16590",Patricia Thomas,443254,Female,White,1979-04-29,Linda,approved
+2021-02-13 00:00:00,Chat,+1-631-458-2341,emily.smith@gmail.com,Finance,tenant-015,"1224 Park Blvd, Los Angeles, CA 42411",Richard Wright,121369,Female,Davis,1961-04-29,Emily,inactive
+2024-04-29 00:00:00,Mobile,+1-676-916-5198,mason.taylor78@example.com,Energy,tenant-008,"2783 Maple Dr, Houston, PA 13365",Harper Martinez,703766,Other,Thomas,1967-10-17,Robert,completed
+2019-02-22 00:00:00,Social Media,+1-991-508-2983,logan.moore@yahoo.com,Manufacturing,tenant-028,"6171 Main St, Paris, OH 54725",James Jackson,962276,Other,Brown,1988-11-22,Elizabeth,rejected
+2025-12-07 00:00:00,Mobile,+1-645-380-9548,olivia.rodriguez@acme.org,Education,tenant-031,"7716 Cedar Ln, Tokyo, WA 52245",Oliver Davis,971084,Male,Rodriguez,1990-06-11,Mary,rejected
+2024-05-23 00:00:00,In-Store,+1-884-588-6511,james.harris@outlook.com,Retail,tenant-014,"5913 Park Blvd, Austin, IL 46655",Lucas Lee,835244,Non-binary,Thompson,1950-11-29,Amy,completed
+2018-12-17 00:00:00,Mobile,+1-937-616-9004,anna.young61@example.com,Energy,tenant-032,"7442 Park Blvd, New York, TX 48566",Mary Thomas,825391,Female,Martinez,2002-03-05,Elizabeth,rejected
+2024-03-17 00:00:00,In-Store,+1-552-635-6419,elizabeth.robinson@yahoo.com,Finance,tenant-015,"2076 Elm St, Denver, IL 25670",Ethan Thompson,899213,Female,Miller,1969-05-31,Ethan,rejected
+2021-02-06 00:00:00,Social Media,+1-803-978-9595,sophia.martinez@outlook.com,Finance,tenant-015,"6012 Oak Ave, Portland, CA 80010",William Rodriguez,147726,Male,Thompson,1976-03-17,Noah,pending
+2025-02-25 00:00:00,Chat,+1-970-702-2680,oliver.smith@company.com,Retail,tenant-029,"5682 Oak Ave, Los Angeles, WA 72616",Michael Wright,168517,Other,Harris,1956-08-24,Emma,active
+2019-09-14 00:00:00,Mobile,+1-776-511-2395,mary.brown@company.com,Manufacturing,tenant-039,"3797 Park Blvd, Paris, CO 69049",Harper White,411797,Other,Martinez,2001-01-05,Sophia,active
+2024-11-02 00:00:00,Social Media,+1-301-981-4404,olivia.miller11@outlook.com,Healthcare,tenant-012,"9143 Main St, Seattle, CA 63545",Sarah Robinson,722656,Other,Martinez,1952-12-05,Mary,failed
+2025-12-05 00:00:00,Email,+1-919-664-2166,liam.davis@example.com,Manufacturing,tenant-043,"3341 Cedar Ln, Houston, GA 39466",Olivia Jones,378535,Female,Williams,1955-05-09,David,failed
+2024-09-03 00:00:00,Social Media,+1-782-495-8195,michael.white@example.com,Retail,tenant-018,"8299 Pine Rd, London, MA 20543",Sophia Johnson,553014,Non-binary,Lee,1972-06-18,James,inactive
+2020-07-26 00:00:00,Social Media,+1-789-801-1339,mason.lewis@acme.org,Technology,tenant-049,"2970 Cedar Ln, Paris, OH 67963",Harper Rodriguez,290305,Other,Clark,1994-02-11,Robert,rejected
+2021-11-26 00:00:00,Phone,+1-541-528-2713,oliver.garcia@example.com,Retail,tenant-019,"6661 Park Blvd, Berlin, CA 69614",Robert Anderson,364659,Non-binary,Brown,1986-04-06,Oliver,active
+2025-05-17 00:00:00,Chat,+1-755-673-7770,john.miller@acme.org,Education,tenant-032,"7342 Park Blvd, Los Angeles, FL 45003",Anna Jones,402020,Other,Robinson,1993-06-27,Michael,active
+2025-01-24 00:00:00,In-Store,+1-445-926-3594,jennifer.thompson53@gmail.com,Healthcare,tenant-008,"7660 Main St, Phoenix, MA 48254",Amy Robinson,386706,Other,Wright,1993-04-15,Emily,completed
+2023-02-14 00:00:00,In-Store,+1-348-592-4122,harper.lee@outlook.com,Education,tenant-005,"4626 Park Blvd, San Francisco, IL 76550",Patricia Wright,102689,Non-binary,Walker,1976-10-14,Aiden,rejected
+2019-09-01 00:00:00,Phone,+1-751-695-6654,linda.thompson@company.com,Retail,tenant-021,"3190 Elm St, Boston, PA 60196",Mary Young,530728,Male,Anderson,1992-06-07,Noah,approved
+2022-05-01 00:00:00,Social Media,+1-867-355-9115,john.jones@acme.org,Finance,tenant-007,"7313 Main St, Paris, MA 12011",Ethan Jones,529893,Female,Williams,1992-02-14,Logan,failed
+2021-10-18 00:00:00,In-Store,+1-909-607-2315,oliver.anderson@acme.org,Retail,tenant-021,"8094 Park Blvd, Berlin, CA 90931",Robert Davis,761820,Non-binary,Davis,1958-02-09,Jessica,inactive
+2026-07-12 00:00:00,Social Media,+1-920-302-8269,david.robinson4@gmail.com,Finance,tenant-004,"4906 Maple Dr, Dallas, CO 29080",Mary Martin,532067,Female,Garcia,1965-09-15,Robert,approved
+2024-12-13 00:00:00,Social Media,+1-446-709-3344,mary.white@company.com,Finance,tenant-043,"253 Park Blvd, Toronto, WA 98815",Anna Garcia,177449,Other,Taylor,2002-09-18,Jennifer,approved
+2025-09-28 00:00:00,Email,+1-667-509-4263,susan.harris49@acme.org,Finance,tenant-037,"4947 Elm St, Portland, CA 96275",Susan Rodriguez,108491,Male,Lee,1994-07-25,Aiden,failed
+2026-09-13 00:00:00,Chat,+1-435-821-6772,mary.clark33@example.com,Education,tenant-047,"2340 Elm St, Houston, OH 94717",John Martinez,926918,Other,Johnson,2001-12-30,Elizabeth,pending
+2019-01-05 00:00:00,Email,+1-534-965-7807,david.miller70@yahoo.com,Manufacturing,tenant-033,"4565 Park Blvd, Seattle, WA 73156",Logan Martinez,882824,Non-binary,King,1960-05-01,Sarah,inactive
+2019-07-31 00:00:00,Chat,+1-431-892-7511,oliver.king@gmail.com,Education,tenant-026,"328 Maple Dr, Berlin, TX 69609",Elizabeth Lewis,885395,Non-binary,Moore,1984-03-08,Aiden,cancelled
+2019-03-20 00:00:00,Social Media,+1-439-682-1410,sophia.thompson@acme.org,Healthcare,tenant-042,"1135 Elm St, Toronto, NC 49608",Olivia Jackson,222343,Female,Johnson,1953-05-04,Jennifer,rejected
+2019-04-21 00:00:00,Web,+1-440-750-3222,susan.white@example.com,Energy,tenant-035,"6966 Pine Rd, Phoenix, CO 95841",Michael Wright,613117,Other,Rodriguez,1952-12-08,Noah,cancelled
+2020-06-08 00:00:00,Phone,+1-655-441-6942,michael.lewis@example.com,Finance,tenant-004,"6623 Maple Dr, Denver, TX 69600",Robert Lewis,322409,Male,Johnson,1979-12-03,Mary,pending
+2026-10-29 00:00:00,In-Store,+1-410-270-4394,emma.miller@outlook.com,Finance,tenant-050,"2517 Park Blvd, Sydney, CA 46342",Oliver Jones,236306,Non-binary,King,1965-08-27,Michael,active
+2019-06-24 00:00:00,Web,+1-566-443-6304,james.garcia17@example.com,Retail,tenant-034,"1962 Elm St, Chicago, MA 68756",Mason Taylor,638169,Male,White,1995-03-15,Mary,active
+2026-02-26 00:00:00,Chat,+1-874-733-5941,sarah.clark@gmail.com,Retail,tenant-026,"7084 Elm St, Houston, MA 68138",Robert Williams,437758,Female,Williams,1961-04-28,Patricia,cancelled
+2022-04-10 00:00:00,In-Store,+1-743-501-8433,amy.lee@example.com,Technology,tenant-042,"9133 Elm St, Denver, CO 69186",Lucas Davis,533914,Non-binary,Wright,1990-09-08,Susan,approved
+2026-03-08 00:00:00,Web,+1-520-637-6120,liam.rodriguez@outlook.com,Energy,tenant-031,"1199 Main St, Chicago, TX 66606",Michael Walker,874683,Non-binary,King,1961-09-03,Anna,active
+2024-07-30 00:00:00,In-Store,+1-775-537-3002,jessica.taylor@company.com,Education,tenant-047,"942 Maple Dr, Sydney, WA 56090",Michael Moore,632060,Female,Jones,1993-04-05,Mary,inactive
+2021-12-05 00:00:00,Chat,+1-769-576-2882,mason.rodriguez@company.com,Education,tenant-036,"9221 Main St, Sydney, OH 45054",James Garcia,386544,Non-binary,Anderson,1981-06-29,James,pending
+2019-08-10 00:00:00,In-Store,+1-873-610-2140,william.walker@gmail.com,Technology,tenant-048,"8791 Oak Ave, Atlanta, CO 69460",Linda Garcia,488028,Non-binary,Walker,1979-02-07,Mason,inactive
+2018-08-04 00:00:00,Mobile,+1-361-972-1815,liam.williams85@company.com,Retail,tenant-039,"7342 Cedar Ln, Austin, FL 77154",Michael Taylor,550797,Male,Martinez,2003-03-19,Emily,failed
+2018-07-06 00:00:00,Mobile,+1-604-813-1897,james.miller@outlook.com,Education,tenant-009,"4286 Maple Dr, Miami, TX 11013",Emily Walker,551574,Female,Jones,1984-02-10,Anna,completed
+2023-08-12 00:00:00,In-Store,+1-884-562-2180,susan.walker3@company.com,Technology,tenant-021,"9533 Cedar Ln, Tokyo, CO 93904",Jessica Martinez,220768,Other,Smith,1979-02-20,David,rejected
+2025-09-25 00:00:00,Email,+1-290-647-2734,mary.jackson@acme.org,Technology,tenant-026,"5183 Elm St, Miami, FL 53655",Mason Garcia,180089,Male,Martin,1995-10-02,Richard,cancelled
+2021-12-09 00:00:00,Social Media,+1-860-351-4871,michael.jones23@acme.org,Healthcare,tenant-049,"1334 Oak Ave, London, MA 83889",Mason Moore,570711,Non-binary,Clark,1978-05-13,William,rejected
+2018-10-07 00:00:00,Phone,+1-652-846-5961,logan.rodriguez@yahoo.com,Manufacturing,tenant-005,"5185 Cedar Ln, Toronto, CA 17456",Elizabeth Wright,401022,Male,Clark,1958-02-06,Sophia,approved
+2023-03-11 00:00:00,In-Store,+1-767-956-1672,sarah.king@outlook.com,Finance,tenant-039,"7892 Pine Rd, Phoenix, CA 69050",Michael King,978053,Non-binary,Robinson,1957-07-26,Amy,pending
+2018-06-10 00:00:00,Mobile,+1-924-648-8199,amy.martin@yahoo.com,Finance,tenant-019,"6447 Cedar Ln, Miami, OH 88366",John King,761532,Non-binary,Williams,1979-07-31,Michael,approved
+2021-03-09 00:00:00,Email,+1-941-872-3463,linda.williams@outlook.com,Finance,tenant-020,"6521 Oak Ave, Sydney, NC 21104",Jennifer Thompson,494976,Non-binary,Wright,1961-06-19,Liam,inactive
+2025-03-31 00:00:00,Social Media,+1-633-720-6928,james.taylor@outlook.com,Finance,tenant-050,"8067 Oak Ave, Boston, NY 30308",Robert Martinez,985447,Male,Martin,1998-06-05,Aiden,active
+2025-06-04 00:00:00,Email,+1-984-832-3147,sophia.thomas24@example.com,Education,tenant-040,"2812 Elm St, Toronto, CA 63852",Elizabeth Lewis,854540,Female,White,2004-10-11,Jennifer,rejected
+2020-08-16 00:00:00,In-Store,+1-444-516-8684,lucas.wright87@acme.org,Retail,tenant-030,"4716 Park Blvd, Atlanta, GA 79135",Jessica Garcia,956572,Female,King,2004-03-31,William,failed
+2018-08-02 00:00:00,Social Media,+1-692-580-2680,noah.martin@yahoo.com,Technology,tenant-049,"2726 Maple Dr, Toronto, GA 29313",Aiden Jackson,196168,Female,Wright,1990-06-22,Lucas,cancelled
+2018-04-20 00:00:00,Phone,+1-254-605-9224,elizabeth.davis@gmail.com,Finance,tenant-015,"561 Maple Dr, Houston, NC 95191",Linda King,253143,Female,Johnson,1975-09-27,Harper,rejected
+2025-10-22 00:00:00,Chat,+1-342-977-8685,sarah.lee11@gmail.com,Finance,tenant-014,"2549 Pine Rd, Sydney, GA 65476",Michael Young,402096,Female,Martinez,1960-12-06,John,completed
+2022-09-16 00:00:00,Social Media,+1-837-668-2029,michael.wright@acme.org,Manufacturing,tenant-002,"8543 Pine Rd, Boston, NC 28818",Jennifer Jackson,101640,Non-binary,Davis,2001-03-13,Jessica,pending
+2025-06-14 00:00:00,Social Media,+1-287-736-6908,robert.martin@acme.org,Manufacturing,tenant-002,"6497 Park Blvd, London, CA 93318",Susan Taylor,365971,Male,Taylor,1956-01-23,Elizabeth,completed
+2026-03-22 00:00:00,Social Media,+1-843-306-6447,william.johnson@yahoo.com,Education,tenant-042,"2968 Park Blvd, Toronto, NC 72722",Olivia Garcia,950916,Female,Williams,1991-01-23,John,failed
+2020-04-05 00:00:00,Web,+1-404-242-6170,harper.martinez@acme.org,Retail,tenant-017,"699 Park Blvd, Denver, WA 56789",Oliver Young,150126,Non-binary,Rodriguez,1961-03-02,Logan,cancelled
+2022-11-25 00:00:00,Phone,+1-961-650-7334,linda.garcia@company.com,Finance,tenant-034,"4469 Park Blvd, Chicago, NC 65640",Robert Jackson,731718,Female,Thompson,1976-05-10,Linda,inactive
+2018-11-24 00:00:00,Email,+1-876-502-6021,sarah.lee@outlook.com,Energy,tenant-029,"5859 Cedar Ln, Los Angeles, NC 56210",Sophia Jackson,387892,Male,Williams,1986-06-11,Elizabeth,pending
+2018-05-08 00:00:00,Mobile,+1-822-894-8179,john.jones83@yahoo.com,Finance,tenant-025,"9393 Main St, Sydney, NY 99006",Sarah Taylor,490084,Other,Young,1956-11-24,Emma,pending
+2023-12-09 00:00:00,Email,+1-607-521-5566,mary.brown24@company.com,Manufacturing,tenant-025,"9302 Main St, Austin, WA 68493",Richard Lee,399449,Other,Miller,1961-01-01,William,inactive
+2023-01-26 00:00:00,Mobile,+1-930-655-2438,logan.lewis@yahoo.com,Energy,tenant-023,"1163 Pine Rd, Berlin, WA 49315",Oliver Garcia,846385,Female,King,1982-06-07,Amy,completed
+2019-05-13 00:00:00,Mobile,+1-342-442-9094,james.taylor@yahoo.com,Retail,tenant-036,"2226 Pine Rd, Chicago, TX 50539",Susan Robinson,853789,Other,Martin,1986-11-08,Mason,approved
+2024-06-12 00:00:00,Web,+1-328-524-2215,sarah.white@yahoo.com,Healthcare,tenant-050,"9132 Elm St, Tokyo, NY 26912",Jessica Martin,158104,Male,Martin,1963-09-24,Jennifer,pending
+2019-10-26 00:00:00,Email,+1-926-430-6669,amy.martinez@yahoo.com,Healthcare,tenant-041,"9124 Maple Dr, Phoenix, OH 49691",Sophia Thompson,197966,Female,Moore,2002-02-03,William,pending
+2025-05-22 00:00:00,In-Store,+1-937-819-6531,aiden.moore4@gmail.com,Technology,tenant-042,"9549 Maple Dr, Denver, PA 64602",Sophia Clark,131757,Other,Clark,1998-12-12,Jennifer,failed
+2023-06-02 00:00:00,Mobile,+1-901-615-5873,sarah.williams@outlook.com,Retail,tenant-027,"8033 Cedar Ln, Denver, IL 89516",William Anderson,853258,Non-binary,Walker,1980-12-26,Susan,pending
+2026-07-13 00:00:00,Email,+1-727-775-2739,linda.davis@yahoo.com,Retail,tenant-016,"2408 Main St, Los Angeles, WA 60351",Oliver Lee,538446,Female,Garcia,1979-05-18,Harper,cancelled
+2020-02-17 00:00:00,Chat,+1-363-710-9433,sarah.harris@company.com,Technology,tenant-006,"6542 Pine Rd, Toronto, FL 38199",Emma Taylor,151021,Male,Martinez,1994-05-26,Sophia,rejected
+2021-03-16 00:00:00,In-Store,+1-208-310-8060,william.rodriguez@company.com,Finance,tenant-003,"6663 Main St, Tokyo, GA 35513",Elizabeth Thompson,402620,Male,Thomas,1995-03-29,Sarah,failed
+2024-12-27 00:00:00,Social Media,+1-825-321-3108,michael.thomas@yahoo.com,Manufacturing,tenant-024,"2463 Oak Ave, Sydney, GA 62610",Amy Johnson,147504,Male,Jones,1979-11-18,Logan,rejected
+2023-10-29 00:00:00,Phone,+1-352-820-9446,william.anderson@yahoo.com,Healthcare,tenant-026,"5002 Pine Rd, Miami, GA 76809",Anna Harris,843167,Non-binary,Harris,1951-06-30,Elizabeth,cancelled
+2025-07-22 00:00:00,Web,+1-626-797-6040,logan.walker@example.com,Technology,tenant-039,"7875 Maple Dr, Tokyo, PA 39824",Ethan Johnson,711868,Other,Garcia,1997-01-12,Olivia,approved
+2019-08-29 00:00:00,Chat,+1-897-448-1517,emma.robinson3@company.com,Finance,tenant-027,"2581 Cedar Ln, Denver, CO 75774",Mason Lee,594514,Male,Robinson,1962-05-22,Amy,completed
+2024-04-16 00:00:00,Email,+1-878-689-9609,susan.anderson@company.com,Manufacturing,tenant-022,"9050 Maple Dr, Austin, PA 73462",Richard Davis,392559,Non-binary,Davis,1976-09-13,Mason,failed
+2025-11-27 00:00:00,Mobile,+1-906-921-9011,linda.harris@example.com,Finance,tenant-019,"2096 Pine Rd, Berlin, CO 61712",Aiden Taylor,910616,Female,Martinez,1953-10-10,Jennifer,inactive
+2021-11-19 00:00:00,Phone,+1-871-462-8849,richard.miller@yahoo.com,Manufacturing,tenant-045,"4550 Oak Ave, Houston, PA 86917",Mary Davis,153231,Female,Clark,1970-11-21,John,inactive
+2022-08-20 00:00:00,Email,+1-934-683-2647,liam.young71@outlook.com,Retail,tenant-042,"7893 Cedar Ln, Denver, WA 52096",Jennifer Clark,162036,Male,Clark,2001-07-05,Mary,active
+2019-12-19 00:00:00,Phone,+1-380-237-7504,logan.harris96@yahoo.com,Technology,tenant-001,"4988 Pine Rd, Sydney, TX 53914",Jennifer White,772464,Other,Jones,1995-03-28,Sarah,failed
+2020-02-29 00:00:00,Chat,+1-315-538-3662,ethan.white@example.com,Healthcare,tenant-001,"5623 Park Blvd, Portland, PA 98395",Mason Miller,284019,Other,Wright,1988-05-15,Amy,cancelled
+2018-12-22 00:00:00,Phone,+1-885-297-4027,william.harris@outlook.com,Technology,tenant-017,"6384 Oak Ave, Toronto, WA 53204",Jennifer Moore,857997,Male,Rodriguez,1982-04-04,Noah,completed
+2018-09-12 00:00:00,Social Media,+1-321-676-6026,david.thomas@example.com,Education,tenant-020,"2023 Elm St, Portland, IL 90560",Mary Davis,240057,Other,Jones,1990-10-26,Ethan,cancelled
+2022-08-31 00:00:00,Social Media,+1-762-682-9806,logan.lewis@outlook.com,Energy,tenant-049,"9861 Park Blvd, Chicago, GA 68556",Amy Robinson,479358,Male,Moore,1960-01-25,John,completed
+2024-06-03 00:00:00,In-Store,+1-353-368-6375,oliver.martin@example.com,Healthcare,tenant-046,"9654 Cedar Ln, Chicago, GA 68390",Logan Johnson,575458,Female,Martin,1987-04-09,Sarah,active

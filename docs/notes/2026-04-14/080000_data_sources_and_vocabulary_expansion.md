@@ -51,8 +51,25 @@ The mapping goes OUTWARD via `atelier-vocab.ttl`, not inward.
   ICE.SENSITIVE.PID.HEALTH, ICE.SENSITIVE.BUSINESS
 - Version bumped to 0.2.0
 
-## Next: Phase 3 (Sample Data Generation)
-- `scripts/generate_sample_source.py`: generate ~20 domain tables from ontology
-- `data/sample/tables/*.csv` + `data/sample/ground_truth.json`
+## Phase 3: Sample Data Generation (Complete)
+
+### scripts/generate_sample_source.py
+- 25 realistic mixed-domain tables, 300 columns total, 100 rows each
+- Tables mix columns from different ontology subtrees (like real GitTables data)
+  - `customers`: identity + contact + metadata + categorical
+  - `orders`: financial + temporal + categorical + measurement
+  - `dataset_7`: opaque table name, opaque column names
+- ~25% of columns get opaque/abbreviated names (field_42, var_abc, etc.)
+- Column order shuffled within tables to prevent position-based patterns
+- Output: `data/sample/tables/*.csv` + `data/sample/ground_truth.json`
+- All 300 leaf categories have generators, 100% coverage
+
+### Design Principles
+- Mixed-domain tables: no table is purely from one ontology subtree
+- Opaque naming: 75/300 columns (~25%) use coded names
+- Realistic patterns: inspired by GitTables organic relational table layouts
+- Deterministic: seed=42, fully reproducible
+
+## Next
 - Pre-classification for OOTB Embeddings page
 - Gateway auto-import on first boot
