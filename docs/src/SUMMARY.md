@@ -8,10 +8,13 @@
 
 - [System Overview](./architecture/overview.md)
 - [Deployment](./architecture/deployment.md)
+- [gRPC & Gateway](./architecture/grpc.md)
 - [Keystone Agents](./architecture/agents.md)
-- [Embeddings](./architecture/embeddings.md)
-- [gRPC Service](./architecture/grpc.md)
 - [Classification Pipeline](./architecture/classification.md)
+- [Monte Carlo Sampling](./architecture/monte-carlo.md)
+- [GPU Acceleration](./architecture/gpu.md)
+- [Synthetic Data & Training](./architecture/synth.md)
+- [Embeddings](./architecture/embeddings.md)
 - [Data Sources & Versioning](./architecture/data-sources.md)
 - [Proposed Integrations](./architecture/integrations.md)
 

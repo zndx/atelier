@@ -80,11 +80,22 @@ The classification pipeline runs as a background Finite State Machine:
 ML-only path:
 IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → CLASSIFYING → FUSING → EVALUATING → CONVERGED → IDLE
 
-Bootstrap path:
+Bootstrap path (programmatic):
 IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → LLM_SWEEP → VALIDATING ──┐
                                                     ▲                     │
                                                     └─── (disagreements) ─┘
                                                           (converged) ────► CLASSIFYING → FUSING → EVALUATING → CONVERGED → IDLE
+
+Agent-driven path:
+IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → LLM_SWEEP → VALIDATING
+                                                    ▲           │
+                                                    └── Agent convergence loop (5 tools)
+                                                          Claude reasons about which columns to revisit
+                                                          (converged) ────► CLASSIFYING → FUSING → EVALUATING → CONVERGED → IDLE
+
+MC sampling (when corpus > 200 columns):
+SAMPLING includes pre-classify → stratify → select MC sample
+LLM_SWEEP classifies frontier columns only → propagate labels to remainder
 ```
 
 State transitions are persisted to PostgreSQL. The Status page polls
@@ -102,8 +113,14 @@ src/atelier/classify/
 ├── embedding.py         # Sentence-transformer cosine classifier
 ├── llm_backend.py       # LLM backend factory (Anthropic, OpenAI-compat, Bedrock, Cerebras)
 ├── bootstrap.py         # Bootstrap convergence loop (LLM sweep + ML validation)
+├── agent_loop.py        # Agent-driven convergence (5 Claude tools)
+├── monte_carlo.py       # MC stratified sampling for scale (pre-classify, stratify, select, propagate)
+├── gpu.py               # GPU detection + NVIDIA driver symlink (nix+CUDA)
 ├── sampler.py           # Hive metadata sampling + fixture data loading
-├── synth.py             # Synthetic data generation (17 category generators)
+├── synth.py             # Synthetic data generation
+├── synth_generators.py  # 316+ hand-coded value generators (shared module)
+├── synth_registry.py    # Three-layer generator registry (hand-coded > template > inferred)
+├── meta_tagging_overlay.py # 130+ META_TO_ICE mappings for meta-tagging alignment
 ├── svm_classifier.py    # Dual TF-IDF + LinearSVC + Platt scaling
 ├── catboost_classifier.py # CatBoost with virtual ensemble uncertainty
 ├── ml_train.py          # Training orchestrator (synth → models)
@@ -111,9 +128,9 @@ src/atelier/classify/
 ├── evaluation.py        # Structured evaluation (per-category P/R/F1, confusion matrix)
 ├── train_eval_cycle.py  # Synth → train → classify → evaluate orchestrator
 ├── mock_llm.py          # Realistic mock LLM (confusable pairs, seeded mistakes)
-├── sage.py              # SAGE feature importance (permutation-based)
+├── sage.py              # SAGE feature importance (permutation-based, GPU-aware)
 ├── shap_explanations.py # Per-item SHAP feature attribution (TreeSHAP + PermutationSHAP)
-├── pipeline.py          # Single-pass ML orchestration (6 evidence sources)
+├── pipeline.py          # Full pipeline orchestration (6 sources + MC + background SHAP)
 ├── fsm.py               # AgentFSM state machine
 ├── fixtures/
 │   ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
@@ -219,6 +236,14 @@ The loop terminates when:
 
 After convergence, the pipeline completes the standard path:
 CLASSIFYING → FUSING → EVALUATING → CONVERGED.
+
+### Agent-Driven Convergence
+
+As an alternative to the programmatic loop, the agent convergence loop
+(`agent_loop.py`) delegates revisit strategy to Claude. The agent uses
+5 tools — `get_conflict_report`, `revisit_columns`, `check_convergence`,
+`get_column_detail`, `declare_converged` — to reason about which columns
+need re-examination. See [Keystone Agents](./agents.md) for details.
 
 ### LLM Backend
 
@@ -330,4 +355,7 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M3** | Evaluation framework, E2E synth-train-eval, realistic mock LLM, SAGE importance | Done |
 | **M4** | SHAP explanations, configurable discounts, thread-safe model loading | Done |
 | **M5** | Data sources + versioning, OOTB onboarding (300-leaf ontology, 25 sample tables) | Done |
-| M6 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |
+| **M6** | Agent-driven convergence loop (5 Claude tools), synth framework (316+ generators) | Done |
+| **M7** | Monte Carlo stratified sampling, label propagation, background SHAP | Done |
+| **M8** | GPU acceleration (NVIDIA driver symlink, batch encoding), meta-tagging overlay | Done |
+| M9 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |

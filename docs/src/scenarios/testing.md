@@ -10,9 +10,13 @@ Scenarios are tagged by the infrastructure they require. The `ATELIER_BDD_TIER` 
 
 | Tier | Tag | Requires | Purpose |
 |------|-----|----------|---------|
-| 0 | `@tier-0` | Python only | Config, imports, script validation, deployment contracts |
+| 0 | `@tier-0` | Python only | Config, imports, classification pipeline, agent loop, ML classifiers |
 | 1 | `@tier-1` | devenv stack | PostgreSQL, Qdrant, gRPC, full gateway startup |
 | cai | `@tier-cai` | CAI session | Live deployment validation — always skipped locally |
+
+Additional tags:
+- `@slow` — scenarios requiring extended runtime (pipeline E2E, ML training)
+- `@gpu` — GPU acceleration scenarios (run on CPU too, just slower)
 
 Tier 0 runs everywhere: laptops, CI, CAI sessions. No services, no network calls. This is where the [runtime profile](./runtime-profile.md) lives — the scenarios that catch deployment failures before you push.
 
@@ -23,7 +27,10 @@ Tier CAI exists as executable documentation. The step definitions are stubs — 
 ## Running Tests
 
 ```bash
-# Tier-0 only (default, no services needed)
+# Full BDD suite including gateway checks (preferred)
+just behave
+
+# Tier-0 only (no services needed)
 just bdd
 
 # Tier-0 + tier-1 (requires devenv up)
@@ -33,44 +40,92 @@ just bdd-full
 just bdd-runtime
 
 # Single domain
-ATELIER_BDD_TIER=0 uv run behave features/deployment/
+ATELIER_BDD_TIER=0 uv run behave features/agent/
 
 # Single feature file
-uv run behave features/deployment/runtime_profile.feature
+uv run behave features/agent/classification.feature
 
 # By tag
-ATELIER_BDD_TIER=0 uv run behave features/ -t @amp
+ATELIER_BDD_TIER=0 uv run behave features/ -t @bootstrap
 
 # Verbose (show all steps, not just failures)
-just bdd --no-capture
+just behave --no-capture
 ```
 
 ## Feature Organization
 
 ```
 features/
-├── environment.py              # Tier filtering, stack health, cleanup hooks
-├── steps/__init__.py           # Central re-exports (behave's discovery point)
-├── infra/                      # Domain: infrastructure & services
-│   ├── step_defs/              # Step definitions (NOT steps/)
+├── environment.py                          # Tier filtering, stack health, cleanup hooks
+├── steps/__init__.py                       # Central re-exports (behave's discovery point)
+├── infra/                                  # Domain: infrastructure & services
+│   ├── step_defs/
 │   │   ├── helpers.py
 │   │   ├── config_steps.py
-│   │   └── health_steps.py
-│   ├── config_lifecycle.feature
-│   ├── health_postgres.feature
-│   ├── health_qdrant.feature
-│   └── health_pglite.feature
-├── deployment/                 # Domain: CAI deployment workflows
+│   │   ├── health_steps.py
+│   │   └── preflight_steps.py
+│   ├── config_lifecycle.feature            # 3 scenarios
+│   ├── health_postgres.feature             # 2 scenarios
+│   ├── health_qdrant.feature               # 1 scenario
+│   ├── health_pglite.feature               # 2 scenarios
+│   └── preflight.feature                   # 3 scenarios
+├── deployment/                             # Domain: CAI deployment workflows
 │   ├── step_defs/
 │   │   ├── helpers.py
 │   │   ├── runtime_steps.py
-│   │   └── amp_steps.py
-│   ├── runtime_profile.feature
-│   ├── amp_lifecycle.feature
-│   ├── application.feature
-│   └── studio.feature
-├── gateway/                    # Domain: HTTP/gRPC (stub)
-└── agent/                      # Domain: Claude Agent SDK (stub)
+│   │   ├── amp_steps.py
+│   │   └── naming_steps.py
+│   ├── runtime_profile.feature             # 6 scenarios
+│   ├── amp_lifecycle.feature               # 5 scenarios
+│   ├── application.feature                 # 3 scenarios
+│   ├── studio.feature                      # 2 scenarios
+│   ├── embeddings.feature                  # 4 scenarios
+│   └── naming_audit.feature                # 2 scenarios
+├── gateway/                                # Domain: HTTP/gRPC gateway
+│   ├── step_defs/
+│   │   ├── status_steps.py
+│   │   ├── http_steps.py
+│   │   ├── endpoint_steps.py
+│   │   ├── pipeline_steps.py
+│   │   └── testclient_steps.py
+│   ├── api_endpoints.feature               # 8 scenarios
+│   ├── api_testclient.feature              # 7 scenarios
+│   ├── status_endpoint.feature             # 4 scenarios
+│   ├── pipeline_integration.feature        # 2 scenarios
+│   └── spa_routes.feature                  # placeholder
+└── agent/                                  # Domain: classification & agents
+    ├── step_defs/
+    │   ├── agent_steps.py
+    │   ├── classification_steps.py
+    │   ├── bootstrap_steps.py
+    │   ├── backend_steps.py
+    │   ├── synth_steps.py
+    │   ├── ml_steps.py
+    │   ├── ml_e2e_steps.py
+    │   ├── sage_steps.py
+    │   ├── shap_steps.py
+    │   ├── real_data_steps.py
+    │   ├── belief_path_steps.py
+    │   ├── synth_framework_steps.py
+    │   ├── meta_tagging_steps.py
+    │   ├── experimentation_steps.py
+    │   ├── agent_loop_steps.py
+    │   └── monte_carlo_steps.py
+    ├── classification.feature              # 19 scenarios (DST, pipeline, MC sampling)
+    ├── bootstrap.feature                   # 10 scenarios
+    ├── agent_loop.feature                  # 6 scenarios
+    ├── agent_smoke.feature                 # 6 scenarios
+    ├── backend.feature                     # 8 scenarios
+    ├── ml_classifiers.feature              # 4 scenarios
+    ├── ml_e2e.feature                      # 2 scenarios
+    ├── synth.feature                       # 2 scenarios
+    ├── synth_framework.feature             # 2 scenarios
+    ├── sage.feature                        # 1 scenario
+    ├── shap.feature                        # 2 scenarios
+    ├── belief_path.feature                 # 3 scenarios
+    ├── meta_tagging.feature                # 2 scenarios
+    ├── experimentation.feature             # 3 scenarios
+    └── real_data.feature                   # 3 scenarios
 ```
 
 ### Step Discovery
@@ -80,8 +135,31 @@ Behave only discovers step definitions from `features/steps/`. Domain step defin
 ```python
 from features.infra.step_defs.config_steps import *
 from features.infra.step_defs.health_steps import *
+from features.infra.step_defs.preflight_steps import *
 from features.deployment.step_defs.runtime_steps import *
 from features.deployment.step_defs.amp_steps import *
+from features.deployment.step_defs.naming_steps import *
+from features.agent.step_defs.agent_steps import *
+from features.agent.step_defs.classification_steps import *
+from features.agent.step_defs.bootstrap_steps import *
+from features.agent.step_defs.backend_steps import *
+from features.agent.step_defs.synth_steps import *
+from features.agent.step_defs.ml_steps import *
+from features.agent.step_defs.ml_e2e_steps import *
+from features.agent.step_defs.sage_steps import *
+from features.agent.step_defs.shap_steps import *
+from features.agent.step_defs.real_data_steps import *
+from features.agent.step_defs.belief_path_steps import *
+from features.agent.step_defs.synth_framework_steps import *
+from features.agent.step_defs.meta_tagging_steps import *
+from features.agent.step_defs.experimentation_steps import *
+from features.gateway.step_defs.status_steps import *
+from features.gateway.step_defs.http_steps import *
+from features.gateway.step_defs.endpoint_steps import *
+from features.gateway.step_defs.pipeline_steps import *
+from features.agent.step_defs.agent_loop_steps import *
+from features.agent.step_defs.monte_carlo_steps import *
+from features.gateway.step_defs.testclient_steps import *
 ```
 
 Two conventions protect against behave's automatic discovery behavior:
