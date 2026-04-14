@@ -45,9 +45,12 @@ message DataSource {
   string vocabulary_mode = 5;       // 'universal' | 'hive'
   string created_at = 6;
   string metadata_json = 7;         // JSON
+  bool is_archived = 8;
 }
 
-message ListDataSourcesRequest {}
+message ListDataSourcesRequest {
+  bool include_archived = 1;       // default false = exclude archived
+}
 
 message ListDataSourcesResponse {
   repeated DataSource sources = 1;
@@ -67,10 +70,12 @@ message ClassificationDataset {
   string summary = 9;
   string fsm_run_id = 10;
   string created_at = 11;
+  bool is_archived = 12;
 }
 
 message ListDatasetsRequest {
   string source_id = 1;             // optional: filter by source
+  bool include_archived = 2;        // default false = exclude archived
 }
 
 message ListDatasetsResponse {

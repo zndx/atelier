@@ -58,7 +58,9 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
         )
 
     def ListDataSources(self, request, context):
-        sources = self.dao.list_data_sources()
+        sources = self.dao.list_data_sources(
+            include_archived=request.include_archived,
+        )
         return atelier_pb2.ListDataSourcesResponse(
             sources=[
                 atelier_pb2.DataSource(
@@ -69,6 +71,7 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                     vocabulary_mode=s["vocabulary_mode"] or "",
                     created_at=s["created_at"] or "",
                     metadata_json=s["metadata"] or "{}",
+                    is_archived=s.get("is_archived", False),
                 )
                 for s in sources
             ]
@@ -76,7 +79,10 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
 
     def ListDatasets(self, request, context):
         source_id = request.source_id or None
-        datasets = self.dao.list_datasets(source_id=source_id)
+        datasets = self.dao.list_datasets(
+            source_id=source_id,
+            include_archived=request.include_archived,
+        )
         return atelier_pb2.ListDatasetsResponse(
             datasets=[
                 atelier_pb2.ClassificationDataset(
@@ -91,6 +97,7 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                     summary=ds.get("summary") or "",
                     fsm_run_id=ds.get("fsm_run_id") or "",
                     created_at=ds.get("created_at") or "",
+                    is_archived=bool(ds.get("is_archived", False)),
                 )
                 for ds in datasets
             ]

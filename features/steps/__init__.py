@@ -31,4 +31,6 @@ from features.gateway.step_defs.endpoint_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.pipeline_steps import *  # noqa: F401,F403
 from features.agent.step_defs.agent_loop_steps import *  # noqa: F401,F403
 from features.agent.step_defs.monte_carlo_steps import *  # noqa: F401,F403
+from features.agent.step_defs.row_mc_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.testclient_steps import *  # noqa: F401,F403
+from features.gateway.step_defs.onboarding_steps import *  # noqa: F401,F403

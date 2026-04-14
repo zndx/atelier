@@ -245,12 +245,14 @@ def get_skill(skill_id: str):
 
 
 @app.get("/api/data-sources")
-def list_data_sources():
-    """Return registered data sources (OOTB sample, hive connections)."""
+def list_data_sources(include_archived: bool = False):
+    """Return registered data sources. Excludes archived by default."""
     try:
         client = _get_client()
         resp = client.stub.ListDataSources(
-            atelier_pb2.ListDataSourcesRequest(), timeout=5
+            atelier_pb2.ListDataSourcesRequest(
+                include_archived=include_archived,
+            ), timeout=5
         )
     except Exception as exc:
         _reset_client()
@@ -265,6 +267,7 @@ def list_data_sources():
                 "vocabulary_mode": s.vocabulary_mode,
                 "created_at": s.created_at,
                 "metadata": s.metadata_json,
+                "is_archived": s.is_archived,
             }
             for s in resp.sources
         ]
@@ -272,10 +275,14 @@ def list_data_sources():
 
 
 @app.get("/api/datasets")
-def list_datasets(source_id: str | None = None):
+def list_datasets(source_id: str | None = None,
+                  include_archived: bool = False):
+    """Return classification datasets. Excludes archived by default."""
     try:
         client = _get_client()
-        req = atelier_pb2.ListDatasetsRequest()
+        req = atelier_pb2.ListDatasetsRequest(
+            include_archived=include_archived,
+        )
         if source_id:
             req.source_id = source_id
         resp = client.stub.ListDatasets(req, timeout=5)
@@ -296,6 +303,7 @@ def list_datasets(source_id: str | None = None):
                 "summary": d.summary,
                 "fsm_run_id": d.fsm_run_id,
                 "created_at": d.created_at,
+                "is_archived": d.is_archived,
             }
             for d in resp.datasets
         ]
@@ -319,6 +327,65 @@ def activate_dataset(dataset_id: str):
         return _error_envelope(f"activate_dataset failed: {exc}")
 
 
+# ── Archive / unarchive ──────────────────────────────────────────
+
+
+@app.post("/api/data-sources/{source_id}/archive")
+def archive_data_source(source_id: str):
+    """Archive a data source and all its datasets."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        found = dao.archive_data_source(source_id)
+        if not found:
+            return _error_envelope("Data source not found", status=404)
+        return {"ok": True, "source_id": source_id, "is_archived": True}
+    except Exception as exc:
+        return _error_envelope(f"archive_data_source failed: {exc}")
+
+
+@app.post("/api/data-sources/{source_id}/unarchive")
+def unarchive_data_source(source_id: str):
+    """Unarchive a data source and all its datasets."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        found = dao.unarchive_data_source(source_id)
+        if not found:
+            return _error_envelope("Data source not found", status=404)
+        return {"ok": True, "source_id": source_id, "is_archived": False}
+    except Exception as exc:
+        return _error_envelope(f"unarchive_data_source failed: {exc}")
+
+
+@app.post("/api/datasets/{dataset_id}/archive")
+def archive_dataset(dataset_id: str):
+    """Archive a single dataset."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        found = dao.archive_dataset(dataset_id)
+        if not found:
+            return _error_envelope("Dataset not found", status=404)
+        return {"ok": True, "dataset_id": dataset_id, "is_archived": True}
+    except Exception as exc:
+        return _error_envelope(f"archive_dataset failed: {exc}")
+
+
+@app.post("/api/datasets/{dataset_id}/unarchive")
+def unarchive_dataset(dataset_id: str):
+    """Unarchive a single dataset."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        found = dao.unarchive_dataset(dataset_id)
+        if not found:
+            return _error_envelope("Dataset not found", status=404)
+        return {"ok": True, "dataset_id": dataset_id, "is_archived": False}
+    except Exception as exc:
+        return _error_envelope(f"unarchive_dataset failed: {exc}")
+
+
 @app.get("/api/datasets/{dataset_id}/data")
 def get_dataset_data(dataset_id: str):
     """Serve a dataset's parquet file for the Embeddings page."""
@@ -326,11 +393,17 @@ def get_dataset_data(dataset_id: str):
 
     client = _get_client()
     resp = client.stub.ListDatasets(
-        atelier_pb2.ListDatasetsRequest(), timeout=5
+        atelier_pb2.ListDatasetsRequest(include_archived=True), timeout=5
     )
     dataset = next((d for d in resp.datasets if d.id == dataset_id), None)
     if dataset is None:
         return Response(status_code=404, content="Dataset not found")
+
+    if not dataset.parquet_path:
+        return Response(
+            status_code=404,
+            content="No parquet data yet — run a classification pipeline first",
+        )
 
     parquet_path = Path(dataset.parquet_path)
     if not parquet_path.is_absolute():

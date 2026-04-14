@@ -57,19 +57,15 @@ class AtelierDao:
 
     # ── Data source operations ────────────────────────────────────
 
-    def list_data_sources(self) -> list[dict]:
-        """Return all data sources as dicts."""
+    def list_data_sources(self, include_archived: bool = False) -> list[dict]:
+        """Return data sources as dicts. Excludes archived by default."""
         from atelier.db.model import DataSource
         with self.get_session() as session:
-            rows = session.query(DataSource).order_by(DataSource.created_at).all()
-            return [
-                {"id": r.id, "source_type": r.source_type,
-                 "source_uri": r.source_uri, "display_name": r.display_name,
-                 "vocabulary_mode": r.vocabulary_mode,
-                 "created_at": str(r.created_at or ""),
-                 "metadata": r.metadata}
-                for r in rows
-            ]
+            q = session.query(DataSource).order_by(DataSource.created_at)
+            if not include_archived:
+                q = q.filter_by(is_archived=False)
+            rows = q.all()
+            return [self._source_to_dict(r) for r in rows]
 
     def get_data_source(self, source_id: str) -> dict | None:
         """Return a data source by ID as dict, or None."""
@@ -78,11 +74,7 @@ class AtelierDao:
             r = session.query(DataSource).filter_by(id=source_id).first()
             if r is None:
                 return None
-            return {"id": r.id, "source_type": r.source_type,
-                    "source_uri": r.source_uri, "display_name": r.display_name,
-                    "vocabulary_mode": r.vocabulary_mode,
-                    "created_at": str(r.created_at or ""),
-                    "metadata": r.metadata}
+            return self._source_to_dict(r)
 
     def get_or_create_data_source(self, source_id: str, source_type: str,
                                   display_name: str, source_uri: str = "",
@@ -96,15 +88,22 @@ class AtelierDao:
                 r = DataSource(
                     id=source_id, source_type=source_type,
                     source_uri=source_uri, display_name=display_name,
-                    vocabulary_mode=vocabulary_mode, metadata=metadata,
+                    vocabulary_mode=vocabulary_mode, source_metadata=metadata,
                 )
                 session.add(r)
                 session.flush()
-            return {"id": r.id, "source_type": r.source_type,
-                    "source_uri": r.source_uri, "display_name": r.display_name,
-                    "vocabulary_mode": r.vocabulary_mode,
-                    "created_at": str(r.created_at or ""),
-                    "metadata": r.metadata}
+            return self._source_to_dict(r)
+
+    @staticmethod
+    def _source_to_dict(r) -> dict:
+        return {
+            "id": r.id, "source_type": r.source_type,
+            "source_uri": r.source_uri, "display_name": r.display_name,
+            "vocabulary_mode": r.vocabulary_mode,
+            "created_at": str(r.created_at or ""),
+            "metadata": r.source_metadata,
+            "is_archived": r.is_archived,
+        }
 
     def update_data_source_metadata(self, source_id: str, metadata: str) -> None:
         """Update the metadata JSON on a data source."""
@@ -112,17 +111,20 @@ class AtelierDao:
         with self.get_session() as session:
             r = session.query(DataSource).filter_by(id=source_id).first()
             if r is not None:
-                r.metadata = metadata
+                r.source_metadata = metadata
 
     # ── Dataset operations (version-aware) ─────────────────────
 
-    def list_datasets(self, source_id: str | None = None) -> list[dict]:
-        """Return datasets, optionally filtered by source_id."""
+    def list_datasets(self, source_id: str | None = None,
+                      include_archived: bool = False) -> list[dict]:
+        """Return datasets. Excludes archived by default."""
         from atelier.db.model import Dataset
         with self.get_session() as session:
             q = session.query(Dataset)
             if source_id is not None:
                 q = q.filter_by(source_id=source_id)
+            if not include_archived:
+                q = q.filter_by(is_archived=False)
             rows = q.order_by(Dataset.created_at.desc()).all()
             return [self._dataset_to_dict(r) for r in rows]
 
@@ -166,14 +168,16 @@ class AtelierDao:
                 ds.summary = summary
                 ds.fsm_run_id = fsm_run_id
 
-    def list_dataset_versions(self, source_id: str) -> list[dict]:
-        """Return all dataset versions for a source, newest first."""
+    def list_dataset_versions(self, source_id: str,
+                              include_archived: bool = False) -> list[dict]:
+        """Return dataset versions for a source, newest first."""
         from atelier.db.model import Dataset
         with self.get_session() as session:
-            rows = (session.query(Dataset)
-                    .filter_by(source_id=source_id)
-                    .order_by(Dataset.version_number.desc())
-                    .all())
+            q = (session.query(Dataset)
+                 .filter_by(source_id=source_id))
+            if not include_archived:
+                q = q.filter_by(is_archived=False)
+            rows = q.order_by(Dataset.version_number.desc()).all()
             return [self._dataset_to_dict(r) for r in rows]
 
     def next_version_number(self, source_id: str) -> int:
@@ -218,7 +222,54 @@ class AtelierDao:
             "is_active": r.is_active, "summary": r.summary,
             "fsm_run_id": r.fsm_run_id,
             "created_at": str(r.created_at or ""),
+            "is_archived": r.is_archived,
         }
+
+    # ── Archive operations ─────────────────────────────────────────
+
+    def archive_data_source(self, source_id: str) -> bool:
+        """Archive a data source and all its datasets. Returns True if found."""
+        from atelier.db.model import DataSource, Dataset
+        with self.get_session() as session:
+            source = session.query(DataSource).filter_by(id=source_id).first()
+            if source is None:
+                return False
+            source.is_archived = True
+            session.query(Dataset).filter_by(source_id=source_id).update(
+                {"is_archived": True}
+            )
+            return True
+
+    def unarchive_data_source(self, source_id: str) -> bool:
+        """Unarchive a data source and all its datasets. Returns True if found."""
+        from atelier.db.model import DataSource, Dataset
+        with self.get_session() as session:
+            source = session.query(DataSource).filter_by(id=source_id).first()
+            if source is None:
+                return False
+            source.is_archived = False
+            session.query(Dataset).filter_by(source_id=source_id).update(
+                {"is_archived": False}
+            )
+            return True
+
+    def archive_dataset(self, dataset_id: str) -> bool:
+        """Archive a single dataset. Returns True if found."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            count = session.query(Dataset).filter_by(id=dataset_id).update(
+                {"is_archived": True}
+            )
+            return count > 0
+
+    def unarchive_dataset(self, dataset_id: str) -> bool:
+        """Unarchive a single dataset. Returns True if found."""
+        from atelier.db.model import Dataset
+        with self.get_session() as session:
+            count = session.query(Dataset).filter_by(id=dataset_id).update(
+                {"is_archived": False}
+            )
+            return count > 0
 
     # ── Agent operations ──────────────────────────────────────────
 
