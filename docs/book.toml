@@ -6,6 +6,8 @@ title = "Atelier"
 
 [preprocessor.d2]
 [preprocessor.mermaid]
-# katex preprocessor disabled (0.9.4 incompatible with mdbook 0.5.2)
+# katex preprocessor disabled (0.9.4 incompatible with mdbook 0.5.2).
+# Using MathJax 3 via client-side JS instead — see theme/mathjax.js
 
 [output.html]
+additional-js = ["theme/mathjax.js"]
