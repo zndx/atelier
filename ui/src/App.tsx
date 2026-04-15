@@ -9,6 +9,7 @@ const Agents = lazy(() => import("./pages/Agents"));
 const Embeddings = lazy(() => import("./pages/Embeddings"));
 const EmbeddingsIndex = lazy(() => import("./pages/EmbeddingsIndex"));
 const Status = lazy(() => import("./pages/Status"));
+const TerminalPage = lazy(() => import("./pages/TerminalPage"));
 const Workflows = lazy(() => import("./pages/Workflows"));
 
 function App() {
@@ -98,6 +99,29 @@ function App() {
                   }
                 >
                   <Workflows />
+                </Suspense>
+              </Layout>
+            }
+          />
+          <Route
+            path="/terminal"
+            element={
+              <Layout fullHeight>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        height: "calc(100vh - 128px)",
+                      }}
+                    >
+                      <Spin size="large" />
+                    </div>
+                  }
+                >
+                  <TerminalPage />
                 </Suspense>
               </Layout>
             }

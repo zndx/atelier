@@ -23,7 +23,7 @@ _log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """Seed OOTB sample + discover Hive sources on boot."""
+    """Seed OOTB sample + discover Hive sources + start cleanup on boot."""
     try:
         _seed_sample_source()
     except Exception as exc:
@@ -32,7 +32,20 @@ async def _lifespan(app: FastAPI):
         _discover_and_register_hive_sources()
     except Exception as exc:
         _log.warning("Hive source discovery skipped: %s", exc)
+
+    # Background task: clean up idle terminal sessions every 60s.
+    async def _session_cleanup_loop() -> None:
+        from atelier.terminal import cleanup_idle_sessions
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await cleanup_idle_sessions()
+            except Exception:
+                pass
+
+    cleanup_task = asyncio.create_task(_session_cleanup_loop())
     yield
+    cleanup_task.cancel()
 
 
 app = FastAPI(title="Atelier", version="0.1.0", lifespan=_lifespan)
@@ -720,23 +733,24 @@ def vocabulary_stats(source_id: str | None = None):
 # ── Terminal WebSocket ─────────────────────────────────────────────
 
 
-@app.websocket("/ws/terminal")
-async def terminal_ws(websocket: WebSocket):
-    """Interactive terminal session backed by the Claude Agent SDK.
+@app.websocket("/ws/terminal/{session_id}")
+async def terminal_ws(websocket: WebSocket, session_id: str):
+    """Persistent terminal session backed by the Claude Agent SDK.
+
+    Sessions survive WebSocket disconnects.  On reconnect, the output
+    ring buffer is replayed so the user sees everything that happened
+    while they were away.  SDK queries continue running in the background
+    even when no client is connected.
 
     The read loop is kept concurrent with any in-flight SDK query by
     routing output through an async ``send`` callback registered on
-    the session. ``handle_input`` returns as soon as it schedules the
-    SDK query as a background task, so the next ``receive_text()``
-    fires immediately and Ctrl-C bytes from the client can cancel
-    the task in flight — the same pause/redirect UX as the Claude
-    Code CLI.
+    the session.
     """
     await websocket.accept()
 
-    from atelier.terminal import TerminalSession
+    from atelier.terminal import get_or_create_session
 
-    session = TerminalSession()
+    session, is_new = get_or_create_session(session_id)
 
     # Serialize websocket writes across the read loop and the
     # background SDK-query task. ``WebSocket.send_json`` is not
@@ -747,10 +761,15 @@ async def terminal_ws(websocket: WebSocket):
         async with send_lock:
             await websocket.send_json(frame)
 
-    session.set_emit(send)
-
-    for frame in session.welcome():
-        await send(frame)
+    if is_new:
+        session.set_emit(send)
+        for frame in session.welcome():
+            await send(frame)
+    else:
+        # Reconnecting to existing session — replay buffered output.
+        replay_frames = session.attach(send)
+        for frame in replay_frames:
+            await send(frame)
 
     try:
         while True:
@@ -765,7 +784,15 @@ async def terminal_ws(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        await session.shutdown()
+        # Detach but do NOT shutdown — session stays alive for reconnection.
+        session.detach()
+
+
+@app.get("/api/terminal/sessions")
+def terminal_sessions():
+    """List active terminal sessions (debugging / operator use)."""
+    from atelier.terminal import list_sessions
+    return {"sessions": list_sessions()}
 
 
 # ── Classification FSM ─────────────────────────────────────────────

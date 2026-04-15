@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 interface TerminalProps {
   style?: CSSProperties;
+  sessionId?: string;
 }
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -32,6 +33,17 @@ declare global {
   }
 }
 
+const STORAGE_KEY = "atelier-terminal-session";
+
+function getOrCreateSessionId(explicitId?: string): string {
+  if (explicitId) return explicitId;
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  localStorage.setItem(STORAGE_KEY, id);
+  return id;
+}
+
 function loadGhosttyScript() {
   if (window.__ghostty || window.__ghosttyLoading) return;
   window.__ghosttyLoading = true;
@@ -52,7 +64,7 @@ function loadGhosttyScript() {
   document.head.appendChild(s);
 }
 
-function Terminal({ style }: TerminalProps) {
+function Terminal({ style, sessionId: explicitSessionId }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connStatus, setConnStatus] = useState<ConnectionStatus>("connecting");
   const setConnStatusRef = useRef(setConnStatus);
@@ -66,6 +78,7 @@ function Terminal({ style }: TerminalProps) {
     reconnectTimer: ReturnType<typeof setTimeout> | null;
     reconnectDelay: number;
     disposed: boolean;
+    hasConnectedBefore: boolean;
   }>({
     term: null,
     fitAddon: null,
@@ -74,6 +87,7 @@ function Terminal({ style }: TerminalProps) {
     reconnectTimer: null,
     reconnectDelay: 1000,
     disposed: false,
+    hasConnectedBefore: false,
   });
 
   useEffect(() => {
@@ -81,6 +95,7 @@ function Terminal({ style }: TerminalProps) {
     if (!el) return;
     const state = stateRef.current;
     state.disposed = false;
+    const sessionId = getOrCreateSessionId(explicitSessionId);
 
     function initTerminal() {
       if (state.disposed || !el) return;
@@ -139,13 +154,17 @@ function Terminal({ style }: TerminalProps) {
     function connect() {
       if (state.disposed) return;
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${proto}//${window.location.host}/ws/terminal`;
+      const wsUrl = `${proto}//${window.location.host}/ws/terminal/${sessionId}`;
       const ws = new WebSocket(wsUrl);
       state.ws = ws;
 
       ws.onopen = () => {
         state.reconnectDelay = 1000;
         setConnStatusRef.current("connected");
+        if (state.hasConnectedBefore && state.term) {
+          state.term.write("\r\n\x1b[2m(reconnected)\x1b[0m\r\n");
+        }
+        state.hasConnectedBefore = true;
       };
 
       ws.onmessage = (evt) => {
@@ -208,7 +227,7 @@ function Terminal({ style }: TerminalProps) {
       if (state.fitAddon) state.fitAddon.dispose();
       if (state.term) state.term.dispose();
     };
-  }, []);
+  }, [explicitSessionId]);
 
   const statusColor =
     connStatus === "connected"

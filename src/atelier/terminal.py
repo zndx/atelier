@@ -1,10 +1,15 @@
-"""Terminal REPL — line-buffered session bridging to the Claude Agent SDK.
+"""Terminal REPL — persistent session bridging to the Claude Agent SDK.
 
-Each WebSocket connection gets a TerminalSession. Input is buffered
-character-by-character; on Enter the completed line is dispatched to
-the SDK via ``query()`` as a *background task*. Ctrl-C cancels the
-running task, giving operators Claude Code-style pause/redirect mid
-query.
+Sessions survive WebSocket disconnects (page navigation, reload).
+The gateway connects clients to sessions via ``/ws/terminal/{session_id}``;
+on disconnect the session stays alive and output accumulates in a ring
+buffer. On reconnect the buffer is replayed so the user sees everything
+that happened while they were away.
+
+Input is buffered character-by-character; on Enter the completed line is
+dispatched to the SDK via ``query()`` as a *background task*. Ctrl-C
+cancels the running task, giving operators Claude Code-style pause/redirect
+mid query.
 
 Graceful degradation: if the SDK is not installed or no credentials
 are configured, the terminal still renders and responds to local
@@ -13,8 +18,8 @@ commands.
 Architecture note
 -----------------
 Frames are emitted via an async callback registered by the gateway
-(``set_emit``) rather than via an async generator. This matters
-because the websocket read loop must stay concurrent with any
+(``set_emit`` / ``attach``) rather than via an async generator. This
+matters because the websocket read loop must stay concurrent with any
 in-flight SDK query — if the read loop were blocked iterating an
 ``async for`` over the session, Ctrl-C bytes from the client would
 never reach us until the query completed. With the callback pattern,
@@ -26,7 +31,9 @@ and subsequent Ctrl-C can cancel the task in flight.
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
+from collections import deque
 from typing import Awaitable, Callable
 
 # ANSI helpers
@@ -64,29 +71,71 @@ def _text(data: str) -> dict:
 
 
 class TerminalSession:
-    """Line-buffered REPL backed by the Claude Agent SDK."""
+    """Persistent line-buffered REPL backed by the Claude Agent SDK.
 
-    def __init__(self) -> None:
+    Sessions survive WebSocket disconnects. Output is buffered in a ring
+    buffer and replayed on reconnect via :meth:`attach`.
+    """
+
+    def __init__(self, session_id: str | None = None) -> None:
         self._line_buffer: list[str] = []
-        self._session_id = str(uuid.uuid4())
+        self._session_id = session_id or str(uuid.uuid4())
         self._sdk_available: bool | None = None
         self._creds_available: bool | None = None
         self._emit: EmitFn | None = None
         self._current_task: asyncio.Task | None = None
+        self._output_buffer: deque[str] = deque(maxlen=65536)
+        self._detached_at: float | None = None
 
     # ── Gateway wiring ───────────────────────────────────────────
 
     def set_emit(self, emit: EmitFn) -> None:
         """Register the async callback used to push frames to the client."""
         self._emit = emit
+        self._detached_at = None
+
+    def detach(self) -> None:
+        """Detach emit callback (WS disconnected). Session stays alive."""
+        self._emit = None
+        self._detached_at = time.monotonic()
+
+    def attach(self, emit: EmitFn) -> list[dict]:
+        """Re-attach emit callback and return buffered output for replay.
+
+        If the buffer is non-empty, returns a single frame containing all
+        buffered output. Otherwise returns the welcome banner.
+        """
+        self._emit = emit
+        self._detached_at = None
+        if self._output_buffer:
+            replay = "".join(self._output_buffer)
+            return [_text(replay)]
+        return self.welcome()
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
 
     @property
     def _busy(self) -> bool:
         return self._current_task is not None and not self._current_task.done()
 
+    @property
+    def idle_seconds(self) -> float:
+        """Seconds since last client disconnected. 0.0 if connected."""
+        if self._detached_at is None:
+            return 0.0
+        return time.monotonic() - self._detached_at
+
     async def _send(self, data: str) -> None:
+        """Buffer output and forward to connected client (if any)."""
+        self._output_buffer.append(data)
         if self._emit is not None:
-            await self._emit(_text(data))
+            try:
+                await self._emit(_text(data))
+            except Exception:
+                # Client disconnected mid-send — detach silently
+                self._emit = None
 
     async def shutdown(self) -> None:
         """Cancel any in-flight query and wait for it to unwind."""
@@ -541,3 +590,45 @@ class TerminalSession:
             # Always clean up the spinner — catches early import
             # errors, cancellation, and any unexpected exit path.
             await _stop_spinner_inner()
+
+
+# ── Session registry ──────────────────────────────────────────────
+#
+# Module-level dict keeps sessions alive across WebSocket reconnects.
+# The gateway's cleanup task sweeps idle sessions periodically.
+
+_sessions: dict[str, TerminalSession] = {}
+_IDLE_TIMEOUT = 1800  # 30 minutes
+
+
+def get_or_create_session(session_id: str) -> tuple[TerminalSession, bool]:
+    """Return ``(session, is_new)``. Creates if not found."""
+    if session_id in _sessions:
+        return _sessions[session_id], False
+    session = TerminalSession(session_id=session_id)
+    _sessions[session_id] = session
+    return session, True
+
+
+async def cleanup_idle_sessions() -> None:
+    """Remove sessions idle longer than ``_IDLE_TIMEOUT``."""
+    to_remove = [
+        sid for sid, s in _sessions.items()
+        if s._emit is None and s.idle_seconds > _IDLE_TIMEOUT
+    ]
+    for sid in to_remove:
+        session = _sessions.pop(sid)
+        await session.shutdown()
+
+
+def list_sessions() -> list[dict]:
+    """Return session metadata (for ``/api/terminal/sessions``)."""
+    return [
+        {
+            "session_id": sid,
+            "busy": s._busy,
+            "connected": s._emit is not None,
+            "idle_seconds": round(s.idle_seconds, 1),
+        }
+        for sid, s in _sessions.items()
+    ]
