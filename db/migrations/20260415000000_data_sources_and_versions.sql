@@ -1,7 +1,7 @@
 -- migrate:up
 
 -- Data sources: OOTB sample, hive connections, etc.
-CREATE TABLE data_sources (
+CREATE TABLE IF NOT EXISTS data_sources (
     id TEXT PRIMARY KEY,
     source_type TEXT NOT NULL,                -- 'sample' | 'hive'
     source_uri TEXT NOT NULL DEFAULT '',      -- '' for sample, 'conn/db' for hive
@@ -12,21 +12,22 @@ CREATE TABLE data_sources (
 );
 
 -- Extend datasets with versioning columns
-ALTER TABLE datasets ADD COLUMN source_id TEXT REFERENCES data_sources(id);
-ALTER TABLE datasets ADD COLUMN version_number INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE datasets ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE datasets ADD COLUMN summary TEXT;
-ALTER TABLE datasets ADD COLUMN fsm_run_id TEXT;
-ALTER TABLE datasets ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_id TEXT REFERENCES data_sources(id);
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS version_number INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS fsm_run_id TEXT;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
 -- Extend fsm_runs with source tracking
-ALTER TABLE fsm_runs ADD COLUMN source_id TEXT REFERENCES data_sources(id);
+ALTER TABLE fsm_runs ADD COLUMN IF NOT EXISTS source_id TEXT REFERENCES data_sources(id);
 
-CREATE INDEX idx_datasets_source_version ON datasets(source_id, version_number DESC);
+CREATE INDEX IF NOT EXISTS idx_datasets_source_version ON datasets(source_id, version_number DESC);
 
 -- Seed the OOTB sample source
 INSERT INTO data_sources (id, source_type, source_uri, display_name, vocabulary_mode)
-VALUES ('ootb-sample', 'sample', '', 'OOTB Sample', 'universal');
+VALUES ('ootb-sample', 'sample', '', 'OOTB Sample', 'universal')
+ON CONFLICT (id) DO NOTHING;
 
 -- migrate:down
 

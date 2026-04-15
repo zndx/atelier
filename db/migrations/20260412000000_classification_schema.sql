@@ -1,5 +1,5 @@
 -- migrate:up
-CREATE TABLE fsm_runs (
+CREATE TABLE IF NOT EXISTS fsm_runs (
     id TEXT PRIMARY KEY,
     state TEXT NOT NULL DEFAULT 'IDLE',
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -10,7 +10,7 @@ CREATE TABLE fsm_runs (
     result_path TEXT
 );
 
-CREATE TABLE classification_runs (
+CREATE TABLE IF NOT EXISTS classification_runs (
     id TEXT PRIMARY KEY,
     fsm_run_id TEXT REFERENCES fsm_runs(id),
     table_name TEXT NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE classification_runs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE vocabularies (
+CREATE TABLE IF NOT EXISTS vocabularies (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
     loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

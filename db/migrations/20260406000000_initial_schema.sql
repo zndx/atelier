@@ -1,5 +1,5 @@
 -- migrate:up
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
     name TEXT,
     description TEXT,
@@ -7,7 +7,7 @@ CREATE TABLE agents (
     tool_ids TEXT
 );
 
-CREATE TABLE datasets (
+CREATE TABLE IF NOT EXISTS datasets (
     id TEXT PRIMARY KEY,
     name TEXT,
     parquet_path TEXT,
