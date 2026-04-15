@@ -24,14 +24,27 @@ _log = logging.getLogger(__name__)
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Seed OOTB sample + discover Hive sources + start cleanup on boot."""
-    try:
-        _seed_sample_source()
-    except Exception as exc:
-        _log.warning("Sample source seeding skipped: %s", exc)
-    try:
-        _discover_and_register_hive_sources()
-    except Exception as exc:
-        _log.warning("Hive source discovery skipped: %s", exc)
+
+    # Seed + discover with retry — the database may still be starting
+    # (PGlite takes a few seconds after the shell probe passes).
+    async def _seed_with_retry() -> None:
+        for attempt in range(5):
+            try:
+                _seed_sample_source()
+                _log.info("OOTB sample seed: OK")
+                break
+            except Exception as exc:
+                if attempt < 4:
+                    _log.info("DB not ready for seed (attempt %d/5): %s", attempt + 1, exc)
+                    await asyncio.sleep(2)
+                else:
+                    _log.warning("Sample source seeding skipped after 5 attempts: %s", exc)
+        try:
+            _discover_and_register_hive_sources()
+        except Exception as exc:
+            _log.warning("Hive source discovery skipped: %s", exc)
+
+    seed_task = asyncio.create_task(_seed_with_retry())
 
     # Background task: clean up idle terminal sessions every 60s.
     async def _session_cleanup_loop() -> None:
@@ -45,6 +58,7 @@ async def _lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(_session_cleanup_loop())
     yield
+    seed_task.cancel()
     cleanup_task.cancel()
 
 
