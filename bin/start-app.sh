@@ -241,19 +241,13 @@ if not result.ok:
     sys.exit(1)
 "
 
-# Run database migrations (SQLAlchemy-based, dbmate-compatible)
-echo "Running database migrations..."
+# Run database migrations + seed keystone agents (shared with devenv)
+echo "Running database bootstrap..."
 echo "  DB URL: ${ATELIER_DB_URL:-<not set>}"
 echo "  psycopg: $(python -c 'import psycopg; print(psycopg.__version__); import importlib; print("binary" if importlib.util.find_spec("psycopg_binary") else "pure-python")' 2>&1)"
-python -c "
-import logging
-logging.basicConfig(level=logging.INFO)
-from atelier.config import load_config
-from atelier.db.bootstrap import run_migrations
-run_migrations(load_config().db_url)
-"
+python -m atelier.db.bootstrap
 
-# Seed datasets if parquet exists but DB is empty
+# Seed datasets if parquet exists but DB is empty (CAI-specific)
 echo "Checking dataset seed..."
 python -c "
 from atelier.db.dao import AtelierDao
@@ -270,40 +264,6 @@ if not existing and Path('data/gittables_sample.parquet').exists():
     print('Seeded gittables-sample dataset')
 else:
     print(f'Seed check: {len(existing)} datasets already registered')
-"
-
-# Seed / refresh keystone agents. upsert_agent is idempotent, so we always
-# run it — this keeps descriptions and tool_ids in sync with the code after
-# re-deploys (the previous `if not existing` guard left stale rows behind).
-echo "Seeding keystone agents..."
-python -c "
-from atelier.db.dao import AtelierDao
-dao = AtelierDao()
-agents = [
-    ('sampler', 'Metadata Sampler',
-     'Discovers tables and samples column metadata from production databases via CAI Data Platform connections',
-     'sampler',
-     '[\"sample-metadata\", \"discover-tables\", \"load-annotations\"]'),
-    ('classifier', 'Column Classifier',
-     'Extracts 12 discrete features per column and runs cosine, CatBoost, and SVM classifiers with regex pattern detection',
-     'classifier',
-     '[\"extract-features\", \"run-classifiers\", \"detect-patterns\", \"classify-columns\"]'),
-    ('evidence-fuser', 'Evidence Fuser',
-     'Converts 5 evidence sources into Dempster-Shafer mass functions, fuses via conjunctive combination, and diagnoses conflicts',
-     'evidence_fuser',
-     '[\"build-mass-functions\", \"apply-dempster-rule\", \"diagnose-conflicts\"]'),
-    ('synth-generator', 'Synthetic Generator',
-     'Creates deterministic synthetic training tables with representative column data for classifier training',
-     'synth_generator',
-     '[\"generate-synth-tables\", \"load-annotations\"]'),
-    ('viz-director', 'Visualization Director',
-     'Computes SAGE/SHAP feature explanations and prepares Atlas-compatible embedding projections',
-     'visualization_director',
-     '[\"compute-sage-importance\", \"generate-shap-explanations\", \"prepare-atlas-projection\"]'),
-]
-for aid, name, desc, role, tools in agents:
-    dao.upsert_agent(aid, name, desc, role, tools)
-print(f'Upserted {len(agents)} keystone agents')
 "
 
 # Start gRPC server (background)

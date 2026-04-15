@@ -11,7 +11,14 @@
   # symlinked into .devenv/nvidia-driver-libs/ by enterShell to avoid pulling
   # in the host glibc from /lib/x86_64-linux-gnu/. See Signals devenv.nix.
   env.LD_LIBRARY_PATH = builtins.concatStringsSep ":" [
-    (lib.makeLibraryPath [ pkgs.postgresql_16.lib pkgs.zlib ])
+    (lib.makeLibraryPath [
+      pkgs.postgresql_16.lib
+      pkgs.zlib
+      pkgs.libGL            # docling → cv2
+      pkgs.xorg.libxcb      # docling → cv2
+      pkgs.xorg.libX11      # docling → cv2
+      pkgs.glib             # docling → cv2 → gthread
+    ])
     "/usr/local/cuda/lib64"
   ];
 
@@ -100,9 +107,19 @@
   # devenv provides env vars via dotenv.enable — no materialized config needed here.
   # For conftest/policy/CI, run `just resolve-config` separately.
   processes = {
+    # One-shot: apply migrations + seed keystone agents.
+    # Runs after PostgreSQL is healthy, before gRPC server starts.
+    db-bootstrap = {
+      exec = "exec uv run python -m atelier.db.bootstrap";
+      process-compose = {
+        availability.restart = "no";
+        depends_on.postgres.condition = "process_healthy";
+      };
+    };
     grpc-server = {
       exec = "exec uv run python -m atelier.server";
       process-compose = {
+        depends_on.db-bootstrap.condition = "process_completed_successfully";
         readiness_probe = {
           exec.command = "bash -c '</dev/tcp/localhost/50051'";
           initial_delay_seconds = 3;

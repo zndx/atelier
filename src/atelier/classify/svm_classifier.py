@@ -1,30 +1,58 @@
-"""SVM column classifier using TF-IDF features.
+"""SVM short-text classifier for column metadata.
 
-Dual TF-IDF (character n-grams + word n-grams) → LinearSVC with
-CalibratedClassifierCV for Platt-scaled probability estimates.
+Implements a TF-IDF + LinearSVC pipeline as a DST evidence source.
+Uses character n-grams (3-6) and word bigrams over column name + sample
+value text, producing calibrated probabilities via Platt scaling
+(CalibratedClassifierCV).
 
-Ported from signals/src/sigint/svm_classifier.py.
+This classifier is architecturally independent from the sentence-transformer
+embedding used by cosine and CatBoost sources — it operates on sparse lexical
+features (TF-IDF), providing genuine evidence diversity for Dempster-Shafer
+combination.
+
+Design follows the LibShortText principles (Yu et al., 2013) using modern
+scikit-learn equivalents rather than the unmaintained original library.
+
+Adopted from signals/src/sigint/svm_classifier.py — the version of record
+presented as an independent fifth DST evidence source.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SVMConfig:
-    """Configuration for the SVM classifier pipeline."""
+    """Configuration for the SVM short-text classifier."""
 
-    char_ngram_range: tuple[int, int] = (3, 6)
-    word_ngram_range: tuple[int, int] = (1, 2)
+    # TF-IDF character n-gram range (inclusive)
+    char_ngram_min: int = 3
+    char_ngram_max: int = 6
+
+    # TF-IDF word n-gram range (inclusive)
+    word_ngram_min: int = 1
+    word_ngram_max: int = 2
+
+    # Maximum features per vectorizer
     max_features: int = 50_000
-    cv_folds: int = 5
-    sublinear_tf: bool = True
+
+    # LinearSVC regularization
+    svc_C: float = 1.0
+
+    # Calibration method: "sigmoid" (Platt) or "isotonic"
+    calibration_method: str = "sigmoid"
+
+    # Number of CV folds for calibration
+    calibration_cv: int = 5
 
 
 def build_svm_text(
@@ -40,97 +68,138 @@ def build_svm_text(
     if column_type and column_type.upper() not in ("STRING", "VARCHAR"):
         parts.append(column_type)
     if sample_values:
-        parts.append(", ".join(str(v) for v in sample_values[:5]))
+        parts.append(", ".join(str(v)[:80] for v in sample_values[:5]))
     return " | ".join(parts)
 
 
 class SVMClassifier:
-    """TF-IDF + LinearSVC classifier with Platt-scaled probabilities."""
+    """TF-IDF + LinearSVC classifier with calibrated probabilities.
+
+    Combines character n-gram and word n-gram TF-IDF features into a
+    single sparse feature matrix, then trains a LinearSVC with Platt
+    scaling for probability output.
+    """
 
     def __init__(self, config: SVMConfig | None = None) -> None:
         self._config = config or SVMConfig()
         self._pipeline = None
         self._classes: list[str] = []
 
+    @property
+    def is_fitted(self) -> bool:
+        return self._pipeline is not None
+
     def fit(self, texts: list[str], labels: list[str]) -> SVMClassifier:
-        """Train the SVM pipeline on text inputs + category labels."""
-        from scipy.sparse import hstack
+        """Train the SVM pipeline on labeled short texts.
+
+        Args:
+            texts: Column metadata text (e.g., "column_name | values").
+            labels: Category codes (e.g., "0070", "0076").
+
+        Returns:
+            self, for method chaining.
+        """
         from sklearn.calibration import CalibratedClassifierCV
         from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.pipeline import FeatureUnion, Pipeline
         from sklearn.svm import LinearSVC
 
         cfg = self._config
 
-        # Dual TF-IDF: character n-grams capture subword patterns,
-        # word n-grams capture multi-word patterns
+        # Character n-gram vectorizer — captures subword patterns
+        # (abbreviations, camelCase fragments, digit sequences)
         char_tfidf = TfidfVectorizer(
             analyzer="char_wb",
-            ngram_range=cfg.char_ngram_range,
+            ngram_range=(cfg.char_ngram_min, cfg.char_ngram_max),
             max_features=cfg.max_features,
-            sublinear_tf=cfg.sublinear_tf,
+            sublinear_tf=True,
         )
+
+        # Word n-gram vectorizer — captures multi-word patterns
+        # ("payment card", "email address")
         word_tfidf = TfidfVectorizer(
             analyzer="word",
-            ngram_range=cfg.word_ngram_range,
+            ngram_range=(cfg.word_ngram_min, cfg.word_ngram_max),
             max_features=cfg.max_features,
-            sublinear_tf=cfg.sublinear_tf,
+            sublinear_tf=True,
+            token_pattern=r"(?u)\b\w+\b",
         )
 
-        X_char = char_tfidf.fit_transform(texts)
-        X_word = word_tfidf.fit_transform(texts)
-        X = hstack([X_char, X_word])
+        # Union of both feature spaces
+        features = FeatureUnion([
+            ("char", char_tfidf),
+            ("word", word_tfidf),
+        ])
 
-        svc = LinearSVC(class_weight="balanced", max_iter=10000, dual="auto")
-        calibrated = CalibratedClassifierCV(svc, cv=cfg.cv_folds, method="sigmoid")
-        calibrated.fit(X, labels)
+        # LinearSVC — maximum-margin classifier on sparse features
+        svc = LinearSVC(
+            C=cfg.svc_C,
+            max_iter=10_000,
+            class_weight="balanced",
+            dual="auto",
+        )
 
-        self._pipeline = {
-            "char_tfidf": char_tfidf,
-            "word_tfidf": word_tfidf,
-            "classifier": calibrated,
-        }
-        self._classes = list(calibrated.classes_)
+        # Wrap in CalibratedClassifierCV for probability estimates
+        calibrated = CalibratedClassifierCV(
+            svc,
+            cv=min(cfg.calibration_cv, self._min_class_count(labels)),
+            method=cfg.calibration_method,
+        )
+
+        self._pipeline = Pipeline([
+            ("features", features),
+            ("classifier", calibrated),
+        ])
+        self._pipeline.fit(texts, labels)
+        self._classes = list(self._pipeline.classes_)
 
         logger.info(
-            "SVM trained: %d samples, %d classes, %d features",
-            len(texts), len(self._classes), X.shape[1],
+            "SVM trained: %d samples, %d classes",
+            len(texts), len(self._classes),
         )
         return self
 
+    @staticmethod
+    def _min_class_count(labels: list[str]) -> int:
+        """Minimum number of samples in any class."""
+        from collections import Counter
+        counts = Counter(labels)
+        return max(2, min(counts.values()))
+
     def predict_proba(self, texts: list[str]) -> list[dict[str, float]]:
-        """Predict class probabilities for a batch of texts."""
-        if self._pipeline is None:
-            raise RuntimeError("Model not trained or loaded")
+        """Return calibrated probability distributions for each text.
 
-        from scipy.sparse import hstack
+        Args:
+            texts: Column metadata texts to classify.
 
-        char_tfidf = self._pipeline["char_tfidf"]
-        word_tfidf = self._pipeline["word_tfidf"]
-        classifier = self._pipeline["classifier"]
+        Returns:
+            List of {category_code: probability} dicts.
+        """
+        if not self.is_fitted:
+            raise RuntimeError("SVMClassifier must be fitted before prediction")
 
-        X_char = char_tfidf.transform(texts)
-        X_word = word_tfidf.transform(texts)
-        X = hstack([X_char, X_word])
-
-        proba_matrix = classifier.predict_proba(X)
+        proba_matrix = self._pipeline.predict_proba(texts)
         results = []
         for row in proba_matrix:
-            results.append({
-                code: float(prob)
-                for code, prob in zip(self._classes, row)
-                if prob > 1e-6
-            })
+            prob_dict = {
+                code: float(p)
+                for code, p in zip(self._classes, row)
+                if p > 1e-6
+            }
+            results.append(prob_dict)
         return results
 
     def predict_proba_single(self, text: str) -> dict[str, float]:
-        """Predict for a single text input."""
+        """Return calibrated probability distribution for a single text."""
         return self.predict_proba([text])[0]
 
     def save(self, path: str | Path) -> None:
-        """Save model to disk (joblib + classes JSON)."""
-        if self._pipeline is None:
-            raise RuntimeError("No model to save")
+        """Persist the trained pipeline to disk.
 
+        Saves:
+          - {path}.pkl — sklearn pipeline (joblib)
+          - {path}.classes.json — class label mapping
+        """
         import joblib
 
         path = Path(path)
@@ -138,29 +207,51 @@ class SVMClassifier:
         joblib.dump(self._pipeline, str(path))
 
         classes_path = path.with_suffix(".classes.json")
-        with open(classes_path, "w") as f:
-            json.dump(self._classes, f)
+        classes_path.write_text(json.dumps(self._classes))
 
         logger.info("SVM saved to %s (%d classes)", path, len(self._classes))
 
     @classmethod
-    def load(cls, path: str | Path) -> SVMClassifier:
-        """Load a saved SVM model from disk."""
+    def load(cls, path: str | Path, config: SVMConfig | None = None) -> SVMClassifier:
+        """Load a persisted SVM pipeline from disk."""
         import joblib
 
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"SVM model not found: {path}")
 
-        instance = cls()
-        instance._pipeline = joblib.load(str(path))
+        obj = cls(config=config)
+        obj._pipeline = joblib.load(str(path))
+        obj._classes = list(obj._pipeline.classes_)
 
+        # Also try classes JSON for consistency
         classes_path = path.with_suffix(".classes.json")
         if classes_path.exists():
-            with open(classes_path) as f:
-                instance._classes = json.load(f)
-        else:
-            instance._classes = list(instance._pipeline["classifier"].classes_)
+            obj._classes = json.loads(classes_path.read_text())
 
-        logger.info("SVM loaded from %s (%d classes)", path, len(instance._classes))
-        return instance
+        logger.info("SVM loaded from %s (%d classes)", path, len(obj._classes))
+        return obj
+
+    def feature_importances(self, top_n: int = 20) -> list[tuple[str, float]]:
+        """Extract top feature names by absolute SVM weight.
+
+        Only works before calibration wrapping. Returns empty list
+        if the underlying estimator is wrapped.
+        """
+        try:
+            # Navigate through CalibratedClassifierCV → LinearSVC
+            calibrated = self._pipeline.named_steps["classifier"]
+            svc = calibrated.estimator
+            if not hasattr(svc, "coef_"):
+                return []
+
+            # For multi-class, average absolute coefficients across classes
+            coef = np.abs(svc.coef_).mean(axis=0)
+
+            feature_union = self._pipeline.named_steps["features"]
+            names = feature_union.get_feature_names_out()
+
+            indices = np.argsort(coef)[::-1][:top_n]
+            return [(str(names[i]), float(coef[i])) for i in indices]
+        except Exception:
+            return []

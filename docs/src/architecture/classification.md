@@ -36,10 +36,98 @@ Assignment) that distributes belief across the frame of discernment:
 | Name matching | Column name ↔ label/abbrev/common_names | varies | `classify.discounts.name_match_*` | M0 |
 | LLM | OpenAI-compatible / Anthropic / Bedrock / Cerebras | 0.10 | `classify.llm.discount` | M1 |
 | CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | `classify.discounts.catboost_*` | M2 |
-| SVM | TF-IDF + LinearSVC (Platt scaling) | 0.20 | `classify.discounts.svm` | M2 |
+| SVM | Dual TF-IDF (char+word n-grams) + LinearSVC (Platt scaling) | 0.20 | `classify.discounts.svm` | M2 |
 
 The **discount** controls how much mass goes to Θ (total ignorance). Higher
 discount = more conservative = wider belief intervals.
+
+### Evidence Independence
+
+Dempster's rule of combination requires **cognitively independent** evidence
+sources (Shafer 1976) — each mass function must reflect information not derived
+from the other sources being combined. Atelier achieves this through
+architectural separation of feature spaces and training signals:
+
+| Source | Feature Space | Training Signal | Independence Basis |
+|--------|---------------|-----------------|-------------------|
+| Name match | String/lexical | None (deterministic) | Symbolic matching only |
+| Pattern | Regex | None (deterministic) | Hand-crafted rules only |
+| Cosine | Dense embedding (384-dim) | Pre-trained sentence-transformer | Learned semantic similarity |
+| LLM | Semantic (frontier or subagent model) | Pre-trained weights | In-context classification |
+| CatBoost | Dense embedding + 12 features | Synthetic data generators | Gradient-boosted ensemble |
+| **SVM** | **Sparse TF-IDF (char 3-6 + word 1-2 n-grams)** | **Synthetic data generators** | **Lexical surface patterns** |
+
+The SVM is architecturally the most important independence guarantee. While
+cosine similarity and CatBoost both operate on the same dense
+sentence-transformer embedding (384 dimensions from `all-MiniLM-L6-v2`), the
+SVM operates on an entirely orthogonal feature representation: **sparse TF-IDF
+character and word n-grams** extracted by `sklearn.pipeline.Pipeline` +
+`FeatureUnion`. This means the SVM captures lexical surface patterns
+(abbreviations, digit sequences, camelCase fragments) that the dense embedding
+may collapse — providing genuine corrective signal in DST fusion.
+
+#### SVM Architecture (adopted from Signals)
+
+The SVM classifier follows the `Pipeline` + `FeatureUnion` composition pattern
+from the [Signals](https://github.com/zndx/signals) project — the version of
+record presented as an independent fifth DST evidence source:
+
+```
+Column metadata text ("email_addr | user@example.com")
+        │
+        ▼
+    FeatureUnion
+    ├── TfidfVectorizer(analyzer="char_wb", ngram_range=(3,6))
+    │   → captures subword patterns, abbreviations, digit sequences
+    └── TfidfVectorizer(analyzer="word", ngram_range=(1,2))
+        → captures multi-word patterns ("email address", "zip code")
+        │
+        ▼
+    Sparse feature matrix (up to 100K dimensions)
+        │
+        ▼
+    CalibratedClassifierCV(LinearSVC, method="sigmoid")
+        │
+        ▼
+    Calibrated probability distribution {code: probability}
+```
+
+Key implementation details:
+
+- **`_min_class_count()`** — prevents `CalibratedClassifierCV` crash when any
+  class has fewer samples than CV folds
+- **`feature_importances(top_n)`** — navigates `CalibratedClassifierCV` →
+  `LinearSVC` to extract `coef_`, averages absolute coefficients across classes,
+  cross-references with `FeatureUnion.get_feature_names_out()` for named
+  feature importance
+- **`is_fitted`** property for safe state checking before prediction
+
+#### Future: Cross-Model Distillation (M9)
+
+The Monte Carlo sampling architecture enables a stronger training signal for
+the SVM without breaking independence. The key insight: train the SVM on
+**frontier model (e.g., Opus) labels** from the stratified importance sample,
+then combine the SVM in DST with **subagent model (e.g., Sonnet/Haiku)**
+predictions during bulk classification:
+
+```
+Opus (frontier, budget-capped 500 cols)
+  → labels stratified sample with maximum accuracy
+  → SVM trained on these labels (TF-IDF distillation)
+  → SVM runs on ALL columns (cheap, fast)
+  → DST combines SVM + Sonnet + cosine + CatBoost + patterns + name match
+  → High-K columns escalated back to Opus (targeted, not bulk)
+  → Convergence: Opus accuracy propagated to full corpus via SVM + DST
+```
+
+This preserves independence because:
+- Different models at training time (Opus) vs. fusion time (Sonnet/Haiku)
+- Different feature spaces (sparse TF-IDF vs. semantic LLM reasoning)
+- Different inductive biases (maximum-margin classifier vs. autoregressive LM)
+
+The SVM becomes the **transmission mechanism** for frontier-quality signal —
+MC sampling bounds the Opus cost; the SVM amortizes Opus's accuracy across
+the entire table-space.
 
 ### Dempster's Rule of Combination
 
@@ -121,7 +209,7 @@ src/atelier/classify/
 ├── synth_generators.py  # 316+ hand-coded value generators (shared module)
 ├── synth_registry.py    # Three-layer generator registry (hand-coded > template > inferred)
 ├── meta_tagging_overlay.py # 130+ META_TO_ICE mappings for meta-tagging alignment
-├── svm_classifier.py    # Dual TF-IDF + LinearSVC + Platt scaling
+├── svm_classifier.py    # Pipeline+FeatureUnion: dual TF-IDF + LinearSVC + Platt scaling (signals)
 ├── catboost_classifier.py # CatBoost with virtual ensemble uncertainty
 ├── ml_train.py          # Training orchestrator (synth → models)
 ├── ml_inference.py      # Lazy-loading inference wrappers
@@ -358,4 +446,6 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M6** | Agent-driven convergence loop (5 Claude tools), synth framework (316+ generators) | Done |
 | **M7** | Monte Carlo stratified sampling, label propagation, background SHAP | Done |
 | **M8** | GPU acceleration (NVIDIA driver symlink, batch encoding), meta-tagging overlay | Done |
-| M9 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |
+| **M8.5** | SVM signals alignment (Pipeline+FeatureUnion adoption, evidence independence documentation) | Done |
+| M9 | Frontier-label SVM training (cross-model distillation via MC sampling) | Designed |
+| M10 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |

@@ -407,15 +407,26 @@ def svm_to_mass(
     frame: FrameOfDiscernment,
     discount: float = 0.20,
 ) -> BeliefAssignment:
-    """Convert SVM calibrated probabilities to a DST mass function.
+    """Convert SVM calibrated probabilities to a mass function.
 
-    Uses a fixed discount (higher than LLM/CatBoost) because SVM
-    Platt-scaled probabilities are less well-calibrated.
+    Converts Platt-scaled (CalibratedClassifierCV) probability estimates
+    from a TF-IDF + LinearSVC classifier into a BeliefAssignment.  The
+    SVM operates on sparse lexical features (character/word n-grams),
+    making it architecturally independent from the dense sentence-
+    transformer embedding shared by cosine and CatBoost sources.
+
+    The discount is lower than cosine (0.30) because calibrated SVM
+    probabilities tend to be well-concentrated on the correct class
+    for short-text classification tasks.
+
+    When the frame has confusable pairs and the top-2 singletons form
+    a known pair with a close mass ratio, mass is redistributed to
+    the pair focal element.
 
     Args:
-        proba: {category_code: probability} from calibrated SVM.
-        frame: Frame of discernment.
-        discount: Fixed discount (default 0.20).
+        proba: {category_code: probability} from SVM predict_proba().
+        frame: The frame of discernment.
+        discount: Fraction of total mass allocated to Theta.
     """
     if not proba:
         return frame.vacuous()

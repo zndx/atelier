@@ -66,6 +66,10 @@ gateway:
 # Helper: build dbmate-compatible URL (strip +psycopg, add sslmode=disable for local)
 _db_url := "$(uv run python -c 'from atelier.config import load_config; u=load_config().db_url.replace(\"+psycopg\",\"\"); print(u+(\"?\" if \"?\" not in u else \"&\")+\"sslmode=disable\")')"
 
+# Run migrations + seed keystone agents (what devenv up does automatically)
+bootstrap:
+    uv run python -m atelier.db.bootstrap
+
 # Run dbmate migrations against the configured database
 migrate:
     dbmate --url "{{_db_url}}" --migrations-dir db/migrations up

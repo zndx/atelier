@@ -1,12 +1,25 @@
 import { Coordinator, wasmConnector } from "@uwdata/mosaic-core";
 import { EmbeddingAtlas } from "embedding-atlas/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Alert, Spin, Typography, Button } from "antd";
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import { Alert, Spin, Typography, Button, Tag } from "antd";
+import { ArrowLeftOutlined, SyncOutlined } from "@ant-design/icons";
 import type { DatasetInfo } from "../contexts/DatasetContext";
 
 const { Title, Paragraph } = Typography;
+
+const FSM_LABELS: Record<string, string> = {
+  LOADING_VOCAB: "Loading vocabulary",
+  DISCOVERING: "Discovering tables",
+  SAMPLING: "Sampling columns",
+  LLM_SWEEP: "Classifying with LLM",
+  VALIDATING: "Validating results",
+  GENERATING_SYNTH: "Generating synthetic data",
+  TRAINING: "Training ML models",
+  CLASSIFYING: "Running ML classifiers",
+  FUSING: "Fusing evidence",
+  EVALUATING: "Evaluating results",
+};
 
 export default function Embeddings() {
   const { datasetId } = useParams<{ datasetId: string }>();
@@ -15,73 +28,104 @@ export default function Embeddings() {
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState<string | null>(null);
+  const [fsmState, setFsmState] = useState<string | null>(null);
+  const retryRef = useRef<() => void>();
 
+  const initialize = useCallback(async (signal: { cancelled: boolean }) => {
+    try {
+      setError(null);
+      // 1. Initialize DuckDB via Mosaic wasmConnector
+      setStatus("Initializing DuckDB...");
+      const connector = wasmConnector();
+      coordinator.databaseConnector(connector);
+
+      // 2. Fetch dataset metadata
+      setStatus("Fetching dataset metadata...");
+      const resp = await fetch("/api/datasets");
+      const data = await resp.json();
+      const ds = data.datasets.find(
+        (d: DatasetInfo) => d.id === datasetId
+      );
+      if (!ds) {
+        if (!signal.cancelled) setError(`Dataset "${datasetId}" not found`);
+        return;
+      }
+      if (!signal.cancelled) setDataset(ds);
+
+      // 3. Fetch parquet bytes on main thread (goes through Vite proxy)
+      if (!signal.cancelled) setStatus(ds.row_count ? `Downloading ${ds.row_count.toLocaleString()} rows...` : "Downloading data...");
+      const parquetResp = await fetch(`/api/datasets/${datasetId}/data`);
+      if (!parquetResp.ok) {
+        if (!signal.cancelled) {
+          if (parquetResp.status === 404) {
+            setError("no-data");
+          } else {
+            setError(`Failed to fetch parquet: HTTP ${parquetResp.status}`);
+          }
+        }
+        return;
+      }
+      const buffer = new Uint8Array(await parquetResp.arrayBuffer());
+
+      // 4. Register parquet bytes into DuckDB virtual filesystem
+      if (!signal.cancelled) setStatus("Loading data into DuckDB...");
+      const db = await connector.getDuckDB();
+      const conn = await connector.getConnection();
+      const tempFile = "import.parquet";
+      await db.registerFileBuffer(tempFile, buffer);
+
+      // 5. Create table with synthetic id column
+      await conn.query(
+        `CREATE TABLE dataset AS SELECT row_number() OVER () AS id, * FROM '${tempFile}'`
+      );
+      await db.dropFile(tempFile);
+
+      if (!signal.cancelled) setReady(true);
+    } catch (e) {
+      console.error("Embeddings init error:", e);
+      if (!signal.cancelled) setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [datasetId, coordinator]);
+
+  // Initial load
   useEffect(() => {
     if (!datasetId) return;
-    let cancelled = false;
-
-    async function initialize() {
-      try {
-        // 1. Initialize DuckDB via Mosaic wasmConnector
-        setStatus("Initializing DuckDB...");
-        const connector = wasmConnector();
-        coordinator.databaseConnector(connector);
-
-        // 2. Fetch dataset metadata
-        setStatus("Fetching dataset metadata...");
-        const resp = await fetch("/api/datasets");
-        const data = await resp.json();
-        const ds = data.datasets.find(
-          (d: DatasetInfo) => d.id === datasetId
-        );
-        if (!ds) {
-          if (!cancelled) setError(`Dataset "${datasetId}" not found`);
-          return;
-        }
-        if (!cancelled) setDataset(ds);
-
-        // 3. Fetch parquet bytes on main thread (goes through Vite proxy)
-        if (!cancelled) setStatus(ds.row_count ? `Downloading ${ds.row_count.toLocaleString()} rows...` : "Downloading data...");
-        const parquetResp = await fetch(`/api/datasets/${datasetId}/data`);
-        if (!parquetResp.ok) {
-          if (!cancelled) {
-            if (parquetResp.status === 404) {
-              setError("no-data");
-            } else {
-              setError(`Failed to fetch parquet: HTTP ${parquetResp.status}`);
-            }
-          }
-          return;
-        }
-        const buffer = new Uint8Array(await parquetResp.arrayBuffer());
-
-        // 4. Register parquet bytes into DuckDB virtual filesystem
-        if (!cancelled) setStatus("Loading data into DuckDB...");
-        const db = await connector.getDuckDB();
-        const conn = await connector.getConnection();
-        const tempFile = "import.parquet";
-        await db.registerFileBuffer(tempFile, buffer);
-
-        // 5. Create table with synthetic id column
-        await conn.query(
-          `CREATE TABLE dataset AS SELECT row_number() OVER () AS id, * FROM '${tempFile}'`
-        );
-        await db.dropFile(tempFile);
-
-        if (!cancelled) setReady(true);
-      } catch (e) {
-        console.error("Embeddings init error:", e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    initialize();
-
+    const signal = { cancelled: false };
+    retryRef.current = () => initialize(signal);
+    initialize(signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
       coordinator.clear();
     };
-  }, [datasetId, coordinator]);
+  }, [datasetId, coordinator, initialize]);
+
+  // Poll FSM status when no data — auto-retry when pipeline converges
+  useEffect(() => {
+    if (error !== "no-data") return;
+
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const resp = await fetch("/api/fsm/status");
+        const body = await resp.json();
+        const state = body.state as string;
+        if (!stopped) setFsmState(state);
+
+        // Pipeline just produced results — retry loading
+        if (state === "CONVERGED" && !stopped) {
+          stopped = true;
+          setFsmState(null);
+          retryRef.current?.();
+        }
+      } catch {
+        // gateway not ready yet
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => { stopped = true; clearInterval(interval); };
+  }, [error]);
 
   if (error) {
     const isNoData = error === "no-data";
@@ -93,12 +137,28 @@ export default function Embeddings() {
           </Button>
         </Link>
         {isNoData ? (
-          <Alert
-            type="info"
-            message="No Embeddings Data Yet"
-            description="Run a classification pipeline on this dataset to generate embeddings for visualization."
-            showIcon
-          />
+          fsmState && fsmState !== "IDLE" && fsmState !== "ERROR" ? (
+            <Alert
+              type="info"
+              message={
+                <span>
+                  Pipeline Running{" "}
+                  <Tag icon={<SyncOutlined spin />} color="processing">
+                    {FSM_LABELS[fsmState] || fsmState}
+                  </Tag>
+                </span>
+              }
+              description="Embeddings will load automatically when the pipeline completes."
+              showIcon
+            />
+          ) : (
+            <Alert
+              type="info"
+              message="No Embeddings Data Yet"
+              description="Run a classification pipeline on this dataset to generate embeddings for visualization."
+              showIcon
+            />
+          )
         ) : (
           <Alert type="error" message="Error" description={error} showIcon />
         )}

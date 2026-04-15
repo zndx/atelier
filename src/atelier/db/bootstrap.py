@@ -1,9 +1,14 @@
-"""Database migration runner for CAI deployment.
+"""Database bootstrap — migrations and seed data.
 
-Local dev: ``just migrate`` runs dbmate CLI against devenv PostgreSQL.
-CAI: This module applies the same migrations via SQLAlchemy, compatible
-with dbmate's ``schema_migrations`` tracking table. PGlite or real
-PostgreSQL is started externally (by bin/start-app.sh) before this runs.
+Provides the complete bootstrap sequence for both ``devenv up`` (local dev)
+and ``bin/start-app.sh`` (CAI deployment):
+
+1. Apply SQL migrations (dbmate-compatible tracking)
+2. Seed keystone agents (idempotent upserts)
+
+Run as a module for one-liner process exec::
+
+    python -m atelier.db.bootstrap
 """
 
 from __future__ import annotations
@@ -96,3 +101,93 @@ def _extract_up_block(content: str) -> str | None:
 def _split_statements(sql: str) -> list[str]:
     """Split SQL text on semicolons, returning non-empty statements."""
     return [s.strip() for s in sql.split(";") if s.strip()]
+
+
+# ── Keystone agents ──────────────────────────────────────────────
+# Single source of truth for agent definitions. Both devenv and CAI
+# use this constant via bootstrap(). Upsert semantics keep
+# descriptions and tool_ids in sync after code changes.
+
+KEYSTONE_AGENTS: list[tuple[str, str, str, str, str]] = [
+    (
+        "sampler",
+        "Metadata Sampler",
+        "Discovers tables and samples column metadata from production "
+        "databases via CAI Data Platform connections",
+        "sampler",
+        '["sample-metadata", "discover-tables", "load-annotations"]',
+    ),
+    (
+        "classifier",
+        "Column Classifier",
+        "Extracts 12 discrete features per column and runs cosine, "
+        "CatBoost, and SVM classifiers with regex pattern detection",
+        "classifier",
+        '["extract-features", "run-classifiers", "detect-patterns", "classify-columns"]',
+    ),
+    (
+        "evidence-fuser",
+        "Evidence Fuser",
+        "Converts 5 evidence sources into Dempster-Shafer mass functions, "
+        "fuses via conjunctive combination, and diagnoses conflicts",
+        "evidence_fuser",
+        '["build-mass-functions", "apply-dempster-rule", "diagnose-conflicts"]',
+    ),
+    (
+        "synth-generator",
+        "Synthetic Generator",
+        "Creates deterministic synthetic training tables with representative "
+        "column data for classifier training",
+        "synth_generator",
+        '["generate-synth-tables", "load-annotations"]',
+    ),
+    (
+        "viz-director",
+        "Visualization Director",
+        "Computes SAGE/SHAP feature explanations and prepares Atlas-compatible "
+        "embedding projections",
+        "visualization_director",
+        '["compute-sage-importance", "generate-shap-explanations", "prepare-atlas-projection"]',
+    ),
+]
+
+
+def seed_keystone_agents() -> None:
+    """Upsert keystone agent definitions into the database.
+
+    Idempotent — safe to call on every restart. Uses upsert semantics
+    so descriptions and tool_ids stay in sync with the codebase.
+    """
+    from atelier.db.dao import AtelierDao
+
+    dao = AtelierDao()
+    for aid, name, desc, role, tools in KEYSTONE_AGENTS:
+        dao.upsert_agent(aid, name, desc, role, tools)
+    log.info("Upserted %d keystone agents", len(KEYSTONE_AGENTS))
+
+
+def bootstrap() -> None:
+    """Run migrations and seed agents.
+
+    Shared entry point for ``devenv up`` and ``bin/start-app.sh``.
+    Loads config from HOCON to get the database URL.
+    """
+    from atelier.config import load_config
+
+    cfg = load_config()
+
+    log.info("Running database migrations...")
+    run_migrations(cfg.db_url)
+
+    log.info("Seeding keystone agents...")
+    seed_keystone_agents()
+
+    log.info("Bootstrap complete")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    bootstrap()

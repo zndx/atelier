@@ -91,6 +91,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.llm.columns_per_call": ("classify_llm_columns_per_call", int),
     "classify.llm.max_retries": ("classify_llm_max_retries", int),
     "classify.llm.disable_reasoning": ("classify_llm_disable_reasoning", bool),
+    "classify.llm.reasoning_budget": ("classify_llm_reasoning_budget", int),
     "classify.llm.discount": ("classify_llm_discount", float),
     # Bootstrap convergence
     "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
@@ -260,6 +261,7 @@ class AtelierConfig:
     classify_llm_columns_per_call: int = 50
     classify_llm_max_retries: int = 3
     classify_llm_disable_reasoning: bool = False
+    classify_llm_reasoning_budget: int = 8192
     classify_llm_discount: float = 0.10
 
     # Bootstrap convergence

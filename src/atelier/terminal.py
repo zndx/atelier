@@ -376,12 +376,32 @@ class TerminalSession:
             )
             return
 
-        # Animated thinking spinner — cycles braille dots until the
-        # first SDK message arrives, then clears the line.
-        stop_spinner = asyncio.Event()
-        spinner_task: asyncio.Task | None = asyncio.create_task(
-            self._animate_spinner("thinking...", stop_spinner)
-        )
+        # ── Restartable spinner ───────────────────────────────────
+        # The spinner persists across tool-use turns and only clears
+        # when actual text output arrives.  Between text segments it
+        # restarts with a contextual label ("thinking…", tool name, …).
+        _stop_ev = asyncio.Event()
+        _spinner_task: asyncio.Task | None = None
+
+        async def _start_spinner(label: str = "thinking...") -> None:
+            nonlocal _spinner_task, _stop_ev
+            await _stop_spinner_inner()
+            _stop_ev = asyncio.Event()
+            _spinner_task = asyncio.create_task(
+                self._animate_spinner(label, _stop_ev)
+            )
+
+        async def _stop_spinner_inner() -> None:
+            nonlocal _spinner_task
+            if _spinner_task is not None and not _stop_ev.is_set():
+                _stop_ev.set()
+                try:
+                    await _spinner_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            _spinner_task = None
+
+        await _start_spinner()
 
         # Capture CLI stderr so we can actually tell the operator *why*
         # the subprocess died. Without this callback, claude-agent-sdk
@@ -394,16 +414,6 @@ class TerminalSession:
 
         def _capture_stderr(line: str) -> None:
             stderr_lines.append(line)
-
-        async def _stop_spinner() -> None:
-            nonlocal spinner_task
-            if spinner_task is not None and not stop_spinner.is_set():
-                stop_spinner.set()
-                try:
-                    await spinner_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                spinner_task = None
 
         try:
             from pathlib import Path
@@ -448,18 +458,46 @@ class TerminalSession:
                 stderr=_capture_stderr,
             )
 
-            async for message in query(prompt=prompt, options=options):
-                # Stop the spinner on the first message of any type.
-                if spinner_task is not None:
-                    await _stop_spinner()
+            # Track whether we've already shown text in this query so
+            # we can insert line-break separators between turns.
+            emitted_text = False
 
+            async for message in query(prompt=prompt, options=options):
                 if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            # Convert LF to CR+LF for terminal display.
+                    text_blocks = [
+                        b for b in message.content
+                        if isinstance(b, TextBlock)
+                    ]
+                    tool_blocks = [
+                        b for b in message.content
+                        if hasattr(b, "name") and not isinstance(b, TextBlock)
+                    ]
+
+                    if text_blocks:
+                        await _stop_spinner_inner()
+                        # Separator between distinct response turns
+                        if emitted_text:
+                            await self._send("\r\n\r\n")
+                        for block in text_blocks:
                             text = block.text.replace("\n", "\r\n")
                             await self._send(text)
+                        emitted_text = True
+
+                    if tool_blocks:
+                        # Model is invoking tools — show contextual spinner
+                        names = [b.name for b in tool_blocks]
+                        if len(names) == 1:
+                            label = f"{names[0]}..."
+                        else:
+                            label = f"{len(names)} tools..."
+                        await _start_spinner(label)
+                    elif not text_blocks:
+                        # Non-text, non-tool message — keep thinking
+                        if _spinner_task is None or _stop_ev.is_set():
+                            await _start_spinner()
+
                 elif isinstance(message, ResultMessage):
+                    await _stop_spinner_inner()
                     cost = getattr(message, "total_cost_usd", None)
                     duration = getattr(message, "duration_ms", None)
                     meta_parts = []
@@ -471,6 +509,11 @@ class TerminalSession:
                         await self._send(
                             f"\r\n{_DIM}({', '.join(meta_parts)}){_RESET}\r\n"
                         )
+
+                else:
+                    # Tool results, internal messages — ensure spinner
+                    if _spinner_task is None or _stop_ev.is_set():
+                        await _start_spinner()
 
         except asyncio.CancelledError:
             # Let _run_query_task handle the user-facing notice so
@@ -497,4 +540,4 @@ class TerminalSession:
         finally:
             # Always clean up the spinner — catches early import
             # errors, cancellation, and any unexpected exit path.
-            await _stop_spinner()
+            await _stop_spinner_inner()

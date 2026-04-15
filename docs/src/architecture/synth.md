@@ -66,11 +66,24 @@ synth_*.csv + ground_truth.json
  svm.pkl  catboost.cbm
 ```
 
-### SVM Path
+### SVM Path (Signals Architecture)
 
-1. Build TF-IDF text from column name + sample values
-2. Fit `LinearSVC` with Platt scaling for probability estimates
-3. Save to `.pkl`
+The SVM classifier uses the `Pipeline` + `FeatureUnion` composition adopted
+wholesale from the [Signals](https://github.com/zndx/signals) project:
+
+1. Build short text from column name + type + sample values via `build_svm_text()`
+2. `FeatureUnion` extracts dual TF-IDF features:
+   - Character n-grams (3-6, `char_wb` analyzer) — captures subword patterns
+   - Word n-grams (1-2) — captures multi-word patterns
+3. `CalibratedClassifierCV(LinearSVC, method="sigmoid")` — Platt scaling
+   for calibrated probability estimates
+4. `_min_class_count()` guard prevents calibration CV crash on small classes
+5. Save to `.pkl` + `.classes.json` via joblib
+
+The SVM operates on **sparse lexical features** — architecturally independent
+from the dense sentence-transformer embedding used by cosine and CatBoost.
+See [Classification Pipeline](./classification.md#evidence-independence) for
+the full independence analysis.
 
 ### CatBoost Path (GPU-accelerated)
 
@@ -151,7 +164,7 @@ Set to `false` on CAI if background threads cause runtime issues.
 | `synth.py` | Synthetic data generation with diverse column names |
 | `ml_train.py` | Training orchestrator (SVM + CatBoost) |
 | `catboost_classifier.py` | CatBoost with virtual ensemble uncertainty |
-| `svm_classifier.py` | TF-IDF + LinearSVC + Platt scaling |
+| `svm_classifier.py` | Pipeline+FeatureUnion: dual TF-IDF + LinearSVC + Platt scaling (signals) |
 | `train_eval_cycle.py` | Generate → train → classify → evaluate loop |
 | `sage.py` | Global SAGE feature importance |
 | `shap_explanations.py` | Per-item SHAP attribution |

@@ -123,6 +123,7 @@ class LLMBackendConfig:
     max_retries: int = 3
     retry_delay: float = 2.0
     disable_reasoning: bool = False
+    reasoning_budget: int = 8192  # max tokens for chain-of-thought; 0 = unlimited
     # AWS Bedrock credentials (used only by "bedrock" backend)
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
@@ -142,6 +143,7 @@ def config_from_atelier(cfg) -> LLMBackendConfig:
         batch_size=cfg.classify_llm_columns_per_call,
         max_retries=cfg.classify_llm_max_retries,
         disable_reasoning=cfg.classify_llm_disable_reasoning,
+        reasoning_budget=cfg.classify_llm_reasoning_budget,
         aws_access_key_id=cfg.aws_access_key_id,
         aws_secret_access_key=cfg.aws_secret_access_key,
         aws_region=cfg.aws_region,
@@ -392,15 +394,29 @@ class AnthropicBackend(LLMBackend):
         user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
         expected_names = [s.name for s in samples]
 
-        response = client.messages.create(
-            model=self._config.model,
-            max_tokens=self._config.max_tokens,
-            temperature=self._config.temperature,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+        kwargs: dict[str, Any] = {
+            "model": self._config.model,
+            "max_tokens": self._config.max_tokens,
+            "temperature": self._config.temperature,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
+        if self._config.reasoning_budget and not self._config.disable_reasoning:
+            kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self._config.reasoning_budget,
+            }
+            # Extended thinking requires temperature=1
+            kwargs["temperature"] = 1
 
-        text = response.content[0].text.strip()
+        response = client.messages.create(**kwargs)
+
+        # With thinking enabled, response may have thinking blocks before text
+        text_block = next(
+            (b for b in response.content if getattr(b, "type", None) == "text"),
+            response.content[-1] if response.content else None,
+        )
+        text = (text_block.text if text_block else "").strip()
         classifications = _parse_classifications(text, expected_names)
 
         return LLMResponse(
@@ -470,25 +486,39 @@ class AnthropicStructuredBackend(LLMBackend):
         user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
         expected_names = [s.name for s in samples]
 
-        response = client.messages.create(
-            model=self._config.model,
-            max_tokens=self._config.max_tokens,
-            temperature=self._config.temperature,
-            system=[{
+        kwargs: dict[str, Any] = {
+            "model": self._config.model,
+            "max_tokens": self._config.max_tokens,
+            "temperature": self._config.temperature,
+            "system": [{
                 "type": "text",
                 "text": system_prompt,
                 "cache_control": {"type": "ephemeral"},
             }],
-            messages=[{"role": "user", "content": user_prompt}],
-            output_config={
+            "messages": [{"role": "user", "content": user_prompt}],
+            "output_config": {
                 "format": {
                     "type": "json_schema",
                     "schema": CLASSIFICATION_OUTPUT_SCHEMA,
                 },
             },
-        )
+        }
+        if self._config.reasoning_budget and not self._config.disable_reasoning:
+            kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self._config.reasoning_budget,
+            }
+            # Extended thinking requires temperature=1
+            kwargs["temperature"] = 1
 
-        text = response.content[0].text
+        response = client.messages.create(**kwargs)
+
+        # With thinking enabled, text block may not be first
+        text_block = next(
+            (b for b in response.content if getattr(b, "type", None) == "text"),
+            response.content[-1] if response.content else None,
+        )
+        text = text_block.text if text_block else ""
         classifications = _parse_structured_response(text, expected_names)
 
         cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
@@ -583,8 +613,13 @@ class OpenAICompatibleBackend(LLMBackend):
             ],
         }
 
+        extra_body: dict[str, Any] = {}
         if self._config.disable_reasoning:
-            api_params["extra_body"] = {"disable_reasoning": True}
+            extra_body["disable_reasoning"] = True
+        if self._config.reasoning_budget and not self._config.disable_reasoning:
+            extra_body["reasoning_budget"] = self._config.reasoning_budget
+        if extra_body:
+            api_params["extra_body"] = extra_body
 
         # Retry with exponential backoff for transient errors
         last_error: Exception | None = None
@@ -817,7 +852,7 @@ class BedrockStructuredBackend(LLMBackend):
         user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
         expected_names = [s.name for s in samples]
 
-        request_body = {
+        request_body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": self._config.max_tokens,
             "temperature": self._config.temperature,
@@ -834,6 +869,13 @@ class BedrockStructuredBackend(LLMBackend):
                 },
             },
         }
+        if self._config.reasoning_budget and not self._config.disable_reasoning:
+            request_body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self._config.reasoning_budget,
+            }
+            # Extended thinking requires temperature=1
+            request_body["temperature"] = 1
 
         last_error: Exception | None = None
         for attempt in range(self._config.max_retries):
@@ -866,7 +908,12 @@ class BedrockStructuredBackend(LLMBackend):
             raise last_error  # type: ignore[misc]
 
         body = json.loads(response["body"].read())
-        text = body["content"][0]["text"]
+        # With thinking enabled, find the text block (skip thinking blocks)
+        text_block = next(
+            (b for b in body["content"] if b.get("type") == "text"),
+            body["content"][-1] if body["content"] else {"text": ""},
+        )
+        text = text_block["text"]
         classifications = _parse_structured_response(text, expected_names)
 
         usage = body.get("usage", {})
@@ -959,6 +1006,7 @@ def create_backend(config: LLMBackendConfig) -> LLMBackend:
             max_retries=config.max_retries,
             retry_delay=config.retry_delay,
             disable_reasoning=config.disable_reasoning,
+            reasoning_budget=config.reasoning_budget,
         )
         return OpenAICompatibleBackend(cerebras_config)
     if config.backend == "bedrock":
@@ -1010,10 +1058,11 @@ def _build_anthropic_backend(cfg, model: str) -> LLMBackend:
         backend="anthropic_structured",
         api_key=cfg.anthropic_api_key,
         model=model,
-        max_tokens=8192,
+        max_tokens=cfg.classify_llm_max_tokens,
         temperature=0.0,
         batch_size=cfg.classify_llm_columns_per_call,
         max_retries=cfg.classify_llm_max_retries,
+        reasoning_budget=cfg.classify_llm_reasoning_budget,
     ))
 
 
@@ -1027,10 +1076,11 @@ def _build_bedrock_backend(cfg, model: str) -> LLMBackend:
     return create_backend(LLMBackendConfig(
         backend="bedrock_structured",
         model=model,
-        max_tokens=8192,
+        max_tokens=cfg.classify_llm_max_tokens,
         temperature=0.0,
         batch_size=cfg.classify_llm_columns_per_call,
         max_retries=cfg.classify_llm_max_retries,
+        reasoning_budget=cfg.classify_llm_reasoning_budget,
         aws_access_key_id=cfg.aws_access_key_id,
         aws_secret_access_key=cfg.aws_secret_access_key,
         aws_region=cfg.aws_region,
