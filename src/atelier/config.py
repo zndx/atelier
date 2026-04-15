@@ -100,6 +100,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
     "classify.bootstrap.frontier_svm_retrain": ("classify_bootstrap_frontier_svm_retrain", bool),
     "classify.bootstrap.frontier_svm_min_labels": ("classify_bootstrap_frontier_svm_min_labels", int),
+    "classify.bootstrap.gap_threshold": ("classify_bootstrap_gap_threshold", float),
+    "classify.bootstrap.clarity_target": ("classify_bootstrap_clarity_target", float),
+    "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
     "classify.discounts.svm": ("classify_discount_svm", float),
@@ -273,6 +276,10 @@ class AtelierConfig:
     classify_bootstrap_max_total_llm_calls: int = 5000
     classify_bootstrap_frontier_svm_retrain: bool = True
     classify_bootstrap_frontier_svm_min_labels: int = 20
+    # Belief-gap convergence
+    classify_bootstrap_gap_threshold: float = 0.15
+    classify_bootstrap_clarity_target: float = 0.10
+    classify_bootstrap_bel_floor: float = 0.50
 
     # DST discount factors
     classify_discount_cosine: float = 0.30

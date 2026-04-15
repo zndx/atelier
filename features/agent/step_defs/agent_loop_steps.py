@@ -492,8 +492,9 @@ def step_run_agent_loop(context):
 @then("the conflict report should list {count:d} columns")
 def step_conflict_report_count(context, count):
     result = context.agent_result
-    assert result["high_k_count"] == count, (
-        f"Expected {count} high-K columns, got {result['high_k_count']}"
+    flagged = result.get("flagged_count", result.get("high_k_count", 0))
+    assert flagged == count, (
+        f"Expected {count} flagged columns, got {flagged}"
     )
 
 

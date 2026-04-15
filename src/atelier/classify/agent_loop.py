@@ -175,11 +175,21 @@ def _handle_get_conflict_report(
     category_set: HierarchicalCategorySet,
     k_threshold: float = 0.2,
 ) -> dict[str, Any]:
-    """Format BootstrapState conflict data for the agent."""
+    """Format BootstrapState conflict data for the agent.
+
+    Includes both K (source disagreement) and belief-gap (prediction
+    certainty) for each column, so the agent can distinguish "sources
+    fought but winner is clear" from "genuinely uncertain."
+    """
     high_k = []
     for name in column_names:
         k = state.ml_conflict.get(name, 0.0)
-        if k <= k_threshold:
+        bel = state.ml_belief.get(name, 0.0)
+        pl = state.ml_plausibility.get(name, 1.0)
+        gap = pl - bel
+
+        # Report columns with high K OR high gap OR low belief
+        if k <= k_threshold and gap <= 0.3 and bel >= 0.5:
             continue
 
         llm_code = state.labels.get(name, "")
@@ -191,6 +201,10 @@ def _handle_get_conflict_report(
         high_k.append({
             "column_name": name,
             "conflict_K": round(k, 4),
+            "belief": round(bel, 4),
+            "plausibility": round(pl, 4),
+            "gap": round(gap, 4),
+            "settled": bel >= 0.7 and gap <= 0.15,
             "llm_prediction": llm_cat.label if llm_cat else llm_code,
             "llm_code": llm_code,
             "ml_prediction": ml_cat.label if ml_cat else ml_code,
@@ -198,10 +212,10 @@ def _handle_get_conflict_report(
             "disagrees": llm_code != ml_code,
         })
 
-    high_k.sort(key=lambda x: -x["conflict_K"])
+    high_k.sort(key=lambda x: -x["gap"])  # sort by uncertainty, not K
     return {
         "total_columns": len(column_names),
-        "high_k_count": len(high_k),
+        "flagged_count": len(high_k),
         "k_threshold": k_threshold,
         "columns": high_k,
     }
@@ -268,15 +282,30 @@ def _handle_check_convergence(
         _coverage,
         _mean_k,
         _max_k,
+        _mean_gap,
+        _mean_bel,
+        _frac_needing_clarification,
         k_convergence_rate,
+        gap_convergence_rate,
         _identify_disagreements,
+        _identify_uncertain_columns,
     )
 
     disagreements = _identify_disagreements(state, column_names, boot_cfg)
+    uncertain = _identify_uncertain_columns(state, column_names, boot_cfg)
 
     return {
         "iteration": state.iteration,
         "coverage": round(_coverage(state, column_names), 4),
+        # Belief-gap convergence (primary)
+        "mean_gap": round(_mean_gap(state, column_names), 4),
+        "mean_bel": round(_mean_bel(state, column_names), 4),
+        "frac_unclear": round(_frac_needing_clarification(state, column_names), 4),
+        "gap_threshold": boot_cfg.gap_threshold,
+        "clarity_target": boot_cfg.clarity_target,
+        "gap_convergence_rate": round(gap_convergence_rate(state), 6),
+        "uncertain_columns": len(uncertain),
+        # K (diagnostic)
         "mean_k": round(_mean_k(state, column_names), 4),
         "max_k": round(_max_k(state, column_names), 4),
         "k_convergence_rate": round(k_convergence_rate(state), 6),
@@ -289,6 +318,9 @@ def _handle_check_convergence(
             {
                 "iteration": m.iteration,
                 "mean_k": m.mean_k,
+                "mean_gap": m.mean_gap,
+                "mean_bel": m.mean_bel,
+                "frac_unclear": m.frac_unclear,
                 "disagreements": m.disagreements,
                 "coverage": m.coverage,
             }

@@ -54,6 +54,10 @@ class BootstrapConfig:
     llm_discount: float = 0.10
     frontier_svm_retrain: bool = True
     frontier_svm_min_labels: int = 20
+    # Belief-gap convergence (primary convergence criteria)
+    gap_threshold: float = 0.15
+    clarity_target: float = 0.10
+    bel_floor: float = 0.50
 
 
 def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
@@ -67,6 +71,9 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         llm_discount=cfg.classify_llm_discount,
         frontier_svm_retrain=cfg.classify_bootstrap_frontier_svm_retrain,
         frontier_svm_min_labels=cfg.classify_bootstrap_frontier_svm_min_labels,
+        gap_threshold=cfg.classify_bootstrap_gap_threshold,
+        clarity_target=cfg.classify_bootstrap_clarity_target,
+        bel_floor=cfg.classify_bootstrap_bel_floor,
     )
 
 
@@ -84,6 +91,10 @@ class IterationMetrics:
     frontier_columns: int = 0
     propagated_columns: int = 0
     escalated_columns: int = 0
+    # Belief-gap convergence (primary convergence measure)
+    mean_gap: float = 0.0        # mean(Pl - Bel) for predicted categories
+    mean_bel: float = 0.0        # mean belief for predicted categories
+    frac_unclear: float = 0.0    # fraction of columns needing clarification
 
 
 @dataclass
@@ -98,6 +109,8 @@ class BootstrapState:
     ml_confidence: dict[str, float] = field(default_factory=dict)
     ml_conflict: dict[str, float] = field(default_factory=dict)
     ml_uncertainty: dict[str, float] = field(default_factory=dict)
+    ml_belief: dict[str, float] = field(default_factory=dict)
+    ml_plausibility: dict[str, float] = field(default_factory=dict)
     llm_calls_total: int = 0
     tokens_input: int = 0
     tokens_output: int = 0
@@ -231,6 +244,8 @@ def _run_ml_validation(
             state.ml_confidence[name] = result["confidence"]
             state.ml_conflict[name] = result["conflict"]
             state.ml_uncertainty[name] = result["uncertainty"]
+            state.ml_belief[name] = result["belief"]
+            state.ml_plausibility[name] = result["plausibility"]
 
 
 def _identify_disagreements(
@@ -361,6 +376,91 @@ def _max_k(state: BootstrapState, column_names: list[str]) -> float:
     return max(state.ml_conflict.get(n, 0) for n in labeled)
 
 
+# ── Belief-gap convergence ──────────────────────────────────────────
+#
+# K measures source disagreement; [Bel, Pl] measures prediction certainty.
+# A column can have K=0.9 but Bel=0.95 — the sources fought hard but the
+# winner is clear. The belief-gap (Pl - Bel) is the primary convergence
+# measure: when it's small, the prediction is settled regardless of K.
+
+
+def _mean_gap(state: BootstrapState, column_names: list[str]) -> float:
+    """Mean uncertainty gap (Pl - Bel) for predicted categories.
+
+    Low mean gap = predictions are settled. This is the primary
+    convergence measure — it directly answers "how certain are we
+    about each column's classification?"
+    """
+    labeled = [n for n in column_names if n in state.labels]
+    if not labeled:
+        return 1.0
+    gaps = [
+        state.ml_plausibility.get(n, 1.0) - state.ml_belief.get(n, 0.0)
+        for n in labeled
+    ]
+    return sum(gaps) / len(gaps)
+
+
+def _mean_bel(state: BootstrapState, column_names: list[str]) -> float:
+    """Mean belief for predicted categories."""
+    labeled = [n for n in column_names if n in state.labels]
+    if not labeled:
+        return 0.0
+    return sum(state.ml_belief.get(n, 0.0) for n in labeled) / len(labeled)
+
+
+def _frac_needing_clarification(
+    state: BootstrapState,
+    column_names: list[str],
+    gap_threshold: float = 0.3,
+    bel_floor: float = 0.5,
+) -> float:
+    """Fraction of columns needing clarification (high gap OR low belief).
+
+    A column needs clarification when its predicted category has either:
+    - gap > gap_threshold (prediction not tight enough)
+    - bel < bel_floor (not enough evidence for the prediction)
+    """
+    labeled = [n for n in column_names if n in state.labels]
+    if not labeled:
+        return 1.0
+    needing = 0
+    for n in labeled:
+        gap = state.ml_plausibility.get(n, 1.0) - state.ml_belief.get(n, 0.0)
+        bel = state.ml_belief.get(n, 0.0)
+        if gap > gap_threshold or bel < bel_floor:
+            needing += 1
+    return needing / len(labeled)
+
+
+def _identify_uncertain_columns(
+    state: BootstrapState,
+    column_names: list[str],
+    cfg: BootstrapConfig,
+) -> list[str]:
+    """Find columns where the prediction is uncertain.
+
+    Targets columns for LLM revisit based on belief-gap metrics rather
+    than K-based disagreement. A column is uncertain when:
+    - Pl - Bel > 0.3 (wide belief interval), OR
+    - Bel < bel_floor (insufficient supporting evidence)
+
+    Sorted by gap descending (most uncertain first).
+    """
+    uncertain = []
+    for name in column_names:
+        if name not in state.labels:
+            continue
+        gap = state.ml_plausibility.get(name, 1.0) - state.ml_belief.get(name, 0.0)
+        bel = state.ml_belief.get(name, 0.0)
+        if gap > 0.3 or bel < cfg.bel_floor:
+            uncertain.append(name)
+    uncertain.sort(
+        key=lambda n: -(state.ml_plausibility.get(n, 1.0) - state.ml_belief.get(n, 0.0))
+    )
+    return uncertain
+
+
 def record_iteration_metrics(
     state: BootstrapState,
     column_names: list[str],
@@ -374,12 +474,18 @@ def record_iteration_metrics(
         disagreements=disagreement_count,
         coverage=round(_coverage(state, column_names), 4),
         llm_calls=state.llm_calls_total,
+        mean_gap=round(_mean_gap(state, column_names), 4),
+        mean_bel=round(_mean_bel(state, column_names), 4),
+        frac_unclear=round(_frac_needing_clarification(
+            state, column_names,
+        ), 4),
     )
     state.iteration_metrics.append(metrics)
     logger.info(
-        "Iteration %d: mean_K=%.4f max_K=%.4f disagreements=%d coverage=%.2f%%",
-        metrics.iteration, metrics.mean_k, metrics.max_k,
-        metrics.disagreements, metrics.coverage * 100,
+        "Iteration %d: mean_K=%.4f mean_gap=%.4f mean_bel=%.4f "
+        "unclear=%.1f%% disagreements=%d coverage=%.1f%%",
+        metrics.iteration, metrics.mean_k, metrics.mean_gap, metrics.mean_bel,
+        metrics.frac_unclear * 100, metrics.disagreements, metrics.coverage * 100,
     )
     return metrics
 
@@ -393,23 +499,40 @@ def k_convergence_rate(state: BootstrapState) -> float:
     metrics = state.iteration_metrics
     if len(metrics) < 2:
         return 0.0
-    # Simple slope: (last - first) / (n - 1)
     return (metrics[-1].mean_k - metrics[0].mean_k) / (len(metrics) - 1)
 
 
-def should_stop_early(state: BootstrapState) -> bool:
-    """True when K is no longer decreasing for 2 consecutive iterations.
+def gap_convergence_rate(state: BootstrapState) -> float:
+    """Slope of mean uncertainty gap over iterations. Negative = improving."""
+    metrics = state.iteration_metrics
+    if len(metrics) < 2:
+        return 0.0
+    return (metrics[-1].mean_gap - metrics[0].mean_gap) / (len(metrics) - 1)
 
-    Uses the proof-of-progress paradigm: as long as K is decreasing,
-    the agent is making verifiable progress. When it plateaus, stop.
+
+def should_stop_early(state: BootstrapState) -> bool:
+    """True when uncertainty gap is no longer decreasing.
+
+    Uses the proof-of-progress paradigm: as long as the mean gap is
+    shrinking, the agent is making verifiable progress toward settled
+    predictions. When it plateaus for 2 consecutive iterations, stop.
+
+    Falls back to K-based plateau detection when gap data is unavailable
+    (e.g., iteration 0 before ML validation populates belief/plausibility).
     """
     metrics = state.iteration_metrics
     if len(metrics) < 3:
         return False
-    # Check last 2 transitions
+
+    # Prefer gap-based plateau detection
+    if metrics[-1].mean_gap > 0:
+        delta_1 = metrics[-1].mean_gap - metrics[-2].mean_gap
+        delta_2 = metrics[-2].mean_gap - metrics[-3].mean_gap
+        return delta_1 >= -1e-6 and delta_2 >= -1e-6
+
+    # Fallback: K-based plateau (pre-ML-validation iterations)
     delta_1 = metrics[-1].mean_k - metrics[-2].mean_k
     delta_2 = metrics[-2].mean_k - metrics[-3].mean_k
-    # Both non-negative means K is not decreasing
     return delta_1 >= -1e-6 and delta_2 >= -1e-6
 
 
