@@ -277,7 +277,7 @@ class AtelierConfig:
     # DST discount factors
     classify_discount_cosine: float = 0.30
     classify_discount_svm: float = 0.20
-    classify_discount_pattern_theta: float = 0.10
+    classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
     classify_discount_name_match_code: float = 0.50
     classify_discount_name_match_alias: float = 0.50

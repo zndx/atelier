@@ -278,7 +278,7 @@ def _llm_revisit(
         # Enrich revisit context with concrete pattern/feature evidence
         # so the LLM can reason about deterministic signals.
         col = samples.get(name)
-        pattern_signals: list[str] = []
+        pattern_signals: dict[str, float] = {}
         value_description = ""
         if col:
             from atelier.classify.features import detect_patterns, _generate_value_description

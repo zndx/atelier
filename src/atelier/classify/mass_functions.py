@@ -26,7 +26,7 @@ class DiscountConfig:
 
     cosine: float = 0.30
     svm: float = 0.20
-    pattern_theta: float = 0.10
+    pattern_theta: float = 0.25
     name_match_exact: float = 0.70
     name_match_code: float = 0.50
     name_match_alias: float = 0.50
@@ -180,18 +180,23 @@ DEFAULT_PATTERN_MAP: dict[str, str] = {
 
 
 def pattern_to_mass(
-    pattern_signals: list[str],
+    pattern_signals: dict[str, float] | list[str],
     frame: FrameOfDiscernment,
     pattern_category_map: dict[str, str] | None = None,
     *,
-    theta_mass: float = 0.10,
+    theta_mass: float = 0.25,
 ) -> BeliefAssignment:
     """Convert detected pattern signals to a mass function.
 
-    Maps pattern names to category codes. When no patterns are detected,
-    returns a vacuous mass function.
+    When *pattern_signals* is a ``dict[str, float]`` (from
+    :func:`detect_patterns`), the match fraction scales each pattern's
+    evidence mass — a 95% match produces more mass than a 35% match.
+    When it is a plain ``list[str]`` (legacy), all matched patterns get
+    equal mass at full strength.
 
     Args:
+        pattern_signals: Detected patterns — either ``{name: fraction}``
+            or ``[name, ...]`` (legacy compatibility).
         theta_mass: Fraction of total mass allocated to Theta.
     """
     if pattern_category_map is None:
@@ -200,22 +205,36 @@ def pattern_to_mass(
     if not pattern_signals:
         return frame.vacuous()
 
-    matched_codes: set[str] = set()
-    for pattern in pattern_signals:
+    # Normalize input: list → dict with fraction=1.0
+    if isinstance(pattern_signals, list):
+        scored: dict[str, float] = {p: 1.0 for p in pattern_signals}
+    else:
+        scored = pattern_signals
+
+    # Map patterns to codes, carrying match fractions
+    matched: dict[str, float] = {}  # code → fraction
+    for pattern, fraction in scored.items():
         code = pattern_category_map.get(pattern)
         if code and code in frame.singletons:
-            matched_codes.add(code)
+            # If multiple patterns map to the same code, take the max fraction
+            matched[code] = max(matched.get(code, 0.0), fraction)
 
-    if not matched_codes:
+    if not matched:
         return frame.vacuous()
 
-    evidence_mass = 1.0 - theta_mass
-    mass_per_code = evidence_mass / len(matched_codes)
+    # Scale evidence by average match fraction across matched patterns.
+    # avg_fraction=1.0 when all values match → full evidence mass.
+    # avg_fraction=0.4 when barely above threshold → reduced mass.
+    avg_fraction = sum(matched.values()) / len(matched)
+    evidence_mass = (1.0 - theta_mass) * avg_fraction
+    actual_theta = 1.0 - evidence_mass
+
+    mass_per_code = evidence_mass / len(matched)
     masses: dict[FocalElement, float] = {}
-    for code in matched_codes:
+    for code in matched:
         masses[frame.singleton(code)] = mass_per_code
 
-    masses[frame.theta] = theta_mass
+    masses[frame.theta] = actual_theta
     return BeliefAssignment(masses=masses)
 
 

@@ -175,8 +175,8 @@ def _is_generic_name(name: str) -> bool:
 
 def _generate_value_description(
     values: list[str],
-    col_type: str | None,
-    patterns: list[str],
+    col_type: str | None,  # noqa: ARG001 — reserved for future type-aware descriptions
+    patterns: dict[str, float] | list[str],
 ) -> str:
     """Generate a natural-language description based on value shape."""
     if not values:
@@ -242,21 +242,26 @@ the phone match is almost certainly a false positive.
 """
 
 
-def detect_patterns(values: list[str]) -> list[str]:
+def detect_patterns(values: list[str]) -> dict[str, float]:
     """Detect which value patterns are present in a sample.
 
+    Returns a dict mapping pattern name → match fraction (0.0–1.0).
     A pattern fires when >= 1/3 of sample values match.  Post-regex
     validators (see :data:`_VALIDATORS`) add precision: a value must pass
     both the regex and the validator to count.
+
+    The match fraction is used by :func:`pattern_to_mass` to scale
+    evidence mass — a 95% match produces more mass than a 35% match.
 
     The ``phone_pattern`` is suppressed when a more specific pattern
     (date, SSN, credit card, etc.) already matched — see
     :data:`_PHONE_SUPPRESSORS`.
     """
     if not values:
-        return []
-    hits: list[str] = []
-    threshold = max(1, len(values) // 3)
+        return {}
+    n = len(values)
+    hits: dict[str, float] = {}
+    threshold = max(1, n // 3)
     for name, pat in _PATTERNS.items():
         validator = _VALIDATORS.get(name)
         if validator:
@@ -267,16 +272,16 @@ def detect_patterns(values: list[str]) -> list[str]:
         else:
             match_count = sum(1 for v in values if pat.match(v.strip()))
         if match_count >= threshold:
-            hits.append(name)
+            hits[name] = match_count / n
 
     # Suppress phone_pattern when a more specific digit-heavy pattern fired.
-    if "phone_pattern" in hits and hits_any_suppressor(hits):
-        hits.remove("phone_pattern")
+    if "phone_pattern" in hits and _hits_any_suppressor(hits):
+        del hits["phone_pattern"]
 
-    return sorted(hits)
+    return dict(sorted(hits.items()))
 
 
-def hits_any_suppressor(hits: list[str]) -> bool:
+def _hits_any_suppressor(hits: dict[str, float]) -> bool:
     """True when *hits* contains any pattern that suppresses phone_pattern."""
     return bool(_PHONE_SUPPRESSORS.intersection(hits))
 
@@ -327,7 +332,7 @@ class ColumnFeatures:
     cardinality: int | None
     null_ratio: float | None
     value_entropy: float | None
-    pattern_signals: list[str] = field(default_factory=list)
+    pattern_signals: dict[str, float] = field(default_factory=dict)
     avg_value_length: float | None = None
     numeric_ratio: float | None = None
     sibling_names: list[str] = field(default_factory=list)
@@ -376,7 +381,7 @@ class ColumnFeatures:
             parts.append(f"entropy={self.value_entropy:.2f}")
 
         if _enabled("pattern_signals") and self.pattern_signals:
-            parts.append("patterns: " + ", ".join(self.pattern_signals))
+            parts.append("patterns: " + ", ".join(self.pattern_signals.keys()))
 
         if _enabled("avg_value_length") and self.avg_value_length is not None:
             parts.append(f"avg_len={self.avg_value_length:.1f}")

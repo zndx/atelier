@@ -198,7 +198,10 @@ def run_classification_pipeline(
         if not isinstance(category_set, HierarchicalCategorySet):
             raise RuntimeError("Expected HierarchicalCategorySet")
 
-        frame = FrameOfDiscernment(category_set)
+        frame = FrameOfDiscernment(
+            category_set,
+            confusable_pairs=_build_confusable_pairs(category_set),
+        )
         fsm.advance(run_id, FSMState.DISCOVERING, progress={
             "categories_loaded": len(category_set.categories),
         })
@@ -736,6 +739,32 @@ def _load_domain_annotations(cfg, build_dir: Path, connection_name):
     return None
 
 
+# ── Confusable pairs ──────────────────────────────────────────────
+#
+# Known category pairs that are structurally similar and commonly confused.
+# When DST evidence is split between two members of a pair, mass is
+# redistributed to a compound focal element instead of forcing a
+# singleton decision — allowing honest representation of ambiguity.
+
+_CONFUSABLE_PAIR_CODES: list[tuple[str, str]] = [
+    ("ICE.METADATA.RECID", "ICE.SENSITIVE.TECHNICAL.DEVID"),
+    ("ICE.METADATA.TIMESTAMP", "ICE.SENSITIVE.PID.IDENTITY.DOB"),
+    ("ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT", "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN"),
+    ("ICE.SENSITIVE.TECHNICAL.IPADDR", "ICE.SENSITIVE.TECHNICAL.DEVID"),
+]
+
+
+def _build_confusable_pairs(
+    category_set: HierarchicalCategorySet,
+) -> list[tuple[str, str]]:
+    """Filter confusable pairs to those present in the loaded vocabulary."""
+    leaf_codes = category_set.leaf_codes
+    return [
+        (a, b) for a, b in _CONFUSABLE_PAIR_CODES
+        if a in leaf_codes and b in leaf_codes
+    ]
+
+
 def _classify_column(
     col: ColumnSample,
     category_set: HierarchicalCategorySet,
@@ -1107,7 +1136,7 @@ def _write_parquet(
             "ground_truth": c["ground_truth"] or "",
             "is_correct": c["is_correct"] if c["is_correct"] is not None else False,
             "embedding_text": c.get("embedding_text", ""),
-            "pattern_signals": ", ".join(c.get("pattern_signals", [])),
+            "pattern_signals": ", ".join(c.get("pattern_signals", {})),
             "dst_belief_path": json.dumps(c.get("belief_path", [])),
             "cautious_code": c.get("cautious_code", ""),
         }
