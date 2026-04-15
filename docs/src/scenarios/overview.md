@@ -6,7 +6,7 @@ These aren't just tests. They're the design context that connects architectural 
 
 ## Active Domains
 
-**127 scenarios across 31 features, 4 domains.**
+**136 scenarios across 32 features, 4 domains.**
 
 ### Infrastructure (infra)
 
@@ -43,7 +43,7 @@ HTTP gateway endpoints, gRPC bridge, and live service integration.
 | API testclient | `@testclient` | 0 | 7 | FastAPI TestClient integration (no running server) |
 | Status endpoint | `@status` | 0 + 1 | 4 | Aggregated health report, config state |
 | Pipeline integration | `@pipeline` | 1 | 2 | Classification pipeline via gateway |
-| SPA routes | `@spa` | 0 | 0 | (placeholder for client-side routing tests) |
+| SPA routes | `@spa` | 0 | 1 | Client-side routing fallback |
 
 ### Agent
 
@@ -51,9 +51,9 @@ Classification pipeline, DST evidence fusion, ML classifiers, and agent orchestr
 
 | Feature | Tag | Tier | Scenarios | What it validates |
 |---------|-----|------|-----------|-------------------|
-| Classification pipeline | `@gpu` | 0 | 19 | DST belief, Dempster combination, features, patterns, name matching, pipeline E2E, Monte Carlo sampling |
-| Bootstrap convergence | `@bootstrap` | 0 | 10 | LLM sweep, ML validation, targeted revisit, convergence criteria |
-| Agent convergence loop | `@gpu` | 0 | 6 | 5-tool agent loop, conflict reports, convergence, mock client |
+| Classification pipeline | `@gpu` | 0 | 24 | DST belief, Dempster combination, features, patterns, name matching, pipeline E2E, Monte Carlo sampling |
+| Bootstrap convergence | `@bootstrap` | 0 | 11 | LLM sweep, ML validation, targeted revisit, convergence criteria, frontier SVM |
+| Agent convergence loop | `@gpu` | 0 | 6 | 6-tool agent loop, conflict reports, convergence, mock client |
 | Agent smoke test | `@agent` | 0 | 6 | Agent metadata, tool definitions, state formatting |
 | LLM backends | `@backend` | 0 | 8 | Backend factory, Anthropic/Bedrock/Cerebras/OpenAI clients |
 | ML classifiers | `@ml` | 0 | 4 | CatBoost + SVM training, inference, virtual ensemble UQ |
@@ -71,7 +71,7 @@ Classification pipeline, DST evidence fusion, ML classifiers, and agent orchestr
 
 | Tier | Requires | Scenarios | Pass locally |
 |------|----------|-----------|--------------|
-| 0 | Python only | ~105 | Yes |
+| 0 | Python only | ~115 | Yes |
 | 1 | devenv stack | ~15 | Yes (with `devenv up`) |
 | cai | Live CAI session | ~5 | Skipped (documentation-only) |
 

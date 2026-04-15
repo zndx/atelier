@@ -32,7 +32,7 @@ Assignment) that distributes belief across the frame of discernment:
 | Source | Type | Discount | Configurable | Status |
 |--------|------|----------|--------------|--------|
 | Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | `classify.discounts.cosine` | M0 |
-| Pattern detection | 8 regex detectors | 0.10 | `classify.discounts.pattern_theta` | M0 |
+| Pattern detection | 15 regex detectors | 0.10 | `classify.discounts.pattern_theta` | M0 |
 | Name matching | Column name ↔ label/abbrev/common_names | varies | `classify.discounts.name_match_*` | M0 |
 | LLM | OpenAI-compatible / Anthropic / Bedrock / Cerebras | 0.10 | `classify.llm.discount` | M1 |
 | CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | `classify.discounts.catboost_*` | M2 |
@@ -478,10 +478,10 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M2** | CatBoost + SVM + synthetic data, 6 evidence sources, Bedrock/Cerebras backends | Done |
 | **M3** | Evaluation framework, E2E synth-train-eval, realistic mock LLM, SAGE importance | Done |
 | **M4** | SHAP explanations, configurable discounts, thread-safe model loading | Done |
-| **M5** | Data sources + versioning, OOTB onboarding (300-leaf ontology, 25 sample tables) | Done |
-| **M6** | Agent-driven convergence loop (5 Claude tools), synth framework (316+ generators) | Done |
+| **M5** | Data sources + versioning, OOTB onboarding (316-leaf ontology, 25 sample tables) | Done |
+| **M6** | Agent-driven convergence loop (6 Claude tools), synth framework (316+ generators) | Done |
 | **M7** | Monte Carlo stratified sampling, label propagation, background SHAP | Done |
 | **M8** | GPU acceleration (NVIDIA driver symlink, batch encoding), meta-tagging overlay | Done |
 | **M8.5** | SVM signals alignment (Pipeline+FeatureUnion adoption, evidence independence documentation) | Done |
-| M9 | Frontier-label SVM training (cross-model distillation via MC sampling) | Designed |
+| **M9** | Frontier-label SVM training (cross-model distillation via MC sampling) | Done |
 | M10 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |

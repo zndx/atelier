@@ -27,7 +27,7 @@ DataSource (1)                      Dataset versions (N)
 
 | Type | Tables loaded from | Vocabulary | Created by |
 |------|-------------------|------------|------------|
-| `sample` | `data/sample/tables/*.csv` | Expanded ontology (300 leaves) | Auto-seeded on first boot |
+| `sample` | `data/sample/tables/*.csv` | Expanded ontology (316 leaves) | Auto-seeded on first boot |
 | `hive` | CAI data connection | `default.annotations` from hive | User creates via Status page |
 
 ### Database Schema
@@ -57,7 +57,7 @@ When a pipeline run starts, the `source_id` determines which vocabulary
 loads:
 
 - **`ootb-sample`**: `load_sample_vocabulary()` → `data/sample/ontology.json`
-  (300 BFO-grounded leaves across the CCO ICE trichotomy)
+  (316 BFO-grounded leaves across the CCO ICE trichotomy)
 - **`hive`**: `load_annotations_from_hive()` → `default.annotations` table,
   composed on top of the universal base vocabulary
 - **No source**: Falls back to universal vocabulary (16 PII leaves)
@@ -66,8 +66,8 @@ loads:
 
 The OOTB (out-of-the-box) sample source ships with Atelier so new
 deployments show meaningful data immediately. When the landing page
-loads and "Connected" turns green, the stats cards show 300 Terms
-and 300 Entities.
+loads and "Connected" turns green, the stats cards show 316 Terms
+and 316 Entities.
 
 ### Expanded Vocabulary (ICE.* Ontology)
 
@@ -98,7 +98,7 @@ ICE (root) ≡ cco:InformationContentEntity
     └── .TIMESTAMP, .RECID, .STATUS, .VERSION, .CREATED_BY, …
 ```
 
-**325 total categories**: 300 leaves + 25 internal nodes across 5 subtrees.
+**351 total categories**: 316 leaves + 35 internal nodes across 5 subtrees.
 
 **Design principle**: every category is our own BFO-grounded term. External
 sources (GitTables, meta-tagging) inform which conceptual space to cover;
@@ -107,7 +107,7 @@ via `atelier-vocab.ttl`, not inward.
 
 ### Sample Tables
 
-25 mixed-domain tables with 300 columns (100 rows each). Tables are
+25 mixed-domain tables with 316 columns (100 rows each). Tables are
 deliberately cross-domain — a `customers` table contains identity,
 contact, metadata, and categorical columns — so the classification
 pipeline cannot rely on table name alone.
@@ -164,7 +164,7 @@ The **Status page** has two new cards:
 
 The **Landing page** stats cards reflect the active source:
 
-- **Terms**: vocabulary size for the active source (300 for OOTB sample)
+- **Terms**: vocabulary size for the active source (316 for OOTB sample)
 - **Entities**: column count from the active dataset version
 - **Sources badge**: shows count when multiple sources exist
 
@@ -194,9 +194,9 @@ interface DatasetContextValue {
 | `src/atelier/classify/taxonomy.py` | `load_sample_vocabulary()` |
 | `src/atelier/classify/pipeline.py` | Source-aware routing |
 | `src/atelier/gateway.py` | REST endpoints + auto-import lifespan |
-| `data/sample/ontology.json` | Expanded vocabulary (300 leaves) |
+| `data/sample/ontology.json` | Expanded vocabulary (316 leaves) |
 | `data/sample/tables/*.csv` | 25 sample tables |
-| `data/sample/ground_truth.json` | 300-entry ground truth mapping |
+| `data/sample/ground_truth.json` | 316-entry ground truth mapping |
 | `scripts/expand_vocabulary.py` | Vocabulary expansion script |
 | `scripts/generate_sample_source.py` | Sample table generation script |
 | `ui/src/contexts/DatasetContext.tsx` | Source-aware React context |
