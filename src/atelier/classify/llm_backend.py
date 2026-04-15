@@ -3,12 +3,12 @@
 Provides a unified interface for LLM-based column classification:
 - Anthropic Structured (Claude) — default when ANTHROPIC_API_KEY is
   available.  Uses the Messages API ``output_config`` with JSON Schema
-  for guaranteed valid structured output, plus prompt caching for the
-  taxonomy system prompt.
+  for guaranteed valid structured output (direct API only), plus prompt
+  caching for the taxonomy system prompt.
 - Anthropic (Claude) — free-text fallback via the anthropic SDK
 - OpenAI-compatible (vLLM/GLM-4.7) via the openai SDK
 - Cerebras (GLM-4.7 via OpenAI-compatible API)
-- AWS Bedrock (Claude via the Converse API)
+- AWS Bedrock (Claude via invoke_model + tool-use for structured output)
 
 Each backend converts batch column metadata into structured
 classification responses with token tracking for cost estimation.
@@ -718,11 +718,16 @@ class BedrockBackend(LLMBackend):
                 "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
             )
 
+        from atelier.config import region_from_arn
+
+        arn_region = region_from_arn(self._config.model)
+        effective_region = arn_region or self._config.aws_region or "us-east-1"
+
         session = boto3.Session(
             aws_access_key_id=self._config.aws_access_key_id,
             aws_secret_access_key=self._config.aws_secret_access_key,
             aws_session_token=self._config.aws_session_token,
-            region_name=self._config.aws_region or "us-east-1",
+            region_name=effective_region,
         )
         self._client = session.client("bedrock-runtime")
         return self._client
@@ -798,14 +803,19 @@ class BedrockBackend(LLMBackend):
 
 
 class BedrockStructuredBackend(LLMBackend):
-    """Backend using Bedrock invoke_model with Anthropic Messages API + structured output.
+    """Backend using Bedrock invoke_model with tool-use for structured output.
 
-    Uses ``invoke_model`` with the raw Anthropic Messages format to access
-    ``output_config`` (constrained JSON schema decoding) which is NOT available
-    through the Converse API or the ``AnthropicBedrock`` SDK wrapper.
+    Uses ``invoke_model`` with the raw Anthropic Messages format.  Structured
+    output is obtained via **forced tool-use** (``tools`` + ``tool_choice``)
+    rather than ``output_config`` which is **NOT supported** by Bedrock's
+    ``invoke_model`` endpoint.
 
     The system prompt is sent with ``cache_control`` for prompt caching
     (90% input token discount on cache hits, 5-min default TTL on Bedrock).
+
+    When extended thinking is enabled, ``tool_choice`` must be ``"auto"``
+    (Anthropic does not allow forced tool selection with thinking).  A
+    text-block fallback parser handles this case.
 
     This is the auto-default backend when AWS Bedrock credentials are
     present and no explicit classify LLM or ANTHROPIC_API_KEY is configured.
@@ -832,11 +842,16 @@ class BedrockStructuredBackend(LLMBackend):
                 "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
             )
 
+        from atelier.config import region_from_arn
+
+        arn_region = region_from_arn(self._config.model)
+        effective_region = arn_region or self._config.aws_region or "us-east-1"
+
         session = boto3.Session(
             aws_access_key_id=self._config.aws_access_key_id,
             aws_secret_access_key=self._config.aws_secret_access_key,
             aws_session_token=self._config.aws_session_token,
-            region_name=self._config.aws_region or "us-east-1",
+            region_name=effective_region,
         )
         self._client = session.client("bedrock-runtime")
         return self._client
@@ -852,6 +867,10 @@ class BedrockStructuredBackend(LLMBackend):
         user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
         expected_names = [s.name for s in samples]
 
+        use_thinking = bool(
+            self._config.reasoning_budget and not self._config.disable_reasoning
+        )
+
         request_body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": self._config.max_tokens,
@@ -862,20 +881,29 @@ class BedrockStructuredBackend(LLMBackend):
                 "cache_control": {"type": "ephemeral"},
             }],
             "messages": [{"role": "user", "content": user_prompt}],
-            "output_config": {
-                "format": {
-                    "type": "json_schema",
-                    "schema": CLASSIFICATION_OUTPUT_SCHEMA,
-                },
-            },
+            # Tool-use for structured output (output_config is NOT
+            # supported on Bedrock invoke_model).
+            "tools": [{
+                "name": "classify_columns",
+                "description": "Submit structured classification results.",
+                "input_schema": CLASSIFICATION_OUTPUT_SCHEMA,
+            }],
         }
-        if self._config.reasoning_budget and not self._config.disable_reasoning:
+
+        if use_thinking:
             request_body["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self._config.reasoning_budget,
             }
-            # Extended thinking requires temperature=1
+            # Extended thinking requires temperature=1 and does NOT
+            # allow forced tool_choice — must use "auto".
             request_body["temperature"] = 1
+            request_body["tool_choice"] = {"type": "auto"}
+        else:
+            request_body["tool_choice"] = {
+                "type": "tool",
+                "name": "classify_columns",
+            }
 
         last_error: Exception | None = None
         for attempt in range(self._config.max_retries):
@@ -908,13 +936,26 @@ class BedrockStructuredBackend(LLMBackend):
             raise last_error  # type: ignore[misc]
 
         body = json.loads(response["body"].read())
-        # With thinking enabled, find the text block (skip thinking blocks)
-        text_block = next(
-            (b for b in body["content"] if b.get("type") == "text"),
-            body["content"][-1] if body["content"] else {"text": ""},
+
+        # Extract structured output from the tool_use content block.
+        # With thinking enabled (tool_choice=auto), the model may return
+        # a text block instead of a tool_use block — fall back to parsing.
+        tool_block = next(
+            (b for b in body["content"] if b.get("type") == "tool_use"),
+            None,
         )
-        text = text_block["text"]
-        classifications = _parse_structured_response(text, expected_names)
+        if tool_block:
+            structured = tool_block["input"]
+            items = structured.get("classifications", [])
+            classifications = _dicts_to_classifications(items, expected_names)
+        else:
+            # Fallback: parse text block (thinking mode, auto tool_choice)
+            text_block = next(
+                (b for b in body["content"] if b.get("type") == "text"),
+                body["content"][-1] if body["content"] else {"text": ""},
+            )
+            text = text_block.get("text", "")
+            classifications = _parse_classifications(text, expected_names)
 
         usage = body.get("usage", {})
         input_tokens = usage.get("input_tokens", 0)
@@ -930,14 +971,14 @@ class BedrockStructuredBackend(LLMBackend):
 
         if stop_reason == "max_tokens":
             logger.warning(
-                "Bedrock structured response TRUNCATED: %d chars, in=%d, out=%d",
-                len(text), input_tokens, output_tokens,
+                "Bedrock structured response TRUNCATED: %d items, in=%d, out=%d",
+                len(classifications), input_tokens, output_tokens,
             )
         else:
             logger.info(
-                "Bedrock structured: %d chars, stop=%s, in=%d, out=%d "
+                "Bedrock structured: %d items, stop=%s, in=%d, out=%d "
                 "(cache_read=%d, cache_write=%d)",
-                len(text), stop_reason, input_tokens, output_tokens,
+                len(classifications), stop_reason, input_tokens, output_tokens,
                 cache_read, cache_write,
             )
 
@@ -954,19 +995,19 @@ class BedrockStructuredBackend(LLMBackend):
             client = self._get_client()
             request_body = {
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 32,
-                "messages": [{"role": "user", "content": "Respond with {\"ok\":true}"}],
-                "output_config": {
-                    "format": {
-                        "type": "json_schema",
-                        "schema": {
-                            "type": "object",
-                            "properties": {"ok": {"type": "boolean"}},
-                            "required": ["ok"],
-                            "additionalProperties": False,
-                        },
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "Respond with ok=true"}],
+                "tools": [{
+                    "name": "health_check",
+                    "description": "Health check response.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"ok": {"type": "boolean"}},
+                        "required": ["ok"],
+                        "additionalProperties": False,
                     },
-                },
+                }],
+                "tool_choice": {"type": "tool", "name": "health_check"},
             }
             response = client.invoke_model(
                 modelId=self._config.model,
@@ -1067,12 +1108,23 @@ def _build_anthropic_backend(cfg, model: str) -> LLMBackend:
 
 
 def _build_bedrock_backend(cfg, model: str) -> LLMBackend:
-    """Build a BedrockStructuredBackend from config + model."""
+    """Build a BedrockStructuredBackend from config + model.
+
+    Uses the region embedded in the model ARN when present, falling back
+    to ``cfg.aws_region``.
+    """
     if not cfg.has_bedrock:
         raise ValueError(
             f"Model {model!r} requires AWS Bedrock credentials."
         )
-    logger.info("Classification LLM: BedrockStructured %s", model)
+    from atelier.config import region_from_arn
+
+    arn_region = region_from_arn(model)
+    effective_region = arn_region or cfg.aws_region
+    logger.info(
+        "Classification LLM: BedrockStructured %s (region=%s)",
+        model, effective_region,
+    )
     return create_backend(LLMBackendConfig(
         backend="bedrock_structured",
         model=model,
@@ -1083,6 +1135,6 @@ def _build_bedrock_backend(cfg, model: str) -> LLMBackend:
         reasoning_budget=cfg.classify_llm_reasoning_budget,
         aws_access_key_id=cfg.aws_access_key_id,
         aws_secret_access_key=cfg.aws_secret_access_key,
-        aws_region=cfg.aws_region,
+        aws_region=effective_region,
         aws_session_token=cfg.aws_session_token,
     ))

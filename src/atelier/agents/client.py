@@ -25,12 +25,21 @@ def _build_anthropic_client(cfg: AtelierConfig):
 
 
 def _build_bedrock_client(cfg: AtelierConfig):
-    """Build AWS Bedrock client."""
+    """Build AWS Bedrock client.
+
+    Uses the region embedded in the model ARN when present, falling back
+    to ``cfg.aws_region``.  Cross-region inference profiles encode their
+    target region in the ARN; without this the client connects to the
+    default region and gets ``ResourceNotFoundException``.
+    """
     import anthropic
+    from atelier.config import region_from_arn
+
+    region = region_from_arn(cfg.agent_model) or cfg.aws_region
     return anthropic.AnthropicBedrock(
         aws_access_key=cfg.aws_access_key_id,
         aws_secret_key=cfg.aws_secret_access_key,
-        aws_region=cfg.aws_region,
+        aws_region=region,
         aws_session_token=cfg.aws_session_token,
     )
 
@@ -140,16 +149,20 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
     if cfg.aws_session_token:
         env["AWS_SESSION_TOKEN"] = cfg.aws_session_token
 
-    from atelier.config import is_bedrock_model
+    from atelier.config import is_bedrock_model, region_from_arn
 
     model_is_bedrock = is_bedrock_model(cfg.agent_model)
     prefer_bedrock = model_is_bedrock or (cfg.has_bedrock and not cfg.has_anthropic)
     if prefer_bedrock and cfg.has_bedrock:
         env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        # The CLI expects AWS_REGION; make sure it's set even if cfg used
-        # a different name (some providers use AWS_DEFAULT_REGION).
-        if cfg.aws_region:
-            env["AWS_DEFAULT_REGION"] = cfg.aws_region
+        # Cross-region inference profiles embed the target region in the
+        # ARN.  Prefer that over cfg.aws_region so the CLI connects to
+        # the correct endpoint.
+        arn_region = region_from_arn(cfg.agent_model)
+        effective_region = arn_region or cfg.aws_region
+        if effective_region:
+            env["AWS_REGION"] = effective_region
+            env["AWS_DEFAULT_REGION"] = effective_region
 
         # ── Bedrock sub-model pins ───────────────────────────────
         # The CLI internally uses haiku-sized models for tool search

@@ -398,6 +398,25 @@ def is_bedrock_model(model_id: str) -> bool:
     return model_id.startswith("arn:") or "anthropic." in model_id
 
 
+def region_from_arn(model_id: str) -> str | None:
+    """Extract the AWS region from a Bedrock ARN.
+
+    Cross-region inference profiles encode their target region in the ARN
+    (``arn:aws:bedrock:<region>:<account>:...``).  Without this, the boto3
+    client connects to the default ``AWS_REGION``, which causes
+    ``ResourceNotFoundException`` on ``invoke_model``.
+
+    Returns the region string if *model_id* is an ARN, else ``None``.
+    """
+    if not model_id.startswith("arn:aws:bedrock:"):
+        return None
+    # arn:aws:bedrock:<region>:<account>:<resource-type>/<id>
+    parts = model_id.split(":")
+    if len(parts) >= 4:
+        return parts[3]
+    return None
+
+
 # ── HOCON loading ────────────────────────────────────────────────
 
 

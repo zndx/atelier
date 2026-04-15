@@ -130,28 +130,41 @@ def _llm_sweep(
     samples: dict[str, ColumnSample],
     column_table: dict[str, str],
 ) -> None:
-    """Phase 1: Send all columns to LLM in table-aware batches."""
+    """Phase 1: Send all columns to LLM in table-aware batches.
+
+    Raises ``RuntimeError`` if **every** batch call fails — this catches
+    configuration errors (wrong region, bad credentials, unsupported API
+    parameters) early instead of silently proceeding with zero labels and
+    reporting false convergence.
+    """
     by_table: dict[str, list[str]] = {}
     for name in column_names:
         table = column_table.get(name, "__flat__")
         by_table.setdefault(table, []).append(name)
 
+    batches_attempted = 0
+    batches_failed = 0
+    last_error: Exception | None = None
+
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), cfg.columns_per_call):
             if state.llm_calls_total >= cfg.max_total_llm_calls:
-                return
+                break
 
             chunk = table_cols[i: i + cfg.columns_per_call]
             chunk_samples = [samples[n] for n in chunk]
             tname = table_name if table_name != "__flat__" else None
 
+            batches_attempted += 1
             try:
                 response = backend.classify_batch(
                     chunk_samples, system_prompt,
                     table_name=tname,
                 )
             except Exception as e:
-                logger.warning("LLM call failed: %s", e)
+                batches_failed += 1
+                last_error = e
+                logger.warning("LLM call failed (%d/%d): %s", batches_failed, batches_attempted, e)
                 continue
 
             state.llm_calls_total += 1
@@ -163,6 +176,15 @@ def _llm_sweep(
                     state.labels[c.column_name] = c.category_code
                     state.confidence[c.column_name] = c.confidence
                     state.label_source[c.column_name] = "llm"
+
+    # Fail fast if every single batch call failed — this is almost
+    # certainly a configuration error, not a transient issue.
+    if batches_attempted > 0 and batches_failed == batches_attempted:
+        raise RuntimeError(
+            f"LLM sweep failed: all {batches_attempted} batch calls failed. "
+            f"Last error: {last_error!r}. "
+            f"Check LLM backend config (region, credentials, model ID)."
+        )
 
 
 def _run_ml_validation(
