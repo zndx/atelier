@@ -13,6 +13,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import Callable
 
 
 # ── Pattern detectors ────────────────────────────────────────────────
@@ -45,6 +46,9 @@ _PATTERNS: dict[str, re.Pattern] = {
     "date_iso_pattern": re.compile(
         r"^\d{4}-\d{2}-\d{2}"
     ),
+    "datetime_iso_pattern": re.compile(
+        r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}"
+    ),
     "url_pattern": re.compile(
         r"^https?://"
     ),
@@ -65,7 +69,7 @@ _PATTERNS: dict[str, re.Pattern] = {
         r"^[\$\€\£]\s?[\d,]+\.\d{2}$"
     ),
     "hex_hash_pattern": re.compile(
-        r"^[0-9a-fA-F]{32,128}$"
+        r"^[0-9a-fA-F]{40,128}$"  # min 40 = SHA-1; excludes MD5/UUID-no-dashes (32)
     ),
     "semver_pattern": re.compile(
         r"^\d+\.\d+\.\d+([.\-+].+)?$"
@@ -74,6 +78,71 @@ _PATTERNS: dict[str, re.Pattern] = {
         r"^[A-Z]{3}$"
     ),
 }
+
+# ── Post-regex validators ────────────────────────────────────────────
+#
+# Regexes optimize for recall; validators add precision.  A value must
+# pass BOTH the regex AND the validator (if one exists) to count.
+
+_ISO_4217_CODES: frozenset[str] = frozenset({
+    "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD",
+    "NZD", "SEK", "KRW", "SGD", "NOK", "MXN", "INR", "RUB", "ZAR",
+    "TRY", "BRL", "TWD", "DKK", "PLN", "THB", "IDR", "HUF", "CZK",
+    "ILS", "CLP", "PHP", "AED", "COP", "SAR", "MYR", "RON", "PEN",
+    "BHD", "KWD", "QAR",
+})
+
+
+def _luhn_check(digits: str) -> bool:
+    """Luhn algorithm — validates credit card check digit."""
+    digits = digits.strip()
+    if not digits.isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        n = int(ch)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
+
+
+def _is_valid_ipv4(v: str) -> bool:
+    """Check all four octets are 0-255."""
+    parts = v.strip().split(".")
+    if len(parts) != 4:
+        return False
+    return all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+def _is_plausible_date(v: str) -> bool:
+    """Check that the YYYY-MM-DD prefix has month 01-12 and day 01-31."""
+    v = v.strip()
+    if len(v) < 10:
+        return False
+    try:
+        month = int(v[5:7])
+        day = int(v[8:10])
+        return 1 <= month <= 12 and 1 <= day <= 31
+    except (ValueError, IndexError):
+        return False
+
+
+def _is_iso_currency(v: str) -> bool:
+    """Check against ISO 4217 whitelist."""
+    return v.strip() in _ISO_4217_CODES
+
+
+_VALIDATORS: dict[str, Callable[[str], bool]] = {
+    "credit_card_pattern": _luhn_check,
+    "ipv4_pattern": _is_valid_ipv4,
+    "date_iso_pattern": _is_plausible_date,
+    "datetime_iso_pattern": _is_plausible_date,
+    "iso_currency_pattern": _is_iso_currency,
+}
+
 
 FEATURE_NAMES: list[str] = [
     "column_name",
@@ -113,6 +182,8 @@ def _generate_value_description(
     if not values:
         return ""
 
+    if "datetime_iso_pattern" in patterns:
+        return "column of datetime/timestamp values"
     if "date_iso_pattern" in patterns:
         return "column of date values in YYYY-MM-DD format"
     if "email_pattern" in patterns:
@@ -155,6 +226,7 @@ def _generate_value_description(
 _PHONE_SUPPRESSORS: frozenset[str] = frozenset({
     "ssn_pattern",
     "date_iso_pattern",
+    "datetime_iso_pattern",
     "credit_card_pattern",
     "ipv4_pattern",
     "postal_code_pattern",
@@ -163,28 +235,38 @@ _PHONE_SUPPRESSORS: frozenset[str] = frozenset({
 })
 """Patterns that, when present, suppress phone_pattern.
 
-The phone regex ``^[\\+]?[\\d\\s\\-\\(\\)\\.]{7,20}$`` is intentionally
-broad (any 7-20 char digit-heavy string). That's correct for recall, but
-it also matches dates, SSNs, amounts, account numbers, etc. When a more
-specific pattern already fired on the same values, the phone match is
-almost certainly a false positive.
+The phone regex requires phone-like formatting (+ prefix, parens, or
+digit-group separators), but can still overlap with other structured
+patterns. When a more specific pattern already fired on the same values,
+the phone match is almost certainly a false positive.
 """
 
 
 def detect_patterns(values: list[str]) -> list[str]:
     """Detect which value patterns are present in a sample.
 
-    A pattern fires when >= 1/3 of sample values match.  The broad
-    ``phone_pattern`` is suppressed when a more specific pattern
+    A pattern fires when >= 1/3 of sample values match.  Post-regex
+    validators (see :data:`_VALIDATORS`) add precision: a value must pass
+    both the regex and the validator to count.
+
+    The ``phone_pattern`` is suppressed when a more specific pattern
     (date, SSN, credit card, etc.) already matched — see
     :data:`_PHONE_SUPPRESSORS`.
     """
     if not values:
         return []
     hits: list[str] = []
+    threshold = max(1, len(values) // 3)
     for name, pat in _PATTERNS.items():
-        match_count = sum(1 for v in values if pat.match(v.strip()))
-        if match_count >= max(1, len(values) // 3):
+        validator = _VALIDATORS.get(name)
+        if validator:
+            match_count = sum(
+                1 for v in values
+                if pat.match(v.strip()) and validator(v.strip())
+            )
+        else:
+            match_count = sum(1 for v in values if pat.match(v.strip()))
+        if match_count >= threshold:
             hits.append(name)
 
     # Suppress phone_pattern when a more specific digit-heavy pattern fired.

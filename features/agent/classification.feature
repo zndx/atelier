@@ -33,6 +33,28 @@ Feature: Dempster-Shafer classification pipeline
     When I run pattern detection on credit card values "4111111111111111, 5500000000000004"
     Then the detected patterns should include "credit_card_pattern"
 
+  Scenario: Currency pattern rejects non-currency 3-letter codes
+    When I run pattern detection on values "USA, NYC, ABC, XYZ, LAX"
+    Then the detected patterns should not include "iso_currency_pattern"
+    When I run pattern detection on values "USD, EUR, GBP, JPY, CAD"
+    Then the detected patterns should include "iso_currency_pattern"
+
+  Scenario: Date pattern rejects impossible dates
+    When I run pattern detection on values "1234-99-7890, 2345-88-8901, 3456-77-9012"
+    Then the detected patterns should not include "date_iso_pattern"
+    When I run pattern detection on values "2024-01-15 10:30:00, 2024-02-28 14:45:00, 2024-03-01 09:00:00"
+    Then the detected patterns should include "datetime_iso_pattern"
+
+  Scenario: Credit card pattern rejects non-Luhn digit strings
+    When I run pattern detection on values "1234567890123, 1111111111111, 2222222222222"
+    Then the detected patterns should not include "credit_card_pattern"
+
+  Scenario: IPv4 pattern rejects invalid octet ranges
+    When I run pattern detection on values "999.999.999.999, 300.400.500.600, 256.1.1.1"
+    Then the detected patterns should not include "ipv4_pattern"
+    When I run pattern detection on values "192.168.1.1, 10.0.0.1, 172.16.0.1"
+    Then the detected patterns should include "ipv4_pattern"
+
   Scenario: Name matching finds exact and abbreviation matches
     Given a frame of discernment from the vocabulary
     When I run name matching for column "email address"

@@ -148,10 +148,24 @@ def step_detect_cc(context, values_str):
     context.detected_patterns = detect_patterns(values)
 
 
+@when('I run pattern detection on values "{values_str}"')
+def step_detect_generic(context, values_str):
+    from atelier.classify.features import detect_patterns
+    values = [v.strip() for v in values_str.split(",")]
+    context.detected_patterns = detect_patterns(values)
+
+
 @then('the detected patterns should include "{pattern}"')
 def step_check_detected_pattern(context, pattern):
     assert pattern in context.detected_patterns, (
         f"{pattern} not in {context.detected_patterns}"
+    )
+
+
+@then('the detected patterns should not include "{pattern}"')
+def step_check_detected_pattern_absent(context, pattern):
+    assert pattern not in context.detected_patterns, (
+        f"{pattern} unexpectedly in {context.detected_patterns}"
     )
 
 
