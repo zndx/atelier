@@ -11,6 +11,7 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import {
@@ -584,11 +585,12 @@ export default function Status() {
             {status?.config ? (
               <Descriptions column={1} size="small">
                 <Descriptions.Item label="Agent Model">
-                  <Tag>{status.config.agent_model}</Tag>
-                  {status.config.model_discovery?.source === "bedrock_arn" && (
-                    <Text type="secondary" style={{ marginLeft: 4, fontSize: 12 }}>
-                      ({status.config.model_discovery.current_model})
-                    </Text>
+                  {status.config.model_discovery?.source === "bedrock_arn" ? (
+                    <Tooltip title={status.config.agent_model}>
+                      <Tag>{status.config.model_discovery.current_model}</Tag>
+                    </Tooltip>
+                  ) : (
+                    <Tag>{status.config.agent_model}</Tag>
                   )}
                   {status.config.model_discovery?.upgrade_available && (
                     <Tag color="gold" style={{ marginLeft: 8 }}>
