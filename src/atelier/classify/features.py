@@ -22,7 +22,15 @@ _PATTERNS: dict[str, re.Pattern] = {
         r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     ),
     "phone_pattern": re.compile(
-        r"^[\+]?[\d\s\-\(\)\.]{7,20}$"
+        # Require phone-like formatting: a + prefix, parenthesized area
+        # code, or digit groups separated by hyphens/spaces/dots.
+        # Bare digit strings like "75000" or "1234.56" must NOT match.
+        r"^(?:"
+        r"\+[\d\s\-\(\)\.]{7,19}"                        # +1-555-123-4567
+        r"|\([\d]{2,4}\)[\s\-\.]?[\d\s\-\.]{4,15}"       # (555) 987-6543
+        r"|[\d]{1,4}[\s\-]+[\d][\d\s\-\.]{4,15}"         # 555-123-4567, 1 800 555 0199
+        r"|[\d]{2,4}\.[\d]{2,4}\.[\d]{4,}"                # 555.123.4567
+        r")$"
     ),
     "ssn_pattern": re.compile(
         r"^\d{3}-\d{2}-\d{4}$"
@@ -144,8 +152,33 @@ def _generate_value_description(
     return "column of text values"
 
 
+_PHONE_SUPPRESSORS: frozenset[str] = frozenset({
+    "ssn_pattern",
+    "date_iso_pattern",
+    "credit_card_pattern",
+    "ipv4_pattern",
+    "postal_code_pattern",
+    "monetary_pattern",
+    "iban_pattern",
+})
+"""Patterns that, when present, suppress phone_pattern.
+
+The phone regex ``^[\\+]?[\\d\\s\\-\\(\\)\\.]{7,20}$`` is intentionally
+broad (any 7-20 char digit-heavy string). That's correct for recall, but
+it also matches dates, SSNs, amounts, account numbers, etc. When a more
+specific pattern already fired on the same values, the phone match is
+almost certainly a false positive.
+"""
+
+
 def detect_patterns(values: list[str]) -> list[str]:
-    """Detect which value patterns are present in a sample."""
+    """Detect which value patterns are present in a sample.
+
+    A pattern fires when >= 1/3 of sample values match.  The broad
+    ``phone_pattern`` is suppressed when a more specific pattern
+    (date, SSN, credit card, etc.) already matched — see
+    :data:`_PHONE_SUPPRESSORS`.
+    """
     if not values:
         return []
     hits: list[str] = []
@@ -153,7 +186,17 @@ def detect_patterns(values: list[str]) -> list[str]:
         match_count = sum(1 for v in values if pat.match(v.strip()))
         if match_count >= max(1, len(values) // 3):
             hits.append(name)
+
+    # Suppress phone_pattern when a more specific digit-heavy pattern fired.
+    if "phone_pattern" in hits and hits_any_suppressor(hits):
+        hits.remove("phone_pattern")
+
     return sorted(hits)
+
+
+def hits_any_suppressor(hits: list[str]) -> bool:
+    """True when *hits* contains any pattern that suppresses phone_pattern."""
+    return bool(_PHONE_SUPPRESSORS.intersection(hits))
 
 
 def _shannon_entropy(values: list[str]) -> float:
