@@ -114,6 +114,20 @@ TOOLS = [
             "required": ["reason"],
         },
     },
+    {
+        "name": "retrain_svm",
+        "description": (
+            "Retrain the SVM classifier on blended synthetic + frontier LLM "
+            "labels. Call when you judge enough new frontier labels have "
+            "accumulated to improve the SVM's accuracy. The retrained SVM "
+            "will be used in subsequent ML validation passes. Returns the "
+            "number of frontier labels used and training statistics."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 
@@ -132,6 +146,9 @@ with enriched context.
 - revisit_columns: Re-classify selected columns with enriched context
 - check_convergence: See overall metrics (coverage, mean K, trend)
 - declare_converged: Stop when further iteration won't help
+- retrain_svm: Retrain the SVM on accumulated frontier labels (blended with
+  synth data). Call after revisiting several batches to let the SVM learn
+  from the latest classifications.
 
 ## Strategy
 1. Start by checking the conflict report — which columns need attention?
@@ -327,6 +344,68 @@ def _handle_get_column_detail(
     }
 
 
+def _handle_retrain_svm(
+    state: BootstrapState,
+    samples: dict[str, ColumnSample],
+    boot_cfg: BootstrapConfig,
+    cfg: AtelierConfig,
+) -> dict[str, Any]:
+    """Retrain SVM on blended synth + frontier labels, hot-swap."""
+    from pathlib import Path
+    from atelier.classify import ml_inference
+    from atelier.classify.ml_train import train_svm_on_frontier_labels
+
+    _project_root = Path(__file__).resolve().parent.parent.parent.parent
+    results_dir = _project_root / "build" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    svm_path = results_dir / "svm_frontier_agent.pkl"
+
+    synth_dir = _project_root / "build" / "data" / "synth"
+    result = train_svm_on_frontier_labels(
+        state, samples, svm_path,
+        synth_dir=synth_dir if synth_dir.exists() else None,
+        min_frontier_labels=boot_cfg.frontier_svm_min_labels,
+    )
+
+    if result is None:
+        frontier_count = sum(
+            1 for src in state.label_source.values()
+            if src in ("llm", "llm_revisit")
+        )
+        return {
+            "retrained": False,
+            "reason": (
+                f"Below threshold: {frontier_count} frontier labels "
+                f"(min={boot_cfg.frontier_svm_min_labels})"
+            ),
+        }
+
+    # Hot-swap
+    ml_inference.reset()
+    ml_inference.configure_paths(
+        svm_path=str(svm_path),
+        catboost_path=cfg.classify_catboost_model_path,
+    )
+
+    frontier_count = sum(
+        1 for src in state.label_source.values()
+        if src in ("llm", "llm_revisit")
+    )
+    state.svm_retrain_count = frontier_count
+    state.svm_frontier_path = str(svm_path)
+
+    return {
+        "retrained": True,
+        "frontier_samples": frontier_count,
+        "total_labels": len(state.labels),
+        "classes": len(set(
+            code for name, code in state.labels.items()
+            if state.label_source.get(name) in ("llm", "llm_revisit")
+        )),
+        "model_path": str(svm_path),
+    }
+
+
 def _handle_declare_converged(
     state: BootstrapState,
     reason: str,
@@ -410,6 +489,7 @@ def _dispatch_tool(
     tool_input: dict[str, Any],
     state: BootstrapState,
     boot_cfg: BootstrapConfig,
+    cfg: AtelierConfig,
     column_names: list[str],
     samples: dict[str, ColumnSample],
     column_table: dict[str, str],
@@ -453,6 +533,9 @@ def _dispatch_tool(
 
     elif tool_name == "declare_converged":
         return _handle_declare_converged(state, tool_input.get("reason", ""))
+
+    elif tool_name == "retrain_svm":
+        return _handle_retrain_svm(state, samples, boot_cfg, cfg)
 
     else:
         return {"error": f"Unknown tool: {tool_name}"}
@@ -569,7 +652,7 @@ def run_agent_loop(
 
                 result = _dispatch_tool(
                     block.name, block.input,
-                    state, boot_cfg, column_names, samples,
+                    state, boot_cfg, cfg, column_names, samples,
                     column_table, category_set, frame,
                     backend, system_prompt, has_embeddings, discounts,
                 )

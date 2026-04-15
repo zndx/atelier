@@ -98,6 +98,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
+    "classify.bootstrap.frontier_svm_retrain": ("classify_bootstrap_frontier_svm_retrain", bool),
+    "classify.bootstrap.frontier_svm_min_labels": ("classify_bootstrap_frontier_svm_min_labels", int),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
     "classify.discounts.svm": ("classify_discount_svm", float),
@@ -269,6 +271,8 @@ class AtelierConfig:
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 0.95
     classify_bootstrap_max_total_llm_calls: int = 5000
+    classify_bootstrap_frontier_svm_retrain: bool = True
+    classify_bootstrap_frontier_svm_min_labels: int = 20
 
     # DST discount factors
     classify_discount_cosine: float = 0.30

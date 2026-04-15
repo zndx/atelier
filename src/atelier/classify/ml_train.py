@@ -10,6 +10,7 @@ import csv
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,104 @@ def train_svm(
     classifier = SVMClassifier()
     classifier.fit(texts, labels)
     classifier.save(output_path)
+    return output_path
+
+
+def train_svm_on_frontier_labels(
+    state,
+    samples_by_name: dict[str, Any],
+    output_path: Path,
+    *,
+    synth_dir: Path | None = None,
+    min_frontier_labels: int = 20,
+    min_classes: int = 3,
+) -> Path | None:
+    """Train SVM on blended synthetic + frontier LLM labels.
+
+    Frontier labels come from the Opus-tier LLM sweep (label_source
+    in ("llm", "llm_revisit")).  Synth data provides broad vocabulary
+    coverage; frontier labels provide corpus-specific signal.
+
+    DST independence is preserved because the SVM operates on sparse
+    TF-IDF features and is trained on frontier-model (Opus) labels,
+    while the LLM mass function in DST fusion uses the subagent model
+    (Sonnet/Haiku).
+
+    Args:
+        state: BootstrapState with labels and label_source.
+        samples_by_name: Column samples keyed by name.
+        output_path: Where to save the frontier-trained SVM.
+        synth_dir: Optional synth data dir for blending.
+        min_frontier_labels: Minimum frontier labels to proceed.
+        min_classes: Minimum distinct classes to proceed.
+
+    Returns:
+        Path to saved model, or None if thresholds not met.
+    """
+    import time
+    from atelier.classify.svm_classifier import SVMClassifier, build_svm_text
+
+    # Collect frontier labels (LLM-sourced, not propagated)
+    frontier_texts: list[str] = []
+    frontier_labels: list[str] = []
+    for name, code in state.labels.items():
+        source = state.label_source.get(name, "")
+        if source not in ("llm", "llm_revisit"):
+            continue
+        col = samples_by_name.get(name)
+        if col is None:
+            continue
+        text = build_svm_text(col.name, col.column_type, col.values[:5])
+        frontier_texts.append(text)
+        frontier_labels.append(code)
+
+    frontier_count = len(frontier_texts)
+    if frontier_count < min_frontier_labels:
+        logger.info(
+            "Frontier SVM skip: %d labels < %d minimum",
+            frontier_count, min_frontier_labels,
+        )
+        return None
+
+    distinct_classes = len(set(frontier_labels))
+    if distinct_classes < min_classes:
+        logger.info(
+            "Frontier SVM skip: %d classes < %d minimum",
+            distinct_classes, min_classes,
+        )
+        return None
+
+    # Blend with synth data for vocabulary coverage
+    synth_texts: list[str] = []
+    synth_labels: list[str] = []
+    if synth_dir and synth_dir.exists():
+        try:
+            columns, ground_truth = _load_synth_data(synth_dir)
+            for col_name, values in columns.items():
+                code = ground_truth.get(col_name)
+                if not code:
+                    continue
+                text = build_svm_text(col_name, sample_values=values[:5])
+                synth_texts.append(text)
+                synth_labels.append(code)
+        except Exception as e:
+            logger.warning("Failed to load synth data for blending: %s", e)
+
+    texts = synth_texts + frontier_texts
+    labels = synth_labels + frontier_labels
+
+    t0 = time.monotonic()
+    classifier = SVMClassifier()
+    classifier.fit(texts, labels)
+    classifier.save(output_path)
+    elapsed = time.monotonic() - t0
+
+    logger.info(
+        "Frontier SVM trained: %d frontier + %d synth = %d samples, "
+        "%d classes, %.1fs → %s",
+        frontier_count, len(synth_texts), len(texts),
+        len(set(labels)), elapsed, output_path,
+    )
     return output_path
 
 

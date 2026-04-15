@@ -103,6 +103,61 @@ class probabilities but per-class variance estimates. High variance
 translates to a higher DST discount factor — uncertain ML predictions
 carry less evidential weight in the fusion.
 
+## Frontier-Label SVM Training (M9)
+
+After the bootstrap LLM sweep, the pipeline has high-quality frontier labels
+from the Opus-tier model. `train_svm_on_frontier_labels()` **blends** these
+with synthetic data and retrains the SVM progressively:
+
+```
+synth_*.csv + frontier LLM labels
+        ↓
+  train_svm_on_frontier_labels()
+        ↓
+  ┌─────────────────────────────────────┐
+  │  Synth texts  +  Frontier texts     │
+  │  (vocabulary   (corpus-specific     │
+  │   coverage)     signal)             │
+  └──────────────┬──────────────────────┘
+                 ↓
+         SVMClassifier.fit()
+                 ↓
+         svm_frontier.pkl
+```
+
+### Three-Phase Progressive Retraining
+
+1. **Post-sweep** (always): After the first LLM sweep labels frontier columns,
+   retrain immediately so the SVM carries corpus-specific signal into the
+   first ML validation pass.
+
+2. **Iterative** (during convergence): In the programmatic loop, retrain
+   after each revisit iteration that adds ≥10 new frontier labels. In the
+   agent-driven loop, the agent calls `retrain_svm` when it judges enough
+   new labels have accumulated.
+
+3. **Final** (only if not converged): Last-resort retrain with all accumulated
+   labels before the final classification pass. Skipped when already converged
+   (the last iteration's model is already in use).
+
+### Why Blend Synth + Frontier
+
+- **Synth data**: Covers all vocabulary categories — ensures the SVM can
+  classify categories not present in the frontier sample
+- **Frontier labels**: Corpus-specific patterns — column names, value formats,
+  and type distributions that synth generators can't capture
+- **Together**: Breadth from synth, depth from frontier
+
+### Hot-Swap Mechanism
+
+After retraining, the SVM is hot-swapped via:
+1. `ml_inference.reset()` — clears cached models and paths
+2. `ml_inference.configure_paths(svm_path=..., catboost_path=...)` — points
+   the lazy-loader at the frontier-trained model
+
+The model file lives at `results_dir/svm_frontier.pkl` (run-specific),
+preserving `build/models/svm.pkl` as the synth-trained fallback.
+
 ## Train-Eval Cycle
 
 `train_eval_cycle.py` orchestrates the full loop:
@@ -162,7 +217,7 @@ Set to `false` on CAI if background threads cause runtime issues.
 | `synth_generators.py` | 316+ hand-coded value generators |
 | `synth_registry.py` | Three-layer registry: hand-coded > template > inferred |
 | `synth.py` | Synthetic data generation with diverse column names |
-| `ml_train.py` | Training orchestrator (SVM + CatBoost) |
+| `ml_train.py` | Training orchestrator: synth-only + frontier-label blended training |
 | `catboost_classifier.py` | CatBoost with virtual ensemble uncertainty |
 | `svm_classifier.py` | Pipeline+FeatureUnion: dual TF-IDF + LinearSVC + Platt scaling (signals) |
 | `train_eval_cycle.py` | Generate → train → classify → evaluate loop |

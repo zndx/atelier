@@ -102,32 +102,68 @@ Key implementation details:
   feature importance
 - **`is_fitted`** property for safe state checking before prediction
 
-#### Future: Cross-Model Distillation (M9)
+#### Frontier-Label SVM Training (M9)
 
 The Monte Carlo sampling architecture enables a stronger training signal for
-the SVM without breaking independence. The key insight: train the SVM on
-**frontier model (e.g., Opus) labels** from the stratified importance sample,
-then combine the SVM in DST with **subagent model (e.g., Sonnet/Haiku)**
-predictions during bulk classification:
+the SVM without breaking independence. After the bootstrap LLM sweep, the
+SVM is **retrained on blended synth + frontier labels** — high-quality
+classifications from the Opus-tier model on the stratified importance sample.
 
 ```
-Opus (frontier, budget-capped 500 cols)
-  → labels stratified sample with maximum accuracy
-  → SVM trained on these labels (TF-IDF distillation)
-  → SVM runs on ALL columns (cheap, fast)
-  → DST combines SVM + Sonnet + cosine + CatBoost + patterns + name match
-  → High-K columns escalated back to Opus (targeted, not bulk)
-  → Convergence: Opus accuracy propagated to full corpus via SVM + DST
+_llm_sweep() → frontier columns get Opus labels
+     ↓
+  RETRAIN #1: Blend synth data + frontier labels
+  SVM hot-swapped before first ML validation
+     ↓
+_run_ml_validation() — uses frontier-trained SVM
+     ↓
+  Convergence loop:
+    Agent path: agent calls retrain_svm tool when it judges
+                enough new labels have accumulated
+    Programmatic path: retrain after each revisit iteration
+                       that adds ≥10 new frontier labels
+     ↓
+  RETRAIN #3 (final): Only if NOT converged
+     ↓
+  CLASSIFYING — final pass uses best available SVM
 ```
 
-This preserves independence because:
-- Different models at training time (Opus) vs. fusion time (Sonnet/Haiku)
-- Different feature spaces (sparse TF-IDF vs. semantic LLM reasoning)
-- Different inductive biases (maximum-margin classifier vs. autoregressive LM)
+**Blending** ensures categories not in the frontier sample still have
+coverage from synth data (broad vocabulary), while corpus-specific patterns
+dominate via frontier signal (depth).
+
+**Independence is preserved** because:
+- Training signal: Opus (frontier model, used in LLM sweep)
+- Bulk LLM source in DST fusion: Sonnet/Haiku (subagent model)
+- SVM feature space: sparse TF-IDF (orthogonal to all other sources)
+
+The three independence axes:
+1. Different models at training time (Opus) vs. fusion time (Sonnet/Haiku)
+2. Different feature spaces (sparse TF-IDF vs. semantic LLM reasoning)
+3. Different inductive biases (maximum-margin classifier vs. autoregressive LM)
 
 The SVM becomes the **transmission mechanism** for frontier-quality signal —
 MC sampling bounds the Opus cost; the SVM amortizes Opus's accuracy across
 the entire table-space.
+
+##### Configuration
+
+```hocon
+classify.bootstrap {
+  frontier_svm_retrain = true    # Enable/disable frontier retraining
+  frontier_svm_min_labels = 20   # Minimum frontier labels to trigger retrain
+}
+```
+
+##### Implementation
+
+- `train_svm_on_frontier_labels()` in `ml_train.py` — collects frontier
+  labels (`label_source in ("llm", "llm_revisit")`), blends with synth data,
+  trains `SVMClassifier`, saves to `results_dir/svm_frontier.pkl`
+- `_maybe_retrain_svm()` in `pipeline.py` — encapsulates retrain + hot-swap
+  via `ml_inference.reset()` + `configure_paths()`
+- Three call sites in pipeline: post-sweep, iterative, final (if not converged)
+- Agent tool `retrain_svm` for agent-driven convergence path
 
 ### Dempster's Rule of Combination
 

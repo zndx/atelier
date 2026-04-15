@@ -8,7 +8,7 @@ and convergence trends.
 ## Agent Convergence Loop
 
 The agent loop (`src/atelier/classify/agent_loop.py`) wraps the bootstrap
-pipeline functions as five Claude tools. Claude receives an initial state
+pipeline functions as six Claude tools. Claude receives an initial state
 summary and iteratively calls tools until it determines the classification
 has converged.
 
@@ -19,16 +19,17 @@ has converged.
 2. Agent calls get_conflict_report → identifies high-K columns
 3. Agent calls get_column_detail → inspects evidence for specific columns
 4. Agent calls revisit_columns → re-classifies with enriched context
-5. Agent calls check_convergence → verifies K trend is decreasing
-6. Repeat 2-5 until satisfied
-7. Agent calls declare_converged with reason
+5. Agent calls retrain_svm → SVM learns from accumulated frontier labels
+6. Agent calls check_convergence → verifies K trend is decreasing
+7. Repeat 2-6 until satisfied
+8. Agent calls declare_converged with reason
 ```
 
 The conversation loop runs up to `classify_agent_max_turns` (default 10)
 Messages API round-trips. Each tool call returns structured JSON that the
 agent uses to plan its next action.
 
-### Five Tools
+### Six Tools
 
 | Tool | Input | Returns | Purpose |
 |------|-------|---------|---------|
@@ -37,6 +38,13 @@ agent uses to plan its next action.
 | `check_convergence` | — | coverage, mean_k, k_trend, iteration history | Assess overall convergence progress |
 | `get_column_detail` | `column_name` (string) | Per-source evidence breakdown, sample values, belief interval | Deep-dive into a specific column |
 | `declare_converged` | `reason` (string) | Confirmation | Exit loop with stated rationale |
+| `retrain_svm` | — | frontier_samples, classes, model_path | Retrain SVM on blended synth + frontier labels |
+
+The `retrain_svm` tool (M9) lets the agent decide when to retrain the SVM
+classifier on accumulated frontier LLM labels. The retrained SVM is
+hot-swapped via `ml_inference.reset()` + `configure_paths()` and used in
+subsequent ML validation passes. The agent calls this when it judges enough
+new frontier labels have accumulated to improve classification accuracy.
 
 ### Agent System Prompt
 
@@ -96,6 +104,8 @@ classify {
         k_threshold = 0.2
         coverage_target = 0.95
         max_total_llm_calls = 5000
+        frontier_svm_retrain = true
+        frontier_svm_min_labels = 20
     }
 }
 

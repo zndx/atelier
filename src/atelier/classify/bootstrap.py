@@ -52,6 +52,8 @@ class BootstrapConfig:
     columns_per_call: int = 50
     max_total_llm_calls: int = 5000
     llm_discount: float = 0.10
+    frontier_svm_retrain: bool = True
+    frontier_svm_min_labels: int = 20
 
 
 def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
@@ -63,6 +65,8 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         columns_per_call=cfg.classify_llm_columns_per_call,
         max_total_llm_calls=cfg.classify_bootstrap_max_total_llm_calls,
         llm_discount=cfg.classify_llm_discount,
+        frontier_svm_retrain=cfg.classify_bootstrap_frontier_svm_retrain,
+        frontier_svm_min_labels=cfg.classify_bootstrap_frontier_svm_min_labels,
     )
 
 
@@ -109,6 +113,9 @@ class BootstrapState:
     mc_sample_fraction: float = 1.0
     # Row-level MC: per-column label history across row-sample iterations
     row_labels_history: dict[str, list[str]] = field(default_factory=dict)
+    # Frontier SVM retraining state
+    svm_retrain_count: int = 0
+    svm_frontier_path: str | None = None
 
 
 # ── Phase helpers ────────────────────────────────────────────────

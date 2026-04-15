@@ -248,3 +248,33 @@ def step_k_decrease(context):
 def step_should_not_stop(context):
     from atelier.classify.bootstrap import should_stop_early
     assert not should_stop_early(context.k_state), "Expected should_stop_early to return False"
+
+
+# ── Frontier SVM retraining ─────────────────────────────────────
+
+
+@then("the SVM should have been retrained on frontier labels")
+def step_svm_retrained(context):
+    retrained = context.bootstrap_result.get("svm_retrained_on_frontier", False)
+    assert retrained, (
+        "Expected svm_retrained_on_frontier=True in bootstrap result, "
+        f"got: {context.bootstrap_result.get('svm_retrained_on_frontier')}"
+    )
+
+
+@then("the frontier-trained SVM should produce valid probabilities")
+def step_frontier_svm_valid(context):
+    model_path = context.bootstrap_result.get("svm_frontier_model_path")
+    assert model_path, "No svm_frontier_model_path in bootstrap result"
+
+    from pathlib import Path
+    from atelier.classify.svm_classifier import SVMClassifier, build_svm_text
+
+    svm = SVMClassifier.load(Path(model_path))
+    text = build_svm_text("email_address", sample_values=["test@example.com"])
+    proba = svm.predict_proba_single(text)
+    assert proba, "SVM predict_proba_single returned empty dict"
+    total = sum(proba.values())
+    assert abs(total - 1.0) < 0.01, (
+        f"SVM probabilities sum to {total:.4f}, expected ~1.0"
+    )

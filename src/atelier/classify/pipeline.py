@@ -61,6 +61,53 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
+def _maybe_retrain_svm(
+    state,
+    samples_by_name: dict[str, ColumnSample],
+    svm_frontier_path: Path,
+    boot_cfg,
+    cfg,
+    last_retrain_count: int,
+    min_new_labels: int = 10,
+) -> tuple[bool, int]:
+    """Retrain SVM on blended synth+frontier if meaningful accumulation.
+
+    Returns (retrained, current_frontier_count).
+    """
+    from atelier.classify import ml_inference
+    from atelier.classify.ml_train import train_svm_on_frontier_labels
+
+    # Count frontier labels
+    frontier_count = sum(
+        1 for src in state.label_source.values()
+        if src in ("llm", "llm_revisit")
+    )
+
+    if frontier_count - last_retrain_count < min_new_labels:
+        return False, last_retrain_count
+
+    if frontier_count < boot_cfg.frontier_svm_min_labels:
+        return False, last_retrain_count
+
+    synth_dir = _PROJECT_ROOT / "build" / "data" / "synth"
+    result = train_svm_on_frontier_labels(
+        state, samples_by_name, svm_frontier_path,
+        synth_dir=synth_dir if synth_dir.exists() else None,
+        min_frontier_labels=boot_cfg.frontier_svm_min_labels,
+    )
+    if result is None:
+        return False, last_retrain_count
+
+    # Hot-swap: reset cached models then reconfigure paths
+    ml_inference.reset()
+    ml_inference.configure_paths(
+        svm_path=str(svm_frontier_path),
+        catboost_path=cfg.classify_catboost_model_path,
+    )
+    logger.info("SVM hot-swapped to frontier-trained model: %s", svm_frontier_path)
+    return True, frontier_count
+
+
 def run_classification_pipeline(
     cfg,
     fsm: AgentFSM,
@@ -309,6 +356,17 @@ def run_classification_pipeline(
             coverage * 100, state.llm_calls_total, state.propagated_count,
         )
 
+        # ── Frontier SVM retrain #1: after first LLM sweep ───────
+        svm_retrained = False
+        svm_retrain_count = 0
+        svm_frontier_path = results_dir / "svm_frontier.pkl"
+        if boot_cfg.frontier_svm_retrain:
+            svm_retrained, svm_retrain_count = _maybe_retrain_svm(
+                state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
+                last_retrain_count=0,
+                min_new_labels=boot_cfg.frontier_svm_min_labels,
+            )
+
         # ── VALIDATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.VALIDATING, progress={
             "phase": "ml_validation",
@@ -409,6 +467,15 @@ def run_classification_pipeline(
                     disagreements, samples_by_name, column_table, category_set,
                 )
 
+                # ── Frontier SVM retrain #2: incremental ─────────
+                if boot_cfg.frontier_svm_retrain:
+                    retrained, svm_retrain_count = _maybe_retrain_svm(
+                        state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
+                        last_retrain_count=svm_retrain_count,
+                    )
+                    if retrained:
+                        svm_retrained = True
+
                 fsm.advance(run_id, FSMState.VALIDATING, progress={
                     "phase": "revalidation",
                     "iteration": iteration,
@@ -456,6 +523,16 @@ def run_classification_pipeline(
         coverage = _coverage(state, column_names)
         mean_k = _mean_k(state, column_names)
         converged = coverage >= boot_cfg.coverage_target and mean_k < boot_cfg.k_threshold
+
+        # ── Frontier SVM retrain #3: final (only if not converged)
+        if boot_cfg.frontier_svm_retrain and not converged:
+            retrained, svm_retrain_count = _maybe_retrain_svm(
+                state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
+                last_retrain_count=svm_retrain_count,
+                min_new_labels=1,
+            )
+            if retrained:
+                svm_retrained = True
 
         fsm.advance(run_id, FSMState.CLASSIFYING, progress={
             "phase": "final_classification",
@@ -518,6 +595,10 @@ def run_classification_pipeline(
         summary["mc_sample_fraction"] = (
             mc_plan.effective_sample_fraction if mc_plan else 1.0
         )
+        summary["svm_retrained_on_frontier"] = svm_retrained
+        if svm_retrained:
+            summary["svm_frontier_training_samples"] = svm_retrain_count
+            summary["svm_frontier_model_path"] = str(svm_frontier_path)
         summary["iteration_metrics"] = [
             {
                 "iteration": m.iteration,
