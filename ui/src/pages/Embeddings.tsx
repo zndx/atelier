@@ -29,7 +29,7 @@ export default function Embeddings() {
   const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState<string | null>(null);
   const [fsmState, setFsmState] = useState<string | null>(null);
-  const retryRef = useRef<() => void>();
+  const retryRef = useRef<(() => void) | undefined>(undefined);
 
   const initialize = useCallback(async (signal: { cancelled: boolean }) => {
     try {
