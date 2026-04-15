@@ -107,22 +107,17 @@
   # devenv provides env vars via dotenv.enable — no materialized config needed here.
   # For conftest/policy/CI, run `just resolve-config` separately.
   processes = {
-    # One-shot: apply migrations + seed keystone agents.
-    # Runs after PostgreSQL is healthy, before gRPC server starts.
-    db-bootstrap = {
-      exec = "exec uv run python -m atelier.db.bootstrap";
-      process-compose = {
-        availability.restart = "no";
-        depends_on.postgres.condition = "process_healthy";
-      };
-    };
+    # gRPC server: runs db-bootstrap inline before starting.
+    # One-shot dependencies (process_completed_successfully) race in
+    # process-compose — folding bootstrap into the server startup
+    # eliminates the sequencing issue.
     grpc-server = {
-      exec = "exec uv run python -m atelier.server";
+      exec = "uv run python -m atelier.db.bootstrap && exec uv run python -m atelier.server";
       process-compose = {
-        depends_on.db-bootstrap.condition = "process_completed_successfully";
+        depends_on.postgres.condition = "process_healthy";
         readiness_probe = {
           exec.command = "bash -c '</dev/tcp/localhost/50051'";
-          initial_delay_seconds = 3;
+          initial_delay_seconds = 5;
           period_seconds = 2;
           failure_threshold = 15;
         };
