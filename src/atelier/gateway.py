@@ -23,11 +23,15 @@ _log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """Seed OOTB sample data on first boot."""
+    """Seed OOTB sample + discover Hive sources on boot."""
     try:
         _seed_sample_source()
     except Exception as exc:
         _log.warning("Sample source seeding skipped: %s", exc)
+    try:
+        _discover_and_register_hive_sources()
+    except Exception as exc:
+        _log.warning("Hive source discovery skipped: %s", exc)
     yield
 
 
@@ -146,6 +150,52 @@ def _seed_sample_source() -> None:
         )
     except Exception as exc:
         _log.warning("Sample source seeding failed: %s", exc)
+
+
+def _discover_and_register_hive_sources() -> None:
+    """Probe configured Hive connections and register discovered annotation sources.
+
+    For each connection × database that contains an ``annotations`` table
+    with the expected schema, registers a data source via the DAO.
+    Idempotent — ``get_or_create_data_source`` is a no-op for existing IDs.
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.data.connections import discover_hive_sources
+        from atelier.db.dao import AtelierDao
+    except Exception:
+        return  # DB or config not available yet
+
+    cfg = load_config()
+    if not cfg.cml_data_connection_names:
+        return
+
+    discoveries = discover_hive_sources(cfg)
+    if not discoveries:
+        return
+
+    try:
+        dao = AtelierDao()
+        for d in discoveries:
+            dao.get_or_create_data_source(
+                source_id=d["source_id"],
+                source_type="hive",
+                display_name=d["display_name"],
+                source_uri=d["source_id"],
+                vocabulary_mode="hive",
+                metadata=json.dumps({
+                    "connection": d["connection"],
+                    "database": d["database"],
+                    "annotation_count": d["annotation_count"],
+                    "schema_format": d["schema_format"],
+                }),
+            )
+            _log.info(
+                "Registered Hive source: %s (%d annotations, %s format)",
+                d["source_id"], d["annotation_count"], d["schema_format"],
+            )
+    except Exception as exc:
+        _log.warning("Hive source registration failed: %s", exc)
 
 
 # ── REST → gRPC bridge ────────────────────────────────────────────

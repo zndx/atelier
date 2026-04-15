@@ -21,3 +21,8 @@ Feature: Pipeline configuration lifecycle
     When I materialize the config to a temporary path
     And I validate the materialized config
     Then validation returns no errors
+
+  @tier-0
+  Scenario: Data connection names are parsed from HOCON config
+    When I load the config with ATELIER_DATA_CONNECTIONS set to "conn-a, conn-b"
+    Then the parsed connection names should be ["conn-a", "conn-b"]

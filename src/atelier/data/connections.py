@@ -105,3 +105,119 @@ def _is_nan(v) -> bool:
         return isinstance(v, float) and math.isnan(v)
     except Exception:
         return False
+
+
+# ── Hive data source discovery ───────────────────────────────────
+
+# Minimum columns that identify a valid annotations table.
+_LEGACY_REQUIRED = {"id", "ontology", "annotation"}
+_UNIVERSAL_REQUIRED = {"code", "label"}
+
+
+def _normalize_key(k: str) -> str:
+    """Strip Hive table-qualification, BOM, quotes; lowercase + underscores."""
+    s = str(k)
+    if "." in s:
+        s = s.rsplit(".", 1)[-1]
+    s = s.strip().strip("'\"\ufeff").lower().replace(" ", "_")
+    return s
+
+
+def _list_databases(conn) -> list[str]:
+    """Return database names from a cml.data_v1 connection."""
+    df = conn.get_pandas_dataframe("SHOW DATABASES")
+    return [str(v) for v in df.iloc[:, 0].tolist()]
+
+
+def _has_annotations_table(conn, database: str) -> bool:
+    """Check whether *database* contains an ``annotations`` table."""
+    df = conn.get_pandas_dataframe(f"SHOW TABLES IN {database}")
+    tables = {str(v).lower() for v in df.iloc[:, 0].tolist()}
+    return "annotations" in tables
+
+
+def _validate_annotations_schema(conn, database: str) -> dict | None:
+    """Fetch one row from ``{database}.annotations`` and validate schema.
+
+    Returns a metadata dict on success, ``None`` if the schema doesn't match.
+    """
+    df = conn.get_pandas_dataframe(
+        f"SELECT * FROM {database}.annotations LIMIT 1"
+    )
+    if df.empty:
+        return None
+
+    keys = {_normalize_key(c) for c in df.columns}
+    if _LEGACY_REQUIRED <= keys:
+        fmt = "legacy"
+    elif _UNIVERSAL_REQUIRED <= keys:
+        fmt = "universal"
+    else:
+        return None
+
+    # Get row count for metadata
+    count_df = conn.get_pandas_dataframe(
+        f"SELECT count(*) AS cnt FROM {database}.annotations"
+    )
+    count = int(count_df.iloc[0, 0]) if not count_df.empty else 0
+
+    return {"schema_format": fmt, "annotation_count": count}
+
+
+def discover_hive_sources(cfg: "AtelierConfig") -> list[dict]:
+    """Probe configured connections for annotations tables.
+
+    For each connection × database, checks for an ``annotations`` table
+    with the expected schema (legacy or universal format).  Returns a list
+    of discovery results suitable for data source registration.
+
+    Gracefully skips connections/databases that fail.
+    Only runs on CAI runtimes (``cml.data_v1`` required).
+    """
+    import logging
+
+    log = logging.getLogger(__name__)
+
+    if not _cml_available():
+        return []
+
+    import cml.data_v1 as cmldata  # type: ignore[import-not-found]
+
+    results: list[dict] = []
+    for conn_name in cfg.cml_data_connection_names:
+        try:
+            conn = cmldata.get_connection(conn_name)
+            databases = _list_databases(conn)
+        except Exception as exc:
+            log.warning("Hive discovery: connection '%s' failed: %s", conn_name, exc)
+            continue
+
+        for db in databases:
+            try:
+                if not _has_annotations_table(conn, db):
+                    continue
+                meta = _validate_annotations_schema(conn, db)
+                if meta is None:
+                    log.debug(
+                        "Hive discovery: %s/%s has annotations table but wrong schema",
+                        conn_name, db,
+                    )
+                    continue
+                source_id = f"{conn_name}/{db}"
+                results.append({
+                    "connection": conn_name,
+                    "database": db,
+                    "source_id": source_id,
+                    "display_name": f"Hive: {conn_name}/{db}",
+                    "annotation_count": meta["annotation_count"],
+                    "schema_format": meta["schema_format"],
+                })
+                log.info(
+                    "Hive discovery: found %d annotations in %s/%s (%s format)",
+                    meta["annotation_count"], conn_name, db, meta["schema_format"],
+                )
+            except Exception as exc:
+                log.warning(
+                    "Hive discovery: error probing %s/%s: %s", conn_name, db, exc
+                )
+    return results

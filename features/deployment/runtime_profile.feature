@@ -43,3 +43,9 @@ Feature: CAI Runtime Profile
     Given migration files exist in "db/migrations/"
     When I parse each migration for UP/DOWN blocks
     Then every migration has a valid UP block
+
+  @tier-cai
+  Scenario: Hive annotation sources are auto-discovered on startup
+    Given ATELIER_DATA_CONNECTIONS includes a valid connection
+    When the gateway starts
+    Then a Hive data source should be registered for each connection with annotations

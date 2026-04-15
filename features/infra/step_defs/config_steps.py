@@ -71,3 +71,25 @@ def step_validate_config(context):
 def step_no_validation_errors(context):
     errors = context.validation_errors
     assert not errors, f"Validation errors: {errors}"
+
+
+@when('I load the config with ATELIER_DATA_CONNECTIONS set to "{value}"')
+def step_load_config_with_data_connections(context, value):
+    import os
+    old = os.environ.get("ATELIER_DATA_CONNECTIONS")
+    os.environ["ATELIER_DATA_CONNECTIONS"] = value
+    try:
+        context.cfg = load_config()
+    finally:
+        if old is None:
+            os.environ.pop("ATELIER_DATA_CONNECTIONS", None)
+        else:
+            os.environ["ATELIER_DATA_CONNECTIONS"] = old
+
+
+@then('the parsed connection names should be {expected}')
+def step_check_connection_names(context, expected):
+    import json
+    expected_list = json.loads(expected)
+    actual = context.cfg.cml_data_connection_names
+    assert actual == expected_list, f"Expected {expected_list}, got {actual}"
