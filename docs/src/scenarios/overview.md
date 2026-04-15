@@ -6,7 +6,7 @@ These aren't just tests. They're the design context that connects architectural 
 
 ## Active Domains
 
-**136 scenarios across 32 features, 4 domains.**
+**141 scenarios across 32 features, 4 domains.**
 
 ### Infrastructure (infra)
 
@@ -51,7 +51,7 @@ Classification pipeline, DST evidence fusion, ML classifiers, and agent orchestr
 
 | Feature | Tag | Tier | Scenarios | What it validates |
 |---------|-----|------|-----------|-------------------|
-| Classification pipeline | `@gpu` | 0 | 24 | DST belief, Dempster combination, features, patterns, name matching, pipeline E2E, Monte Carlo sampling |
+| Classification pipeline | `@gpu` | 0 | 28 | DST belief, Dempster combination, features, patterns (+ Luhn/IPv4/date/currency validation), name matching, pipeline E2E, Monte Carlo sampling |
 | Bootstrap convergence | `@bootstrap` | 0 | 11 | LLM sweep, ML validation, targeted revisit, convergence criteria, frontier SVM |
 | Agent convergence loop | `@gpu` | 0 | 6 | 6-tool agent loop, conflict reports, convergence, mock client |
 | Agent smoke test | `@agent` | 0 | 6 | Agent metadata, tool definitions, state formatting |
@@ -71,7 +71,7 @@ Classification pipeline, DST evidence fusion, ML classifiers, and agent orchestr
 
 | Tier | Requires | Scenarios | Pass locally |
 |------|----------|-----------|--------------|
-| 0 | Python only | ~115 | Yes |
+| 0 | Python only | ~120 | Yes |
 | 1 | devenv stack | ~15 | Yes (with `devenv up`) |
 | cai | Live CAI session | ~5 | Skipped (documentation-only) |
 

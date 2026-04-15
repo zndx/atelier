@@ -15,12 +15,12 @@ has converged.
 ### Flow
 
 ```
-1. Initial state → agent sees coverage, mean K, disagreement count
-2. Agent calls get_conflict_report → identifies high-K columns
-3. Agent calls get_column_detail → inspects evidence for specific columns
+1. Initial state → agent sees mean gap, mean belief, coverage, K (diagnostic)
+2. Agent calls get_conflict_report → identifies uncertain columns (high gap or low belief)
+3. Agent calls get_column_detail → inspects per-source evidence breakdown
 4. Agent calls revisit_columns → re-classifies with enriched context
 5. Agent calls retrain_svm → SVM learns from accumulated frontier labels
-6. Agent calls check_convergence → verifies K trend is decreasing
+6. Agent calls check_convergence → verifies gap trend + belief floor
 7. Repeat 2-6 until satisfied
 8. Agent calls declare_converged with reason
 ```
@@ -33,9 +33,9 @@ agent uses to plan its next action.
 
 | Tool | Input | Returns | Purpose |
 |------|-------|---------|---------|
-| `get_conflict_report` | `k_threshold` (float) | High-K columns with conflict scores, current vs ML predictions | Identify where sources disagree |
-| `revisit_columns` | `column_names` (list) | Updated labels + new conflict scores | Re-classify with enriched LLM context (includes ML prediction + K) |
-| `check_convergence` | — | coverage, mean_k, k_trend, iteration history | Assess overall convergence progress |
+| `get_conflict_report` | `k_threshold` (float) | Flagged columns with K, belief, plausibility, gap, settled flag | Identify uncertain or conflicting columns |
+| `revisit_columns` | `column_names` (list) | Updated labels + new belief intervals | Re-classify with enriched LLM context (ML prediction + belief interval) |
+| `check_convergence` | — | mean_gap, mean_bel, frac_unclear, coverage, K (diagnostic), iteration history | Assess convergence via belief-gap criteria |
 | `get_column_detail` | `column_name` (string) | Per-source evidence breakdown, sample values, belief interval | Deep-dive into a specific column |
 | `declare_converged` | `reason` (string) | Confirmation | Exit loop with stated rationale |
 | `retrain_svm` | — | frontier_samples, classes, model_path | Retrain SVM on blended synth + frontier labels |

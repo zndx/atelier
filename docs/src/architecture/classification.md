@@ -32,7 +32,7 @@ Assignment) that distributes belief across the frame of discernment:
 | Source | Type | Discount | Configurable | Status |
 |--------|------|----------|--------------|--------|
 | Cosine similarity | Sentence-transformer (all-MiniLM-L6-v2) | 0.30 | `classify.discounts.cosine` | M0 |
-| Pattern detection | 15 regex detectors | 0.10 | `classify.discounts.pattern_theta` | M0 |
+| Pattern detection | 16 regex detectors + post-regex validators | 0.25 | `classify.discounts.pattern_theta` | M0 |
 | Name matching | Column name ↔ label/abbrev/common_names | varies | `classify.discounts.name_match_*` | M0 |
 | LLM | OpenAI-compatible / Anthropic / Bedrock / Cerebras | 0.10 | `classify.llm.discount` | M1 |
 | CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | `classify.discounts.catboost_*` | M2 |
@@ -40,6 +40,16 @@ Assignment) that distributes belief across the frame of discernment:
 
 The **discount** controls how much mass goes to Θ (total ignorance). Higher
 discount = more conservative = wider belief intervals.
+
+Pattern mass is **graduated**: `detect_patterns()` returns a match fraction
+(0.0-1.0) per pattern, and `pattern_to_mass()` scales evidence mass by the
+average match fraction. A 95% match produces ~3x more mass than a 35% match,
+eliminating the binary cliff at the 1/3 detection threshold.
+
+Pattern theta (0.25) is deliberately higher than LLM theta (0.10), so the
+LLM cleanly dominates when pattern and LLM evidence conflict — the LLM
+considers full context (name, type, values, siblings), while patterns
+operate on value structure alone.
 
 ### Evidence Independence
 
@@ -94,8 +104,12 @@ Column metadata text ("email_addr | user@example.com")
 
 Key implementation details:
 
-- **`_min_class_count()`** — prevents `CalibratedClassifierCV` crash when any
-  class has fewer samples than CV folds
+- **Singleton class filtering** — `fit()` drops categories with < 2 training
+  examples before `CalibratedClassifierCV`, since `StratifiedKFold` requires
+  every class to have >= 2 samples. With 316 categories and few tables, some
+  categories inevitably have only one example. Dropped categories are logged
+  and still receive predictions from the other 5 DST evidence sources.
+- **`_min_class_count()`** — returns the actual minimum (no longer clamped to 2)
 - **`feature_importances(top_n)`** — navigates `CalibratedClassifierCV` →
   `LinearSVC` to extract `coef_`, averages absolute coefficients across classes,
   cross-references with `FeatureUnion.get_feature_names_out()` for named
@@ -175,7 +189,50 @@ m₁₂(C) = Σ{m₁(A)·m₂(B) : A∩B=C} / (1 - K)
 
 where `K = Σ{m₁(A)·m₂(B) : A∩B=∅}` is the **conflict** between sources.
 
-High K means the sources disagree — a valuable diagnostic signal.
+High K means the sources disagree — a valuable diagnostic signal. Note that
+K is **not** the convergence criterion — see [Belief-Gap Convergence](#belief-gap-convergence)
+below.
+
+### Confusable Pairs
+
+When DST evidence splits between two known-confusing categories, mass is
+redistributed from the runner-up singleton to a **compound focal element**
+representing the pair. This captures honest ambiguity instead of forcing a
+singleton prediction that may be wrong.
+
+Four confusable pairs are active (filtered to vocabulary at runtime):
+
+| Pair | Rationale |
+|------|-----------|
+| Record Identifier ↔ Device Identifier | Both are opaque identifiers; context determines which |
+| Timestamp ↔ Date of Birth | Both are temporal; DOB is a specific semantic subtype |
+| Transaction Amount ↔ Bank Account Number | Both are financial numbers |
+| IP Address ↔ Device Identifier | IP addresses can identify devices |
+
+**Mechanics**: When the top-2 singleton masses form a known pair and their
+ratio is below `confusable_ratio_threshold` (default 3.0), half of the
+runner-up's mass transfers to the pair focal element. The pair's mass
+propagates up the hierarchy via `belief_at()` — Bel at the common ancestor
+reflects the combined evidence.
+
+### Pattern Validation
+
+Pattern detection uses a two-stage architecture: 16 regex patterns for
+**recall**, plus a `_VALIDATORS` registry for **precision**. A value must
+pass both the regex AND the validator (if one exists) to count.
+
+| Validator | Pattern | Checks |
+|-----------|---------|--------|
+| `_luhn_check` | `credit_card_pattern` | Luhn checksum (ISO/IEC 7812) |
+| `_is_valid_ipv4` | `ipv4_pattern` | All 4 octets in 0-255 range |
+| `_is_plausible_date` | `date_iso_pattern`, `datetime_iso_pattern` | Month 01-12, day 01-31 |
+| `_is_iso_currency` | `iso_currency_pattern` | ISO 4217 whitelist (~40 codes) |
+
+The `phone_pattern` uses a **suppression mechanism**: when a more specific
+digit-heavy pattern also fires (SSN, date, credit card, IP, postal code,
+monetary, IBAN), the phone match is suppressed. This prevents the phone
+regex from injecting false evidence on columns whose values happen to
+contain formatted digits.
 
 ### 12 Discrete Features
 
@@ -232,12 +289,12 @@ src/atelier/classify/
 ├── __init__.py          # Public API: run_pipeline(), run_bootstrap(), get_fsm_status()
 ├── belief.py            # DST core: BeliefAssignment, FocalElement, dempster_combine()
 ├── mass_functions.py    # Evidence→mass converters (6 active)
-├── features.py          # 12 features + 8 pattern detectors
+├── features.py          # 12 features + 16 pattern detectors + 5 post-regex validators
 ├── taxonomy.py          # ReferenceCategory, HierarchicalCategorySet
 ├── embedding.py         # Sentence-transformer cosine classifier
-├── llm_backend.py       # LLM backend factory (Anthropic, OpenAI-compat, Bedrock, Cerebras)
+├── llm_backend.py       # LLM backend factory (Anthropic, OpenAI-compat, Bedrock tool-use, Cerebras)
 ├── bootstrap.py         # Bootstrap convergence loop (LLM sweep + ML validation)
-├── agent_loop.py        # Agent-driven convergence (5 Claude tools)
+├── agent_loop.py        # Agent-driven convergence (6 Claude tools)
 ├── monte_carlo.py       # MC stratified sampling for scale (pre-classify, stratify, select, propagate)
 ├── gpu.py               # GPU detection + NVIDIA driver symlink (nix+CUDA)
 ├── sampler.py           # Hive metadata sampling + fixture data loading
@@ -332,42 +389,72 @@ transform that distributes multi-element focal set mass equally among members.
 ## Bootstrap Convergence Loop
 
 The bootstrap pipeline wraps the single-pass ML pipeline in an iterative
-LLM↔ML convergence loop. It adds a 4th evidence source (LLM) and repeats
-until DST conflict K converges across all columns.
+LLM↔ML convergence loop. It adds LLM evidence and repeats until
+predictions are **settled** — measured by belief-gap convergence, not
+raw conflict K.
 
 ### Three Phases
 
 1. **LLM Sweep** (`LLM_SWEEP`): Batch-classify all columns via the configured
-   LLM backend (GLM-4.7 on vLLM, Claude, or any OpenAI-compatible endpoint).
-   Columns are sent in table-aware batches with sibling context.
+   LLM backend (Claude via Bedrock/Anthropic, or any OpenAI-compatible endpoint).
+   Columns are sent in table-aware batches with sibling context. If every batch
+   fails, the sweep raises `RuntimeError` (fail-fast) instead of silently
+   proceeding with zero labels.
 
-2. **ML Validation** (`VALIDATING`): Run the existing 3-source ML pipeline
-   plus the new LLM mass function for each column. Compute per-column conflict
-   K from Dempster's rule. Identify disagreements where the LLM and ML top
-   predictions differ AND K exceeds the threshold.
+2. **ML Validation** (`VALIDATING`): Run the full 6-source DST pipeline for
+   each column. Compute per-column belief interval `[Bel, Pl]`, conflict K,
+   and uncertainty gap `Pl - Bel`. Identify **uncertain columns** where
+   predictions need revisiting.
 
-3. **Targeted Revisit** (back to `LLM_SWEEP`): Re-classify high-K columns
-   with enriched context — the ML prediction, belief interval, and conflict
-   score are included in the prompt. This gives the LLM a chance to reconsider
-   with evidence it didn't have in the first pass.
+3. **Targeted Revisit** (back to `LLM_SWEEP`): Re-classify uncertain columns
+   with enriched context — the ML prediction, belief interval, pattern signals,
+   and value descriptions are included in the prompt. This gives the LLM
+   evidence it didn't have in the first pass.
 
-### Convergence Criteria
+### Belief-Gap Convergence
 
-The loop terminates when:
-- `coverage >= 0.95` (95% of columns have a label) **AND**
-  `mean_k < 0.2` (average conflict is low), or
-- Budget exhausted (`max_iterations` or `max_total_llm_calls` reached)
+The primary convergence measure is the **uncertainty gap** `Pl - Bel` for
+each column's predicted category. This directly answers "how settled is this
+prediction?" — unlike K, which only measures source disagreement.
 
-After convergence, the pipeline completes the standard path:
-CLASSIFYING → FUSING → EVALUATING → CONVERGED.
+A column can have K=0.9 but Bel=0.95 — the sources fought hard during
+combination, but the normalizing denominator `(1-K)` concentrated surviving
+mass on the agreed-upon singleton. That column's prediction is **settled**
+despite high conflict; it doesn't need revisiting.
+
+**Convergence criteria** (all must hold):
+
+| Criterion | Metric | Default | Meaning |
+|-----------|--------|---------|---------|
+| **Primary** | `mean_gap < gap_threshold` | 0.15 | Predictions are tight |
+| **Secondary** | `frac_unclear < clarity_target` | 0.10 | At most 10% of columns need clarification |
+| **Coverage** | `coverage >= coverage_target` | 0.95 | 95% of columns have labels |
+
+**Revisit targeting**: `_identify_uncertain_columns()` selects columns
+where `gap > 0.3` OR `Bel < bel_floor` (default 0.50), sorted by gap
+descending (most uncertain first).
+
+**Early stopping**: The proof-of-progress paradigm monitors the gap trend.
+When mean gap plateaus for 2 consecutive iterations (no verifiable progress),
+the loop stops even if the threshold hasn't been reached.
+
+### K as Diagnostic
+
+Conflict K remains in logs, iteration metrics, and agent tools as a
+diagnostic for **source disagreement**. It is useful for identifying
+calibration issues (e.g., a pattern detector producing false positives)
+but does not gate convergence. The cumulative K formula
+`K = 1 - Π(1 - Kᵢ)` tends to be high (~0.5-0.8) with 6 partially
+correlated sources; this is expected and does not indicate poor quality.
 
 ### Agent-Driven Convergence
 
 As an alternative to the programmatic loop, the agent convergence loop
 (`agent_loop.py`) delegates revisit strategy to Claude. The agent uses
-5 tools — `get_conflict_report`, `revisit_columns`, `check_convergence`,
-`get_column_detail`, `declare_converged` — to reason about which columns
-need re-examination. See [Keystone Agents](./agents.md) for details.
+6 tools — `get_conflict_report`, `revisit_columns`, `check_convergence`,
+`get_column_detail`, `retrain_svm`, `declare_converged` — to reason about
+which columns need re-examination. The agent sees both gap-based and K-based
+metrics and can make nuanced decisions. See [Keystone Agents](./agents.md).
 
 ### LLM Backend
 
@@ -376,8 +463,13 @@ need re-examination. See [Keystone Agents](./agents.md) for details.
 - **`OpenAICompatibleBackend`**: For vLLM, GLM-4.7, and any endpoint
   implementing the OpenAI chat completions API. Default backend.
 - **`AnthropicBackend`**: For Claude via the Anthropic SDK.
-- **`BedrockBackend`**: For AWS Bedrock (production default on CAI).
-  Uses `boto3` Converse API with `modelId`-based routing.
+- **`BedrockBackend`**: For AWS Bedrock via the Converse API.
+- **`BedrockStructuredBackend`**: Production default on CAI. Uses
+  `invoke_model` with **tool-use** for structured output (`output_config`
+  is not supported on Bedrock). When extended thinking is enabled,
+  `tool_choice` must be `"auto"` (Anthropic constraint); a text-block
+  fallback parser handles this case. Both backends use `region_from_arn()`
+  to extract the target region from cross-region inference profile ARNs.
 - **`CerebrasBackend`**: OpenAI-compatible with Cerebras-specific defaults
   (`base_url=https://api.cerebras.ai/v1`, `model=zai-glm-4.7`).
 - **`create_backend_from_cfg(cfg)`**: Factory that reads HOCON config
@@ -392,7 +484,7 @@ All bootstrap/LLM settings live in HOCON (`config/base.conf`):
 ```hocon
 classify {
     llm {
-        backend = "openai_compatible"  # or "anthropic"
+        backend = "openai_compatible"  # or "anthropic", "bedrock_structured"
         model = "glm-4.7"
         base_url = null                # vLLM endpoint URL
         columns_per_call = 50
@@ -400,9 +492,13 @@ classify {
     }
     bootstrap {
         max_iterations = 5
-        k_threshold = 0.2
+        k_threshold = 0.2              # diagnostic (not convergence-gating)
         coverage_target = 0.95
         max_total_llm_calls = 5000
+        # Belief-gap convergence (primary criteria)
+        gap_threshold = 0.15           # mean(Pl - Bel) target
+        clarity_target = 0.10          # max fraction of unclear columns
+        bel_floor = 0.50               # min belief for "settled"
     }
 }
 ```
@@ -453,7 +549,7 @@ dataclass bundles all parameters with `DiscountConfig.from_cfg(cfg)` factory:
 classify.discounts {
     cosine = 0.30                    # Cosine similarity → Theta mass
     svm = 0.20                       # SVM → Theta mass
-    pattern_theta = 0.10             # Pattern detection → Theta mass
+    pattern_theta = 0.25             # Pattern detection → Theta mass (graduated by match fraction)
     name_match_exact = 0.70          # Exact label match singleton mass
     name_match_code = 0.50           # Formal code/abbrev match mass
     name_match_alias = 0.50          # Common name alias match mass

@@ -92,8 +92,23 @@ Gateway (gateway.py)      ← FastAPI bridge from REST to gRPC + React SPA
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/ws/terminal` | Interactive terminal backed by Claude Agent SDK |
+| `/ws/terminal/{session_id}` | Persistent terminal backed by Claude Agent SDK |
 | `/ws/orchestration` | Live agent events (spawned, reasoning, tool_call, completed) |
+
+#### Persistent Terminal Sessions
+
+Terminal sessions survive page navigation and browser reload. The WebSocket
+endpoint accepts a client-provided `session_id` (persisted in localStorage).
+On disconnect, the session stays alive server-side — SDK queries continue
+running and output accumulates in a **ring buffer** (64KB `collections.deque`).
+On reconnect, the buffer is replayed so the user sees everything that happened
+while they were away.
+
+- **Session registry**: Module-level `_sessions` dict in `terminal.py`
+- **Idle cleanup**: Background asyncio task sweeps sessions with no client
+  for 30 minutes (`/api/terminal/sessions` lists active sessions)
+- **Dedicated page**: `/terminal` route renders a full-screen Ghostty WASM
+  terminal; the Landing page embeds the same component at preview size
 
 ### SPA Fallback
 
@@ -122,14 +137,21 @@ PostgreSQL probes retry 3x with 1s backoff (PGlite can have transient stalls).
 Overall status is `connected` when gRPC responds, `degraded` when gRPC is up
 but other services are flaky.
 
-## OOTB Seed Lifecycle
+## Gateway Lifespan
 
-The gateway seeds sample data on first boot via a FastAPI `lifespan` hook:
+The FastAPI `lifespan` hook runs three startup tasks:
 
-1. Check if `ootb-sample` source has any dataset versions
-2. If none, read sample source stats (table count, column count)
-3. Create dataset version 1 with metadata
-4. Log and skip silently if database isn't ready (migrations haven't run)
+1. **OOTB seed**: Check if `ootb-sample` source has any dataset versions;
+   if none, create version 1 with metadata.
+2. **Hive auto-discovery**: `discover_hive_sources()` probes all configured
+   data connections (`ATELIER_DATA_CONNECTIONS`), iterates databases, finds
+   `annotations` tables matching the known schema (legacy or universal format),
+   and auto-registers them via `get_or_create_data_source()`.
+3. **Terminal cleanup**: Background asyncio task sweeps idle terminal sessions
+   every 60 seconds.
+
+All three tasks are wrapped in try/except — failures are logged as warnings
+but don't prevent gateway startup.
 
 ## Config Lifecycle
 

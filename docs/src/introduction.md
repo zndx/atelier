@@ -88,7 +88,7 @@ Each source independently produces a **mass function**
 | Source | Feature Space | Cost Tier |
 |--------|--------------|-----------|
 | **Cosine similarity** | Dense 384-dim sentence-transformer embedding (all-MiniLM-L6-v2) | M0 (local) |
-| **Pattern detection** | 15 regex detectors (email, phone, SSN, IP, UUID, date, URL, credit card, MAC, IBAN, postal code, monetary, hash, semver, currency code) | M0 |
+| **Pattern detection** | 16 regex detectors + post-regex validators (email, phone, SSN, IP, UUID, date, datetime, URL, credit card + Luhn, MAC, IBAN, postal code, monetary, hash, semver, currency + ISO 4217); graduated mass scaling by match fraction | M0 |
 | **Name matching** | Column name vs vocabulary labels, codes, and aliases (4-tier: exact > code > alias > overlap) | M0 |
 | **LLM classification** | Frontier model reasoning (Anthropic / Bedrock / Cerebras / OpenAI-compatible) | M1 (API) |
 | **CatBoost** | 12 discrete features + 384-dim embedding; virtual ensemble uncertainty via `posterior_sampling` | M2 (trained) |
@@ -194,7 +194,7 @@ just up               # Start gRPC + gateway + Vite dev server
 - **[Classification Pipeline](./architecture/classification.md)** — DST methodology, evidence sources, bootstrap convergence
 - **[Monte Carlo Sampling](./architecture/monte-carlo.md)** — Stratified sampling for scale
 - **[GPU Acceleration](./architecture/gpu.md)** — CUDA detection and batch encoding
-- **[Synthetic Data & Training](./architecture/synth.md)** — 318 generators, frontier-label retraining, CatBoost + SVM
+- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, frontier-label retraining, CatBoost + SVM
 - **[Embeddings](./architecture/embeddings.md)** — Interactive parquet visualization
-- **[Data Sources](./architecture/data-sources.md)** — Source-aware versioning and OOTB sample
-- **[BDD Scenarios](./scenarios/overview.md)** — 136 scenarios across 4 domains
+- **[Data Sources](./architecture/data-sources.md)** — Source-aware versioning, OOTB sample, Hive auto-discovery
+- **[BDD Scenarios](./scenarios/overview.md)** — 141 scenarios across 4 domains

@@ -183,20 +183,26 @@ the customer's actual Hive tables via CAI data connections.
 
 ### How It Works
 
-No new modules are needed — the existing machinery already supports this:
+Hive sources are **auto-discovered at gateway startup**. The gateway
+lifespan hook calls `discover_hive_sources(cfg)` which:
 
-1. **`/api/data-connections`** lists available CAI data connections
-   (from `ATELIER_DATA_CONNECTIONS` config)
-2. **User creates a Hive source** via the Status page or API:
-   `POST /api/data-sources` with `source_type: "hive"` and the
-   connection name as `source_uri`
-3. **Pipeline resolves data from the connection**: when `source_id`
+1. Iterates all connections listed in `ATELIER_DATA_CONNECTIONS`
+2. For each connection, runs `SHOW DATABASES` and checks each database
+   for an `annotations` table
+3. Validates the schema: fetches 1 row and checks for legacy
+   (`id`, `ontology`, `annotation`) or universal (`code`, `label`) format
+4. Auto-registers valid sources via `get_or_create_data_source()`
+   (idempotent — safe to re-run on restart)
+
+Once registered, the pipeline route works automatically:
+
+1. **Pipeline resolves data from the connection**: when `source_id`
    refers to a hive source, the pipeline calls `discover_tables()` and
    `sample_table_metadata()` using that connection
-4. **Vocabulary routing**: hive sources use `load_annotations_from_hive()`
-   which reads `default.annotations` (290+ domain categories) and
-   composes them on top of the universal base
-5. **Results register as versions**: each pipeline run creates a new
+2. **Vocabulary routing**: hive sources use `load_annotations_from_hive()`
+   which reads `default.annotations` (domain categories) and composes
+   them on top of the universal base
+3. **Results register as versions**: each pipeline run creates a new
    version under the hive source, with the same activation/versioning
    semantics as the sample source
 
