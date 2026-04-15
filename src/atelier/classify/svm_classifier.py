@@ -104,7 +104,32 @@ class SVMClassifier:
         from sklearn.pipeline import FeatureUnion, Pipeline
         from sklearn.svm import LinearSVC
 
+        from collections import Counter
+
         cfg = self._config
+
+        # Drop singleton classes — StratifiedKFold requires every class
+        # to have >= 2 samples.  With many categories and few tables,
+        # some categories will inevitably have only one example.
+        min_count = self._min_class_count(labels)
+        if min_count < 2:
+            counts = Counter(labels)
+            singletons = {code for code, n in counts.items() if n < 2}
+            logger.warning(
+                "SVM: dropping %d singleton classes (< 2 examples): %s",
+                len(singletons),
+                sorted(singletons)[:20],  # log first 20 to avoid spam
+            )
+            filtered = [
+                (t, l) for t, l in zip(texts, labels)
+                if l not in singletons
+            ]
+            if not filtered:
+                raise ValueError(
+                    "No classes with >= 2 examples — cannot train SVM"
+                )
+            texts, labels = [t for t, _ in filtered], [l for _, l in filtered]
+            min_count = self._min_class_count(labels)
 
         # Character n-gram vectorizer — captures subword patterns
         # (abbreviations, camelCase fragments, digit sequences)
@@ -142,7 +167,7 @@ class SVMClassifier:
         # Wrap in CalibratedClassifierCV for probability estimates
         calibrated = CalibratedClassifierCV(
             svc,
-            cv=min(cfg.calibration_cv, self._min_class_count(labels)),
+            cv=min(cfg.calibration_cv, min_count),
             method=cfg.calibration_method,
         )
 
@@ -164,7 +189,7 @@ class SVMClassifier:
         """Minimum number of samples in any class."""
         from collections import Counter
         counts = Counter(labels)
-        return max(2, min(counts.values()))
+        return min(counts.values())
 
     def predict_proba(self, texts: list[str]) -> list[dict[str, float]]:
         """Return calibrated probability distributions for each text.
