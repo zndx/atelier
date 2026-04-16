@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from governance.client import BaseClient, CDPUrlResolver, ClientConfig
+from atelier.governance.client import BaseClient, CDPUrlResolver, ClientConfig
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class RangerClient:
     Usage::
 
         from governance import RangerClient
-        from governance.client import ClientConfig
+        from atelier.governance.client import ClientConfig
 
         client = RangerClient(ClientConfig(
             url="https://host:6182",
@@ -369,3 +369,18 @@ class RangerClient:
             if result:
                 results.append(result)
         return results
+
+    # -- Health / discovery ------------------------------------------------
+
+    def ping(self) -> dict[str, Any]:
+        """Lightweight health probe. Returns service info or error."""
+        try:
+            resp = self._http.get("service")
+            if resp.ok:
+                services = resp.json()
+                if isinstance(services, list):
+                    return {"ok": True, "service_count": len(services)}
+                return {"ok": True, "services": services}
+            return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}

@@ -102,20 +102,13 @@ try:
 except Exception:
     pass
 
-# 8. Governance — Atlas
+# 8. Governance — use the /api/governance/status endpoint which
+#    probes Atlas and Ranger connectivity via the governance SDK
 try:
-    sys.path.insert(0, "src/atelier/governance/src")
-    from governance.atlas import AtlasClient
-    results["atlas_sdk"] = True
-except ImportError:
-    results["atlas_sdk"] = False
-
-# 9. Governance — Ranger
-try:
-    from governance.ranger import RangerClient
-    results["ranger_sdk"] = True
-except ImportError:
-    results["ranger_sdk"] = False
+    r = json.loads(urlopen(f"{gateway}/api/governance/status", timeout=10).read())
+    results["governance"] = r
+except Exception as e:
+    results["governance"] = {"error": str(e)}
 
 # 10. ML Platform — cmlapi (compute orchestration)
 try:
@@ -263,9 +256,12 @@ Pipeline               {state}
   • Last accuracy      {N}%
   • Recent runs        {count}
 
-Governance
-  {✓|✗} Atlas SDK      {available/not found}
-  {✓|✗} Ranger SDK     {available/not found}
+Governance (via /api/governance/status)
+  {✓|✗} Atlas          {url, classification_count, entity_type_count or not configured}
+  {✓|✗} Ranger         {url, service_count or not configured}
+  • Cluster            {cluster_name}
+  • Auto-sync          {enabled/disabled}
+  • Dry-run            {enabled/disabled}
 
 CAI Compute (cmlapi)
   {✓|✗} cmlapi         {available/not available}

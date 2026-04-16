@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from governance.client import BaseClient, CDPUrlResolver, ClientConfig
+from atelier.governance.client import BaseClient, CDPUrlResolver, ClientConfig
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class ClassificationTag:
     """A tag to apply to an entity, with optional metadata."""
 
     type_name: str
-    confidence: str = ""
+    confidence: float = 0.0
     reason: str = ""
     notation: str = ""
     super_types: list[str] | None = None
@@ -62,8 +62,8 @@ class ClassificationTag:
     def to_atlas_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"typeName": self.type_name}
         attrs: dict[str, str] = {}
-        if self.confidence:
-            attrs["confidence"] = self.confidence
+        if self.confidence > 0:
+            attrs["confidence"] = f"{self.confidence:.3f}"
         if self.reason:
             attrs["reason"] = self.reason
         if self.notation:
@@ -92,12 +92,13 @@ class SyncResult:
     """Outcome of tagging a single entity."""
 
     entity_name: str
-    tags: list[str]
-    status: str  # success | skipped | dry_run | error
-    message: str
+    entity_guid: str = ""
+    tags: list[str] | None = None
+    status: str = ""  # success | skipped | dry_run | error
+    message: str = ""
     existing_tags: list[str] | None = None
     new_tags: list[str] | None = None
-    confidence: str = ""
+    confidence: float = 0.0
 
 
 # -- Client ----------------------------------------------------------------
@@ -109,7 +110,7 @@ class AtlasClient:
     Usage::
 
         from governance import AtlasClient
-        from governance.client import ClientConfig
+        from atelier.governance.client import ClientConfig
 
         client = AtlasClient(ClientConfig(
             url="https://host:21000",
@@ -256,11 +257,9 @@ class AtlasClient:
 
         for t in skipped:
             results.append(SyncResult(
-                entity_name=guid,
-                tags=[t.type_name],
-                status="skipped",
-                message="Already present",
-                existing_tags=existing,
+                entity_name=guid, entity_guid=guid,
+                tags=[t.type_name], status="skipped",
+                message="Already present", existing_tags=existing,
             ))
 
         if not new_tags:
@@ -269,12 +268,10 @@ class AtlasClient:
         if dry_run:
             for t in new_tags:
                 results.append(SyncResult(
-                    entity_name=guid,
-                    tags=[t.type_name],
-                    status="dry_run",
+                    entity_name=guid, entity_guid=guid,
+                    tags=[t.type_name], status="dry_run",
                     message="Would apply (dry run)",
-                    existing_tags=existing,
-                    new_tags=[t.type_name],
+                    existing_tags=existing, new_tags=[t.type_name],
                     confidence=t.confidence,
                 ))
             return results
@@ -294,20 +291,16 @@ class AtlasClient:
         if resp.status_code in (200, 204):
             for t in new_tags:
                 results.append(SyncResult(
-                    entity_name=guid,
-                    tags=[t.type_name],
-                    status="success",
-                    message="Applied",
-                    existing_tags=existing,
-                    new_tags=[t.type_name],
-                    confidence=t.confidence,
+                    entity_name=guid, entity_guid=guid,
+                    tags=[t.type_name], status="success",
+                    message="Applied", existing_tags=existing,
+                    new_tags=[t.type_name], confidence=t.confidence,
                 ))
         else:
             for t in new_tags:
                 results.append(SyncResult(
-                    entity_name=guid,
-                    tags=[t.type_name],
-                    status="error",
+                    entity_name=guid, entity_guid=guid,
+                    tags=[t.type_name], status="error",
                     message=f"HTTP {resp.status_code}: {resp.text[:200]}",
                 ))
 
@@ -343,6 +336,92 @@ class AtlasClient:
         if resp.ok:
             return resp.json()
         return []
+
+    # -- Health / discovery ------------------------------------------------
+
+    def ping(self) -> dict[str, Any]:
+        """Lightweight health probe. Returns version info or error."""
+        try:
+            resp = self._http.get("types/typedefs/headers")
+            if resp.ok:
+                headers = resp.json()
+                return {
+                    "ok": True,
+                    "classification_count": len([
+                        h for h in headers if h.get("category") == "CLASSIFICATION"
+                    ]),
+                    "entity_type_count": len([
+                        h for h in headers if h.get("category") == "ENTITY"
+                    ]),
+                }
+            return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # -- Batch operations --------------------------------------------------
+
+    def tag_entities_bulk(
+        self,
+        entity_guids: list[str],
+        tags: list[ClassificationTag],
+        *,
+        dry_run: bool = False,
+    ) -> list[SyncResult]:
+        """Apply the same classification tags to multiple entities at once.
+
+        Uses the Atlas bulk classification endpoint for efficiency.
+        """
+        if dry_run:
+            return [
+                SyncResult(
+                    entity_name=guid,
+                    entity_guid=guid,
+                    tags=[t.type_name for t in tags],
+                    status="dry_run",
+                    message=f"Would apply {len(tags)} tags",
+                )
+                for guid in entity_guids
+            ]
+
+        # Ensure type definitions exist
+        for t in tags:
+            self.ensure_classification(
+                t.type_name,
+                super_types=t.super_types,
+                notation=t.notation,
+            )
+
+        # POST /entity/bulk/classifications
+        payload = {
+            "classification": tags[0].to_atlas_payload() if len(tags) == 1 else None,
+            "classifications": [t.to_atlas_payload() for t in tags] if len(tags) > 1 else None,
+            "entityGuids": entity_guids,
+        }
+        # Clean None keys
+        payload = {k: v for k, v in payload.items() if v is not None}
+
+        resp = self._http.post("entity/bulk/classifications", json=payload)
+        if resp.status_code in (200, 204):
+            return [
+                SyncResult(
+                    entity_name=guid,
+                    entity_guid=guid,
+                    tags=[t.type_name for t in tags],
+                    status="success",
+                    message="Applied (bulk)",
+                )
+                for guid in entity_guids
+            ]
+        return [
+            SyncResult(
+                entity_name=guid,
+                entity_guid=guid,
+                tags=[t.type_name for t in tags],
+                status="error",
+                message=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            )
+            for guid in entity_guids
+        ]
 
 
 # -- helpers ---------------------------------------------------------------

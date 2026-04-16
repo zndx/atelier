@@ -110,20 +110,42 @@ class BaseClient:
 
     # -- internals ---------------------------------------------------------
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
+    def _request(
+        self, method: str, path: str, *, _retries: int = 2, **kwargs: Any
+    ) -> requests.Response:
+        import time as _time
         url = f"{self.base_api_url}/{path.lstrip('/')}"
         kwargs.setdefault("timeout", self._config.timeout)
         log.debug("%s %s", method, url)
-        resp = self._session.request(method, url, **kwargs)
-        if not resp.ok:
-            log.warning(
-                "%s %s → %d: %s",
-                method,
-                url,
-                resp.status_code,
-                resp.text[:300],
-            )
-        return resp
+        last_exc: Exception | None = None
+        for attempt in range(_retries + 1):
+            try:
+                resp = self._session.request(method, url, **kwargs)
+                if resp.status_code in (502, 503, 504) and attempt < _retries:
+                    wait = 2 ** attempt
+                    log.warning(
+                        "%s %s → %d (attempt %d/%d, retry in %ds)",
+                        method, url, resp.status_code, attempt + 1, _retries + 1, wait,
+                    )
+                    _time.sleep(wait)
+                    continue
+                if not resp.ok:
+                    log.warning(
+                        "%s %s → %d: %s", method, url, resp.status_code, resp.text[:300],
+                    )
+                return resp
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exc = e
+                if attempt < _retries:
+                    wait = 2 ** attempt
+                    log.warning(
+                        "%s %s failed (attempt %d/%d): %s, retry in %ds",
+                        method, url, attempt + 1, _retries + 1, e, wait,
+                    )
+                    _time.sleep(wait)
+                    continue
+                raise
+        raise last_exc or RuntimeError("Unexpected retry exhaustion")
 
 
 class GovernanceClient:
@@ -153,8 +175,8 @@ class GovernanceClient:
         timeout: float = 30.0,
         cluster_name: str = "cm",
     ) -> None:
-        from governance.atlas import AtlasClient
-        from governance.ranger import RangerClient
+        from atelier.governance.atlas import AtlasClient
+        from atelier.governance.ranger import RangerClient
 
         shared = dict(
             username=username,
@@ -185,3 +207,19 @@ class GovernanceClient:
         if self._ranger is None:
             raise RuntimeError("RangerClient not configured — pass ranger_url to GovernanceClient")
         return self._ranger
+
+    @classmethod
+    def from_atelier_config(cls, cfg) -> "GovernanceClient":
+        """Build GovernanceClient from an AtelierConfig instance.
+
+        Returns a client with Atlas and/or Ranger configured based on
+        which URLs are set in the HOCON config.
+        """
+        return cls(
+            atlas_url=cfg.governance_atlas_url or None,
+            ranger_url=cfg.governance_ranger_url or None,
+            username=cfg.governance_atlas_username,
+            password=cfg.governance_atlas_password,
+            verify_ssl=cfg.governance_verify_ssl,
+            cluster_name=cfg.governance_cluster_name,
+        )

@@ -68,6 +68,17 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "cml.domain": ("cml_domain", str),
     "cml.engine_id": ("cml_engine_id", str),
     "cml.data_connections": ("cml_data_connections", str),
+    # Governance
+    "governance.atlas.url": ("governance_atlas_url", str),
+    "governance.atlas.username": ("governance_atlas_username", str),
+    "governance.atlas.password": ("governance_atlas_password", str),
+    "governance.ranger.url": ("governance_ranger_url", str),
+    "governance.ranger.username": ("governance_ranger_username", str),
+    "governance.ranger.password": ("governance_ranger_password", str),
+    "governance.cluster_name": ("governance_cluster_name", str),
+    "governance.verify_ssl": ("governance_verify_ssl", bool),
+    "governance.auto_sync": ("governance_auto_sync", bool),
+    "governance.dry_run": ("governance_dry_run", bool),
     "classify.connection_name": ("classify_connection_name", str),
     "classify.database": ("classify_database", str),
     "classify.sample_size": ("classify_sample_size", int),
@@ -348,6 +359,28 @@ class AtelierConfig:
     cml_domain: str | None = None
     cml_engine_id: str | None = None
     cml_data_connections: str = ""
+
+    # Governance
+    governance_atlas_url: str = ""
+    governance_atlas_username: str = "admin"
+    governance_atlas_password: str = ""
+    governance_ranger_url: str = ""
+    governance_ranger_username: str = "admin"
+    governance_ranger_password: str = ""
+    governance_cluster_name: str = "cm"
+    governance_verify_ssl: bool = False
+    governance_auto_sync: bool = False
+    governance_dry_run: bool = False
+
+    @property
+    def has_atlas(self) -> bool:
+        """True when Atlas URL is configured."""
+        return bool(self.governance_atlas_url)
+
+    @property
+    def has_ranger(self) -> bool:
+        """True when Ranger URL is configured."""
+        return bool(self.governance_ranger_url)
 
     @property
     def is_cml(self) -> bool:

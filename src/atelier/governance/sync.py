@@ -18,8 +18,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from governance.atlas import AtlasClient, ClassificationTag, QualifiedName, SyncResult
-from governance.ranger import RangerClient, RangerRole, PolicyItem, PolicyResource
+from atelier.governance.atlas import AtlasClient, ClassificationTag, QualifiedName, SyncResult
+from atelier.governance.ranger import RangerClient, RangerRole, PolicyItem, PolicyResource
 
 log = logging.getLogger(__name__)
 

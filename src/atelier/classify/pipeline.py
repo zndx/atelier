@@ -647,10 +647,78 @@ def run_classification_pipeline(
             except Exception as e:
                 logger.warning("Failed to register dataset: %s", e)
 
+        # ── Governance sync (Atlas) ──────────────────────────────────
+        # When auto_sync is enabled and Atlas is configured, push the
+        # taxonomy as classification types and tag entities with results.
+        governance_summary: dict = {}
+        try:
+            if cfg.governance_auto_sync and cfg.has_atlas:
+                from atelier.governance.client import GovernanceClient
+                from atelier.governance.sync import (
+                    TaxonomyNode, sync_taxonomy_to_atlas,
+                    ColumnClassification as GovColumnClassification,
+                    sync_classifications_to_atlas,
+                )
+                gc = GovernanceClient.from_atelier_config(cfg)
+                dry = cfg.governance_dry_run
+
+                # 1. Sync taxonomy → Atlas classification types
+                nodes = [
+                    TaxonomyNode(
+                        code=cat.code, label=cat.label,
+                        notation=getattr(cat, "notation", ""),
+                        parent_code=getattr(cat, "parent_code", "") or "",
+                    )
+                    for cat in category_set.all_categories
+                ]
+                nodes.sort(key=lambda n: n.code.count("."))
+                tax_report = sync_taxonomy_to_atlas(gc.atlas, nodes, dry_run=dry)
+                governance_summary["taxonomy"] = {
+                    "created": len(tax_report.created),
+                    "skipped": len(tax_report.skipped),
+                    "failed": len(tax_report.failed),
+                }
+
+                # 2. Tag entities with classification results
+                by_table: dict[str, list] = {}
+                for c in classifications:
+                    table = c.get("table_name", "unknown")
+                    by_table.setdefault(table, []).append(
+                        GovColumnClassification(
+                            column_name=c["column_name"],
+                            tags=[c.get("predicted_code", "")],
+                            confidence=str(c.get("confidence", "")),
+                            reason=c.get("evidence", ""),
+                        )
+                    )
+                tag_success = 0
+                tag_errors = 0
+                for tbl, cols in by_table.items():
+                    results = sync_classifications_to_atlas(
+                        gc.atlas, tbl, cols,
+                        cluster_name=cfg.governance_cluster_name,
+                        dry_run=dry,
+                    )
+                    tag_success += sum(1 for r in results if r.status in ("success", "dry_run"))
+                    tag_errors += sum(1 for r in results if r.status == "error")
+                governance_summary["tagging"] = {
+                    "success": tag_success, "errors": tag_errors,
+                    "tables": len(by_table), "dry_run": dry,
+                }
+                logger.info(
+                    "Governance sync: taxonomy=%d created, tagging=%d/%d success/errors%s",
+                    len(tax_report.created), tag_success, tag_errors,
+                    " (dry run)" if dry else "",
+                )
+        except Exception as e:
+            logger.warning("Governance sync failed (non-fatal): %s", e)
+            governance_summary["error"] = str(e)
+
         fsm.advance(run_id, FSMState.CONVERGED, progress={
             **summary,
             "result_path": str(results_path),
             "parquet_path": str(parquet_path) if parquet_path else None,
+            "governance": governance_summary or None,
         }, result_path=str(parquet_path) if parquet_path else str(results_path))
 
         return {

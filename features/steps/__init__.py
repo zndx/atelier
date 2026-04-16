@@ -36,3 +36,4 @@ from features.gateway.step_defs.testclient_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.onboarding_steps import *  # noqa: F401,F403
 from features.agent.step_defs.vocab_routing_steps import *  # noqa: F401,F403
 from features.agent.step_defs.llm_robustness_steps import *  # noqa: F401,F403
+from features.agent.step_defs.governance_steps import *  # noqa: F401,F403

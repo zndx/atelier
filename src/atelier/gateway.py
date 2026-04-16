@@ -700,6 +700,157 @@ def model_discovery():
         return {"upgrade_available": False, "reason": "error", "error": str(exc)}
 
 
+# ── Governance (Atlas + Ranger) ────────────────────────────────────
+
+
+@app.get("/api/governance/status")
+def governance_status():
+    """Probe Atlas and Ranger connectivity. Returns per-service health."""
+    try:
+        from atelier.config import load_config
+        from atelier.governance.client import GovernanceClient
+        cfg = load_config()
+        result: dict = {
+            "atlas": {"configured": cfg.has_atlas, "ok": False},
+            "ranger": {"configured": cfg.has_ranger, "ok": False},
+            "cluster_name": cfg.governance_cluster_name,
+            "auto_sync": cfg.governance_auto_sync,
+            "dry_run": cfg.governance_dry_run,
+        }
+        gc = GovernanceClient.from_atelier_config(cfg)
+        if cfg.has_atlas:
+            result["atlas"].update(gc.atlas.ping())
+        if cfg.has_ranger:
+            result["ranger"].update(gc.ranger.ping())
+        return result
+    except Exception as exc:
+        return _error_envelope(f"governance_status failed: {exc}")
+
+
+@app.post("/api/governance/sync-taxonomy")
+def governance_sync_taxonomy(source_id: str | None = None, dry_run: bool | None = None):
+    """Push the active vocabulary to Atlas as classification types with hierarchy."""
+    try:
+        from atelier.config import load_config
+        from atelier.governance.client import GovernanceClient
+        from atelier.governance.sync import TaxonomyNode, sync_taxonomy_to_atlas
+        from atelier.classify.taxonomy import load_sample_vocabulary
+
+        cfg = load_config()
+        if not cfg.has_atlas:
+            return _error_envelope("Atlas not configured — set ATELIER_ATLAS_URL")
+
+        gc = GovernanceClient.from_atelier_config(cfg)
+        use_dry_run = dry_run if dry_run is not None else cfg.governance_dry_run
+
+        # Load vocabulary for the source
+        vocab = load_sample_vocabulary(hierarchical=True)
+        nodes = []
+        for cat in vocab.all_categories:
+            nodes.append(TaxonomyNode(
+                code=cat.code,
+                label=cat.label,
+                notation=getattr(cat, "notation", ""),
+                parent_code=getattr(cat, "parent_code", "") or "",
+            ))
+
+        # Sort parents-first for superType resolution
+        code_set = {n.code for n in nodes}
+        sorted_nodes = sorted(nodes, key=lambda n: n.code.count("."))
+
+        report = sync_taxonomy_to_atlas(gc.atlas, sorted_nodes, dry_run=use_dry_run)
+        return {
+            "ok": True,
+            "dry_run": report.dry_run,
+            "total": report.total,
+            "created": len(report.created),
+            "skipped": len(report.skipped),
+            "failed": len(report.failed),
+            "failed_types": report.failed[:10],
+        }
+    except Exception as exc:
+        return _error_envelope(f"sync_taxonomy failed: {exc}")
+
+
+@app.post("/api/governance/tag-results")
+def governance_tag_results(
+    source_id: str | None = None,
+    run_id: str | None = None,
+    dry_run: bool | None = None,
+):
+    """Apply classification results from a pipeline run to Atlas entities."""
+    try:
+        import json as _json
+        from pathlib import Path
+        from atelier.config import load_config
+        from atelier.governance.client import GovernanceClient
+        from atelier.governance.sync import ColumnClassification, sync_classifications_to_atlas
+
+        cfg = load_config()
+        if not cfg.has_atlas:
+            return _error_envelope("Atlas not configured — set ATELIER_ATLAS_URL")
+
+        gc = GovernanceClient.from_atelier_config(cfg)
+        use_dry_run = dry_run if dry_run is not None else cfg.governance_dry_run
+
+        # Find the latest run results
+        results_base = Path("build/results")
+        if run_id:
+            results_path = results_base / run_id / "classifications.json"
+        else:
+            # Find most recent
+            runs = sorted(results_base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not runs:
+                return _error_envelope("No classification results found in build/results/")
+            results_path = runs[0] / "classifications.json"
+
+        if not results_path.exists():
+            return _error_envelope(f"Results file not found: {results_path}")
+
+        with open(results_path) as f:
+            raw = _json.load(f)
+
+        # Group by table, build ColumnClassification objects
+        by_table: dict[str, list] = {}
+        for c in raw:
+            table = c.get("table_name", "unknown")
+            by_table.setdefault(table, []).append(
+                ColumnClassification(
+                    column_name=c["column_name"],
+                    tags=[c.get("predicted_code", "")],
+                    confidence=str(c.get("confidence", "")),
+                    reason=c.get("evidence", ""),
+                )
+            )
+
+        total_results = []
+        for table_name, cols in by_table.items():
+            table_results = sync_classifications_to_atlas(
+                gc.atlas, table_name, cols,
+                cluster_name=cfg.governance_cluster_name,
+                dry_run=use_dry_run,
+            )
+            total_results.extend(table_results)
+
+        success = sum(1 for r in total_results if r.status == "success")
+        skipped = sum(1 for r in total_results if r.status == "skipped")
+        errors = sum(1 for r in total_results if r.status == "error")
+        dry = sum(1 for r in total_results if r.status == "dry_run")
+
+        return {
+            "ok": True,
+            "dry_run": use_dry_run,
+            "total": len(total_results),
+            "success": success,
+            "skipped": skipped,
+            "errors": errors,
+            "dry_run_count": dry,
+            "tables": list(by_table.keys()),
+        }
+    except Exception as exc:
+        return _error_envelope(f"tag_results failed: {exc}")
+
+
 # ── CAI Data Platform ──────────────────────────────────────────────
 
 
