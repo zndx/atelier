@@ -1,0 +1,10 @@
+# SOPS configuration for Atelier secrets.
+# Encrypted files can be committed to git safely.
+# Decrypt with: sops --decrypt <file>
+# The age private key lives at ~/.config/sops/age/keys.txt
+# On CAI, set SOPS_AGE_KEY or SOPS_AGE_KEY_FILE to decrypt at deploy time.
+creation_rules:
+  - path_regex: '\.env\.cai'
+    age: age1sfpdmc0ap0y2y378u2ge0e8x6rxygjd5j6gzd4fhfecknl7ac4yswpqajw
+  - path_regex: 'config/secrets/.*\.env'
+    age: age1sfpdmc0ap0y2y378u2ge0e8x6rxygjd5j6gzd4fhfecknl7ac4yswpqajw

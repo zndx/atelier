@@ -158,6 +158,23 @@ fi
 # Ensure pip-installed tools are on PATH
 export PATH="$HOME/.local/bin:$PATH"
 
+# ── Decrypt CAI secrets (if encrypted defaults are present) ────────
+# .env.cai.enc is committed to git (SOPS+age encrypted).
+# Decrypt at startup so values feed into HOCON ${?VAR} substitution.
+# Requires SOPS_AGE_KEY or ~/.config/sops/age/keys.txt.
+if [ -f .env.cai.enc ] && ! [ -f .env.cai ]; then
+  if command -v sops &>/dev/null; then
+    echo "Decrypting .env.cai from SOPS..."
+    sops --decrypt --input-type dotenv --output-type dotenv .env.cai.enc > .env.cai 2>/dev/null || true
+  fi
+fi
+if [ -f .env.cai ]; then
+  echo "Loading CAI defaults from .env.cai..."
+  set -a
+  source .env.cai
+  set +a
+fi
+
 # Load nvm so node/npm are available (needed by PGlite below)
 if [ -f scripts/load_nvm.sh ]; then
   source scripts/load_nvm.sh

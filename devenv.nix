@@ -42,6 +42,8 @@
     zarf
     conftest
     cloudflared
+    sops
+    age
 
     # gRPC
     grpcurl
