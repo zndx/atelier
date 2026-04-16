@@ -131,6 +131,10 @@ class TerminalSession:
         self._current_task: asyncio.Task | None = None
         self._output_buffer: deque[str] = deque(maxlen=65536)
         self._detached_at: float | None = None
+        # SDK conversation continuity — track whether we've had a
+        # successful query so subsequent prompts continue the conversation.
+        self._sdk_session_id: str | None = None
+        self._has_conversed: bool = False
 
     # ── Gateway wiring ───────────────────────────────────────────
 
@@ -448,6 +452,10 @@ class TerminalSession:
             pass
 
         lines.append(f"  \u2022 Session     {_DIM}{self._session_id[:8]}...{_RESET}\r\n")
+        if self._has_conversed:
+            lines.append(f"  \u2022 Context     {_DIM}active (conversation continues across prompts){_RESET}\r\n")
+        else:
+            lines.append(f"  \u2022 Context     {_DIM}fresh (first query will start a new conversation){_RESET}\r\n")
         await self._send("".join(lines))
 
     # ── Spinner ───────────────────────────────────────────────────
@@ -609,6 +617,11 @@ class TerminalSession:
                 setting_sources=["project"],
                 env=env,
                 stderr=_capture_stderr,
+                # Conversation continuity — after the first query,
+                # subsequent prompts continue the same conversation so
+                # Claude retains context across terminal interactions.
+                session_id=self._sdk_session_id,
+                continue_conversation=self._has_conversed,
             )
 
             # Track state across the query for the summary line.
@@ -618,6 +631,11 @@ class TerminalSession:
             is_thinking = False
 
             async for message in query(prompt=prompt, options=options):
+                # Capture session_id early for conversation continuity
+                msg_sid = getattr(message, "session_id", None)
+                if msg_sid and not self._sdk_session_id:
+                    self._sdk_session_id = msg_sid
+
                 if isinstance(message, AssistantMessage):
                     text_blocks = []
                     thinking_blocks = []
@@ -722,6 +740,11 @@ class TerminalSession:
                 # ── Result summary ──
                 elif isinstance(message, ResultMessage):
                     await _stop_spinner_inner()
+                    # Capture session_id for conversation continuity
+                    result_sid = getattr(message, "session_id", None)
+                    if result_sid:
+                        self._sdk_session_id = result_sid
+                        self._has_conversed = True
                     duration = getattr(message, "duration_ms", None)
                     num_turns = getattr(message, "num_turns", None)
                     usage = getattr(message, "usage", None)
