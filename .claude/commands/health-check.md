@@ -2,11 +2,30 @@
 
 System health and service discovery — verify connectivity and report the operational landscape.
 
+## Strategy
+
+Use **parallel subagents** to maximize discovery speed. Spawn up to 3
+agents concurrently, each probing an independent service domain:
+
+1. **Core + Pipeline agent**: Gateway health, PostgreSQL, Qdrant, FSM
+   status, recent runs, data sources, vocabulary stats, data connections
+2. **ML Platform agent**: cmlapi (model serving, jobs, apps, runtimes)
+   and MLflow (tracking URI, experiments, atelier experiment)
+3. **Governance agent**: Atlas SDK + connectivity, Ranger SDK, credentials,
+   Atelier version
+
+Each agent runs a Python script and returns structured JSON. After all
+complete, synthesize the results into a single sitrep.
+
+If subagents are not available (e.g. single-turn mode), fall back to
+running all probes sequentially in a single script.
+
 ## Instructions
 
-Run a comprehensive health check of the Atelier environment. Each probe is independent — if one fails, continue with the rest. Use Python with `urllib.request` for HTTP calls (no external deps needed).
-
-Execute all probes in a single Python script, then present a compact sitrep.
+Run the probes below. When using subagents, split into the 3 domains
+above. When running sequentially, execute as a single Python script.
+Each probe is independent — if one fails, continue with the rest.
+Use Python with `urllib.request` for HTTP calls (no external deps needed).
 
 ### Probes to run
 
