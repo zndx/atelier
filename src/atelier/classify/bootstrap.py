@@ -126,12 +126,96 @@ class BootstrapState:
     mc_sample_fraction: float = 1.0
     # Row-level MC: per-column label history across row-sample iterations
     row_labels_history: dict[str, list[str]] = field(default_factory=dict)
+    # LLM truncation tracking
+    truncation_count: int = 0
+    effective_batch_size: int = 50
     # Frontier SVM retraining state
     svm_retrain_count: int = 0
     svm_frontier_path: str | None = None
 
 
 # ── Phase helpers ────────────────────────────────────────────────
+
+
+def _estimate_safe_batch_size(category_count: int, max_output_tokens: int = 65536) -> int:
+    """Estimate columns-per-call that avoids LLM response truncation.
+
+    The LLM must produce a JSON classification object per column (~200
+    tokens each including code, confidence, evidence, alternatives).
+    Reserve 20% of max_output_tokens for overhead/reasoning.
+
+    For large vocabularies (>200 categories), also reduce batch size
+    to keep the system prompt from consuming too much input context.
+    """
+    # Output budget: each column classification is ~200 output tokens
+    output_budget = int(max_output_tokens * 0.8)
+    tokens_per_classification = 200
+    output_limit = max(5, output_budget // tokens_per_classification)
+
+    # Input budget: large vocab tables consume more input context
+    # >200 categories starts eating into available batch capacity
+    if category_count > 200:
+        input_limit = max(5, 50 - (category_count - 200) // 10)
+    else:
+        input_limit = 50
+
+    return max(5, min(50, output_limit, input_limit))
+
+
+def _classify_batch_with_retry(
+    backend: LLMBackend,
+    chunk_samples: list[ColumnSample],
+    system_prompt: str,
+    state: BootstrapState,
+    *,
+    revisit_context: dict[str, dict] | None = None,
+    table_name: str | None = None,
+    min_batch: int = 3,
+) -> list:
+    """Classify a batch, retrying with halved batch on truncation.
+
+    When the LLM response is truncated (``response.truncated``), the batch
+    is split in half and each half retried recursively.  This ensures all
+    columns receive classifications even when the vocabulary is large.
+    """
+    response = backend.classify_batch(
+        chunk_samples, system_prompt,
+        revisit_context=revisit_context,
+        table_name=table_name,
+    )
+    state.llm_calls_total += 1
+    state.tokens_input += response.input_tokens
+    state.tokens_output += response.output_tokens
+
+    if not response.truncated or len(chunk_samples) <= min_batch:
+        if response.truncated:
+            state.truncation_count += 1
+            logger.warning(
+                "Truncated response at minimum batch size (%d columns)",
+                len(chunk_samples),
+            )
+        return list(response.classifications)
+
+    # Truncation detected — halve and retry
+    state.truncation_count += 1
+    mid = len(chunk_samples) // 2
+    logger.warning(
+        "Truncated response for %d columns — retrying as 2x%d",
+        len(chunk_samples), mid,
+    )
+    results = []
+    for sub in (chunk_samples[:mid], chunk_samples[mid:]):
+        sub_context = None
+        if revisit_context:
+            sub_names = [s.name for s in sub]
+            sub_context = {n: revisit_context[n] for n in sub_names if n in revisit_context}
+        results.extend(_classify_batch_with_retry(
+            backend, sub, system_prompt, state,
+            revisit_context=sub_context,
+            table_name=table_name,
+            min_batch=min_batch,
+        ))
+    return results
 
 
 def _llm_sweep(
@@ -142,6 +226,7 @@ def _llm_sweep(
     column_names: list[str],
     samples: dict[str, ColumnSample],
     column_table: dict[str, str],
+    category_count: int = 0,
 ) -> None:
     """Phase 1: Send all columns to LLM in table-aware batches.
 
@@ -150,6 +235,16 @@ def _llm_sweep(
     parameters) early instead of silently proceeding with zero labels and
     reporting false convergence.
     """
+    # Adaptive batch sizing: reduce batch for large vocabularies
+    safe_batch = _estimate_safe_batch_size(category_count) if category_count else cfg.columns_per_call
+    effective_batch = min(cfg.columns_per_call, safe_batch)
+    state.effective_batch_size = effective_batch
+    if effective_batch < cfg.columns_per_call:
+        logger.info(
+            "Adaptive batch: %d columns (reduced from %d for %d categories)",
+            effective_batch, cfg.columns_per_call, category_count,
+        )
+
     by_table: dict[str, list[str]] = {}
     for name in column_names:
         table = column_table.get(name, "__flat__")
@@ -160,18 +255,18 @@ def _llm_sweep(
     last_error: Exception | None = None
 
     for table_name, table_cols in by_table.items():
-        for i in range(0, len(table_cols), cfg.columns_per_call):
+        for i in range(0, len(table_cols), effective_batch):
             if state.llm_calls_total >= cfg.max_total_llm_calls:
                 break
 
-            chunk = table_cols[i: i + cfg.columns_per_call]
+            chunk = table_cols[i: i + effective_batch]
             chunk_samples = [samples[n] for n in chunk]
             tname = table_name if table_name != "__flat__" else None
 
             batches_attempted += 1
             try:
-                response = backend.classify_batch(
-                    chunk_samples, system_prompt,
+                classifications = _classify_batch_with_retry(
+                    backend, chunk_samples, system_prompt, state,
                     table_name=tname,
                 )
             except Exception as e:
@@ -180,11 +275,7 @@ def _llm_sweep(
                 logger.warning("LLM call failed (%d/%d): %s", batches_failed, batches_attempted, e)
                 continue
 
-            state.llm_calls_total += 1
-            state.tokens_input += response.input_tokens
-            state.tokens_output += response.output_tokens
-
-            for c in response.classifications:
+            for c in classifications:
                 if c.category_code and c.confidence > 0:
                     state.labels[c.column_name] = c.category_code
                     state.confidence[c.column_name] = c.confidence
@@ -322,19 +413,21 @@ def _llm_revisit(
         table = column_table.get(name, "__flat__")
         by_table.setdefault(table, []).append(name)
 
+    effective_batch = state.effective_batch_size or cfg.columns_per_call
+
     for table_name, table_cols in by_table.items():
-        for i in range(0, len(table_cols), cfg.columns_per_call):
+        for i in range(0, len(table_cols), effective_batch):
             if state.llm_calls_total >= cfg.max_total_llm_calls:
                 return
 
-            chunk = table_cols[i: i + cfg.columns_per_call]
+            chunk = table_cols[i: i + effective_batch]
             chunk_samples = [samples[n] for n in chunk]
             chunk_context = {n: revisit_context[n] for n in chunk}
             tname = table_name if table_name != "__flat__" else None
 
             try:
-                response = backend.classify_batch(
-                    chunk_samples, system_prompt,
+                classifications = _classify_batch_with_retry(
+                    backend, chunk_samples, system_prompt, state,
                     revisit_context=chunk_context,
                     table_name=tname,
                 )
@@ -342,11 +435,7 @@ def _llm_revisit(
                 logger.warning("LLM revisit call failed: %s", e)
                 continue
 
-            state.llm_calls_total += 1
-            state.tokens_input += response.input_tokens
-            state.tokens_output += response.output_tokens
-
-            for c in response.classifications:
+            for c in classifications:
                 if c.category_code and c.confidence > 0:
                     state.labels[c.column_name] = c.category_code
                     state.confidence[c.column_name] = c.confidence

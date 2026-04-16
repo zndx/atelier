@@ -197,7 +197,7 @@ function Landing() {
                 return active ? (
                   <div style={{ marginTop: 12 }}>
                     <Tag color="blue">
-                      {active.name} ({active.row_count.toLocaleString()} rows)
+                      {active.name} ({active.row_count?.toLocaleString() ?? "—"} entities)
                     </Tag>
                   </div>
                 ) : null;

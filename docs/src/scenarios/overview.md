@@ -6,7 +6,7 @@ These aren't just tests. They're the design context that connects architectural 
 
 ## Active Domains
 
-**141 scenarios across 32 features, 4 domains.**
+**149 scenarios across 34 features, 4 domains.**
 
 ### Infrastructure (infra)
 

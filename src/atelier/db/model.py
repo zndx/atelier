@@ -19,6 +19,7 @@ class DataSource(Base):
     source_uri = Column(String, nullable=False, default="")
     display_name = Column(String, nullable=False)
     vocabulary_mode = Column(String, nullable=False, default="universal")
+    vocab_uri = Column(String, nullable=False, default="")  # e.g. "meta.vocab"
     created_at = Column(DateTime, server_default=func.now())
     source_metadata = Column("metadata", Text, nullable=True)  # JSON
     is_archived = Column(Boolean, nullable=False, default=False)

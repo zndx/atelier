@@ -201,6 +201,39 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
     if tool_search is not None:
         env["ENABLE_TOOL_SEARCH"] = tool_search
 
+    # ── Python environment for CLI subprocess ────────────────────
+    # The Claude CLI inherits os.environ but needs to find the project's
+    # Python with atelier + deps installed.  Three cases:
+    #   1. devenv: .venv/ managed by uv sync (VIRTUAL_ENV already set)
+    #   2. CAI with uv: .venv/ created by uv sync in install job
+    #   3. CAI without uv: pip install -e . into system Python
+    # Explicitly set VIRTUAL_ENV + prepend bin/ to PATH so the CLI's
+    # Bash tool finds `python` with project deps available.
+    import os
+    from pathlib import Path
+
+    # client.py → agents/ → atelier/ → src/ → project_root/
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    venv_dir = project_root / ".venv"
+
+    if venv_dir.is_dir():
+        venv_str = str(venv_dir)
+        venv_bin = str(venv_dir / "bin")
+        env["VIRTUAL_ENV"] = venv_str
+        # Prepend venv bin to PATH (SDK merges on top of os.environ,
+        # so this override wins for PATH).
+        current_path = os.environ.get("PATH", "")
+        if venv_bin not in current_path:
+            env["PATH"] = f"{venv_bin}:{current_path}"
+    else:
+        # No .venv — ensure system Python's site-packages are visible.
+        # Set PYTHONPATH to include the project root so `import atelier`
+        # works even without a venv (CAI pip install -e . pattern).
+        project_str = str(project_root)
+        pythonpath = os.environ.get("PYTHONPATH", "")
+        if project_str not in pythonpath:
+            env["PYTHONPATH"] = f"{project_str}:{pythonpath}" if pythonpath else project_str
+
     return env
 
 

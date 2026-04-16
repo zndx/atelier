@@ -48,7 +48,6 @@ from atelier.classify.sampler import (
 )
 from atelier.classify.taxonomy import (
     HierarchicalCategorySet,
-    compose_vocabularies,
     load_annotations_from_hive,
     load_annotations_from_json,
     load_sample_vocabulary,
@@ -120,6 +119,7 @@ def run_classification_pipeline(
     samples: list[TableSample] | None = None,
     category_set: HierarchicalCategorySet | None = None,
     llm_backend=None,
+    vocab_uri: str | None = None,
 ) -> dict[str, Any]:
     """Run the classification pipeline with LLM-driven convergence.
 
@@ -192,7 +192,7 @@ def run_classification_pipeline(
         # ── LOADING_VOCAB ────────────────────────────────────────
         fsm.advance(run_id, FSMState.LOADING_VOCAB, progress={"step": "loading_vocab"})
         if category_set is None:
-            category_set = _load_vocabulary(cfg, build_dir, connection_name)
+            category_set = _load_vocabulary(cfg, build_dir, connection_name, vocab_uri=vocab_uri)
         logger.info("Loaded %d leaf categories", len(category_set.categories))
 
         if not isinstance(category_set, HierarchicalCategorySet):
@@ -268,7 +268,7 @@ def run_classification_pipeline(
 
         boot_cfg = bootstrap_config_from_cfg(cfg)
         category_table = build_category_table(category_set)
-        system_prompt = build_system_prompt(category_table)
+        system_prompt = build_system_prompt(category_table, category_set=category_set)
 
         # Wire config → ml_inference model paths
         from atelier.classify import ml_inference
@@ -345,6 +345,7 @@ def run_classification_pipeline(
         _llm_sweep(
             state, boot_cfg, llm_backend, system_prompt,
             sweep_columns, samples_by_name, column_table,
+            category_count=len(category_set.categories),
         )
 
         # ── Label Propagation ──────────────────────────────────────
@@ -675,35 +676,47 @@ def run_classification_pipeline(
         }
 
 
-def _load_vocabulary(cfg, build_dir: Path, connection_name):
-    """Load vocabulary: universal base + optional domain extensions.
+def _load_vocabulary(cfg, build_dir: Path, connection_name, vocab_uri: str | None = None):
+    """Load vocabulary for classification.
 
-    Two-layer composition:
-      1. Universal BFO-grounded vocabulary (always loaded, ships in git)
-      2. Domain annotations (customer-specific, from hive or cache)
+    Vocabulary routing by source type:
 
-    Domain annotations compose on top of the universal base via ``is_a``
-    parent references.  When unavailable, returns universal-only.
+    - **OOTB sample**: 316-leaf ICE from ``data/sample/ontology.json``
+      (handled by caller via ``load_sample_vocabulary``).
+    - **Hive/synth with annotations**: Domain vocab loaded directly from
+      the annotations table specified by *vocab_uri*.  The customer's
+      domain codes are the classification targets — the LLM reads labels
+      and descriptions and classifies into hierarchical dot-codes.
+    - **Fallback**: 16-leaf universal (only when no domain annotations).
+
+    Hive sources always require annotations; the annotations table
+    location (``vocab_uri``) is configured per data source, decoupled
+    from the data tables being classified.
     """
     log = logging.getLogger(__name__)
 
-    # Always start with BFO-grounded universal vocabulary
+    if vocab_uri:
+        domain_cs = _load_domain_annotations(cfg, build_dir, connection_name)
+        if domain_cs is not None and len(domain_cs.categories) > 0:
+            if not isinstance(domain_cs, HierarchicalCategorySet):
+                domain_cs = HierarchicalCategorySet(
+                    name=domain_cs.name,
+                    categories=list(domain_cs.categories),
+                )
+            log.info(
+                "Loaded domain vocabulary: %d leaf categories (vocab_uri=%s)",
+                len(domain_cs.categories), vocab_uri,
+            )
+            return domain_cs
+        raise RuntimeError(
+            f"Could not load domain annotations from vocab_uri={vocab_uri!r} "
+            f"via connection {connection_name!r}"
+        )
+
+    # Fallback: universal vocabulary (16 BFO-grounded leaves)
     universal = load_universal_vocabulary(hierarchical=True)
     log.info("Loaded universal vocabulary: %d terms", len(universal.categories))
-
-    # Try domain extensions (customer annotations from cache or hive)
-    domain_cs = _load_domain_annotations(cfg, build_dir, connection_name)
-    if domain_cs is None:
-        return universal
-
-    # Compose: domain terms attach to universal tree via parent_code
-    composed = compose_vocabularies(universal, domain_cs)
-    log.info(
-        "Composed vocabulary: %d universal + %d domain = %d total terms",
-        len(universal.categories), len(domain_cs.categories),
-        len(composed.categories),
-    )
-    return composed
+    return universal
 
 
 def _load_domain_annotations(cfg, build_dir: Path, connection_name):

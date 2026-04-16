@@ -46,6 +46,50 @@ _RESET = "\x1b[0m"
 _WHITE = "\x1b[97m"
 
 _PROMPT = f"{_CYAN}\u25b8{_RESET} "
+_YELLOW = "\x1b[33m"
+
+# ── Inline annotation prefixes ───────────────────────────────
+_TOOL_PREFIX = f"{_DIM}  \u2699 "        # ⚙ tool call
+_TOOL_ERR_PREFIX = f"{_RED}  \u2717 "    # ✗ tool error
+_THINK_PREFIX = f"{_DIM}  \U0001f4ad "   # 💭 thinking
+_AGENT_PREFIX = f"{_CYAN}  \u25c8 "      # ◈ agent/task event
+_DONE_PREFIX = f"{_DIM}  \u2713 "        # ✓ done summary
+
+
+def _format_tool_summary(name: str, tool_input: dict) -> str:
+    """Build a compact one-line summary for a tool invocation."""
+    if name in ("Read", "read"):
+        path = tool_input.get("file_path", "")
+        offset = tool_input.get("offset")
+        suffix = f" (lines {offset}-{offset + tool_input.get('limit', 200)})" if offset else ""
+        return f"{path}{suffix}"
+    if name in ("Edit", "edit"):
+        return tool_input.get("file_path", "")
+    if name in ("Write", "write"):
+        return tool_input.get("file_path", "")
+    if name in ("Bash", "bash"):
+        cmd = tool_input.get("command", "")
+        return cmd[:60] + ("\u2026" if len(cmd) > 60 else "")
+    if name in ("Grep", "grep"):
+        pat = tool_input.get("pattern", "")
+        path = tool_input.get("path", ".")
+        return f'"{pat}" in {path}'
+    if name in ("Glob", "glob"):
+        return tool_input.get("pattern", "")
+    if name in ("Agent", "agent"):
+        desc = tool_input.get("description", "")
+        return desc
+    return name
+
+
+def _format_tokens(n: int) -> str:
+    """Format token count as compact string (e.g. 12.4k, 1.2M)."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
 
 # Braille dots spinner frames — the same clockwise orbit used by
 # Claude Code's thinking indicator (rattles `Dots` preset).
@@ -246,24 +290,53 @@ class TerminalSession:
                     await self._send(_PROMPT)
             return
 
-        for ch in data:
+        i = 0
+        while i < len(data):
+            ch = data[i]
+
             if ch == "\x03":  # Ctrl-C — always handled, even while busy
                 if self._busy:
                     assert self._current_task is not None
-                    # Cancellation propagates into the SDK query
-                    # coroutine; the task wrapper emits the
-                    # interrupted notice and restores the prompt.
                     self._current_task.cancel()
                 else:
                     self._line_buffer.clear()
                     await self._send(f"^C\r\n{_PROMPT}")
+                i += 1
                 continue
+
+            # ── Escape sequences (arrow keys, Delete, Home, End) ──
+            if ch == "\x1b" and i + 1 < len(data) and data[i + 1] == "[":
+                # CSI sequence: \x1b[ followed by params + final byte
+                j = i + 2
+                while j < len(data) and data[j] in "0123456789;":
+                    j += 1
+                if j < len(data):
+                    final = data[j]
+                    seq = data[i + 2 : j + 1]
+                    j += 1  # consume final byte
+                else:
+                    # Incomplete sequence — discard
+                    i = len(data)
+                    continue
+
+                i = j
+
+                if self._busy:
+                    continue
+
+                if seq == "3~":  # Delete key
+                    # No-op for now (cursor is always at end of line)
+                    pass
+                # Arrow keys, Home, End — silently ignore (no cursor
+                # movement in this simple line editor)
+                continue
+
+            i += 1
 
             if self._busy:
                 # While a query is running, silently drop other
                 # input. Otherwise keystrokes would interleave with
-                # SDK output and confuse the user. They can type
-                # their next prompt after Ctrl-C.
+                # SDK output and confuse the user.
                 continue
 
             if ch in ("\r", "\n"):
@@ -279,6 +352,10 @@ class TerminalSession:
                 if self._line_buffer:
                     self._line_buffer.pop()
                     await self._send("\x08 \x08")
+
+            elif ch == "\x1b":
+                # Lone escape (no CSI) — ignore
+                pass
 
             elif ch >= " " or ch == "\t":  # Printable
                 self._line_buffer.append(ch)
@@ -474,6 +551,27 @@ class TerminalSession:
                 ResultMessage,
                 TextBlock,
             )
+            # Optional types — import what's available
+            try:
+                from claude_agent_sdk import (
+                    ThinkingBlock,
+                    ToolUseBlock,
+                    ToolResultBlock,
+                )
+            except ImportError:
+                ThinkingBlock = None  # type: ignore[assignment,misc]
+                ToolUseBlock = None  # type: ignore[assignment,misc]
+                ToolResultBlock = None  # type: ignore[assignment,misc]
+            try:
+                from claude_agent_sdk.types import (
+                    TaskStartedMessage,
+                    TaskProgressMessage,
+                    TaskNotificationMessage,
+                )
+            except ImportError:
+                TaskStartedMessage = None  # type: ignore[assignment,misc]
+                TaskProgressMessage = None  # type: ignore[assignment,misc]
+                TaskNotificationMessage = None  # type: ignore[assignment,misc]
             from atelier.config import load_config
             from atelier.agents.client import _build_sdk_env
 
@@ -507,24 +605,65 @@ class TerminalSession:
                 stderr=_capture_stderr,
             )
 
-            # Track whether we've already shown text in this query so
-            # we can insert line-break separators between turns.
+            # Track state across the query for the summary line.
             emitted_text = False
+            tools_used: list[str] = []
+            tool_errors = 0
+            is_thinking = False
 
             async for message in query(prompt=prompt, options=options):
                 if isinstance(message, AssistantMessage):
-                    text_blocks = [
-                        b for b in message.content
-                        if isinstance(b, TextBlock)
-                    ]
-                    tool_blocks = [
-                        b for b in message.content
-                        if hasattr(b, "name") and not isinstance(b, TextBlock)
-                    ]
+                    text_blocks = []
+                    thinking_blocks = []
+                    tool_use_blocks = []
+                    tool_result_blocks = []
+                    for b in message.content:
+                        if isinstance(b, TextBlock):
+                            text_blocks.append(b)
+                        elif ThinkingBlock and isinstance(b, ThinkingBlock):
+                            thinking_blocks.append(b)
+                        elif ToolUseBlock and isinstance(b, ToolUseBlock):
+                            tool_use_blocks.append(b)
+                        elif ToolResultBlock and isinstance(b, ToolResultBlock):
+                            tool_result_blocks.append(b)
+                        elif hasattr(b, "name"):
+                            tool_use_blocks.append(b)
 
+                    # ── Thinking indicator ──
+                    if thinking_blocks and not is_thinking:
+                        is_thinking = True
+                        await _stop_spinner_inner()
+                        await self._send(
+                            f"\r\n{_THINK_PREFIX}thinking\u2026{_RESET}\r\n"
+                        )
+
+                    # ── Tool call annotations ──
+                    if tool_use_blocks:
+                        await _stop_spinner_inner()
+                        is_thinking = False
+                        for tb in tool_use_blocks:
+                            name = tb.name
+                            inp = tb.input if hasattr(tb, "input") else {}
+                            summary = _format_tool_summary(name, inp)
+                            tools_used.append(name)
+                            await self._send(
+                                f"\r\n{_TOOL_PREFIX}{name}: {summary}{_RESET}\r\n"
+                            )
+                        await _start_spinner(f"{tool_use_blocks[-1].name}\u2026")
+
+                    # ── Tool result errors ──
+                    for tr in tool_result_blocks:
+                        if getattr(tr, "is_error", False):
+                            tool_errors += 1
+                            err_text = str(getattr(tr, "content", ""))[:80]
+                            await self._send(
+                                f"\r\n{_TOOL_ERR_PREFIX}failed: {err_text}{_RESET}\r\n"
+                            )
+
+                    # ── Text output ──
                     if text_blocks:
                         await _stop_spinner_inner()
-                        # Separator between distinct response turns
+                        is_thinking = False
                         if emitted_text:
                             await self._send("\r\n\r\n")
                         for block in text_blocks:
@@ -532,35 +671,79 @@ class TerminalSession:
                             await self._send(text)
                         emitted_text = True
 
-                    if tool_blocks:
-                        # Model is invoking tools — show contextual spinner
-                        names = [b.name for b in tool_blocks]
-                        if len(names) == 1:
-                            label = f"{names[0]}..."
-                        else:
-                            label = f"{len(names)} tools..."
-                        await _start_spinner(label)
-                    elif not text_blocks:
-                        # Non-text, non-tool message — keep thinking
+                    elif not tool_use_blocks and not thinking_blocks:
                         if _spinner_task is None or _stop_ev.is_set():
                             await _start_spinner()
 
+                # ── Subagent / task events ──
+                elif TaskStartedMessage and isinstance(message, TaskStartedMessage):
+                    await _stop_spinner_inner()
+                    desc = getattr(message, "description", "")
+                    await self._send(
+                        f"\r\n{_AGENT_PREFIX}Agent spawned: \"{desc}\"{_RESET}\r\n"
+                    )
+                    await _start_spinner("agent\u2026")
+
+                elif TaskProgressMessage and isinstance(message, TaskProgressMessage):
+                    last_tool = getattr(message, "last_tool_name", None)
+                    usage = getattr(message, "usage", None)
+                    parts = []
+                    if last_tool:
+                        parts.append(last_tool)
+                    if usage:
+                        parts.append(f"{getattr(usage, 'tool_uses', '?')} tools")
+                        parts.append(f"{getattr(usage, 'duration_ms', 0)}ms")
+                    if parts:
+                        label = ", ".join(parts)
+                        await _start_spinner(f"agent: {label}")
+
+                elif TaskNotificationMessage and isinstance(message, TaskNotificationMessage):
+                    await _stop_spinner_inner()
+                    status = getattr(message, "status", "")
+                    summary = (getattr(message, "summary", "") or "")[:80]
+                    usage = getattr(message, "usage", None)
+                    tok = ""
+                    if usage:
+                        total = getattr(usage, "total_tokens", 0)
+                        if total:
+                            tok = f", {_format_tokens(total)} tokens"
+                    icon = "\u2713" if status == "completed" else "\u2717"
+                    color = _CYAN if status == "completed" else _YELLOW
+                    await self._send(
+                        f"\r\n{color}  {icon} Agent {status}: {summary}{tok}{_RESET}\r\n"
+                    )
+
+                # ── Result summary ──
                 elif isinstance(message, ResultMessage):
                     await _stop_spinner_inner()
-                    cost = getattr(message, "total_cost_usd", None)
                     duration = getattr(message, "duration_ms", None)
-                    meta_parts = []
+                    num_turns = getattr(message, "num_turns", None)
+                    usage = getattr(message, "usage", None)
+
+                    parts = []
+                    if num_turns is not None and num_turns > 1:
+                        parts.append(f"{num_turns} turns")
+                    if usage:
+                        inp = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
+                        out = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
+                        if inp or out:
+                            parts.append(f"{_format_tokens(inp)} in / {_format_tokens(out)} out")
+                        cache_read = usage.get("cache_read_input_tokens", 0) if isinstance(usage, dict) else 0
+                        if cache_read:
+                            parts.append(f"+{_format_tokens(cache_read)} cache")
                     if duration is not None:
-                        meta_parts.append(f"{duration}ms")
-                    if cost is not None:
-                        meta_parts.append(f"${cost:.4f}")
-                    if meta_parts:
-                        await self._send(
-                            f"\r\n{_DIM}({', '.join(meta_parts)}){_RESET}\r\n"
-                        )
+                        secs = duration / 1000
+                        parts.append(f"{secs:.1f}s" if secs < 60 else f"{secs / 60:.1f}m")
+                    if tool_errors:
+                        parts.append(f"{tool_errors} error{'s' if tool_errors > 1 else ''}")
+
+                    summary = " \u00b7 ".join(parts) if parts else "done"
+                    await self._send(
+                        f"\r\n{_DONE_PREFIX}{summary}{_RESET}\r\n"
+                    )
 
                 else:
-                    # Tool results, internal messages — ensure spinner
+                    # Other messages — ensure spinner is active
                     if _spinner_task is None or _stop_ev.is_set():
                         await _start_spinner()
 

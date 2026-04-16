@@ -164,6 +164,57 @@ def _validate_annotations_schema(conn, database: str) -> dict | None:
     return {"schema_format": fmt, "annotation_count": count}
 
 
+def _table_count(conn, database: str) -> int:
+    """Count tables in a database."""
+    try:
+        df = conn.get_pandas_dataframe(f"SHOW TABLES IN {database}")
+        return len(df)
+    except Exception:
+        return 0
+
+
+def refresh_connection(cfg: "AtelierConfig", name: str) -> dict:
+    """Probe a connection: list databases with table counts and annotations.
+
+    Returns a dict with per-database metadata including whether an
+    annotations table exists, its row count, and schema format.
+    """
+    import logging
+    import time
+    log = logging.getLogger(__name__)
+
+    if not _cml_available():
+        return {"ok": False, "connection": name, "error": "cml.data_v1 not available"}
+
+    import cml.data_v1 as cmldata  # type: ignore[import-not-found]
+
+    t0 = time.monotonic()
+    try:
+        conn = cmldata.get_connection(name)
+        databases = _list_databases(conn)
+    except Exception as exc:
+        return {"ok": False, "connection": name, "error": str(exc)}
+
+    db_infos = []
+    for db in databases:
+        info: dict = {"name": db, "table_count": 0, "has_annotations": False,
+                      "annotation_count": 0, "schema_format": None}
+        try:
+            info["table_count"] = _table_count(conn, db)
+            if _has_annotations_table(conn, db):
+                info["has_annotations"] = True
+                meta = _validate_annotations_schema(conn, db)
+                if meta:
+                    info["annotation_count"] = meta["annotation_count"]
+                    info["schema_format"] = meta["schema_format"]
+        except Exception as exc:
+            log.debug("refresh_connection: error probing %s/%s: %s", name, db, exc)
+        db_infos.append(info)
+
+    latency = int((time.monotonic() - t0) * 1000)
+    return {"ok": True, "connection": name, "latency_ms": latency, "databases": db_infos}
+
+
 def discover_hive_sources(cfg: "AtelierConfig") -> list[dict]:
     """Probe configured connections for annotations tables.
 

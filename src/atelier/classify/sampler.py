@@ -359,3 +359,99 @@ def sample_source_stats(sample_dir: str | Path | None = None) -> dict:
         "column_count": column_count,
         "has_data": table_count > 0,
     }
+
+
+# ── Synth source data (large-scale synthetic) ──────────────────────
+
+_SYNTH_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "synth"
+
+
+def load_synth_source(
+    synth_dir: str | Path | None = None,
+) -> list[TableSample]:
+    """Load synth tables from data/synth/tables/*.csv.
+
+    Same contract as :func:`load_sample_source` but for the larger
+    synthetic database (~100 tables, ~100 columns each).  Generate
+    with ``scripts/generate_synth_source.py``.
+    """
+    import csv as csv_mod
+
+    base = Path(synth_dir) if synth_dir else _SYNTH_DIR
+    tables_dir = base / "tables"
+    gt_path = base / "ground_truth.json"
+
+    if not tables_dir.is_dir():
+        log.warning("Synth tables directory not found: %s", tables_dir)
+        return []
+
+    ground_truth: dict[str, str] = {}
+    if gt_path.exists():
+        with open(gt_path) as f:
+            ground_truth = json.load(f)
+
+    samples: list[TableSample] = []
+    for csv_path in sorted(tables_dir.glob("*.csv")):
+        table_name = csv_path.stem
+        with open(csv_path, newline="") as f:
+            reader = csv_mod.reader(f)
+            header = next(reader, None)
+            if not header:
+                continue
+            rows = list(reader)
+
+        col_names = header
+        columns: list[ColumnSample] = []
+        for i, col_name in enumerate(col_names):
+            all_vals = [row[i] for row in rows if i < len(row) and row[i]]
+            values = all_vals[:5]
+            total_count = len(rows)
+            null_count = sum(1 for row in rows if i >= len(row) or not row[i])
+            gt_key = f"{table_name}.{col_name}"
+
+            columns.append(ColumnSample(
+                name=col_name,
+                column_type="object",
+                values=values,
+                all_values=all_vals,
+                total_count=total_count,
+                null_count=null_count,
+                table_name=table_name,
+                database="synth",
+                siblings=col_names,
+                ground_truth=ground_truth.get(gt_key),
+                distinct_count=len(set(row[i] for row in rows if i < len(row))),
+            ))
+
+        samples.append(TableSample(
+            name=table_name,
+            database="synth",
+            columns=columns,
+        ))
+
+    log.info(
+        "Loaded %d synth tables (%d columns) from %s",
+        len(samples),
+        sum(len(t.columns) for t in samples),
+        tables_dir,
+    )
+    return samples
+
+
+def synth_source_stats(synth_dir: str | Path | None = None) -> dict:
+    """Return summary stats for the synth source without loading all data."""
+    base = Path(synth_dir) if synth_dir else _SYNTH_DIR
+    tables_dir = base / "tables"
+    gt_path = base / "ground_truth.json"
+
+    table_count = len(list(tables_dir.glob("*.csv"))) if tables_dir.is_dir() else 0
+    column_count = 0
+    if gt_path.exists():
+        with open(gt_path) as f:
+            column_count = len(json.load(f))
+
+    return {
+        "table_count": table_count,
+        "column_count": column_count,
+        "has_data": table_count > 0,
+    }

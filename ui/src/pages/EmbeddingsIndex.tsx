@@ -50,7 +50,7 @@ export default function EmbeddingsIndex() {
                     </Paragraph>
                   )}
                   <Tag color="blue">
-                    {ds.row_count.toLocaleString()} rows
+                    {ds.row_count.toLocaleString()} entities
                   </Tag>
                 </Card>
               </Link>

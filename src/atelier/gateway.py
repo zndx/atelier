@@ -210,6 +210,7 @@ def _discover_and_register_hive_sources() -> None:
                 display_name=d["display_name"],
                 source_uri=d["source_id"],
                 vocabulary_mode="hive",
+                vocab_uri=f"{d['database']}.annotations",
                 metadata=json.dumps({
                     "connection": d["connection"],
                     "database": d["database"],
@@ -433,6 +434,43 @@ def unarchive_data_source(source_id: str):
         return {"ok": True, "source_id": source_id, "is_archived": False}
     except Exception as exc:
         return _error_envelope(f"unarchive_data_source failed: {exc}")
+
+
+@app.post("/api/data-sources")
+def create_data_source(body: dict):
+    """Create a new hive/synth data source with explicit vocab_uri."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        source_id = body.get("source_id", "")
+        if not source_id:
+            return _error_envelope("source_id is required", status=400)
+        result = dao.get_or_create_data_source(
+            source_id=source_id,
+            source_type=body.get("source_type", "hive"),
+            display_name=body.get("display_name", source_id),
+            source_uri=body.get("source_uri", source_id),
+            vocabulary_mode=body.get("vocabulary_mode", "hive"),
+            vocab_uri=body.get("vocab_uri", ""),
+            metadata=body.get("metadata"),
+        )
+        return {"ok": True, "source": result}
+    except Exception as exc:
+        return _error_envelope(f"create_data_source failed: {exc}")
+
+
+@app.patch("/api/data-sources/{source_id}")
+def update_data_source(source_id: str, body: dict):
+    """Update mutable fields on a data source (e.g. vocab_uri)."""
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        result = dao.update_data_source(source_id, **body)
+        if result is None:
+            return _error_envelope("Data source not found", status=404)
+        return {"ok": True, "source": result}
+    except Exception as exc:
+        return _error_envelope(f"update_data_source failed: {exc}")
 
 
 @app.post("/api/datasets/{dataset_id}/archive")
@@ -686,6 +724,17 @@ def test_data_connection(name: str):
         return _error_envelope(f"test_data_connection failed: {exc}")
 
 
+@app.post("/api/data-connections/{name}/refresh")
+def refresh_data_connection(name: str):
+    """Probe connection: list databases with table counts and annotations status."""
+    try:
+        from atelier.config import load_config
+        from atelier.data.connections import refresh_connection
+        return refresh_connection(load_config(), name)
+    except Exception as exc:
+        return _error_envelope(f"refresh_data_connection failed: {exc}")
+
+
 # ── Vocabulary ────────────────────────────────────────────────────
 
 
@@ -861,10 +910,21 @@ def fsm_start(source_id: str | None = None):
                     "error": "No classification LLM configured. "
                     "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
+        # Resolve vocab_uri from source record (hive/synth sources store it)
+        vocab_uri = None
+        if source_id and source_id != "ootb-sample":
+            try:
+                from atelier.db.dao import AtelierDao
+                src = AtelierDao().get_data_source(source_id)
+                if src:
+                    vocab_uri = src.get("vocab_uri") or None
+            except Exception:
+                pass  # proceed without — pipeline will use fallback
+
         def _background():
             # Pipeline owns run creation via fsm.start_run() — don't
             # create a run here (avoids double-run bug).
-            run_classification_pipeline(cfg, fsm, source_id=source_id)
+            run_classification_pipeline(cfg, fsm, source_id=source_id, vocab_uri=vocab_uri)
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()

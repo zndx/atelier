@@ -53,7 +53,7 @@ export default function Embeddings() {
       if (!signal.cancelled) setDataset(ds);
 
       // 3. Fetch parquet bytes on main thread (goes through Vite proxy)
-      if (!signal.cancelled) setStatus(ds.row_count ? `Downloading ${ds.row_count.toLocaleString()} rows...` : "Downloading data...");
+      if (!signal.cancelled) setStatus(ds.row_count ? `Downloading ${ds.row_count.toLocaleString()} entities...` : "Downloading data...");
       const parquetResp = await fetch(`/api/datasets/${datasetId}/data`);
       if (!parquetResp.ok) {
         if (!signal.cancelled) {

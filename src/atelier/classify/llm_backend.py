@@ -103,7 +103,7 @@ class LLMResponse:
     @property
     def truncated(self) -> bool:
         """Whether response was truncated due to max_tokens limit."""
-        return self.finish_reason == "length"
+        return self.finish_reason in ("length", "max_tokens")
 
 
 # ── Configuration ────────────────────────────────────────────────
@@ -163,8 +163,25 @@ def build_category_table(category_set) -> str:
     return "\n".join(lines)
 
 
-def build_system_prompt(category_table: str) -> str:
-    """Build the bootstrap classification system prompt."""
+def build_system_prompt(category_table: str, category_set=None) -> str:
+    """Build the bootstrap classification system prompt.
+
+    When *category_set* is provided, the response-format example uses real
+    codes from the loaded vocabulary so the LLM doesn't hallucinate codes
+    from a different naming convention (e.g. ICE.* vs numeric dot-codes).
+    """
+    # Pick two real codes for the example (primary + alternative)
+    example_code = "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN"
+    example_alt = "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME"
+    if category_set is not None and hasattr(category_set, "categories"):
+        cats = category_set.categories
+        if len(cats) >= 2:
+            example_code = cats[0].code
+            example_alt = cats[1].code
+        elif len(cats) == 1:
+            example_code = cats[0].code
+            example_alt = cats[0].code
+
     return (
         "You are a data governance classification engine. Your task is to "
         "classify database columns into taxonomy categories based on column "
@@ -176,7 +193,8 @@ def build_system_prompt(category_table: str) -> str:
         "\n"
         "## Instructions\n"
         "\n"
-        "- Classify each column into exactly ONE leaf category.\n"
+        "- Classify each column into exactly ONE leaf category from the table above.\n"
+        "- Use the exact Code value from the Categories table.\n"
         "- Consider column name, data type, sample values, and sibling columns.\n"
         "- If no category fits, set category_code to null.\n"
         "- Provide confidence 0.0–1.0 and brief evidence.\n"
@@ -185,8 +203,8 @@ def build_system_prompt(category_table: str) -> str:
         "\n"
         "## Response Format\n"
         "\n"
-        '[{"column_name": "ssn", "category_code": "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN", "confidence": 0.95, '
-        '"evidence": "SSN pattern", "alternatives": [{"code": "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME", "confidence": 0.03}]}]'
+        f'[{{"column_name": "ssn", "category_code": "{example_code}", "confidence": 0.95, '
+        f'"evidence": "SSN pattern", "alternatives": [{{"code": "{example_alt}", "confidence": 0.03}}]}}]'
     )
 
 

@@ -314,6 +314,8 @@ def _handle_check_convergence(
         "disagreements": len(disagreements),
         "llm_calls_total": state.llm_calls_total,
         "max_llm_calls": boot_cfg.max_total_llm_calls,
+        "truncation_count": state.truncation_count,
+        "effective_batch_size": state.effective_batch_size,
         "iteration_history": [
             {
                 "iteration": m.iteration,

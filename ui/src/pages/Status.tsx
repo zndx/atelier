@@ -9,6 +9,7 @@ import {
   Select,
   Space,
   Spin,
+  Switch,
   Table,
   Tag,
   Tooltip,
@@ -16,7 +17,6 @@ import {
 } from "antd";
 import {
   ArrowLeftOutlined,
-  DatabaseOutlined,
   EyeOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -89,16 +89,19 @@ interface SmokeResult {
   error?: string;
 }
 
-type CellValue = string | number | boolean | null;
+interface DatabaseInfo {
+  name: string;
+  table_count: number;
+  has_annotations: boolean;
+  annotation_count: number;
+  schema_format: string | null;
+}
 
-interface DataConnectionResult {
+interface RefreshResult {
   ok: boolean;
   connection: string;
-  query?: string;
-  row_count?: number;
-  columns?: string[];
-  rows?: CellValue[][];
   latency_ms?: number;
+  databases?: DatabaseInfo[];
   error?: string;
 }
 
@@ -210,7 +213,7 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
           <Text code>{fsm?.id ?? "—"}</Text>
         </Descriptions.Item>
         {progress.categories_loaded != null && (
-          <Descriptions.Item label="Categories">
+          <Descriptions.Item label="Terms">
             {String(progress.categories_loaded)}
           </Descriptions.Item>
         )}
@@ -424,10 +427,11 @@ export default function Status() {
 
   const [connections, setConnections] = useState<string[]>([]);
   const [selectedConn, setSelectedConn] = useState<string | undefined>();
-  const [connResult, setConnResult] = useState<DataConnectionResult | null>(
-    null,
-  );
   const [connLoading, setConnLoading] = useState(false);
+  const [refreshResult, setRefreshResult] = useState<RefreshResult | null>(null);
+  // Per-database state: which are enabled, and their vocab_uri selection
+  const [dbEnabled, setDbEnabled] = useState<Record<string, boolean>>({});
+  const [dbVocabUri, setDbVocabUri] = useState<Record<string, string>>({});
 
   const fetchStatus = () => {
     setLoading(true);
@@ -477,16 +481,31 @@ export default function Status() {
       .finally(() => setSmokeLoading(false));
   };
 
-  const runConnectionTest = () => {
+  const runConnectionRefresh = () => {
     if (!selectedConn) return;
     setConnLoading(true);
-    fetch(`/api/data-connections/${encodeURIComponent(selectedConn)}/test`, {
+    fetch(`/api/data-connections/${encodeURIComponent(selectedConn)}/refresh`, {
       method: "POST",
     })
       .then((r) => r.json())
-      .then(setConnResult)
+      .then((data: RefreshResult) => {
+        setRefreshResult(data);
+        if (data.ok && data.databases) {
+          // Auto-enable databases that have annotations; auto-select their vocab_uri
+          const enabled: Record<string, boolean> = {};
+          const vocabs: Record<string, string> = {};
+          for (const db of data.databases) {
+            enabled[db.name] = db.has_annotations;
+            if (db.has_annotations) {
+              vocabs[db.name] = `${db.name}.annotations`;
+            }
+          }
+          setDbEnabled(enabled);
+          setDbVocabUri(vocabs);
+        }
+      })
       .catch((e) =>
-        setConnResult({
+        setRefreshResult({
           ok: false,
           connection: selectedConn,
           error: String(e),
@@ -760,7 +779,7 @@ export default function Status() {
               <Space>
                 <Select
                   value={selectedConn}
-                  onChange={setSelectedConn}
+                  onChange={(v) => { setSelectedConn(v); setRefreshResult(null); }}
                   style={{ minWidth: 240 }}
                   placeholder="Select connection"
                   options={connections.map((c) => ({ label: c, value: c }))}
@@ -768,20 +787,20 @@ export default function Status() {
                   size="small"
                 />
                 <Button
-                  icon={<DatabaseOutlined />}
-                  onClick={runConnectionTest}
+                  icon={<ReloadOutlined />}
+                  onClick={runConnectionRefresh}
                   loading={connLoading}
                   disabled={!selectedConn}
                   size="small"
                 >
-                  Test
+                  Refresh
                 </Button>
               </Space>
             }
           >
             <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-              Runs <Text code>show databases</Text> against the selected CAI
-              Data Connection via <Text code>cml.data_v1</Text>.
+              Probe databases via <Text code>cml.data_v1</Text>. Toggle
+              databases on for classification and assign a vocabulary.
             </Paragraph>
             {connections.length === 0 && (
               <Text type="secondary">
@@ -790,45 +809,121 @@ export default function Status() {
                 deploy time.
               </Text>
             )}
-            {connResult && connResult.ok ? (
-              <>
-                <Descriptions
-                  column={2}
-                  size="small"
-                  style={{ marginBottom: 12 }}
-                >
-                  <Descriptions.Item label="Status">
-                    <Tag color="green">Success</Tag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Rows">
-                    {connResult.row_count}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Latency">
-                    {connResult.latency_ms}ms
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Query">
-                    <Text code>{connResult.query}</Text>
-                  </Descriptions.Item>
-                </Descriptions>
-                <Table
-                  size="small"
-                  pagination={false}
-                  dataSource={(connResult.rows ?? []).map((row, i) => ({
-                    key: i,
-                    ...Object.fromEntries(
-                      (connResult.columns ?? []).map((c, j) => [c, row[j]]),
-                    ),
-                  }))}
-                  columns={(connResult.columns ?? []).map((c) => ({
-                    title: c,
-                    dataIndex: c,
-                    key: c,
-                  }))}
-                />
-              </>
-            ) : connResult ? (
-              <Text type="danger">{connResult.error}</Text>
-            ) : null}
+            {refreshResult && !refreshResult.ok && (
+              <Text type="danger">{refreshResult.error}</Text>
+            )}
+            {refreshResult?.ok && refreshResult.databases && (() => {
+              const dbs = refreshResult.databases!;
+              // Build vocab options from databases that have annotations
+              const vocabOptions = dbs
+                .filter((d) => d.has_annotations)
+                .map((d) => ({
+                  label: `${d.name}.annotations (${d.annotation_count})`,
+                  value: `${d.name}.annotations`,
+                }));
+              vocabOptions.unshift({ label: "— none —", value: "" });
+
+              const handleToggle = (dbName: string, checked: boolean) => {
+                setDbEnabled((prev) => ({ ...prev, [dbName]: checked }));
+                if (checked && !dbVocabUri[dbName]) {
+                  // Auto-pick own annotations if available
+                  const db = dbs.find((d) => d.name === dbName);
+                  if (db?.has_annotations) {
+                    setDbVocabUri((prev) => ({ ...prev, [dbName]: `${dbName}.annotations` }));
+                  }
+                }
+                // Create/archive data source
+                const sourceId = `${selectedConn}/${dbName}`;
+                if (checked) {
+                  fetch("/api/data-sources", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      source_id: sourceId,
+                      source_type: "hive",
+                      display_name: `Hive: ${sourceId}`,
+                      vocab_uri: dbVocabUri[dbName] || "",
+                    }),
+                  }).catch(() => {});
+                } else {
+                  fetch(`/api/data-sources/${encodeURIComponent(sourceId)}/archive`, {
+                    method: "POST",
+                  }).catch(() => {});
+                }
+              };
+
+              const handleVocabChange = (dbName: string, uri: string) => {
+                setDbVocabUri((prev) => ({ ...prev, [dbName]: uri }));
+                const sourceId = `${selectedConn}/${dbName}`;
+                fetch(`/api/data-sources/${encodeURIComponent(sourceId)}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ vocab_uri: uri }),
+                }).catch(() => {});
+              };
+
+              return (
+                <>
+                  {refreshResult.latency_ms != null && (
+                    <div style={{ marginBottom: 8, fontSize: 12, color: "#8c8c8c" }}>
+                      {dbs.length} databases discovered in {refreshResult.latency_ms}ms
+                    </div>
+                  )}
+                  <Table
+                    size="small"
+                    pagination={false}
+                    dataSource={dbs.map((d) => ({ key: d.name, ...d }))}
+                    columns={[
+                      {
+                        title: "Database",
+                        dataIndex: "name",
+                        key: "name",
+                        render: (v: string) => <Text strong>{v}</Text>,
+                      },
+                      {
+                        title: "Tables",
+                        dataIndex: "table_count",
+                        key: "table_count",
+                        width: 80,
+                        render: (v: number) => v?.toLocaleString() ?? "—",
+                      },
+                      {
+                        title: "Entities",
+                        key: "entities",
+                        width: 80,
+                        render: () => <Text type="secondary">—</Text>,
+                      },
+                      {
+                        title: "Enabled",
+                        key: "enabled",
+                        width: 80,
+                        render: (_: unknown, row: DatabaseInfo) => (
+                          <Switch
+                            size="small"
+                            checked={dbEnabled[row.name] ?? false}
+                            onChange={(checked) => handleToggle(row.name, checked)}
+                          />
+                        ),
+                      },
+                      {
+                        title: "Vocabulary",
+                        key: "vocab_uri",
+                        render: (_: unknown, row: DatabaseInfo) => (
+                          <Select
+                            size="small"
+                            style={{ width: "100%" }}
+                            value={dbVocabUri[row.name] ?? ""}
+                            onChange={(v) => handleVocabChange(row.name, v)}
+                            disabled={!dbEnabled[row.name]}
+                            options={vocabOptions}
+                          />
+                        ),
+                      },
+                    ]}
+                  />
+                </>
+              );
+            })()}
           </Card>
         </Col>
       </Row>

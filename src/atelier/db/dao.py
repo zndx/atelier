@@ -79,6 +79,7 @@ class AtelierDao:
     def get_or_create_data_source(self, source_id: str, source_type: str,
                                   display_name: str, source_uri: str = "",
                                   vocabulary_mode: str = "universal",
+                                  vocab_uri: str = "",
                                   metadata: str | None = None) -> dict:
         """Get existing or create a new data source. Returns the source dict."""
         from atelier.db.model import DataSource
@@ -88,7 +89,8 @@ class AtelierDao:
                 r = DataSource(
                     id=source_id, source_type=source_type,
                     source_uri=source_uri, display_name=display_name,
-                    vocabulary_mode=vocabulary_mode, source_metadata=metadata,
+                    vocabulary_mode=vocabulary_mode, vocab_uri=vocab_uri,
+                    source_metadata=metadata,
                 )
                 session.add(r)
                 session.flush()
@@ -100,6 +102,7 @@ class AtelierDao:
             "id": r.id, "source_type": r.source_type,
             "source_uri": r.source_uri, "display_name": r.display_name,
             "vocabulary_mode": r.vocabulary_mode,
+            "vocab_uri": getattr(r, "vocab_uri", "") or "",
             "created_at": str(r.created_at or ""),
             "metadata": r.source_metadata,
             "is_archived": r.is_archived,
@@ -112,6 +115,20 @@ class AtelierDao:
             r = session.query(DataSource).filter_by(id=source_id).first()
             if r is not None:
                 r.source_metadata = metadata
+
+    def update_data_source(self, source_id: str, **fields) -> dict | None:
+        """Update mutable fields on a data source. Returns updated dict or None."""
+        from atelier.db.model import DataSource
+        _MUTABLE = {"vocab_uri", "display_name", "vocabulary_mode", "source_metadata"}
+        with self.get_session() as session:
+            r = session.query(DataSource).filter_by(id=source_id).first()
+            if r is None:
+                return None
+            for k, v in fields.items():
+                if k in _MUTABLE and v is not None:
+                    setattr(r, k, v)
+            session.flush()
+            return self._source_to_dict(r)
 
     # ── Dataset operations (version-aware) ─────────────────────
 

@@ -321,6 +321,41 @@ def name_match_to_mass(
 # ── LLM classification ───────────────────────────────────────────────
 
 
+def _coerce_to_singleton(
+    code: str,
+    frame: FrameOfDiscernment,
+) -> str | None:
+    """Try to resolve a non-singleton code to a valid leaf code.
+
+    Handles three common LLM failure modes:
+    1. Code is already a singleton → return as-is.
+    2. Code is a known internal node with a unique leaf descendant
+       → return that descendant.
+    3. Code is a prefix of exactly one singleton → return it.
+
+    Returns None when the code is unresolvable or ambiguous.
+    """
+    if code in frame.singletons:
+        return code
+
+    # Check internal nodes (parent codes) for unique-descendant resolution
+    if code in frame.internal_nodes:
+        fe = frame.internal_nodes[code]
+        if len(fe.codes) == 1:
+            leaf = next(iter(fe.codes))
+            return leaf if leaf in frame.singletons else None
+        # Ambiguous parent (multiple descendants) — can't choose one
+        return None
+
+    # Prefix matching: "1.1.1.9.3" might resolve to "1.1.1.9.3.1"
+    prefix = code + "."
+    matches = [s for s in frame.singletons if s.startswith(prefix)]
+    if len(matches) == 1:
+        return matches[0]
+
+    return None
+
+
 def llm_to_mass(
     category_code: str | None,
     confidence: float,
@@ -335,6 +370,10 @@ def llm_to_mass(
     (0.10 vs cosine's 0.30) because frontier LLM predictions are
     well-informed and typically well-calibrated.
 
+    When the LLM returns a parent code or near-miss code, coercion
+    attempts to resolve it to a valid leaf singleton.  Unresolvable
+    codes produce a vacuous assignment.
+
     Args:
         category_code: Predicted category code (None if unclassified).
         confidence: LLM confidence 0.0-1.0 for primary prediction.
@@ -342,7 +381,17 @@ def llm_to_mass(
         frame: The frame of discernment.
         discount: Fraction of total mass allocated to Theta.
     """
-    if not category_code or category_code not in frame.singletons:
+    if not category_code:
+        return frame.vacuous()
+
+    # Coerce non-singleton codes (parent codes, near-misses) to valid leaves
+    resolved = _coerce_to_singleton(category_code, frame)
+    if resolved is None:
+        import logging
+        logging.getLogger(__name__).debug(
+            "LLM code %r not in frame singletons and unresolvable — vacuous",
+            category_code,
+        )
         return frame.vacuous()
 
     evidence_mass = 1.0 - discount
@@ -350,9 +399,9 @@ def llm_to_mass(
 
     # Primary prediction
     primary_mass = confidence * evidence_mass
-    masses[frame.singleton(category_code)] = primary_mass
+    masses[frame.singleton(resolved)] = primary_mass
 
-    # Distribute remaining evidence to alternatives
+    # Distribute remaining evidence to alternatives (also coerced)
     remaining = evidence_mass - primary_mass
     if remaining > 1e-15 and alternatives:
         alt_total = sum(a.get("confidence", 0.0) for a in alternatives)
@@ -360,10 +409,11 @@ def llm_to_mass(
             for alt in alternatives:
                 alt_code = alt.get("code", "")
                 alt_conf = alt.get("confidence", 0.0)
-                if alt_code in frame.singletons and alt_conf > 0:
+                alt_resolved = _coerce_to_singleton(alt_code, frame) if alt_code else None
+                if alt_resolved and alt_conf > 0:
                     alt_mass = (alt_conf / alt_total) * remaining
                     if alt_mass > 1e-15:
-                        fe = frame.singleton(alt_code)
+                        fe = frame.singleton(alt_resolved)
                         masses[fe] = masses.get(fe, 0.0) + alt_mass
 
     # Theta gets discount + any unallocated evidence

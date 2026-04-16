@@ -77,6 +77,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.embedding_device": ("classify_embedding_device", str),
     "classify.embedding_batch_size": ("classify_embedding_batch_size", int),
     "classify.auto_start": ("classify_auto_start", bool),
+    "classify.default_source": ("classify_default_source", str),
     "classify.subagent_model": ("classify_subagent_model", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
@@ -250,6 +251,7 @@ class AtelierConfig:
     classify_embedding_device: str = "auto"
     classify_embedding_batch_size: int = 32
     classify_auto_start: bool = False
+    classify_default_source: str = ""  # empty = ootb-sample
     classify_subagent_model: str | None = None
 
     # ML classifier model paths
