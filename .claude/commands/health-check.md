@@ -11,8 +11,10 @@ agents concurrently, each probing an independent service domain:
    status, recent runs, data sources, vocabulary stats, data connections
 2. **ML Platform agent**: cmlapi (model serving, jobs, apps, runtimes)
    and MLflow (tracking URI, experiments, atelier experiment)
-3. **Governance agent**: Atlas SDK + connectivity, Ranger SDK, credentials,
-   Atelier version
+3. **Governance + Credentials agent**: Atlas SDK + connectivity, Ranger
+   SDK, credential providers, Atelier version
+4. **AI Studio agent**: Probe sibling studio applications on the same
+   CAI workspace (each is a separate AMP with its own port)
 
 Each agent runs a Python script and returns structured JSON. After all
 complete, synthesize the results into a single sitrep.
@@ -179,7 +181,51 @@ try:
 except ImportError:
     results["mlflow"] = False
 
-# 12. Atelier version
+# 12. AI Studio siblings — probe sibling AMPs on same workspace
+#     Each studio runs on its own port; try common ports and known
+#     health endpoints. Use short timeouts (2s) since unreachable
+#     studios should not slow down the sitrep.
+studios = {}
+
+# Agent Studio — workflow engine on port 5000, or app port
+for port in [5000]:
+    try:
+        r = urlopen(f"http://localhost:{port}/docs", timeout=2)
+        studios["agent_studio"] = {"available": True, "port": port, "endpoint": "/docs"}
+        break
+    except Exception:
+        pass
+if "agent_studio" not in studios:
+    studios["agent_studio"] = {"available": False}
+
+# RAG Studio — LLM service on port 8081
+try:
+    r = json.loads(urlopen("http://localhost:8081/llm-service/models/llm", timeout=2).read())
+    studios["rag_studio"] = {"available": True, "port": 8081, "models": len(r) if isinstance(r, list) else 0}
+except Exception:
+    studios["rag_studio"] = {"available": False}
+
+# Fine Tuning Studio — Streamlit + gRPC on 50051
+try:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(2)
+    s.connect(("localhost", 50051))
+    s.close()
+    studios["fine_tuning_studio"] = {"available": True, "port": 50051, "protocol": "gRPC"}
+except Exception:
+    studios["fine_tuning_studio"] = {"available": False}
+
+# Synthetic Data Studio — FastAPI on port 8001
+try:
+    r = json.loads(urlopen("http://localhost:8001/health", timeout=2).read())
+    studios["synthetic_data_studio"] = {"available": True, "port": 8001}
+except Exception:
+    studios["synthetic_data_studio"] = {"available": False}
+
+results["ai_studios"] = studios
+
+# 13. Atelier version
 try:
     from atelier import __version__
     results["version"] = __version__
@@ -234,6 +280,12 @@ ML Tracking (MLflow)
   • Experiments      {count} ({list names})
   • Atelier exp      {id or not yet created}
 
+AI Studios (sibling AMPs)
+  {✓|✗} Agent Studio   {port or not detected}
+  {✓|✗} RAG Studio     {port, model count or not detected}
+  {✓|✗} Fine Tuning    {port or not detected}
+  {✓|✗} Synth Data     {port or not detected}
+
 Data Connections
   {✓|✗} Connections    {list or none configured}
 
@@ -249,3 +301,7 @@ Adjust recommendations based on findings. For example:
 - If cmlapi model serving available: "Model serving accessible — trained classifiers can be deployed as endpoints"
 - If cmlapi jobs available: "Jobs API accessible — pipeline can be scheduled as recurring CML jobs"
 - If MLflow not available and not on CAI: "MLflow not detected (local dev) — pipeline metrics logged to build/results/ only"
+- If Synth Data Studio available: "Synthetic Data Studio accessible — can generate training data at scale"
+- If RAG Studio available: "RAG Studio accessible — classification results can enrich RAG knowledge bases"
+- If Fine Tuning Studio available: "Fine Tuning Studio accessible — can fine-tune models on classification data"
+- If Agent Studio available: "Agent Studio accessible — workflows can orchestrate multi-step classification pipelines"
