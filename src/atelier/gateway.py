@@ -1130,21 +1130,32 @@ def fsm_start(source_id: str | None = None):
                     "error": "No classification LLM configured. "
                     "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
-        # Resolve vocab_uri from source record (hive/synth sources store it)
+        # Resolve source metadata: connection, database, vocab_uri
         vocab_uri = None
+        connection_name = None
+        database = "default"
         if source_id and source_id != "ootb-sample":
             try:
                 from atelier.db.dao import AtelierDao
                 src = AtelierDao().get_data_source(source_id)
                 if src:
                     vocab_uri = src.get("vocab_uri") or None
+                    # source_uri format: "{connection}/{database}"
+                    uri = src.get("source_uri", "")
+                    if "/" in uri:
+                        connection_name, database = uri.split("/", 1)
+                    elif uri:
+                        connection_name = uri
             except Exception:
                 pass  # proceed without — pipeline will use fallback
 
         def _background():
             # Pipeline owns run creation via fsm.start_run() — don't
             # create a run here (avoids double-run bug).
-            run_classification_pipeline(cfg, fsm, source_id=source_id, vocab_uri=vocab_uri)
+            run_classification_pipeline(
+                cfg, fsm, source_id=source_id, vocab_uri=vocab_uri,
+                connection_name=connection_name, database=database,
+            )
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()
