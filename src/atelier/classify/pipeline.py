@@ -714,11 +714,25 @@ def run_classification_pipeline(
             logger.warning("Governance sync failed (non-fatal): %s", e)
             governance_summary["error"] = str(e)
 
+        # ── Overwatch analysis ────────────────────────────────────────
+        # When overwatch is enabled, run a single-turn analysis of the
+        # pipeline results and write recommendations to overwatch.md.
+        overwatch_path = None
+        try:
+            if cfg.has_overwatch:
+                from atelier.overwatch.agent import run_overwatch_analysis
+                overwatch_path = run_overwatch_analysis(
+                    cfg, run_id, summary, results_dir,
+                )
+        except Exception as e:
+            logger.warning("Overwatch analysis failed (non-fatal): %s", e)
+
         fsm.advance(run_id, FSMState.CONVERGED, progress={
             **summary,
             "result_path": str(results_path),
             "parquet_path": str(parquet_path) if parquet_path else None,
             "governance": governance_summary or None,
+            "overwatch": str(overwatch_path) if overwatch_path else None,
         }, result_path=str(parquet_path) if parquet_path else str(results_path))
 
         return {
@@ -728,6 +742,7 @@ def run_classification_pipeline(
             "result_path": str(results_path),
             "parquet_path": str(parquet_path) if parquet_path else None,
             "evaluation_report": eval_report.to_dict(),
+            "overwatch_report": str(overwatch_path) if overwatch_path else None,
             **summary,
         }
 

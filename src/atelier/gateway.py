@@ -734,6 +734,21 @@ def overwatch_status():
         return _error_envelope(f"overwatch_status failed: {exc}")
 
 
+@app.get("/api/overwatch/report/{run_id}")
+def overwatch_report(run_id: str):
+    """Return the overwatch analysis report for a pipeline run."""
+    try:
+        from pathlib import Path
+        report_path = Path("build/results") / run_id / "overwatch.md"
+        if not report_path.exists():
+            return _error_envelope(
+                f"No overwatch report for run {run_id}", status=404
+            )
+        return {"ok": True, "run_id": run_id, "report": report_path.read_text()}
+    except Exception as exc:
+        return _error_envelope(f"overwatch_report failed: {exc}")
+
+
 # ── CDP Control Plane Discovery ────────────────────────────────────
 
 
