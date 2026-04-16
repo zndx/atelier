@@ -274,7 +274,7 @@ class AtelierConfig:
     classify_llm_api_key: str | None = None
     classify_llm_model: str = "glm-4.7"
     classify_llm_base_url: str | None = None
-    classify_llm_max_tokens: int = 128000
+    classify_llm_max_tokens: int = 65536
     classify_llm_temperature: float = 0.0
     classify_llm_columns_per_call: int = 50
     classify_llm_max_retries: int = 3

@@ -620,7 +620,9 @@ class TerminalSession:
                 # Conversation continuity — after the first query,
                 # subsequent prompts continue the same conversation so
                 # Claude retains context across terminal interactions.
-                session_id=self._sdk_session_id,
+                # NOTE: only pass continue_conversation (not session_id)
+                # because the SDK CLI rejects --session-id + --continue
+                # without --fork-session.
                 continue_conversation=self._has_conversed,
             )
 

@@ -769,7 +769,7 @@ class BedrockBackend(LLMBackend):
                 "content": [{"text": user_prompt}],
             }],
             inferenceConfig={
-                "maxTokens": self._config.max_tokens,
+                "maxTokens": min(self._config.max_tokens, 65536),
                 "temperature": self._config.temperature,
             },
         )
@@ -891,7 +891,7 @@ class BedrockStructuredBackend(LLMBackend):
 
         request_body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": self._config.max_tokens,
+            "max_tokens": min(self._config.max_tokens, 65536),
             "temperature": self._config.temperature,
             "system": [{
                 "type": "text",
