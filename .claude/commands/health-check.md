@@ -102,7 +102,36 @@ try:
 except Exception:
     pass
 
-# 8. Governance — use the /api/governance/status endpoint which
+# 8. S3 Object Store (via CAI Data Connection)
+try:
+    import cml.data_v1 as cmldata
+    s3_info = {}
+    # Probe each connection that looks like S3
+    for conn_name in results.get("connections", []):
+        try:
+            conn = cmldata.get_connection(conn_name)
+            client = conn.get_base_connection()
+            # Attempt a lightweight list to verify access
+            resp = client.list_buckets()
+            bucket_names = [b["Name"] for b in resp.get("Buckets", [])]
+            s3_info[conn_name] = {
+                "available": True,
+                "bucket_count": len(bucket_names),
+                "buckets": bucket_names[:10],
+            }
+        except Exception:
+            # Not an S3 connection or not accessible — skip
+            pass
+    if s3_info:
+        results["s3"] = s3_info
+    else:
+        results["s3"] = {"available": False}
+except ImportError:
+    results["s3"] = {"available": False, "reason": "cml.data_v1 not available"}
+except Exception as e:
+    results["s3"] = {"available": False, "error": str(e)}
+
+# 9. Governance — use the /api/governance/status endpoint which
 #    probes Atlas and Ranger connectivity via the governance SDK
 try:
     r = json.loads(urlopen(f"{gateway}/api/governance/status", timeout=10).read())
@@ -282,6 +311,9 @@ AI Studios (sibling AMPs)
   {✓|✗} Fine Tuning    {port or not detected}
   {✓|✗} Synth Data     {port or not detected}
 
+Object Storage (S3)
+  {✓|✗} {connection}   {bucket_count} buckets ({bucket names})
+
 Data Connections
   {✓|✗} Connections    {list or none configured}
 
@@ -301,3 +333,5 @@ Adjust recommendations based on findings. For example:
 - If RAG Studio available: "RAG Studio accessible — classification results can enrich RAG knowledge bases"
 - If Fine Tuning Studio available: "Fine Tuning Studio accessible — can fine-tune models on classification data"
 - If Agent Studio available: "Agent Studio accessible — workflows can orchestrate multi-step classification pipelines"
+- If S3 available with buckets: "S3 Object Store accessible — {N} buckets available for artifact storage"
+- If S3 not available: "S3 not configured — classification artifacts stored locally only"
