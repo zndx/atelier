@@ -178,7 +178,14 @@ try:
 except Exception as e:
     results["governance"] = {"error": str(e)}
 
-# 10. ML Platform — cmlapi (compute orchestration)
+# 10. Overwatch status
+try:
+    r = json.loads(urlopen(f"{gateway}/api/overwatch/status", timeout=5).read())
+    results["overwatch"] = r
+except Exception as e:
+    results["overwatch"] = {"error": str(e)}
+
+# 11. ML Platform — cmlapi (compute orchestration)
 try:
     import cmlapi
     cml = cmlapi.default_client()
@@ -323,6 +330,13 @@ Data Sources           {count} registered
 Pipeline               {state}
   • Last accuracy      {N}%
   • Recent runs        {count}
+
+Overwatch (via /api/overwatch/status)
+  {✓|✗} Enabled        {true/false}
+  {✓|✗} Anthropic API  {required — direct API only, not Bedrock}
+  • Autonomy           {monitor|propose|autonomous}
+  • Model              {overwatch model}
+  {✓|✗} GitHub App     {configured with repo, or not configured}
 
 CDP Control Plane (via cdpcurl)
   {✓|✗} cdpcurl        {available/not installed}

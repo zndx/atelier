@@ -700,6 +700,40 @@ def model_discovery():
         return {"upgrade_available": False, "reason": "error", "error": str(exc)}
 
 
+# ── Overwatch ──────────────────────────────────────────────────────
+
+
+@app.get("/api/overwatch/status")
+def overwatch_status():
+    """Report overwatch configuration, readiness, and GitHub App health."""
+    try:
+        from atelier.config import load_config
+        cfg = load_config()
+        result: dict = {
+            "enabled": cfg.overwatch_enabled,
+            "has_overwatch": cfg.has_overwatch,
+            "has_anthropic": cfg.has_anthropic,
+            "autonomy": cfg.overwatch_autonomy,
+            "model": cfg.overwatch_model,
+            "github_app": {"configured": False},
+        }
+        if cfg.overwatch_github_app_id:
+            result["github_app"]["configured"] = True
+            result["github_app"]["repo"] = cfg.overwatch_github_repo
+            # Probe GitHub App connectivity if credentials available
+            if cfg.overwatch_github_private_key_path:
+                try:
+                    from atelier.overwatch.github_app import GitHubApp
+                    app = GitHubApp.from_config(cfg)
+                    if app:
+                        result["github_app"].update(app.ping())
+                except Exception as e:
+                    result["github_app"]["error"] = str(e)
+        return result
+    except Exception as exc:
+        return _error_envelope(f"overwatch_status failed: {exc}")
+
+
 # ── CDP Control Plane Discovery ────────────────────────────────────
 
 

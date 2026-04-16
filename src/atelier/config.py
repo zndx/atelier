@@ -79,6 +79,13 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "governance.verify_ssl": ("governance_verify_ssl", bool),
     "governance.auto_sync": ("governance_auto_sync", bool),
     "governance.dry_run": ("governance_dry_run", bool),
+    # Overwatch
+    "overwatch.enabled": ("overwatch_enabled", bool),
+    "overwatch.autonomy": ("overwatch_autonomy", str),
+    "overwatch.model": ("overwatch_model", str),
+    "overwatch.github_app_id": ("overwatch_github_app_id", str),
+    "overwatch.github_private_key_path": ("overwatch_github_private_key_path", str),
+    "overwatch.github_repo": ("overwatch_github_repo", str),
     "classify.connection_name": ("classify_connection_name", str),
     "classify.database": ("classify_database", str),
     "classify.sample_size": ("classify_sample_size", int),
@@ -371,6 +378,24 @@ class AtelierConfig:
     governance_verify_ssl: bool = False
     governance_auto_sync: bool = False
     governance_dry_run: bool = False
+
+    # Overwatch
+    overwatch_enabled: bool = False
+    overwatch_autonomy: str = "propose"
+    overwatch_model: str = "claude-opus-4-6-20250918"
+    overwatch_github_app_id: str = ""
+    overwatch_github_private_key_path: str = ""
+    overwatch_github_repo: str = ""
+
+    @property
+    def has_overwatch(self) -> bool:
+        """True only when overwatch is enabled AND Anthropic API is available.
+
+        Overwatch requires direct Anthropic API access for full Claude Code
+        capabilities (/fast, worktrees, subagents). Bedrock-only deployments
+        cannot activate overwatch.
+        """
+        return self.overwatch_enabled and self.has_anthropic
 
     @property
     def has_atlas(self) -> bool:

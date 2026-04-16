@@ -67,52 +67,73 @@ else:
     print("    Run the full build locally and commit dist/ to the fork.")
 
 # Install Claude Code CLI (required by claude-agent-sdk at runtime)
-# Pin to the version the SDK was built against for compatibility.
+# The official standalone installer replaces the deprecated npm package.
+# See: https://github.com/anthropics/claude-code
 #
-# On CAI, `nvm use default` doesn't reliably propagate nvm's node bin
-# directory into fresh bash subprocesses, so `claude` ends up installed
-# at $NVM_DIR/versions/node/<ver>/bin/claude but isn't on PATH later.
-# Symlink it into ~/.local/bin (which bin/start-app.sh puts on PATH)
-# so the Agent SDK can find it at runtime.
+# Falls back to npm install if the standalone installer fails
+# (air-gapped environments without curl access to claude.ai).
 print("\n--- Installing Claude Code CLI ---")
-subprocess.run(
-    ["bash", "-c", nvm_prefix + "npm install -g @anthropic-ai/claude-code@2.1.92"],
-    check=True,
-)
-
-# Locate the installed binary via `npm prefix -g` (works regardless of
-# whether nvm's bin dir is on PATH in later shells).
-npm_prefix_g = subprocess.run(
-    ["bash", "-c", nvm_prefix + "npm prefix -g"],
-    capture_output=True, text=True, check=True,
-).stdout.strip()
-claude_src = os.path.join(npm_prefix_g, "bin", "claude")
-
-if not os.path.exists(claude_src):
-    # Fallback: search NVM_DIR for the binary (handles prefix quirks).
-    found = subprocess.run(
-        ["bash", "-c", 'find "$HOME/.nvm" -type f -name claude 2>/dev/null | head -1'],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    if found:
-        claude_src = found
-
-if not os.path.exists(claude_src):
-    raise RuntimeError(
-        f"claude binary not found after npm install -g "
-        f"(looked at {npm_prefix_g}/bin/claude and under ~/.nvm)"
-    )
-
 local_bin = os.path.expanduser("~/.local/bin")
 os.makedirs(local_bin, exist_ok=True)
-claude_dst = os.path.join(local_bin, "claude")
-if os.path.islink(claude_dst) or os.path.exists(claude_dst):
-    os.remove(claude_dst)
-os.symlink(claude_src, claude_dst)
-print(f"Symlinked {claude_src} -> {claude_dst}")
 
-# Verify through the symlink — this is the path start-app.sh will use.
-subprocess.run([claude_dst, "--version"], check=True)
+installed = False
+
+# Primary: official standalone installer
+try:
+    subprocess.run(
+        ["bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"],
+        check=True,
+    )
+    # The installer puts claude in ~/.claude/local/bin or ~/.local/bin
+    for candidate in [
+        os.path.expanduser("~/.claude/local/bin/claude"),
+        os.path.join(local_bin, "claude"),
+        "/usr/local/bin/claude",
+    ]:
+        if os.path.exists(candidate):
+            # Ensure it's on PATH via ~/.local/bin
+            claude_dst = os.path.join(local_bin, "claude")
+            if candidate != claude_dst:
+                if os.path.islink(claude_dst) or os.path.exists(claude_dst):
+                    os.remove(claude_dst)
+                os.symlink(candidate, claude_dst)
+                print(f"Symlinked {candidate} -> {claude_dst}")
+            installed = True
+            break
+except Exception as e:
+    print(f"Standalone installer failed: {e}")
+    print("Falling back to npm install...")
+
+# Fallback: npm install (deprecated but works in air-gapped envs)
+if not installed:
+    subprocess.run(
+        ["bash", "-c", nvm_prefix + "npm install -g @anthropic-ai/claude-code"],
+        check=True,
+    )
+    npm_prefix_g = subprocess.run(
+        ["bash", "-c", nvm_prefix + "npm prefix -g"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    claude_src = os.path.join(npm_prefix_g, "bin", "claude")
+    if not os.path.exists(claude_src):
+        found = subprocess.run(
+            ["bash", "-c", 'find "$HOME/.nvm" -type f -name claude 2>/dev/null | head -1'],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        if found:
+            claude_src = found
+    if os.path.exists(claude_src):
+        claude_dst = os.path.join(local_bin, "claude")
+        if os.path.islink(claude_dst) or os.path.exists(claude_dst):
+            os.remove(claude_dst)
+        os.symlink(claude_src, claude_dst)
+        installed = True
+
+if not installed:
+    raise RuntimeError("Claude Code CLI installation failed (both standalone and npm)")
+
+# Verify
+subprocess.run([os.path.join(local_bin, "claude"), "--version"], check=True)
 print("Claude Code CLI installed")
 
 # Install PGlite server dependencies
