@@ -100,6 +100,7 @@ _HELP_TEXT = f"""\r
 {_BOLD}Commands{_RESET}
   {_WHITE}help{_RESET}      {_DIM}Show this message{_RESET}
   {_WHITE}status{_RESET}    {_DIM}SDK, credentials, and model info{_RESET}
+  {_WHITE}chk{_RESET}       {_DIM}Discovery sitrep — probe all reachable services{_RESET}
   {_WHITE}clear{_RESET}     {_DIM}Clear the screen{_RESET}
 
 {_DIM}Anything else is sent to the Claude Agent SDK as a prompt.{_RESET}
@@ -387,6 +388,11 @@ class TerminalSession:
             await self._status()
             await self._send(_PROMPT)
             return
+
+        # Aliases for common skills — expand before SDK dispatch
+        _SKILL_ALIASES = {"chk": "/health-check"}
+        if cmd in _SKILL_ALIASES:
+            line = _SKILL_ALIASES[cmd]
 
         # Everything else goes to the SDK as a background task.
         self._current_task = asyncio.create_task(self._run_query_task(line))
