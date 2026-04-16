@@ -27,10 +27,16 @@ class ServiceEndpoint:
 class CDPUrlResolver:
     """Detects CDP proxy, standard, and custom Atlas/Ranger URL formats.
 
-    Supported patterns (Atlas example — Ranger works identically):
-        CDP proxy:  https://host/cdp-proxy-api/atlas   → .../atlas/api/atlas/v2
-        Standard:   https://host:21000                  → .../api/atlas/v2
-        Explicit:   https://host:21000/api/atlas/v2     → kept as-is
+    Handles URLs as provided by Cloudera console, SEs, or CDP CLI —
+    including malformed variants with partial API paths embedded.
+
+    Supported patterns (Atlas example — Ranger works identically)::
+
+        CDP proxy:      https://host/dl/cdp-proxy-api/atlas
+        Standard:       https://host:21000
+        Explicit:       https://host:21000/api/atlas/v2
+        SE-provided:    https://host/dl/cdp-proxy-api/atlas/api/atlas/v2  ← coerced
+        Partial:        https://host/dl/cdp-proxy-api/atlas/api/atlas     ← coerced
     """
 
     ATLAS_API_PREFIX = "api/atlas/v2"
@@ -47,8 +53,27 @@ class CDPUrlResolver:
     @classmethod
     def _resolve(cls, raw_url: str, api_prefix: str, proxy_suffix: str) -> ServiceEndpoint:
         url = raw_url.rstrip("/")
+
+        # ── Coerce malformed URLs from Cloudera console/SEs ──────
+        # URLs sometimes arrive with partial or full API paths appended
+        # to the CDP proxy base (e.g. .../atlas/api/atlas/v2 or
+        # .../atlas/api/atlas). Strip these to recover the base URL.
+        # Longest match first to avoid partial stripping.
+        api_parent = api_prefix.rsplit("/", 1)[0]  # e.g. "api/atlas"
+        for suffix in [f"/{api_prefix}", f"/{api_parent}"]:
+            if url.endswith(suffix):
+                candidate = url[: -len(suffix)]
+                if candidate and "://" in candidate:
+                    log.info(
+                        "URL coerced: stripped '%s' suffix. Original: %s → Base: %s",
+                        suffix, raw_url, candidate,
+                    )
+                    url = candidate
+                    break
+
+        # ── Standard resolution ──────────────────────────────────
         if api_prefix in url:
-            # Already fully qualified
+            # Already fully qualified (after possible coercion)
             base = url[: url.index(api_prefix)].rstrip("/")
             return ServiceEndpoint(base_url=base, api_prefix=api_prefix)
         if url.endswith(proxy_suffix):

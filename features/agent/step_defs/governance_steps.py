@@ -95,3 +95,31 @@ def step_table_qn(context, expected):
 @then('column qualified name for "{col}" is "{expected}"')
 def step_column_qn(context, col, expected):
     assert context.qn.for_column(col) == expected
+
+
+# ── URL normalization scenarios ──────────────────────────────────
+
+@given('Atlas URL "{url}"')
+def step_atlas_url(context, url):
+    context.atlas_url = url
+
+
+@when("I resolve the Atlas URL")
+def step_resolve_url(context):
+    from atelier.governance.client import CDPUrlResolver
+    ep = CDPUrlResolver.resolve_atlas(context.atlas_url)
+    context.resolved_url = ep.url
+
+
+@then('the resolved URL ends with "{suffix}"')
+def step_url_ends_with(context, suffix):
+    assert context.resolved_url.endswith(suffix), (
+        f"Expected URL ending with '{suffix}', got '{context.resolved_url}'"
+    )
+
+
+@then('the resolved URL does not contain "{fragment}"')
+def step_url_not_contain(context, fragment):
+    assert fragment not in context.resolved_url, (
+        f"URL should not contain '{fragment}', got '{context.resolved_url}'"
+    )

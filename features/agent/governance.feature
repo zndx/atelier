@@ -30,3 +30,25 @@ Feature: Governance SDK integration
     Given qualified name for "mydb.mytable" cluster "prod"
     Then table qualified name is "mydb.mytable@prod"
     And column qualified name for "email" is "mydb.mytable.email@prod"
+
+  # URL normalization — handles malformed Cloudera SE-provided URLs
+  Scenario: CDPUrlResolver coerces SE-provided URL with full API path
+    Given Atlas URL "https://host/dl/cdp-proxy-api/atlas/api/atlas/v2"
+    When I resolve the Atlas URL
+    Then the resolved URL ends with "api/atlas/v2"
+    And the resolved URL does not contain "api/atlas/v2/api/atlas/v2"
+
+  Scenario: CDPUrlResolver coerces URL with partial API path
+    Given Atlas URL "https://host/dl/cdp-proxy-api/atlas/api/atlas"
+    When I resolve the Atlas URL
+    Then the resolved URL ends with "api/atlas/v2"
+
+  Scenario: CDPUrlResolver handles clean CDP proxy URL
+    Given Atlas URL "https://host/dl/cdp-proxy-api/atlas"
+    When I resolve the Atlas URL
+    Then the resolved URL ends with "api/atlas/v2"
+
+  Scenario: CDPUrlResolver handles bare host URL
+    Given Atlas URL "https://atlas-host:21000"
+    When I resolve the Atlas URL
+    Then the resolved URL ends with "api/atlas/v2"

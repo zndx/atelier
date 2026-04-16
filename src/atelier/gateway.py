@@ -700,6 +700,73 @@ def model_discovery():
         return {"upgrade_available": False, "reason": "error", "error": str(exc)}
 
 
+# ── CDP Control Plane Discovery ────────────────────────────────────
+
+
+@app.post("/api/cdp/discover")
+def cdp_discover():
+    """Discover Atlas/Ranger service URLs from the CDP control plane.
+
+    Uses cdpcurl (Ed25519 signed requests) to query the CDP API for
+    datalake endpoints.  Requires CDP API access key configured in
+    ``~/.cdp/credentials`` or ``CDP_ACCESS_KEY_ID`` / ``CDP_PRIVATE_KEY``
+    environment variables.
+    """
+    try:
+        import requests as _req
+        from cdpcurl.requests_auth import auth_v1
+
+        cdp_api = "https://api.us-west-1.cdp.cloudera.com"
+        result: dict = {"ok": True, "environments": [], "datalakes": [],
+                        "discovered_services": {}}
+
+        # List environments
+        try:
+            r = _req.post(f"{cdp_api}/api/v1/environments2/listEnvironments",
+                         json={}, auth=auth_v1(), timeout=15)
+            if r.ok:
+                envs = r.json().get("environments", [])
+                result["environments"] = [
+                    {"name": e.get("environmentName", ""), "crn": e.get("crn", "")}
+                    for e in envs
+                ]
+        except Exception as e:
+            result["environment_error"] = str(e)
+
+        # List datalakes and extract service endpoints
+        try:
+            r = _req.post(f"{cdp_api}/api/v1/datalake/listDatalakes",
+                         json={}, auth=auth_v1(), timeout=15)
+            if r.ok:
+                dls = r.json().get("datalakes", [])
+                for dl in dls:
+                    dl_info = {
+                        "name": dl.get("datalakeName", ""),
+                        "status": dl.get("status", ""),
+                        "services": {},
+                    }
+                    endpoints = dl.get("endpoints", {}).get("endpoints", [])
+                    for ep in endpoints:
+                        svc = ep.get("serviceName", "")
+                        if svc in ("ATLAS_SERVER", "RANGER_ADMIN", "HIVESERVER2",
+                                   "NIFI", "NIFI_REGISTRY", "SOLR"):
+                            dl_info["services"][svc] = ep.get("serviceUrl", "")
+                            result["discovered_services"][svc] = ep.get("serviceUrl", "")
+                    result["datalakes"].append(dl_info)
+        except Exception as e:
+            result["datalake_error"] = str(e)
+
+        return result
+
+    except ImportError:
+        return _error_envelope(
+            "cdpcurl not installed — pip install cdpcurl. "
+            "Required for CDP control plane discovery."
+        )
+    except Exception as exc:
+        return _error_envelope(f"CDP discover failed: {exc}")
+
+
 # ── Governance (Atlas + Ranger) ────────────────────────────────────
 
 
