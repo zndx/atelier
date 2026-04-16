@@ -687,7 +687,7 @@ def run_classification_pipeline(
                         GovColumnClassification(
                             column_name=c["column_name"],
                             tags=[c.get("predicted_code", "")],
-                            confidence=str(c.get("confidence", "")),
+                            confidence=float(c.get("confidence", 0) or 0),
                             reason=c.get("evidence", ""),
                         )
                     )

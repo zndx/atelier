@@ -153,7 +153,7 @@ class GovernanceClient:
 
     Usage::
 
-        from governance import GovernanceClient
+        from atelier.governance import GovernanceClient
 
         gc = GovernanceClient(
             atlas_url="https://cdp-host/cdp-proxy-api/atlas",
@@ -212,14 +212,46 @@ class GovernanceClient:
     def from_atelier_config(cls, cfg) -> "GovernanceClient":
         """Build GovernanceClient from an AtelierConfig instance.
 
-        Returns a client with Atlas and/or Ranger configured based on
-        which URLs are set in the HOCON config.
+        Atlas and Ranger may have different credentials. When Ranger
+        credentials are not explicitly set, fall back to Atlas credentials
+        (common in single-cluster deployments).
         """
-        return cls(
-            atlas_url=cfg.governance_atlas_url or None,
-            ranger_url=cfg.governance_ranger_url or None,
-            username=cfg.governance_atlas_username,
-            password=cfg.governance_atlas_password,
+        atlas_url = cfg.governance_atlas_url or None
+        ranger_url = cfg.governance_ranger_url or None
+
+        shared = dict(
             verify_ssl=cfg.governance_verify_ssl,
             cluster_name=cfg.governance_cluster_name,
         )
+
+        gc = cls.__new__(cls)
+        gc._atlas = None
+        gc._ranger = None
+
+        if atlas_url:
+            from atelier.governance.atlas import AtlasClient
+            atlas_cfg = ClientConfig(
+                url=atlas_url,
+                username=cfg.governance_atlas_username,
+                password=cfg.governance_atlas_password,
+                **shared,
+            )
+            gc._atlas = AtlasClient(atlas_cfg)
+
+        if ranger_url:
+            from atelier.governance.ranger import RangerClient
+            # Ranger may have its own credentials; fall back to Atlas creds
+            ranger_user = cfg.governance_ranger_username
+            ranger_pass = cfg.governance_ranger_password
+            if not ranger_pass:
+                ranger_user = cfg.governance_atlas_username
+                ranger_pass = cfg.governance_atlas_password
+            ranger_cfg = ClientConfig(
+                url=ranger_url,
+                username=ranger_user,
+                password=ranger_pass,
+                **shared,
+            )
+            gc._ranger = RangerClient(ranger_cfg)
+
+        return gc

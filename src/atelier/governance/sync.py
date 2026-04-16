@@ -117,7 +117,7 @@ class ColumnClassification:
 
     column_name: str
     tags: list[str]
-    confidence: str = ""
+    confidence: float = 0.0
     reason: str = ""
 
 

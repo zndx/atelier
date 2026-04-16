@@ -123,7 +123,7 @@ class AtlasClient:
 
         # Classify
         client.ensure_classification("PII")
-        client.tag_entity(guid, [ClassificationTag("PII", confidence="high")])
+        client.tag_entity(guid, [ClassificationTag("PII", confidence=0.95)])
     """
 
     def __init__(self, config: ClientConfig) -> None:
@@ -391,37 +391,31 @@ class AtlasClient:
                 notation=t.notation,
             )
 
-        # POST /entity/bulk/classifications
-        payload = {
-            "classification": tags[0].to_atlas_payload() if len(tags) == 1 else None,
-            "classifications": [t.to_atlas_payload() for t in tags] if len(tags) > 1 else None,
-            "entityGuids": entity_guids,
-        }
-        # Clean None keys
-        payload = {k: v for k, v in payload.items() if v is not None}
-
-        resp = self._http.post("entity/bulk/classifications", json=payload)
-        if resp.status_code in (200, 204):
-            return [
-                SyncResult(
-                    entity_name=guid,
-                    entity_guid=guid,
-                    tags=[t.type_name for t in tags],
-                    status="success",
-                    message="Applied (bulk)",
-                )
-                for guid in entity_guids
-            ]
-        return [
-            SyncResult(
-                entity_name=guid,
-                entity_guid=guid,
-                tags=[t.type_name for t in tags],
-                status="error",
-                message=f"HTTP {resp.status_code}: {resp.text[:200]}",
-            )
-            for guid in entity_guids
-        ]
+        # POST /entity/bulk/classifications — one classification at a time.
+        # The Atlas bulk endpoint applies a SINGLE classification to multiple
+        # entities. For multiple tags, iterate.
+        all_results: list[SyncResult] = []
+        for tag in tags:
+            payload = {
+                "classification": tag.to_atlas_payload(),
+                "entityGuids": entity_guids,
+            }
+            resp = self._http.post("entity/bulk/classifications", json=payload)
+            if resp.status_code in (200, 204):
+                for guid in entity_guids:
+                    all_results.append(SyncResult(
+                        entity_name=guid, entity_guid=guid,
+                        tags=[tag.type_name], status="success",
+                        message="Applied (bulk)",
+                    ))
+            else:
+                for guid in entity_guids:
+                    all_results.append(SyncResult(
+                        entity_name=guid, entity_guid=guid,
+                        tags=[tag.type_name], status="error",
+                        message=f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    ))
+        return all_results
 
 
 # -- helpers ---------------------------------------------------------------

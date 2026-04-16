@@ -351,9 +351,13 @@ class RangerClient:
             "isVisible": 1,
             "userSource": 0,
         }
-        resp = self._http.post(
-            "../xusers/secure/users",  # relative to service/public/v2/api
+        # The secure user endpoint is outside the v2 API path.
+        # Build the URL from the base host, not relative path traversal.
+        base = self._http.endpoint.base_url
+        resp = self._http._session.post(
+            f"{base}/service/xusers/secure/users",
             json=payload,
+            timeout=self._http._config.timeout,
         )
         if resp.ok:
             log.info("Created user: %s", username)
