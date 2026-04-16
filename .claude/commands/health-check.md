@@ -11,8 +11,9 @@ agents concurrently, each probing an independent service domain:
    status, recent runs, data sources, vocabulary stats, data connections
 2. **ML Platform agent**: cmlapi (model serving, jobs, apps, runtimes)
    and MLflow (tracking URI, experiments, atelier experiment)
-3. **Governance + Credentials agent**: Atlas SDK + connectivity, Ranger
-   SDK, credential providers, Atelier version
+3. **Governance + CDP discovery agent**: CDP control plane (cdpcurl
+   datalake/environment discovery), Atlas + Ranger connectivity via
+   governance SDK, credential providers, Atelier version
 4. **AI Studio agent**: Probe sibling studio applications on the same
    CAI workspace (each is a separate AMP with its own port)
 
@@ -131,8 +132,46 @@ except ImportError:
 except Exception as e:
     results["s3"] = {"available": False, "error": str(e)}
 
-# 9. Governance — use the /api/governance/status endpoint which
-#    probes Atlas and Ranger connectivity via the governance SDK
+# 9. CDP Control Plane — datalake/environment discovery via cdpcurl
+#    Uses CDP API access key (Ed25519) to query the control plane.
+#    This discovers the Atlas/Ranger Knox URLs automatically.
+try:
+    import requests as _req
+    from cdpcurl.requests_auth import auth_v1
+    cdp_api = "https://api.us-west-1.cdp.cloudera.com"
+    cdp_info = {"available": True}
+    try:
+        # Discover environments
+        r = _req.post(f"{cdp_api}/api/v1/environments2/listEnvironments",
+                     json={}, auth=auth_v1(), timeout=15)
+        if r.ok:
+            envs = r.json().get("environments", [])
+            cdp_info["environment_count"] = len(envs)
+            cdp_info["environments"] = [e.get("environmentName", "") for e in envs[:5]]
+        # Discover datalakes
+        r = _req.post(f"{cdp_api}/api/v1/datalake/listDatalakes",
+                     json={}, auth=auth_v1(), timeout=15)
+        if r.ok:
+            dls = r.json().get("datalakes", [])
+            cdp_info["datalake_count"] = len(dls)
+            for dl in dls:
+                endpoints = dl.get("endpoints", {}).get("endpoints", [])
+                atlas_ep = next((e for e in endpoints if e.get("serviceName") == "ATLAS_SERVER"), None)
+                ranger_ep = next((e for e in endpoints if e.get("serviceName") == "RANGER_ADMIN"), None)
+                if atlas_ep:
+                    cdp_info["atlas_service_url"] = atlas_ep["serviceUrl"]
+                if ranger_ep:
+                    cdp_info["ranger_service_url"] = ranger_ep["serviceUrl"]
+    except Exception as e:
+        cdp_info["error"] = str(e)
+    results["cdp_control_plane"] = cdp_info
+except ImportError:
+    results["cdp_control_plane"] = {"available": False, "reason": "cdpcurl not installed (pip install cdpcurl)"}
+
+# 10. Governance — use the /api/governance/status endpoint which
+#     probes Atlas and Ranger connectivity via the governance SDK.
+#     If cdpcurl discovered Atlas/Ranger URLs above and they're not
+#     yet configured, report the discovered URLs as a recommendation.
 try:
     r = json.loads(urlopen(f"{gateway}/api/governance/status", timeout=10).read())
     results["governance"] = r
@@ -285,6 +324,13 @@ Pipeline               {state}
   • Last accuracy      {N}%
   • Recent runs        {count}
 
+CDP Control Plane (via cdpcurl)
+  {✓|✗} cdpcurl        {available/not installed}
+  • Environments       {count} ({names})
+  • Datalakes          {count}
+  • Atlas URL          {discovered url or "not discovered"}
+  • Ranger URL         {discovered url or "not discovered"}
+
 Governance (via /api/governance/status)
   {✓|✗} Atlas          {url, classification_count, entity_type_count or not configured}
   {✓|✗} Ranger         {url, service_count or not configured}
@@ -335,3 +381,6 @@ Adjust recommendations based on findings. For example:
 - If Agent Studio available: "Agent Studio accessible — workflows can orchestrate multi-step classification pipelines"
 - If S3 available with buckets: "S3 Object Store accessible — {N} buckets available for artifact storage"
 - If S3 not available: "S3 not configured — classification artifacts stored locally only"
+- If cdpcurl discovered Atlas URL but governance.atlas.url is empty: "Atlas URL auto-discovered: {url} — set ATELIER_ATLAS_URL to enable governance sync"
+- If cdpcurl discovered Ranger URL but governance.ranger.url is empty: "Ranger URL auto-discovered: {url} — set ATELIER_RANGER_URL to enable policy derivation"
+- If cdpcurl not installed: "Install cdpcurl for automatic datalake service discovery (pip install cdpcurl)"
