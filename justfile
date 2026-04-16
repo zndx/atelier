@@ -138,6 +138,12 @@ behave-slow *ARGS:
 bdd-runtime:
     ATELIER_BDD_TIER=0 uv run behave features/deployment/runtime_profile.feature
 
+# ── Versioning ────────────────────────────────────────────────────
+
+# Bump version: just bump-version --minor (or --patch, --major, X.Y.Z)
+bump-version *ARGS:
+    scripts/bump-version.sh {{ARGS}}
+
 # ── Documentation ─────────────────────────────────────────────────
 
 # Build mdbook docs

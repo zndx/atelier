@@ -62,7 +62,9 @@ async def _lifespan(app: FastAPI):
     cleanup_task.cancel()
 
 
-app = FastAPI(title="Atelier", version="0.1.0", lifespan=_lifespan)
+from atelier import __version__ as _atelier_version
+
+app = FastAPI(title="Atelier", version=_atelier_version, lifespan=_lifespan)
 
 _project_root = Path(__file__).resolve().parent.parent.parent
 

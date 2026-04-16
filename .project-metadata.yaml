@@ -6,7 +6,7 @@ description: |
 author: "Cloudera Inc."
 date: "2026-04-05"
 specification_version: 1.0
-prototype_version: 0.1.0
+prototype_version: 0.2.0
 
 environment_variables:
   # ── AWS / Bedrock Credentials ──────────────────────────────────

@@ -6,6 +6,7 @@ All business logic lives in separate modules.
 
 import json
 
+from atelier import __version__
 from atelier.db.dao import AtelierDao
 from atelier.proto import atelier_pb2, atelier_pb2_grpc
 
@@ -25,7 +26,7 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
     def HealthCheck(self, request, context):
         return atelier_pb2.HealthCheckResponse(
             status="ok",
-            version="0.1.0",
+            version=__version__,
         )
 
     def ListAgents(self, request, context):
