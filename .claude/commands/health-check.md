@@ -96,14 +96,71 @@ try:
 except ImportError:
     results["ranger_sdk"] = False
 
-# 10. ML Platform (CAI only)
+# 10. ML Platform — cmlapi (compute orchestration)
 try:
     import cmlapi
+    cml = cmlapi.default_client()
+    project_id = os.environ.get("CDSW_PROJECT_ID", "")
     results["cmlapi"] = True
+    # Probe accessible services
+    ml_services = {}
+    try:
+        models = cml.list_models(project_id=project_id)
+        ml_services["model_serving"] = {"available": True, "count": len(models.models or [])}
+    except Exception:
+        ml_services["model_serving"] = {"available": False}
+    try:
+        jobs = cml.list_jobs(project_id=project_id)
+        ml_services["jobs"] = {"available": True, "count": len(jobs.jobs or [])}
+    except Exception:
+        ml_services["jobs"] = {"available": False}
+    try:
+        apps = cml.list_applications(project_id=project_id)
+        ml_services["applications"] = {"available": True, "count": len(apps.applications or [])}
+    except Exception:
+        ml_services["applications"] = {"available": False}
+    try:
+        runtimes = cml.list_runtimes(search_filter='{"image_identifier":"*"}')
+        ml_services["runtimes"] = {"available": True, "count": len(runtimes.runtimes or [])}
+    except Exception:
+        ml_services["runtimes"] = {"available": False}
+    results["ml_services"] = ml_services
 except ImportError:
     results["cmlapi"] = False
+except Exception as e:
+    results["cmlapi"] = True
+    results["cmlapi_error"] = str(e)
 
-# 11. Atelier version
+# 11. ML Platform — MLflow (experiment tracking, auto-configured on CAI)
+try:
+    import mlflow
+    results["mlflow"] = True
+    mlflow_info = {}
+    try:
+        tracking_uri = mlflow.get_tracking_uri()
+        mlflow_info["tracking_uri"] = tracking_uri
+    except Exception:
+        pass
+    try:
+        experiments = mlflow.search_experiments()
+        mlflow_info["experiment_count"] = len(experiments)
+        mlflow_info["experiments"] = [
+            {"name": e.name, "id": e.experiment_id}
+            for e in experiments[:10]
+        ]
+    except Exception:
+        mlflow_info["experiment_count"] = 0
+    try:
+        # Check if we can create/access an atelier experiment
+        exp = mlflow.set_experiment("atelier")
+        mlflow_info["atelier_experiment_id"] = exp.experiment_id
+    except Exception:
+        pass
+    results["mlflow_info"] = mlflow_info
+except ImportError:
+    results["mlflow"] = False
+
+# 12. Atelier version
 try:
     from atelier import __version__
     results["version"] = __version__
@@ -145,9 +202,21 @@ Governance
   {✓|✗} Atlas SDK      {available/not found}
   {✓|✗} Ranger SDK     {available/not found}
 
-CAI Platform
+CAI Compute (cmlapi)
   {✓|✗} cmlapi         {available/not available}
-  {✓|✗} Data Conns     {list or none configured}
+  {✓|✗} Model Serving  {count} endpoints
+  {✓|✗} Jobs           {count} registered
+  {✓|✗} Applications   {count} running
+  {✓|✗} Runtimes       {count} available
+
+ML Tracking (MLflow)
+  {✓|✗} MLflow         {available/not available}
+  • Tracking URI     {uri or auto-configured}
+  • Experiments      {count} ({list names})
+  • Atelier exp      {id or not yet created}
+
+Data Connections
+  {✓|✗} Connections    {list or none configured}
 
 Recommendations:
   • [actionable next steps based on what's available/missing]
@@ -156,4 +225,8 @@ Recommendations:
 Adjust recommendations based on findings. For example:
 - If Atlas SDK is available but no URL configured: "Configure ATLAS_URL to enable governance sync"
 - If pipeline is IDLE with sources available: "Run /classify-columns on {source}"
-- If cmlapi available: "Model Registry accessible — pipeline can track CatBoost/SVM versions"
+- If MLflow available: "MLflow tracking active — pipeline runs will be logged as experiments"
+- If MLflow available but no atelier experiment: "Will create 'atelier' experiment on first pipeline run"
+- If cmlapi model serving available: "Model serving accessible — trained classifiers can be deployed as endpoints"
+- If cmlapi jobs available: "Jobs API accessible — pipeline can be scheduled as recurring CML jobs"
+- If MLflow not available and not on CAI: "MLflow not detected (local dev) — pipeline metrics logged to build/results/ only"
