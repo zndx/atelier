@@ -44,6 +44,29 @@ def _build_bedrock_client(cfg: AtelierConfig):
     )
 
 
+_ANTHROPIC_FALLBACK_MODEL = "claude-opus-4-7"
+
+
+def _anthropic_test_model(cfg: AtelierConfig) -> str:
+    """Pick a model id to probe the direct Anthropic API with.
+
+    The Anthropic validator cannot reuse ``cfg.agent_model`` because in
+    CAI that value is a Bedrock inference-profile ARN — Anthropic's
+    direct API returns a 404 for ARN-shaped model identifiers.
+
+    ``cfg.overwatch_model`` is the canonical direct-API consumer:
+    overwatch routes through ``ANTHROPIC_API_KEY`` by construction, so
+    whatever model the operator selected for overwatch is the right
+    thing to probe.  If that happens to also be a Bedrock ARN (unusual
+    but possible via env override), fall back to a well-known direct-
+    API default so the validator still returns something actionable.
+    """
+    candidate = getattr(cfg, "overwatch_model", "") or ""
+    if not candidate or candidate.startswith("arn:"):
+        return _ANTHROPIC_FALLBACK_MODEL
+    return candidate
+
+
 def _validate_single(client, model: str, provider: str) -> dict:
     """Validate a single provider with a minimal messages call."""
     import anthropic
@@ -94,7 +117,11 @@ def validate_credentials(cfg: AtelierConfig) -> dict:
 
     if cfg.has_anthropic:
         client = _build_anthropic_client(cfg)
-        providers["anthropic"] = _validate_single(client, cfg.agent_model, "anthropic")
+        # Direct API needs a direct-API model id, NOT the Bedrock ARN
+        # that may be pinned in cfg.agent_model for CAI deployments.
+        providers["anthropic"] = _validate_single(
+            client, _anthropic_test_model(cfg), "anthropic",
+        )
 
     if cfg.has_bedrock:
         client = _build_bedrock_client(cfg)
