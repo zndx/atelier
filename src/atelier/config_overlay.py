@@ -692,3 +692,33 @@ def apply_to_config(cfg):  # type: ignore[no-untyped-def]
     if not _overlay:
         return cfg
     return dataclasses.replace(cfg, **_overlay)
+
+
+def snapshot(cfg) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    """Capture a point-in-time record of all tunable settings.
+
+    Returns a dict suitable for writing as ``settings_snapshot.json``
+    beside a pipeline run's other artifacts. Includes:
+
+    - ``overlay_at_start``: the subset of keys the operator explicitly
+      set via the Settings page (non-default).
+    - ``resolved_values``: the final value each SETTINGS_METADATA key
+      resolved to after HOCON + env + overlay merge.
+    - ``default_values``: the SETTINGS_METADATA baseline, for diffing
+      in the UI's "historical → current" view.
+
+    Callers should pass the *already-overlaid* cfg (i.e. the return
+    value of ``apply_to_config``) so ``resolved_values`` reflects
+    what the run actually used.
+    """
+    overlay_at_start = dict(_overlay)
+    resolved: dict[str, Any] = {}
+    defaults: dict[str, Any] = {}
+    for key, meta in SETTINGS_METADATA.items():
+        resolved[key] = getattr(cfg, key, meta.get("default"))
+        defaults[key] = meta.get("default")
+    return {
+        "overlay_at_start": overlay_at_start,
+        "resolved_values": resolved,
+        "default_values": defaults,
+    }

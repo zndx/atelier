@@ -15,11 +15,14 @@ import {
   message,
 } from "antd";
 import {
+  ArrowRightOutlined,
+  CompassOutlined,
   ReloadOutlined,
   RocketOutlined,
   SaveOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
+import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -108,6 +111,45 @@ const TABS: TabSpec[] = [
   { key: "llm_system", label: "LLM & System" },
 ];
 
+const TAB_LABEL: Record<BaseMeta["group"], string> = TABS.reduce(
+  (acc, t) => {
+    acc[t.key] = t.label;
+    return acc;
+  },
+  {} as Record<BaseMeta["group"], string>,
+);
+
+// ── Focus response ──────────────────────────────────────────────────
+
+type FocusSource = "hybrid" | "rules" | "overwatch" | "starter" | "error";
+
+type FocusResponse = {
+  run_id: string | null;
+  source: FocusSource;
+  focus_keys: string[];
+  deterministic: string[];
+  from_overwatch: string[];
+  historical: Record<string, ParamValue>;
+  current: Record<string, ParamValue>;
+  computed_at: string | null;
+};
+
+const FOCUS_SOURCE_LABEL: Record<FocusSource, string> = {
+  hybrid: "Overwatch + drift",
+  overwatch: "From Overwatch",
+  rules: "Drift from defaults",
+  starter: "Getting started",
+  error: "Fallback",
+};
+
+const FOCUS_SOURCE_COLOR: Record<FocusSource, string> = {
+  hybrid: "gold",
+  overwatch: "blue",
+  rules: "geekblue",
+  starter: "default",
+  error: "red",
+};
+
 // ── Rendering helpers ───────────────────────────────────────────────
 
 /** Expand {value}, {value_pct} in a caption template. */
@@ -129,6 +171,28 @@ const toneColor: Record<"default" | "up" | "down", string> = {
   up: "#d48806",        // amber  — looser / higher
   down: "#1677ff",      // blue   — stricter / lower
 };
+
+/** Format a setting's value in a way that respects its metadata type. */
+function formatValue(meta: ParamMeta | undefined, v: ParamValue | undefined): string {
+  if (v === undefined || v === null) return "—";
+  if (meta?.type === "switch") return v ? "on" : "off";
+  if (meta?.type === "choice") return String(v);
+  if (meta?.type === "float" || meta?.type === "int") {
+    const step = meta.step ?? (meta.type === "int" ? 1 : 0.01);
+    const decimals = step < 1 ? Math.max(0, -Math.floor(Math.log10(step))) : 0;
+    return Number(v).toFixed(decimals);
+  }
+  return String(v);
+}
+
+/** Deep-ish equality for focus value comparison. */
+function sameValue(a: ParamValue | undefined, b: ParamValue | undefined): boolean {
+  if (a === b) return true;
+  if (typeof a === "number" && typeof b === "number") {
+    return Math.abs(a - b) < 1e-9;
+  }
+  return false;
+}
 
 // ── Control card ────────────────────────────────────────────────────
 
@@ -289,11 +353,14 @@ function ControlCard({ paramKey, meta, current, pending, session, onChange }: Co
 export default function Settings() {
   const [data, setData] = useState<SettingsResponse | null>(null);
   const [accel, setAccel] = useState<AccelerationInfo | null>(null);
+  const [focus, setFocus] = useState<FocusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Record<string, ParamValue>>({});
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("convergence");
+
+  const { activeSourceId, activeDatasetId } = useDataset();
 
   const load = () => {
     setLoading(true);
@@ -313,6 +380,27 @@ export default function Settings() {
       })
       .catch(() => {});
   };
+
+  // Focus list — tied to the active dataset. When the active dataset
+  // changes, refetch. Poll lightly (20s) so a new run's focus surfaces
+  // without requiring a page reload.
+  useEffect(() => {
+    const fetchFocus = () => {
+      const params = new URLSearchParams();
+      if (activeDatasetId) params.set("run_id", activeDatasetId);
+      else if (activeSourceId) params.set("source_id", activeSourceId);
+      const url = "/api/settings/focus" + (params.toString() ? `?${params}` : "");
+      fetch(url)
+        .then((r) => r.json())
+        .then((d: FocusResponse | { error: string }) => {
+          if (!("error" in d)) setFocus(d);
+        })
+        .catch(() => {});
+    };
+    fetchFocus();
+    const t = setInterval(fetchFocus, 20_000);
+    return () => clearInterval(t);
+  }, [activeDatasetId, activeSourceId]);
 
   useEffect(() => {
     load();
@@ -525,6 +613,111 @@ export default function Settings() {
                   ))}
                 </div>
               )}
+            </Space>
+          </Card>
+        )}
+
+        {focus && focus.focus_keys.length > 0 && (
+          <Card
+            size="small"
+            title={
+              <Space>
+                <CompassOutlined style={{ color: "#1677ff" }} />
+                <Text strong>Focus</Text>
+                <Tag color={FOCUS_SOURCE_COLOR[focus.source]}>
+                  {FOCUS_SOURCE_LABEL[focus.source]}
+                </Tag>
+                {focus.computed_at && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    updated {new Date(focus.computed_at).toLocaleString()}
+                  </Text>
+                )}
+              </Space>
+            }
+            extra={
+              focus.source === "starter" && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Run the pipeline for dataset-specific recommendations.
+                </Text>
+              )
+            }
+          >
+            <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              {focus.focus_keys.map((key) => {
+                const meta = data.metadata[key];
+                if (!meta) return null;
+                const curVal = effective[key];
+                const histVal = focus.historical[key];
+                const hasHistory = histVal !== undefined
+                  && !sameValue(curVal, histVal);
+
+                return (
+                  <div
+                    key={`focus-${key}`}
+                    style={{
+                      borderLeft: "3px solid #1677ff",
+                      paddingLeft: 12,
+                    }}
+                  >
+                    <Space
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <Space size={8}>
+                        <Text strong>{meta.label}</Text>
+                        {focus.from_overwatch.includes(key) && (
+                          <Tag color="blue" style={{ marginRight: 0 }}>
+                            overwatch
+                          </Tag>
+                        )}
+                        {focus.deterministic.includes(key)
+                          && !focus.from_overwatch.includes(key) && (
+                          <Tag color="geekblue" style={{ marginRight: 0 }}>
+                            drift
+                          </Tag>
+                        )}
+                      </Space>
+                      <Button
+                        size="small"
+                        type="link"
+                        icon={<ArrowRightOutlined />}
+                        onClick={() => setActiveTab(meta.group)}
+                      >
+                        {TAB_LABEL[meta.group]}
+                      </Button>
+                    </Space>
+                    {hasHistory && (
+                      <div style={{ marginBottom: 8, fontSize: 12 }}>
+                        <Text type="secondary">
+                          {formatValue(meta, histVal)}
+                        </Text>
+                        <Text type="secondary" style={{ margin: "0 6px" }}>
+                          →
+                        </Text>
+                        <Text strong>{formatValue(meta, curVal)}</Text>
+                        <Text type="secondary" style={{ marginLeft: 8 }}>
+                          (historical → current)
+                        </Text>
+                      </div>
+                    )}
+                    <ControlCard
+                      paramKey={key}
+                      meta={meta}
+                      current={curVal}
+                      pending={key in pending}
+                      session={
+                        !(key in pending)
+                        && data.overlay_keys.includes(key)
+                      }
+                      onChange={handleChange}
+                    />
+                  </div>
+                );
+              })}
             </Space>
           </Card>
         )}

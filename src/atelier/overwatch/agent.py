@@ -119,6 +119,14 @@ def _build_analysis_prompt(
         except Exception:
             pass
 
+    # List the keys the operator can actually tune via the Settings
+    # page, so the agent emits focus-block keys that will resolve.
+    try:
+        from atelier.config_overlay import SETTINGS_METADATA
+        tunable_keys = sorted(SETTINGS_METADATA.keys())
+    except Exception:
+        tunable_keys = []
+
     parts.append(
         "\n## Instructions\n\n"
         "Write a markdown report with these sections:\n"
@@ -130,6 +138,27 @@ def _build_analysis_prompt(
         "6. **Configuration Suggestions** — any parameter tuning needed\n\n"
         "Be specific and concise. Reference column names and codes directly.\n"
     )
+
+    # Focus-block addendum: the Settings page surfaces the union of
+    # deterministic drift rules and anything the agent names here,
+    # so listing 3–7 keys that actually matter for the next run
+    # steers the operator's attention efficiently.
+    if tunable_keys:
+        parts.append(
+            "\n## Focus keys\n\n"
+            "After the markdown report, append a final code block "
+            "tagged ``focus`` containing a JSON object with a "
+            "``focus_keys`` array — the 3–7 Settings keys most worth "
+            "the operator's attention for the next run. Use the "
+            "exact keys from the tunable list below; unknown keys "
+            "are silently dropped. Omit the block entirely if "
+            "nothing needs attention.\n\n"
+            "Example:\n\n"
+            "```focus\n"
+            '{"focus_keys": ["mc_sample_fraction", "classify_bootstrap_clarity_target"]}\n'
+            "```\n\n"
+            "Tunable keys:\n```\n" + "\n".join(tunable_keys) + "\n```\n"
+        )
 
     return "".join(parts)
 

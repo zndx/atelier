@@ -1239,6 +1239,114 @@ def reset_settings():
         return _error_envelope(f"reset_settings failed: {exc}")
 
 
+@app.get("/api/settings/focus")
+def get_settings_focus(run_id: str | None = None, source_id: str | None = None):
+    """Return the adaptive focus list for the Settings page.
+
+    Resolution order:
+      1. Explicit ``run_id`` query param → read that run's focus_settings.json.
+      2. ``source_id`` → look up its active dataset's fsm_run_id and use that run.
+      3. Neither provided → fall back to the curated starter-focus set.
+
+    Response shape::
+
+        {
+          "run_id": "a22f1f10" | None,
+          "source": "hybrid" | "rules" | "overwatch" | "starter",
+          "focus_keys": [...],
+          "deterministic": [...],
+          "from_overwatch": [...],
+          "historical": { key: value_at_run_time, ... },
+          "current": { key: resolved_value_now, ... },
+          "computed_at": iso8601 | None,
+        }
+
+    Missing snapshot / focus files degrade gracefully — caller always
+    gets a usable structure.
+    """
+    try:
+        import json
+        from pathlib import Path
+        from atelier.classify.pipeline import _PROJECT_ROOT
+        from atelier.config import load_config
+        from atelier.config_overlay import (
+            SETTINGS_METADATA,
+            STARTER_FOCUS_KEYS,
+            apply_to_config,
+        )
+
+        cfg = apply_to_config(load_config())
+
+        # Resolve run_id from source_id when necessary.
+        if run_id is None and source_id:
+            try:
+                from atelier.db.dao import AtelierDao
+                active = AtelierDao().get_active_version(source_id)
+                if active and active.get("fsm_run_id"):
+                    run_id = active["fsm_run_id"]
+            except Exception as exc:
+                log.debug("focus: source_id lookup failed: %s", exc)
+
+        results_dir: Path | None = None
+        if run_id:
+            results_dir = _PROJECT_ROOT / "build" / "results" / run_id
+            if not results_dir.exists():
+                results_dir = None
+
+        focus_keys: list[str] = []
+        deterministic: list[str] = []
+        from_overwatch: list[str] = []
+        source = "starter"
+        computed_at: str | None = None
+        historical: dict = {}
+
+        if results_dir:
+            focus_path = results_dir / "focus_settings.json"
+            if focus_path.exists():
+                try:
+                    payload = json.loads(focus_path.read_text())
+                    focus_keys = list(payload.get("focus_keys") or [])
+                    deterministic = list(payload.get("deterministic") or [])
+                    from_overwatch = list(payload.get("from_overwatch") or [])
+                    source = str(payload.get("source") or "starter")
+                    computed_at = payload.get("computed_at")
+                except Exception as exc:
+                    log.warning("focus_settings.json unreadable: %s", exc)
+
+            snap_path = results_dir / "settings_snapshot.json"
+            if snap_path.exists():
+                try:
+                    snap = json.loads(snap_path.read_text())
+                    historical = dict(snap.get("resolved_values") or {})
+                except Exception as exc:
+                    log.warning("settings_snapshot.json unreadable: %s", exc)
+
+        # Starter fallback — never leave the UI empty-handed.
+        if not focus_keys:
+            focus_keys = list(STARTER_FOCUS_KEYS)
+            source = "starter"
+
+        # Always emit current values for the focus keys so the UI can
+        # show historical vs current side-by-side.
+        current: dict = {}
+        for key in focus_keys:
+            meta = SETTINGS_METADATA.get(key) or {}
+            current[key] = getattr(cfg, key, meta.get("default"))
+
+        return {
+            "run_id": run_id,
+            "source": source,
+            "focus_keys": focus_keys,
+            "deterministic": deterministic,
+            "from_overwatch": from_overwatch,
+            "historical": historical,
+            "current": current,
+            "computed_at": computed_at,
+        }
+    except Exception as exc:
+        return _error_envelope(f"get_settings_focus failed: {exc}")
+
+
 # ── Terminal WebSocket ─────────────────────────────────────────────
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -213,6 +214,20 @@ def run_classification_pipeline(
     build_dir = _PROJECT_ROOT / "build"
     results_dir = build_dir / "results" / run_id
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Persist the settings-at-start so the UI can show historical vs
+    # current in the adaptive focus section even for past runs.
+    try:
+        from atelier.config_overlay import snapshot as _settings_snapshot
+        snapshot_path = results_dir / "settings_snapshot.json"
+        snap = {
+            "run_id": run_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **_settings_snapshot(cfg),
+        }
+        snapshot_path.write_text(json.dumps(snap, indent=2, default=str) + "\n")
+    except Exception as e:
+        logger.warning("settings_snapshot.json write failed (non-fatal): %s", e)
 
     try:
         # ── LOADING_VOCAB ────────────────────────────────────────
@@ -753,6 +768,16 @@ def run_classification_pipeline(
                 )
         except Exception as e:
             logger.warning("Overwatch analysis failed (non-fatal): %s", e)
+
+        # ── Focus computation ─────────────────────────────────────────
+        # Hybrid focus: deterministic drift-from-default rules unioned
+        # with the fenced ``focus`` JSON block overwatch may emit.
+        # Always runs — overwatch-absence degrades gracefully.
+        try:
+            from atelier.classify.focus import compute_focus
+            compute_focus(run_id, results_dir)
+        except Exception as e:
+            logger.warning("Focus computation failed (non-fatal): %s", e)
 
         fsm.advance(run_id, FSMState.CONVERGED, progress={
             **summary,
