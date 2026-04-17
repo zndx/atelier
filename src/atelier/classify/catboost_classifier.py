@@ -32,7 +32,14 @@ class CatBoostColumnClassifier:
         learning_rate: float = 0.1,
         verbose: int = 0,
     ) -> CatBoostColumnClassifier:
-        """Train CatBoost on pre-computed embeddings."""
+        """Train CatBoost on pre-computed embeddings.
+
+        Uses GPU when preflight_gpu reports availability.  CatBoost's GPU
+        trainer does not support ``posterior_sampling``, so on GPU we
+        disable it and accept the trade-off (no virtual-ensemble variance
+        estimate) in exchange for a ~5× speedup.  The CPU path keeps
+        posterior_sampling and the uncertainty it provides.
+        """
         from catboost import CatBoostClassifier, Pool
 
         # Deduplicate classes preserving order
@@ -46,20 +53,49 @@ class CatBoostColumnClassifier:
 
         pool = Pool(data=embeddings, label=labels)
 
-        self._model = CatBoostClassifier(
+        use_gpu = False
+        try:
+            from atelier.classify.gpu import preflight_gpu
+            use_gpu = preflight_gpu().available
+        except Exception:
+            pass
+
+        params: dict = dict(
             iterations=iterations,
             depth=depth,
             learning_rate=learning_rate,
             loss_function="MultiClass",
-            posterior_sampling=True,
             auto_class_weights="Balanced",
             verbose=verbose,
             random_seed=42,
         )
-        self._model.fit(pool)
+        if use_gpu:
+            params["task_type"] = "GPU"
+            params["devices"] = "0"
+        else:
+            params["posterior_sampling"] = True
+
+        self._model = CatBoostClassifier(**params)
+        try:
+            self._model.fit(pool)
+        except Exception as exc:
+            if use_gpu:
+                # GPU trainer can fail for version/feature combinations —
+                # fall back to CPU with the richer posterior_sampling path.
+                logger.warning(
+                    "CatBoost GPU training failed (%s); falling back to CPU", exc,
+                )
+                params.pop("task_type", None)
+                params.pop("devices", None)
+                params["posterior_sampling"] = True
+                self._model = CatBoostClassifier(**params)
+                self._model.fit(pool)
+            else:
+                raise
 
         logger.info(
-            "CatBoost trained: %d samples, %d classes, %d dims",
+            "CatBoost trained (%s): %d samples, %d classes, %d dims",
+            "GPU" if use_gpu else "CPU",
             len(labels), len(self._classes), embeddings.shape[1],
         )
         return self

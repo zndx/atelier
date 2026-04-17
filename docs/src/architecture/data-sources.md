@@ -12,7 +12,7 @@ DataSource (1)                      Dataset versions (N)
 ┌─────────────────────────┐        ┌──────────────────────────┐
 │ id: "ootb-sample"       │───1:N──│ v3 (active) — 2 min ago  │
 │ type: "sample"          │        │ v2 — yesterday           │
-│ display: "OOTB Sample"  │        │ v1 — built-in            │
+│ display: "Sample"       │        │ v1 — built-in            │
 │ vocab_mode: "universal" │        └──────────────────────────┘
 └─────────────────────────┘
 ┌─────────────────────────┐        ┌──────────────────────────┐
@@ -91,12 +91,14 @@ embedding the full category table can consume significant context.
 - **Metrics**: `truncation_count` and `effective_batch_size` tracked in
   `BootstrapState` and exposed via the agent's `check_convergence` tool
 
-## OOTB Sample Source
+## Sample Source
 
-The OOTB (out-of-the-box) sample source ships with Atelier so new
-deployments show meaningful data immediately. When the landing page
-loads and "Connected" turns green, the stats cards show 316 Terms
-and 316 Entities.
+The built-in "Sample" source (source_id `ootb-sample`) ships with
+Atelier so new deployments show meaningful data immediately. When the
+landing page loads and "Connected" turns green, the stats cards show
+316 Terms and 316 Entities.  The `ootb-` prefix in the id is an
+internal marker distinguishing shipped sources from user-registered
+connections — it is not shown in the UI.
 
 ### Expanded Vocabulary (ICE.* Ontology)
 
@@ -150,8 +152,8 @@ committed in `data/sample/ground_truth.json`.
 
 ### Auto-Import on First Boot
 
-The gateway seeds the OOTB sample source via a FastAPI `lifespan`
-context manager:
+The gateway seeds the Sample source (id `ootb-sample`) via a FastAPI
+`lifespan` context manager:
 
 1. Check if `ootb-sample` source has any dataset versions
 2. If none, read `sample_source_stats()` (table count, column count)
@@ -193,7 +195,7 @@ The **Status page** has two new cards:
 
 The **Landing page** stats cards reflect the active source:
 
-- **Terms**: vocabulary size for the active source (316 for OOTB sample)
+- **Terms**: vocabulary size for the active source (316 for the Sample source)
 - **Entities**: column count from the active dataset version
 - **Sources badge**: shows count when multiple sources exist
 

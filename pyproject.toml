@@ -44,6 +44,16 @@ dependencies = [
     "cdpcurl>=1.0.0",
 ]
 
+[project.optional-dependencies]
+# RAPIDS GPU extras for UMAP 2D projection acceleration.
+# Installs cuml (CUDA 12 wheel) for cuml.manifold.UMAP, falling back to
+# umap-learn at runtime when not installed.  Not pulled into the default
+# install — CPU-only workstations and non-GPU CAI deployments skip it.
+gpu = [
+    "cuml-cu12>=24.10",
+    "cupy-cuda12x>=13.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

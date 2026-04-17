@@ -20,12 +20,21 @@ class GpuInfo:
     driver_cuda_version: str = ""
     pytorch_cuda_version: str = ""
     devices: list[str] = field(default_factory=list)
+    vram_total_mib: list[int] = field(default_factory=list)
+    vram_free_mib: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     @property
     def resolved_device(self) -> str:
         """Return 'cuda' if GPUs are usable, else 'cpu'."""
         return "cuda" if self.available else "cpu"
+
+    @property
+    def resolved_devices(self) -> list[str]:
+        """Return ['cuda:0', 'cuda:1', ...] for all usable GPUs, or ['cpu']."""
+        if not self.available:
+            return ["cpu"]
+        return [f"cuda:{i}" for i in range(self.device_count)]
 
     def summary(self) -> str:
         """Human-readable GPU status string."""
@@ -37,8 +46,33 @@ class GpuInfo:
                 f"(driver CUDA {self.driver_cuda_version}, "
                 f"PyTorch CUDA {self.pytorch_cuda_version})"
             )
-        vram = f" ({', '.join(self.devices)})" if self.devices else ""
-        return f"{self.device_count}x GPU available{vram}, CUDA {self.driver_cuda_version}"
+        # Use the first device name as a model descriptor — all devices
+        # are typically the same SKU, so reporting each is noise.
+        model = self.devices[0] if self.devices else "GPU"
+        if self.vram_total_mib:
+            vram_gb = self.vram_total_mib[0] / 1024
+            return (
+                f"{self.device_count}x {model} ({vram_gb:.0f} GB each), "
+                f"CUDA {self.driver_cuda_version}"
+            )
+        return f"{self.device_count}x {model}, CUDA {self.driver_cuda_version}"
+
+    def to_dict(self) -> dict:
+        """Dict form for the /api/acceleration endpoint."""
+        return {
+            "available": self.available,
+            "device_count": self.device_count,
+            "devices": self.devices,
+            "vram_total_mib": self.vram_total_mib,
+            "vram_free_mib": self.vram_free_mib,
+            "driver_version": self.driver_version,
+            "driver_cuda_version": self.driver_cuda_version,
+            "pytorch_cuda_version": self.pytorch_cuda_version,
+            "resolved_device": self.resolved_device,
+            "resolved_devices": self.resolved_devices,
+            "warnings": list(self.warnings),
+            "summary": self.summary(),
+        }
 
 
 _gpu_info_cache: GpuInfo | None = None
@@ -89,11 +123,11 @@ def preflight_gpu() -> GpuInfo:
                 timeout=5,
             )
             if result.returncode == 0:
+                # Store just the device name — VRAM is reported
+                # separately via torch.cuda.mem_get_info below.
                 for line in result.stdout.strip().splitlines():
                     parts = [p.strip() for p in line.split(",")]
-                    device_names.append(
-                        f"{parts[0]} {parts[1]}" if len(parts) >= 2 else parts[0],
-                    )
+                    device_names.append(parts[0])
                 device_count = len(device_names)
 
             # Get driver version
@@ -128,11 +162,30 @@ def preflight_gpu() -> GpuInfo:
             pass
 
     # ── Step 2: Check PyTorch CUDA runtime ───────────────────────
+    vram_total: list[int] = []
+    vram_free: list[int] = []
     try:
         import torch
 
         pytorch_cuda = torch.version.cuda or ""
         cuda_available = torch.cuda.is_available()
+
+        if cuda_available:
+            # Probe per-device VRAM via the runtime (more accurate than
+            # nvidia-smi which doesn't reflect the current process's
+            # point-in-time visibility under CUDA_VISIBLE_DEVICES).
+            for i in range(torch.cuda.device_count()):
+                try:
+                    free, total = torch.cuda.mem_get_info(i)
+                    vram_total.append(int(total // (1024 * 1024)))
+                    vram_free.append(int(free // (1024 * 1024)))
+                except Exception:
+                    break
+            # When torch sees a different device count than nvidia-smi
+            # (e.g. CUDA_VISIBLE_DEVICES filtering), trust torch — those
+            # are the devices the pipeline can actually use.
+            if torch.cuda.device_count() != device_count:
+                device_count = torch.cuda.device_count()
 
         if not cuda_available and device_count > 0 and pytorch_cuda:
             # GPUs present but torch can't see them
@@ -163,6 +216,8 @@ def preflight_gpu() -> GpuInfo:
         driver_cuda_version=driver_cuda,
         pytorch_cuda_version=pytorch_cuda,
         devices=device_names,
+        vram_total_mib=vram_total,
+        vram_free_mib=vram_free,
         warnings=warnings,
     )
     return _gpu_info_cache

@@ -40,6 +40,10 @@ async def _lifespan(app: FastAPI):
                 else:
                     _log.warning("Sample source seeding skipped after 5 attempts: %s", exc)
         try:
+            _seed_synth_source()
+        except Exception as exc:
+            _log.warning("Synth source seeding skipped: %s", exc)
+        try:
             _discover_and_register_hive_sources()
         except Exception as exc:
             _log.warning("Hive source discovery skipped: %s", exc)
@@ -155,7 +159,7 @@ def _seed_sample_source() -> None:
         dataset_id = str(uuid.uuid4())[:8]
         dao.upsert_dataset(
             dataset_id=dataset_id,
-            name="OOTB Sample v1",
+            name="Sample v1",
             parquet_path="",
             description=f"{stats['table_count']} tables, {stats['column_count']} columns from expanded ontology",
             row_count=stats["column_count"],
@@ -179,6 +183,79 @@ def _seed_sample_source() -> None:
         )
     except Exception as exc:
         _log.warning("Sample source seeding failed: %s", exc)
+
+
+def _seed_synth_source() -> None:
+    """Register the local Synthetic source when an artifact is present.
+
+    Looks for either an uncompressed build/data/synth/ directory or the
+    build/atelier-synth-db.zip archive (resolved by
+    :func:`atelier.classify.sampler.resolve_synth_mount`).  When found,
+    upserts a 'synthetic' data source and seeds a version-1 dataset so
+    the UI source selector can offer it.  Silent no-op when no artifact
+    is present — we don't want a dangling entry in the selector.
+
+    Synthetic is deliberately **local-dev only** — the artifact lives
+    under build/ (gitignored) and is never shipped as an OOTB bundle.
+    """
+    try:
+        from atelier.db.dao import AtelierDao
+        from atelier.classify.sampler import (
+            resolve_synth_mount,
+            synth_source_stats,
+        )
+    except Exception:
+        return
+
+    try:
+        mount = resolve_synth_mount()
+        if mount is None:
+            return
+
+        dao = AtelierDao()
+        stats = synth_source_stats()
+        if not stats["has_data"]:
+            return
+
+        dao.get_or_create_data_source(
+            source_id="synthetic",
+            source_type="sample",
+            display_name="Synthetic",
+            source_uri=str(mount),
+            vocabulary_mode="universal",
+        )
+        dao.update_data_source_metadata("synthetic", json.dumps({
+            "table_count": stats["table_count"],
+            "column_count": stats["column_count"],
+            "mount": stats["mount"],
+            "mount_kind": stats["mount_kind"],
+        }))
+
+        versions = dao.list_dataset_versions("synthetic")
+        if not versions:
+            import uuid
+            dataset_id = str(uuid.uuid4())[:8]
+            dao.upsert_dataset(
+                dataset_id=dataset_id,
+                name="Synthetic v1",
+                parquet_path="",
+                description=(
+                    f"{stats['table_count']} tables, {stats['column_count']} "
+                    f"columns (mounted {stats['mount_kind']})"
+                ),
+                row_count=stats["column_count"],
+                source_id="synthetic",
+                version_number=1,
+                is_active=True,
+                summary=f"{stats['table_count']} tables, {stats['column_count']} columns",
+            )
+
+        _log.info(
+            "Seeded Synthetic source: %d tables, %d columns (mount=%s)",
+            stats["table_count"], stats["column_count"], stats["mount_kind"],
+        )
+    except Exception as exc:
+        _log.warning("Synthetic source seeding failed: %s", exc)
 
 
 def _discover_and_register_hive_sources() -> None:
@@ -1026,11 +1103,13 @@ def vocabulary_stats(source_id: str | None = None):
 
         cfg = load_config()
 
-        # Sample source uses the expanded ontology
-        if source_id == "ootb-sample":
+        # OOTB sample and local Synthetic both use the expanded
+        # ontology — their ground-truth codes share the 316-leaf ICE
+        # vocabulary.
+        if source_id in ("ootb-sample", "synthetic"):
             try:
                 sample_vocab = load_sample_vocabulary(hierarchical=True)
-                return {"terms": len(sample_vocab.categories), "source": "sample"}
+                return {"terms": len(sample_vocab.categories), "source": source_id}
             except FileNotFoundError:
                 pass
 
@@ -1060,6 +1139,104 @@ def vocabulary_stats(source_id: str | None = None):
         return {"terms": len(universal.categories), "source": "universal"}
     except Exception as exc:
         return _error_envelope(f"vocabulary_stats failed: {exc}")
+
+
+# ── Settings (runtime config overlay) ──────────────────────────────
+#
+# Session-level tuning of the DST classification pipeline.  Changes
+# apply to the next pipeline run and reset on gateway restart.  For
+# persistent changes, operators edit config/base.conf or env vars.
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Return settings metadata + current effective values.
+
+    Effective value = overlay (if set) else HOCON default.  The
+    metadata dict feeds the React Settings page (label, range,
+    description, captions).
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.config_overlay import SETTINGS_METADATA, get_overlay
+
+        cfg = load_config()
+        overlay = get_overlay()
+        values: dict = {}
+        for key, meta in SETTINGS_METADATA.items():
+            if key in overlay:
+                values[key] = overlay[key]
+            else:
+                values[key] = getattr(cfg, key, meta.get("default"))
+        return {
+            "metadata": SETTINGS_METADATA,
+            "values": values,
+            "overlay_keys": sorted(overlay.keys()),
+        }
+    except Exception as exc:
+        return _error_envelope(f"get_settings failed: {exc}")
+
+
+@app.patch("/api/settings")
+def patch_settings(body: dict):
+    """Validate and apply settings updates to the runtime overlay.
+
+    Body is a flat {key: value} map.  Returns the updated values on
+    success, or a 400 envelope on validation failure.
+    """
+    try:
+        from atelier.config_overlay import set_overlay
+        overlay = set_overlay(body or {})
+        return {"ok": True, "overlay": overlay}
+    except ValueError as exc:
+        return _error_envelope(str(exc), status=400)
+    except Exception as exc:
+        return _error_envelope(f"patch_settings failed: {exc}")
+
+
+@app.get("/api/acceleration")
+def get_acceleration():
+    """Return current GPU detection + resolved acceleration methods.
+
+    Read-only probe — drives the "Acceleration" card in Settings.  Never
+    blocks or fails; a CPU-only host simply reports ``available: false``.
+    """
+    try:
+        from atelier.classify.gpu import preflight_gpu
+        from atelier.config import load_config
+        cfg = load_config()
+        info = preflight_gpu().to_dict()
+        gpu_on = info["available"] and cfg.classify_gpu_enabled != "false"
+        info["methods"] = {
+            # sage_enabled = explicit flag OR auto-enabled on GPU
+            "sage": gpu_on or cfg.classify_sage_enabled,
+            "sage_gpu": gpu_on,
+            "shap_gpu": gpu_on,
+            "catboost_gpu": gpu_on,
+            "embedding_sharded": (
+                gpu_on and info["device_count"] > 1
+                and cfg.classify_gpu_shard_threshold < 1_000_000
+            ),
+        }
+        info["config"] = {
+            "gpu_enabled": cfg.classify_gpu_enabled,
+            "shard_threshold": cfg.classify_gpu_shard_threshold,
+            "sage_chunk": cfg.classify_gpu_sage_chunk,
+        }
+        return info
+    except Exception as exc:
+        return _error_envelope(f"acceleration probe failed: {exc}")
+
+
+@app.post("/api/settings/reset")
+def reset_settings():
+    """Clear the overlay — revert to HOCON/env defaults."""
+    try:
+        from atelier.config_overlay import clear_overlay
+        clear_overlay()
+        return {"ok": True}
+    except Exception as exc:
+        return _error_envelope(f"reset_settings failed: {exc}")
 
 
 # ── Terminal WebSocket ─────────────────────────────────────────────
@@ -1179,11 +1356,13 @@ def fsm_start(source_id: str | None = None):
                     "error": "No classification LLM configured. "
                     "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
-        # Resolve source metadata: connection, database, vocab_uri
+        # Resolve source metadata: connection, database, vocab_uri.
+        # OOTB sample and local Synthetic skip the DAO lookup — the
+        # pipeline handles their auto-resolution internally.
         vocab_uri = None
         connection_name = None
         database = "default"
-        if source_id and source_id != "ootb-sample":
+        if source_id and source_id not in ("ootb-sample", "synthetic"):
             try:
                 from atelier.db.dao import AtelierDao
                 src = AtelierDao().get_data_source(source_id)

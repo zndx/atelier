@@ -24,9 +24,11 @@ ALTER TABLE fsm_runs ADD COLUMN IF NOT EXISTS source_id TEXT REFERENCES data_sou
 
 CREATE INDEX IF NOT EXISTS idx_datasets_source_version ON datasets(source_id, version_number DESC);
 
--- Seed the OOTB sample source
+-- Seed the built-in sample source.  The 'ootb-' id prefix is retained as
+-- an internal marker (distinguishes shipped sources from user-registered
+-- connections); the user-facing display name is simply "Sample".
 INSERT INTO data_sources (id, source_type, source_uri, display_name, vocabulary_mode)
-VALUES ('ootb-sample', 'sample', '', 'OOTB Sample', 'universal')
+VALUES ('ootb-sample', 'sample', '', 'Sample', 'universal')
 ON CONFLICT (id) DO NOTHING;
 
 -- migrate:down

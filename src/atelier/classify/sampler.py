@@ -362,44 +362,122 @@ def sample_source_stats(sample_dir: str | Path | None = None) -> dict:
 
 
 # ── Synth source data (large-scale synthetic) ──────────────────────
+#
+# The synth corpus can be mounted either uncompressed at build/data/synth/
+# or directly from the zip at build/atelier-synth-db.zip.  Both layouts
+# share the same internal structure (data/synth/tables/*.csv + ground_truth.json);
+# the zip uses that same prefix as its top-level entries.
+#
+# resolve_synth_mount() picks the faster option (directory) when present,
+# falling back to the zip so operators can drop the artifact in and go.
 
-_SYNTH_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "synth"
+_BUILD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "build"
+_SYNTH_DIR = _BUILD_DIR / "data" / "synth"
+_SYNTH_ZIP = _BUILD_DIR / "atelier-synth-db.zip"
+
+
+def resolve_synth_mount() -> Path | None:
+    """Return the path Atelier should mount for the OOTB synth source.
+
+    Preference: uncompressed directory > zip archive > None.  Returning
+    None means neither artifact is present and the synth source should
+    be hidden from the UI.
+    """
+    if _SYNTH_DIR.is_dir() and (_SYNTH_DIR / "tables").is_dir():
+        return _SYNTH_DIR
+    if _SYNTH_ZIP.is_file():
+        return _SYNTH_ZIP
+    return None
+
+
+def _iter_synth_csvs(mount: Path):
+    """Yield ``(table_name, header, rows)`` from either a dir or zip mount.
+
+    For a directory mount, ``mount/tables/*.csv`` is walked.  For a zip
+    mount, entries under ``data/synth/tables/`` are streamed without
+    extracting to disk.  Row ordering follows sorted filename order so
+    runs are reproducible across mount types.
+    """
+    import csv as csv_mod
+    import io
+    import zipfile
+
+    if mount.is_dir():
+        tables_dir = mount / "tables"
+        for csv_path in sorted(tables_dir.glob("*.csv")):
+            with open(csv_path, newline="") as f:
+                reader = csv_mod.reader(f)
+                header = next(reader, None)
+                if not header:
+                    continue
+                rows = list(reader)
+            yield csv_path.stem, header, rows
+        return
+
+    if mount.suffix == ".zip":
+        with zipfile.ZipFile(mount) as zf:
+            names = sorted(
+                n for n in zf.namelist()
+                if n.startswith("data/synth/tables/") and n.endswith(".csv")
+            )
+            for name in names:
+                with zf.open(name) as raw:
+                    text = io.TextIOWrapper(raw, encoding="utf-8", newline="")
+                    reader = csv_mod.reader(text)
+                    header = next(reader, None)
+                    if not header:
+                        continue
+                    rows = list(reader)
+                table_name = Path(name).stem
+                yield table_name, header, rows
+        return
+
+    raise ValueError(f"Unsupported synth mount: {mount}")
+
+
+def _read_synth_ground_truth(mount: Path) -> dict[str, str]:
+    """Read the ground_truth.json sidecar from either a dir or zip mount."""
+    import zipfile
+
+    if mount.is_dir():
+        gt_path = mount / "ground_truth.json"
+        if gt_path.exists():
+            with open(gt_path) as f:
+                return json.load(f)
+        return {}
+
+    if mount.suffix == ".zip":
+        with zipfile.ZipFile(mount) as zf:
+            for name in ("data/synth/ground_truth.json", "ground_truth.json"):
+                if name in zf.namelist():
+                    with zf.open(name) as f:
+                        return json.loads(f.read().decode("utf-8"))
+        return {}
+
+    raise ValueError(f"Unsupported synth mount: {mount}")
 
 
 def load_synth_source(
-    synth_dir: str | Path | None = None,
+    synth_mount: str | Path | None = None,
 ) -> list[TableSample]:
-    """Load synth tables from data/synth/tables/*.csv.
+    """Load synth tables from build/data/synth/ or build/atelier-synth-db.zip.
 
     Same contract as :func:`load_sample_source` but for the larger
-    synthetic database (~100 tables, ~100 columns each).  Generate
-    with ``scripts/generate_synth_source.py``.
+    synthetic database (~100 tables, ~100 columns each).  ``synth_mount``
+    may point at either the uncompressed directory or a ``.zip`` archive;
+    when omitted, :func:`resolve_synth_mount` picks whichever is present.
     """
-    import csv as csv_mod
-
-    base = Path(synth_dir) if synth_dir else _SYNTH_DIR
-    tables_dir = base / "tables"
-    gt_path = base / "ground_truth.json"
-
-    if not tables_dir.is_dir():
-        log.warning("Synth tables directory not found: %s", tables_dir)
+    mount = Path(synth_mount) if synth_mount else resolve_synth_mount()
+    if mount is None:
+        log.warning(
+            "Synth mount not found; looked at %s and %s", _SYNTH_DIR, _SYNTH_ZIP,
+        )
         return []
 
-    ground_truth: dict[str, str] = {}
-    if gt_path.exists():
-        with open(gt_path) as f:
-            ground_truth = json.load(f)
+    ground_truth = _read_synth_ground_truth(mount)
 
     samples: list[TableSample] = []
-    for csv_path in sorted(tables_dir.glob("*.csv")):
-        table_name = csv_path.stem
-        with open(csv_path, newline="") as f:
-            reader = csv_mod.reader(f)
-            header = next(reader, None)
-            if not header:
-                continue
-            rows = list(reader)
-
+    for table_name, header, rows in _iter_synth_csvs(mount):
         col_names = header
         columns: list[ColumnSample] = []
         for i, col_name in enumerate(col_names):
@@ -433,25 +511,38 @@ def load_synth_source(
         "Loaded %d synth tables (%d columns) from %s",
         len(samples),
         sum(len(t.columns) for t in samples),
-        tables_dir,
+        mount,
     )
     return samples
 
 
-def synth_source_stats(synth_dir: str | Path | None = None) -> dict:
+def synth_source_stats(synth_mount: str | Path | None = None) -> dict:
     """Return summary stats for the synth source without loading all data."""
-    base = Path(synth_dir) if synth_dir else _SYNTH_DIR
-    tables_dir = base / "tables"
-    gt_path = base / "ground_truth.json"
+    import zipfile
 
-    table_count = len(list(tables_dir.glob("*.csv"))) if tables_dir.is_dir() else 0
-    column_count = 0
-    if gt_path.exists():
-        with open(gt_path) as f:
-            column_count = len(json.load(f))
+    mount = Path(synth_mount) if synth_mount else resolve_synth_mount()
+    if mount is None:
+        return {"table_count": 0, "column_count": 0, "has_data": False, "mount": None}
 
+    if mount.is_dir():
+        tables_dir = mount / "tables"
+        table_count = len(list(tables_dir.glob("*.csv")))
+        mount_kind = "dir"
+    elif mount.suffix == ".zip":
+        with zipfile.ZipFile(mount) as zf:
+            table_count = sum(
+                1 for n in zf.namelist()
+                if n.startswith("data/synth/tables/") and n.endswith(".csv")
+            )
+        mount_kind = "zip"
+    else:
+        return {"table_count": 0, "column_count": 0, "has_data": False, "mount": None}
+
+    ground_truth = _read_synth_ground_truth(mount)
     return {
         "table_count": table_count,
-        "column_count": column_count,
+        "column_count": len(ground_truth),
         "has_data": table_count > 0,
+        "mount": str(mount),
+        "mount_kind": mount_kind,
     }

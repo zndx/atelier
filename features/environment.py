@@ -135,7 +135,9 @@ def _check_gateway(port):
     import urllib.request
     resp = urllib.request.urlopen(f"http://localhost:{port}/api/health", timeout=5)
     body = json.loads(resp.read().decode())
-    return body.get("ok", False)
+    # /api/health returns {"status":"ok","version":"..."} — accept either
+    # the new ``status`` shape or the legacy ``ok`` bool.
+    return body.get("status") == "ok" or body.get("ok", False)
 
 
 # ── Hooks ───────────────────────────────────────────────────────
@@ -156,6 +158,19 @@ def before_scenario(context, scenario):
     if tier >= 1:
         _ensure_stack_healthy(context)
 
+    # @gpu — skip when no CUDA device is available.  Cheap probe;
+    # preflight_gpu() is cached for the process lifetime.
+    all_tags = set(scenario.tags) | set(scenario.feature.tags)
+    if "gpu" in all_tags:
+        try:
+            from atelier.classify.gpu import preflight_gpu
+            if not preflight_gpu().available:
+                scenario.skip("@gpu scenario skipped: no CUDA device available")
+                return
+        except Exception as exc:
+            scenario.skip(f"@gpu scenario skipped: preflight failed ({exc})")
+            return
+
 
 def after_scenario(context, scenario):
     for path in getattr(context, "_temp_files", []):
@@ -163,3 +178,11 @@ def after_scenario(context, scenario):
             os.unlink(path)
         except OSError:
             pass
+    # Step modules can register teardown callables via context._cleanups.
+    # Used by scenarios that patch module state or build temp mounts.
+    for fn in getattr(context, "_cleanups", []):
+        try:
+            fn()
+        except Exception:
+            pass
+    context._cleanups = []

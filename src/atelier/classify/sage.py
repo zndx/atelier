@@ -155,6 +155,12 @@ def run_sage_analysis(
 ) -> SageResult:
     """Run SAGE feature importance analysis.
 
+    Dispatches to the vectorized GPU kernel
+    (:func:`atelier.classify.gpu_importance.gpu_sage`) when CUDA is
+    available.  Falls back to the upstream ``sage-importance`` library
+    on CPU — the CPU path is slow (many minutes on a large corpus) and
+    is kept only for environments without a GPU.
+
     Args:
         all_features: ColumnFeatures for each sample.
         ground_truth_indices: (N,) integer class indices.
@@ -165,6 +171,19 @@ def run_sage_analysis(
     Returns:
         SageResult with per-feature importance and std.
     """
+    # GPU path — vectorized kernel + fixed global donors.
+    try:
+        from atelier.classify.gpu import preflight_gpu
+        if preflight_gpu().available:
+            from atelier.classify.gpu_importance import gpu_sage
+            return gpu_sage(
+                all_features, ground_truth_indices, category_set,
+                n_permutations=n_permutations,
+                detect_convergence=detect_convergence,
+            )
+    except Exception as exc:
+        logger.warning("GPU SAGE unavailable, falling back to CPU: %s", exc)
+
     import sage
 
     t0 = time.time()

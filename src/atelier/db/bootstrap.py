@@ -99,8 +99,73 @@ def _extract_up_block(content: str) -> str | None:
 
 
 def _split_statements(sql: str) -> list[str]:
-    """Split SQL text on semicolons, returning non-empty statements."""
-    return [s.strip() for s in sql.split(";") if s.strip()]
+    """Split SQL text on semicolons, ignoring ``;`` inside comments and strings.
+
+    Semicolons that appear inside ``--`` line comments, ``/* ... */`` block
+    comments, or single-quoted string literals are NOT statement terminators.
+    Previous naive ``sql.split(';')`` broke on comments like
+    ``-- internal marker; only the display changes`` by turning the latter
+    half into a bogus statement.
+    """
+    out: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        # Line comment: skip to newline
+        if ch == "-" and nxt == "-":
+            buf.append(ch)
+            i += 1
+            while i < n and sql[i] != "\n":
+                buf.append(sql[i])
+                i += 1
+            continue
+
+        # Block comment: skip to closing */
+        if ch == "/" and nxt == "*":
+            buf.append(ch); buf.append(nxt)
+            i += 2
+            while i < n and not (sql[i] == "*" and i + 1 < n and sql[i + 1] == "/"):
+                buf.append(sql[i])
+                i += 1
+            if i < n:
+                buf.append("*"); buf.append("/")
+                i += 2
+            continue
+
+        # Single-quoted string: skip to closing ', handling '' escapes
+        if ch == "'":
+            buf.append(ch)
+            i += 1
+            while i < n:
+                c = sql[i]
+                buf.append(c)
+                i += 1
+                if c == "'":
+                    if i < n and sql[i] == "'":
+                        buf.append("'"); i += 1
+                        continue
+                    break
+            continue
+
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                out.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        out.append(tail)
+    return out
 
 
 # ── Keystone agents ──────────────────────────────────────────────

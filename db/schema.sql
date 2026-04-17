@@ -63,7 +63,8 @@ CREATE TABLE public.data_sources (
     vocabulary_mode text DEFAULT 'universal'::text NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     metadata text,
-    is_archived boolean DEFAULT false NOT NULL
+    is_archived boolean DEFAULT false NOT NULL,
+    vocab_uri text DEFAULT ''::text NOT NULL
 );
 
 
@@ -240,7 +241,15 @@ ALTER TABLE ONLY public.fsm_runs
 
 INSERT INTO public.schema_migrations (version) VALUES
     ('20260406000000'),
+    ('20260406000000_initial_schema'),
     ('20260412000000'),
+    ('20260412000000_classification_schema'),
     ('20260413000000'),
+    ('20260413000000_seed_keystone_agents'),
     ('20260415000000'),
-    ('20260416000000');
+    ('20260415000000_data_sources_and_versions'),
+    ('20260416000000'),
+    ('20260416000000_archive_flag'),
+    ('20260416100000'),
+    ('20260416100000_vocab_uri'),
+    ('20260417000000');

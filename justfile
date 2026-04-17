@@ -118,19 +118,14 @@ proto:
 test:
     uv run pytest
 
-# Run BDD scenarios (tier-0, fast only — excludes @slow ML training tests)
-bdd *ARGS:
-    ATELIER_BDD_TIER=0 uv run behave features/ --tags="@tier-0" --tags="~@slow" {{ARGS}}
-
-# Run BDD including slow ML training tests (tier-0 only)
-bdd-slow *ARGS:
-    ATELIER_BDD_TIER=0 uv run behave features/ --tags="@tier-0" {{ARGS}}
-
-# Run BDD with full stack (tier-0 + tier-1, excludes @slow — auto-starts devenv if needed)
+# Run BDD — full stack (tier-0 + tier-1), excludes @slow.  Auto-starts
+# devenv if needed.  Canonical BDD entry point.
 behave *ARGS:
     ATELIER_BDD_TIER=1 uv run behave features/ --tags="~@slow" {{ARGS}}
 
-# Run BDD with full stack including @slow scenarios (pipeline convergence, ML training)
+# Run BDD with full stack including @slow scenarios (pipeline convergence,
+# ML training).  Heavy synth-scale validation (9782 cols × 512 perms)
+# belongs to UI-driven pipeline runs, not BDD.
 behave-slow *ARGS:
     ATELIER_BDD_TIER=1 uv run behave features/ {{ARGS}}
 

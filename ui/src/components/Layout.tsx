@@ -1,4 +1,5 @@
-import { Layout as AntLayout, Typography } from "antd";
+import { Layout as AntLayout, Tooltip, Typography } from "antd";
+import { SettingOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import clouderaLogo from "../assets/Cloudera.svg";
@@ -70,6 +71,30 @@ function Layout({ children, fullHeight }: LayoutProps) {
             );
           })}
         </nav>
+        <Tooltip title="Settings — tune the DST pipeline" placement="bottomRight">
+          <Link
+            to="/settings"
+            aria-label="Settings"
+            style={{
+              marginLeft: "auto",
+              color: pathname.startsWith("/settings")
+                ? "#fff"
+                : "rgba(255,255,255,0.65)",
+              padding: "6px 10px",
+              borderRadius: 4,
+              fontSize: 18,
+              lineHeight: 1,
+              display: "inline-flex",
+              alignItems: "center",
+              background: pathname.startsWith("/settings")
+                ? "rgba(255,255,255,0.1)"
+                : "transparent",
+              transition: "all 0.2s",
+            }}
+          >
+            <SettingOutlined />
+          </Link>
+        </Tooltip>
       </Header>
       <Content
         style={fullHeight

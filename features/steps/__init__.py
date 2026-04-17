@@ -8,6 +8,7 @@ auto-discovery which would exec them without proper Python import context).
 from features.infra.step_defs.config_steps import *  # noqa: F401,F403
 from features.infra.step_defs.health_steps import *  # noqa: F401,F403
 from features.infra.step_defs.preflight_steps import *  # noqa: F401,F403
+from features.infra.step_defs.devenv_log_steps import *  # noqa: F401,F403
 from features.deployment.step_defs.runtime_steps import *  # noqa: F401,F403
 from features.deployment.step_defs.amp_steps import *  # noqa: F401,F403
 from features.deployment.step_defs.naming_steps import *  # noqa: F401,F403
@@ -38,3 +39,7 @@ from features.agent.step_defs.vocab_routing_steps import *  # noqa: F401,F403
 from features.agent.step_defs.llm_robustness_steps import *  # noqa: F401,F403
 from features.agent.step_defs.governance_steps import *  # noqa: F401,F403
 from features.agent.step_defs.fusion_strategy_steps import *  # noqa: F401,F403
+from features.agent.step_defs.settings_steps import *  # noqa: F401,F403
+from features.agent.step_defs.synth_source_steps import *  # noqa: F401,F403
+from features.agent.step_defs.gpu_acceleration_steps import *  # noqa: F401,F403
+from features.agent.step_defs.gpu_sage_parity_steps import *  # noqa: F401,F403

@@ -12,6 +12,7 @@ const Status = lazy(() => import("./pages/Status"));
 const TerminalPage = lazy(() => import("./pages/TerminalPage"));
 const Workflows = lazy(() => import("./pages/Workflows"));
 const OverwatchReport = lazy(() => import("./pages/OverwatchReport"));
+const Settings = lazy(() => import("./pages/Settings"));
 
 function App() {
   return (
@@ -169,6 +170,29 @@ function App() {
                   }
                 >
                   <Embeddings />
+                </Suspense>
+              </Layout>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Layout>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        height: "calc(100vh - 128px)",
+                      }}
+                    >
+                      <Spin size="large" />
+                    </div>
+                  }
+                >
+                  <Settings />
                 </Suspense>
               </Layout>
             }

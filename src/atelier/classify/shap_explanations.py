@@ -202,9 +202,11 @@ def run_embedding_shap(
 ) -> ShapResult:
     """Compute item-wise SHAP values on the 12-feature embedding classifier.
 
-    Uses ``shap.PermutationExplainer`` which is model-agnostic but benefits
-    from GPU-accelerated sentence-transformer encoding.  Reuses
-    ``FeatureMaskModel`` from sage.py for efficient embedding caching.
+    GPU path (CUDA available): vectorized kernel in
+    :func:`atelier.classify.gpu_importance.gpu_permutation_shap` with
+    fixed global donors — fast enough to run by default.  CPU path: the
+    upstream ``shap.PermutationExplainer`` wrapped around
+    :class:`FeatureMaskModel`, kept as a fallback.
 
     Args:
         all_features: List of ColumnFeatures for evaluated items.
@@ -214,6 +216,18 @@ def run_embedding_shap(
     Returns:
         ShapResult with per-item SHAP values on the 12 named features.
     """
+    try:
+        from atelier.classify.gpu import preflight_gpu
+        if preflight_gpu().available:
+            from atelier.classify.gpu_importance import gpu_permutation_shap
+            return gpu_permutation_shap(
+                all_features, category_set, n_permutations=n_permutations,
+            )
+    except Exception as exc:
+        logger.warning(
+            "GPU PermutationSHAP unavailable, falling back to CPU: %s", exc,
+        )
+
     import shap
 
     from atelier.classify.features import FEATURE_NAMES
@@ -324,12 +338,22 @@ def run_shap_analysis(
                 return None
 
     if method == "embedding_permutation":
-        # Only run PermutationSHAP when explicitly requested — too slow for auto
         try:
             return run_embedding_shap(all_features, category_set)
         except Exception as e:
             logger.warning("Embedding PermutationSHAP failed: %s", e)
     elif method == "auto":
-        logger.info("SHAP auto: no CatBoost model loaded, skipping (PermutationSHAP too slow for auto)")
+        # No CatBoost model: try GPU PermutationSHAP (fast); on CPU we
+        # skip rather than block the pipeline for minutes.
+        try:
+            from atelier.classify.gpu import preflight_gpu
+            if preflight_gpu().available:
+                return run_embedding_shap(all_features, category_set)
+            logger.info(
+                "SHAP auto: no CatBoost model loaded and no GPU — skipping "
+                "(CPU PermutationSHAP too slow for auto)",
+            )
+        except Exception as e:
+            logger.warning("SHAP auto fallback failed: %s", e)
 
     return None

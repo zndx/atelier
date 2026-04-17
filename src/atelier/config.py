@@ -15,7 +15,7 @@ Usage::
     cfg = load_config()
 
     # Load with CLI overrides
-    cfg = load_config(overrides={"agent_model": "claude-opus-4-6"})
+    cfg = load_config(overrides={"agent_model": "claude-opus-4-7"})
 
     # Materialize and validate resolved config
     materialize_config(cfg, "build/config/atelier.env")
@@ -94,6 +94,10 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.embedding_model": ("classify_embedding_model", str),
     "classify.embedding_device": ("classify_embedding_device", str),
     "classify.embedding_batch_size": ("classify_embedding_batch_size", int),
+    # GPU acceleration
+    "classify.gpu.enabled": ("classify_gpu_enabled", str),
+    "classify.gpu.shard_threshold": ("classify_gpu_shard_threshold", int),
+    "classify.gpu.sage_chunk_permutations": ("classify_gpu_sage_chunk", int),
     "classify.auto_start": ("classify_auto_start", bool),
     "classify.default_source": ("classify_default_source", str),
     "classify.subagent_model": ("classify_subagent_model", str),
@@ -223,7 +227,7 @@ class AtelierConfig:
 
     # Claude Agent SDK
     anthropic_api_key: str | None = None
-    agent_model: str = "claude-opus-4-6"
+    agent_model: str = "claude-opus-4-7"
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     aws_region: str | None = None
@@ -270,6 +274,10 @@ class AtelierConfig:
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_embedding_device: str = "auto"
     classify_embedding_batch_size: int = 32
+    # GPU acceleration
+    classify_gpu_enabled: str = "auto"
+    classify_gpu_shard_threshold: int = 200_000
+    classify_gpu_sage_chunk: int = 16
     classify_auto_start: bool = False
     classify_default_source: str = ""  # empty = ootb-sample
     classify_subagent_model: str | None = None
@@ -388,7 +396,7 @@ class AtelierConfig:
     # Overwatch
     overwatch_enabled: bool = False
     overwatch_autonomy: str = "propose"
-    overwatch_model: str = "claude-opus-4-6-20250918"
+    overwatch_model: str = "claude-opus-4-7"
     overwatch_github_app_id: str = ""
     overwatch_github_private_key_path: str = ""
     overwatch_github_repo: str = ""

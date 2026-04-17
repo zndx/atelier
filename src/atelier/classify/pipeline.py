@@ -44,6 +44,7 @@ from atelier.classify.sampler import (
     TableSample,
     discover_tables,
     load_sample_source,
+    load_synth_source,
     sample_table_metadata,
 )
 from atelier.classify.taxonomy import (
@@ -151,10 +152,24 @@ def run_classification_pipeline(
     Raises:
         ValueError: If no LLM backend is available.
     """
+    # ── Runtime overlay (settings page) ───────────────────────
+    # Session-level tuning values override cfg here; the overlay
+    # is a no-op when empty, so production runs behave normally.
+    from atelier.config_overlay import apply_to_config
+    cfg = apply_to_config(cfg)
+
     # ── Source-based auto-resolution ──────────────────────────
-    # When source_id is provided, auto-load samples and vocabulary
+    # When source_id is provided, auto-load samples and vocabulary.
+    # The OOTB sample and the local Synthetic corpus both pair with
+    # the expanded 316-leaf ICE ontology — their ground_truth codes
+    # share that vocabulary, so the LLM prompts and fusion frame are
+    # identical.  Synthetic is local-dev only and never shipped OOTB.
     if source_id == "ootb-sample" and samples is None:
         samples = load_sample_source()
+        if category_set is None:
+            category_set = load_sample_vocabulary(hierarchical=True)
+    elif source_id == "synthetic" and samples is None:
+        samples = load_synth_source()
         if category_set is None:
             category_set = load_sample_vocabulary(hierarchical=True)
     # ── LLM backend resolution ────────────────────────────────
@@ -166,10 +181,21 @@ def run_classification_pipeline(
         llm_backend = create_backend_from_cfg(cfg)
 
     # ── Embedding acceleration ────────────────────────────────
+    # Multi-GPU sharding kicks in automatically when preflight_gpu()
+    # reports more than one device AND the operator hasn't forced
+    # classify_gpu_enabled = "false".
     from atelier.classify.embedding import configure as configure_embeddings
+    gpu_devices = None
+    if cfg.classify_gpu_enabled != "false":
+        from atelier.classify.gpu import preflight_gpu
+        probe = preflight_gpu()
+        if probe.available and cfg.classify_embedding_device == "auto":
+            gpu_devices = probe.resolved_devices
     configure_embeddings(
         device=cfg.classify_embedding_device,
         batch_size=cfg.classify_embedding_batch_size,
+        devices=gpu_devices,
+        shard_threshold=cfg.classify_gpu_shard_threshold,
     )
 
     run = fsm.start_run(
@@ -1102,8 +1128,20 @@ def _run_feature_analysis(
     # ── SAGE (global feature importance) ────────────────────
     # SAGE is critical — it quantifies per-feature contribution to
     # classification. The config flag gates runtime cost for dev/UI
-    # testing, not because SAGE is optional. See config/base.conf.
-    if cfg.classify_sage_enabled:
+    # testing, not because SAGE is optional.  When a GPU is present
+    # we also auto-enable SAGE (kernel runtime is tens of seconds on
+    # synth-scale corpora); CPU users keep the opt-in default.
+    sage_auto = False
+    if not cfg.classify_sage_enabled and cfg.classify_gpu_enabled != "false":
+        try:
+            from atelier.classify.gpu import preflight_gpu
+            if preflight_gpu().available:
+                sage_auto = True
+                logger.info("SAGE auto-enabled on GPU (kernel runtime acceptable)")
+        except Exception:
+            pass
+
+    if cfg.classify_sage_enabled or sage_auto:
         # When MC active, run SAGE on frontier sample only (representative)
         sage_features = all_features
         sage_classifications = classifications
@@ -1263,20 +1301,43 @@ def _compute_projection(
     Tries UMAP on sentence-transformer embeddings first (best quality).
     Falls back to PCA on DST numeric features (always available).
     """
-    # Try UMAP + sentence-transformers for high-quality projection
+    # Try UMAP + sentence-transformers for high-quality projection.
+    # When the optional [gpu] extra is installed and a GPU is available,
+    # prefer cuml.UMAP (an order of magnitude faster on large corpora);
+    # otherwise fall back to umap-learn (CPU).
     try:
         from atelier.classify.embedding import _get_model, get_batch_size
-        import umap
         import numpy as np
 
         model = _get_model()
         embeddings = model.encode(texts, show_progress_bar=False, batch_size=get_batch_size())
         n_neighbors = min(15, max(2, len(texts) - 1))
-        reducer = umap.UMAP(
-            n_components=2, n_neighbors=n_neighbors,
-            min_dist=0.1, metric="cosine", random_state=42,
-        )
-        projection = reducer.fit_transform(embeddings)
+
+        projection = None
+        try:
+            from atelier.classify.gpu import preflight_gpu
+            if preflight_gpu().available:
+                from cuml.manifold import UMAP as CuUMAP  # type: ignore
+                reducer = CuUMAP(
+                    n_components=2, n_neighbors=n_neighbors,
+                    min_dist=0.1, metric="cosine", random_state=42,
+                )
+                projection = reducer.fit_transform(embeddings)
+                logger.info("UMAP projection: cuml.UMAP (GPU)")
+        except ImportError:
+            logger.debug("cuml not installed; falling back to umap-learn (CPU)")
+
+        if projection is None:
+            import umap
+            reducer = umap.UMAP(
+                n_components=2, n_neighbors=n_neighbors,
+                min_dist=0.1, metric="cosine", random_state=42,
+            )
+            projection = reducer.fit_transform(embeddings)
+
+        if hasattr(projection, "values"):
+            projection = projection.values
+        projection = np.asarray(projection)
         return projection[:, 0].tolist(), projection[:, 1].tolist()
     except Exception as e:
         logger.debug("UMAP projection unavailable (%s), using DST feature projection", e)

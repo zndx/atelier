@@ -64,6 +64,61 @@ HOCON (`config/base.conf`) captures env vars via `${?VAR}` substitution. No modu
 
 Workflow: `just resolve-config` → `just preflight` → `devenv up`
 
+### Runtime overlay (Settings page)
+
+`src/atelier/config_overlay.py` provides an in-memory overlay applied inside
+`run_classification_pipeline` via `apply_to_config(cfg)`. The `/settings` UI
+(gear icon, top-right of the header) reads/writes this overlay through
+`GET/PATCH /api/settings` and `POST /api/settings/reset`. Overlay keys must
+match `AtelierConfig` dataclass field names and validate against
+`SETTINGS_METADATA` (choice enums, float ranges). The overlay is
+session-only — it resets when the gateway process restarts. For permanent
+tuning, edit `config/base.conf` or set the corresponding env var.
+
+## Classification Pipeline
+
+The core of the project lives in `src/atelier/classify/` and is driven by
+`run_classification_pipeline()` in `pipeline.py`. Triggered from the UI via
+`POST /api/fsm/start` (gateway) → FSM-tracked run → results written to
+`build/results/{run_id}/`.
+
+Key concepts worth internalizing before editing:
+
+- **Dempster-Shafer evidence fusion** (`belief.py`, `mass_functions.py`) —
+  up to 6 evidence sources (name-match, pattern, cosine, LLM, CatBoost,
+  SVM) combined into a `HierarchicalClassification` with belief,
+  plausibility, and conflict per code. Fusion strategy is configurable —
+  `dempster` normalizes conflict by `(1−K)`, `yager` redirects conflict
+  mass to Θ (ignorance).
+- **Belief-gap convergence** (`bootstrap.py`) — the bootstrap loop
+  converges on `mean(Pl − Bel)`, not on K (conflict). Gap is the primary
+  signal; K is diagnostic.
+- **Bootstrap loop**: LLM sweep → ML validation → revisit disagreements
+  until gap threshold / bel-floor / max-iterations reached. Frontier SVM
+  hot-swap retrains on accumulated LLM labels during the loop.
+- **Monte Carlo stratification** (`monte_carlo.py`, `row_sampler.py`) —
+  for large corpora, only a stratified frontier gets LLM sweeps; the
+  remainder receives label propagation with an elevated discount.
+- **FSM** (`fsm.py`) — authoritative state machine; every phase advances
+  through `LOADING_VOCAB → DISCOVERING → SAMPLING → LLM_SWEEP →
+  VALIDATING → CLASSIFYING → FUSING → EVALUATING → CONVERGED|ERROR`.
+
+Terminology (Atlas Lexicon — use in UI / docs): **entities** (not rows),
+**terms** (not categories), **classifications** (applied tags).
+
+## Overwatch & Governance (optional capabilities)
+
+- **Overwatch** (`src/atelier/overwatch/agent.py`) — single-turn Opus
+  analysis that writes `build/results/{run_id}/overwatch.md` with
+  pipeline recommendations. **Requires direct Anthropic API** — not
+  Bedrock. Gated by `cfg.has_overwatch`. Triggered at the end of a
+  pipeline run when `overwatch.enabled = true`.
+- **Governance** (`src/atelier/governance/`) — optional Atlas sync
+  (taxonomy → classification types; results → entity tags). Gated by
+  `cfg.governance_auto_sync && cfg.has_atlas`. Knox-proxied Atlas auth
+  uses `HTTPBasicAuth` + `CDPUrlResolver` (not `cdpcurl`, which is
+  control-plane only).
+
 ## Proto-First Development
 
 1. Edit `src/atelier/proto/atelier.proto`
@@ -93,12 +148,64 @@ behave auto-discovery conflicts. Re-exported via `features/steps/__init__.py`.
 **Important:** Never name a features/ subdirectory after a stdlib module (e.g., `platform`).
 
 Tier system controls what runs:
-- `just bdd` — tier-0 only (pure Python, no services needed)
-- `just bdd-full` — tier-0 + tier-1 (requires devenv stack)
+- `just behave` — canonical BDD entry point; tier-0 + tier-1, excludes
+  `@slow` (auto-starts devenv if the stack isn't up)
+- `just behave-slow` — adds `@slow` scenarios (pipeline convergence,
+  ML training)
 - `@tier-cai` scenarios are documentation-only; skipped locally
+- `@gpu` scenarios skip automatically when no CUDA device is present
+
+Scenarios should model user/operator workflows, not implementation details.
+Import checks and unit-level assertions belong in pytest, not BDD.
+Heavy synth-scale validation (full 9782-col × 512-perm SAGE) is triggered
+via UI pipeline runs, not BDD.
+
+Run a single feature or scenario:
+
+```bash
+uv run behave features/agent/settings.feature              # one feature
+uv run behave features/agent/settings.feature -n "Reset"   # name regex
+uv run behave --tags @tier-0 --tags @agent                 # tag filter
+```
 
 CAI Runtime Profile (`features/deployment/runtime_profile.feature`) validates
 deployment readiness without CAI access. Run before every push.
+
+## GPU Acceleration
+
+`preflight_gpu()` (`src/atelier/classify/gpu.py`) probes nvidia-smi +
+`torch.cuda` at pipeline start. When CUDA is available, the pipeline
+auto-routes SAGE, PermutationSHAP, CatBoost training, and (optional)
+UMAP 2D projection onto GPU kernels — full CPU fallback preserved.
+
+- **SAGE / SHAP**: `src/atelier/classify/gpu_importance.py` — custom
+  vectorized kernel with fixed global donors, precomputed embedding
+  cache, and chunk-batched losses via `torch.matmul`. Replaces
+  `sage-importance` and `shap.PermutationExplainer` on GPU hosts; both
+  libraries remain as CPU fallbacks.
+- **Multi-GPU**: `MultiDeviceEncoder` lazy-loads replicas; shard_threshold
+  defaults to 200K because MiniLM-L6 saturates a single 4090 before
+  GIL-bound thread coordination pays off. Lower it for larger embedding
+  models (BGE-large, E5-mistral).
+- **RAPIDS extra**: `uv sync --extra gpu` installs `cuml` + `cupy` for
+  `cuml.UMAP`. Pipeline falls back to `umap-learn` when absent.
+- **Settings**: `classify.gpu.{enabled,shard_threshold,sage_chunk_permutations}`
+  in `config/base.conf`. Runtime status at `GET /api/acceleration`;
+  visible in the UI's Settings page.
+- **SAGE auto-enable**: on GPU hosts, SAGE is auto-enabled even when
+  `classify.sage.enabled = false` (the kernel is fast enough to be
+  default-on). CPU hosts keep the opt-in behavior (too slow otherwise).
+
+See [`docs/src/architecture/gpu-acceleration.md`](docs/src/architecture/gpu-acceleration.md)
+for full design notes.
+
+## Model Defaults
+
+`agents.model` and `overwatch.model` in `config/base.conf` track the
+latest Opus on the Anthropic direct API (currently `claude-opus-4-7`).
+Bedrock deployments override via `ATELIER_AGENT_MODEL` with a Bedrock
+ARN — Bedrock lags direct-API releases, so the two are not kept in
+lockstep.
 
 ## Branch Convention
 
