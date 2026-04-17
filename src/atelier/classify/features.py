@@ -372,6 +372,121 @@ def _numeric_ratio(values: list[str]) -> float:
     return round(numeric / len(values), 4)
 
 
+# ── Categorical enum detection ──────────────────────────────────────
+#
+# When a column has low cardinality and its values match a known
+# enumeration set, we can classify with high confidence even without
+# column name signal.
+
+_CATEGORICAL_SETS: dict[str, tuple[frozenset[str], str]] = {
+    # name → (value_set, description_hint)
+    "blood_type": (frozenset({
+        "A", "B", "AB", "O", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-",
+    }), "blood type values"),
+    "device_type": (frozenset({
+        "MOBILE", "DESKTOP", "TABLET", "WATCH", "TV", "IOT", "SMARTPHONE",
+        "LAPTOP", "PC", "WEARABLE",
+    }), "device/platform type"),
+    "quarter": (frozenset({
+        "Q1", "Q2", "Q3", "Q4",
+    }), "fiscal/calendar quarter"),
+    "boolean": (frozenset({
+        "TRUE", "FALSE", "YES", "NO", "Y", "N", "1", "0",
+        "ACTIVE", "INACTIVE", "ENABLED", "DISABLED",
+    }), "boolean/status flag"),
+    "gender": (frozenset({
+        "M", "F", "MALE", "FEMALE", "OTHER", "NON-BINARY", "NB",
+        "PREFER NOT TO SAY", "UNKNOWN",
+    }), "gender/sex"),
+    "priority": (frozenset({
+        "LOW", "MEDIUM", "HIGH", "CRITICAL", "URGENT", "P1", "P2", "P3", "P4",
+    }), "priority level"),
+    "continent": (frozenset({
+        "AFRICA", "ANTARCTICA", "ASIA", "EUROPE", "NORTH AMERICA",
+        "SOUTH AMERICA", "OCEANIA",
+    }), "continent"),
+}
+
+
+def detect_categorical_enum(values: list[str]) -> dict[str, float]:
+    """Match column values against known categorical enumeration sets.
+
+    Returns {enum_name: match_fraction} for sets where ≥70% of non-empty
+    values are members.
+    """
+    if not values:
+        return {}
+    clean = [v.strip().upper() for v in values if v and v.strip()]
+    if len(clean) < 3:
+        return {}
+
+    hits: dict[str, float] = {}
+    value_set = set(clean)
+    for enum_name, (enum_values, _desc) in _CATEGORICAL_SETS.items():
+        overlap = len(value_set & enum_values)
+        if overlap > 0 and overlap / len(value_set) >= 0.7:
+            hits[enum_name] = overlap / len(value_set)
+    return hits
+
+
+# ── Sibling domain clustering ──────────────────────────────────────
+#
+# When sibling columns form a recognizable domain cluster (e.g. health,
+# payment, identity), we can infer the domain for opaque-named columns.
+
+_DOMAIN_CLUSTERS: dict[str, frozenset[str]] = {
+    "health": frozenset({
+        "blood_type", "diagnosis", "prescription", "allergy", "medication",
+        "medical_record", "patient", "vital", "lab_result", "immunization",
+        "mrn", "icd", "encounter", "clinical", "prognosis", "symptom",
+    }),
+    "payment": frozenset({
+        "card_number", "cvv", "expiry", "cardholder", "billing",
+        "payment", "transaction", "pan", "credit_card", "debit",
+        "merchant", "authorization", "refund", "invoice",
+    }),
+    "identity": frozenset({
+        "first_name", "last_name", "name", "dob", "ssn", "passport",
+        "driver_license", "gender", "nationality", "ethnicity",
+        "marital_status", "birth", "citizen",
+    }),
+    "geo": frozenset({
+        "latitude", "longitude", "address", "city", "country",
+        "postal_code", "zip", "timezone", "region", "state",
+        "province", "county", "district",
+    }),
+    "technical": frozenset({
+        "ip_address", "mac_address", "hostname", "url", "api_key",
+        "password", "token", "certificate", "ssh_key", "user_agent",
+        "session_id", "device_id",
+    }),
+}
+
+
+def detect_sibling_domain(
+    column_name: str, sibling_names: list[str]
+) -> dict[str, float]:
+    """Detect domain clusters from sibling column names.
+
+    Returns {domain: match_score} where score is the fraction of
+    siblings matching that domain's keyword set.
+    """
+    if not sibling_names:
+        return {}
+
+    # Normalize sibling names to lowercase word sets
+    sibling_words: set[str] = set()
+    for sib in sibling_names:
+        sibling_words.update(sib.lower().replace("_", " ").split())
+
+    hits: dict[str, float] = {}
+    for domain, keywords in _DOMAIN_CLUSTERS.items():
+        overlap = len(sibling_words & keywords)
+        if overlap >= 2:  # At least 2 keyword matches
+            hits[domain] = overlap / max(len(keywords), 1)
+    return hits
+
+
 # ── ColumnFeatures ───────────────────────────────────────────────────
 
 
