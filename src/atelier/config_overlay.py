@@ -97,7 +97,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "step": 0.01,
         "default": 0.10,
         "default_focus": True,
-        "caption_template": "Revisit any column whose clarity < {value_pct}% — raises LLM re-sweep aggressiveness.",
+        "caption_template": "Revisit any column whose clarity < {value_pct}% in the next iteration — raise for more aggressive LLM re-sweeps on ambiguous columns.",
     },
     "classify_bootstrap_gap_threshold": {
         "hocon_path": "classify.bootstrap.gap_threshold",
@@ -109,7 +109,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.25,
         "step": 0.01,
         "default": 0.15,
-        "caption_template": "Converge when mean(Pl − Bel) < {value}.",
+        "caption_template": "Converge once mean(Pl − Bel) < {value} — lower = demand tighter belief bands before stopping.",
     },
     "classify_bootstrap_bel_floor": {
         "hocon_path": "classify.bootstrap.bel_floor",
@@ -121,7 +121,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.70,
         "step": 0.01,
         "default": 0.50,
-        "caption_template": "A prediction is 'settled' when Bel ≥ {value}.",
+        "caption_template": "Mark a prediction 'settled' once Bel ≥ {value} — raise to require stronger evidence before locking in.",
     },
     "classify_bootstrap_frontier_svm_retrain": {
         "hocon_path": "classify.bootstrap.frontier_svm_retrain",
@@ -159,7 +159,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.45,
         "step": 0.01,
         "default": 0.30,
-        "caption_template": "{value_pct}% of cosine mass allocated to ignorance.",
+        "caption_template": "Reserve {value_pct}% of cosine mass as ignorance — lower = trust embedding similarity more, raise when cosine is misleading your labels.",
     },
     "classify_discount_svm": {
         "hocon_path": "classify.discounts.svm",
@@ -171,7 +171,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.40,
         "step": 0.01,
         "default": 0.20,
-        "caption_template": "{value_pct}% of SVM mass allocated to ignorance.",
+        "caption_template": "Reserve {value_pct}% of SVM mass as ignorance — lower = stronger frontier-SVM voice in fusion.",
     },
     "classify_discount_pattern_theta": {
         "hocon_path": "classify.discounts.pattern_theta",
@@ -183,7 +183,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.40,
         "step": 0.01,
         "default": 0.25,
-        "caption_template": "{value_pct}% of pattern-match mass allocated to ignorance.",
+        "caption_template": "Reserve {value_pct}% of pattern mass as ignorance — raise when regex hits over-fire on format-only matches.",
     },
     "classify_discount_name_match_exact": {
         "hocon_path": "classify.discounts.name_match_exact",
@@ -208,7 +208,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.65,
         "step": 0.01,
         "default": 0.50,
-        "caption_template": "Code-level name-match keeps {value_pct}% as ignorance.",
+        "caption_template": "Code-level name-match holds {value_pct}% as ignorance — lower this if your codes are reliable unique IDs.",
     },
     "classify_discount_name_match_alias": {
         "hocon_path": "classify.discounts.name_match_alias",
@@ -220,7 +220,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.65,
         "step": 0.01,
         "default": 0.50,
-        "caption_template": "Alias-level name-match keeps {value_pct}% as ignorance.",
+        "caption_template": "Alias-level name-match holds {value_pct}% as ignorance — raise when aliases are shared across multiple terms.",
     },
     "classify_discount_name_match_overlap": {
         "hocon_path": "classify.discounts.name_match_overlap",
@@ -232,7 +232,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.50,
         "step": 0.01,
         "default": 0.30,
-        "caption_template": "Partial-overlap name-match keeps {value_pct}% as ignorance.",
+        "caption_template": "Partial-overlap name-match holds {value_pct}% as ignorance — raise to de-weight fuzzy substring hits.",
     },
     "classify_discount_catboost_base": {
         "hocon_path": "classify.discounts.catboost_base",
@@ -244,7 +244,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.25,
         "step": 0.01,
         "default": 0.10,
-        "caption_template": "CatBoost baseline discount floor = {value_pct}%.",
+        "caption_template": "Floor CatBoost ignorance at {value_pct}% before variance scaling — your minimum skepticism of tree-based votes.",
     },
     "classify_discount_catboost_variance_scale": {
         "hocon_path": "classify.discounts.catboost_variance_scale",
@@ -280,7 +280,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.30,
         "step": 0.01,
         "default": 0.15,
-        "caption_template": "Fallback CatBoost discount = {value_pct}% when variance signal is missing.",
+        "caption_template": "When CatBoost variance is unavailable, discount at {value_pct}% — the fallback fires on GPU training where posterior_sampling is disabled.",
     },
     "classify_discount_confusable_ratio_threshold": {
         "hocon_path": "classify.discounts.confusable_ratio_threshold",
@@ -331,7 +331,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "step": 1,
         "default": 3,
         "default_focus": True,
-        "caption_template": "At least {value} column per stratum reaches LLM — lower bound on sparse-stratum coverage.",
+        "caption_template": "Guarantee {value} LLM samples per stratum — raise when rare categories are being missed; the dominant stratum still gets sample_fraction × corpus.",
     },
     "mc_max_frontier_columns": {
         "hocon_path": "classify.monte_carlo.max_frontier_columns",
@@ -490,7 +490,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 5,
         "step": 1,
         "default": 3,
-        "caption_template": "Retain top {value} contributing features per prediction.",
+        "caption_template": "Retain the top {value} feature attributions per column — raise for richer 'why?' explanations, lower to trim parquet payload.",
     },
     # ── LLM & System ──────────────────────────────────────────────
     "classify_llm_discount": {
@@ -503,7 +503,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.20,
         "step": 0.01,
         "default": 0.10,
-        "caption_template": "{value_pct}% of LLM mass allocated to ignorance.",
+        "caption_template": "Reserve {value_pct}% of LLM mass as ignorance — lower = trust the LLM's self-confidence, raise when you're seeing confident-but-wrong predictions.",
     },
     "classify_llm_max_tokens": {
         "hocon_path": "classify.llm.max_tokens",
@@ -515,7 +515,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 131072,
         "step": 1024,
         "default": 65536,
-        "caption_template": "Cap LLM response at {value} tokens per batch.",
+        "caption_template": "Bound LLM response at {value} tokens — raise only if you see truncated batches; larger values burn context quota without accuracy gain.",
     },
     "classify_llm_temperature": {
         "hocon_path": "classify.llm.temperature",
@@ -551,7 +551,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 10,
         "step": 1,
         "default": 3,
-        "caption_template": "Retry each LLM batch up to {value} times on transient failure.",
+        "caption_template": "Retry each batch up to {value} times — raise when the provider is flaky, lower to fail fast on persistent errors.",
     },
     "classify_embedding_batch_size": {
         "hocon_path": "classify.embedding_batch_size",
