@@ -109,6 +109,52 @@ class LLMResponse:
 # ── Configuration ────────────────────────────────────────────────
 
 
+def _effort_from_budget(budget: int) -> str:
+    """Map a legacy thinking-budget token count to the new effort level.
+
+    Opus 4.7's direct API replaced ``thinking.type=enabled`` +
+    ``budget_tokens`` with ``thinking.type=adaptive`` +
+    ``output_config.effort`` (low / medium / high / max). The mapping
+    here preserves the intent of our existing ``reasoning_budget``
+    config knob without requiring operators to learn the new axis.
+    """
+    if budget <= 4096:
+        return "low"
+    if budget <= 16384:
+        return "medium"
+    if budget <= 32768:
+        return "high"
+    return "max"
+
+
+def _apply_thinking(kwargs: dict, model: str, budget: int) -> None:
+    """Mutate *kwargs* to include a thinking config compatible with *model*.
+
+    Opus 4.7+ (and future Opus ≥ 5) reject the legacy
+    ``{type:"enabled", budget_tokens:N}`` pair — they require
+    ``{type:"adaptive"}`` alongside ``output_config.effort``.  Opus 4.6
+    (still on Bedrock) and earlier accept the legacy shape and are
+    incompatible with the adaptive route on current deployments.
+
+    Both routes set ``temperature=1`` (the thinking prerequisite).  The
+    adaptive route merges ``effort`` into any pre-existing
+    ``output_config`` dict so structured-output backends (which already
+    use ``output_config.format``) keep their schema setting intact.
+    """
+    from atelier.model_compat import requires_adaptive_thinking
+
+    if requires_adaptive_thinking(model):
+        kwargs["thinking"] = {"type": "adaptive"}
+        oc = kwargs.setdefault("output_config", {})
+        oc["effort"] = _effort_from_budget(budget)
+    else:
+        kwargs["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budget,
+        }
+    kwargs["temperature"] = 1
+
+
 @dataclass
 class LLMBackendConfig:
     """Configuration for LLM backend."""
@@ -434,12 +480,7 @@ class AnthropicBackend(LLMBackend):
             "messages": [{"role": "user", "content": user_prompt}],
         }
         if self._config.reasoning_budget and not self._config.disable_reasoning:
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": self._config.reasoning_budget,
-            }
-            # Extended thinking requires temperature=1
-            kwargs["temperature"] = 1
+            _apply_thinking(kwargs, self._config.model, self._config.reasoning_budget)
 
         response = client.messages.create(**kwargs)
 
@@ -536,12 +577,7 @@ class AnthropicStructuredBackend(LLMBackend):
             },
         }
         if self._config.reasoning_budget and not self._config.disable_reasoning:
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": self._config.reasoning_budget,
-            }
-            # Extended thinking requires temperature=1
-            kwargs["temperature"] = 1
+            _apply_thinking(kwargs, self._config.model, self._config.reasoning_budget)
 
         response = client.messages.create(**kwargs)
 

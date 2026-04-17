@@ -607,6 +607,17 @@ class TerminalSession:
             # USD budget is high enough to be effectively unlimited
             # for a single session; ``max_turns=None`` disables the
             # turn gate so tool-heavy prompts don't trip a default.
+            # Opus 4.7+ (direct API) only accepts thinking.type=adaptive
+            # paired with output_config.effort.  Opus 4.6 on Bedrock
+            # still uses the legacy enabled+budget_tokens shape, which
+            # the bundled CLI defaults to correctly — so only pin the
+            # adaptive shape when we're on a model that requires it.
+            from atelier.model_compat import requires_adaptive_thinking
+            thinking_kwargs: dict = {}
+            if requires_adaptive_thinking(cfg.agent_model):
+                thinking_kwargs["thinking"] = {"type": "adaptive"}
+                thinking_kwargs["effort"] = "medium"
+
             options = ClaudeAgentOptions(
                 allowed_tools=[],
                 permission_mode="bypassPermissions",
@@ -624,6 +635,7 @@ class TerminalSession:
                 # because the SDK CLI rejects --session-id + --continue
                 # without --fork-session.
                 continue_conversation=self._has_conversed,
+                **thinking_kwargs,
             )
 
             # Track state across the query for the summary line.

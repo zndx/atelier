@@ -177,6 +177,16 @@ def _query_overwatch(cfg, prompt: str) -> str:
 
     project_root = Path(__file__).resolve().parent.parent.parent.parent
 
+    # Opus 4.7+ requires thinking.type=adaptive + output_config.effort;
+    # pre-4.7 models (Opus 4.6 on Bedrock today) still use the legacy
+    # shape that the SDK CLI sends by default.  Only pin the adaptive
+    # shape when we're routed to a model that requires it.
+    from atelier.model_compat import requires_adaptive_thinking
+    thinking_kwargs: dict = {}
+    if requires_adaptive_thinking(cfg.overwatch_model):
+        thinking_kwargs["thinking"] = {"type": "adaptive"}
+        thinking_kwargs["effort"] = "medium"
+
     options = ClaudeAgentOptions(
         allowed_tools=[],
         permission_mode="bypassPermissions",
@@ -184,6 +194,7 @@ def _query_overwatch(cfg, prompt: str) -> str:
         max_turns=1,  # Single-turn analysis, no tool use
         cwd=str(project_root),
         env=env,
+        **thinking_kwargs,
     )
 
     text_parts: list[str] = []
