@@ -123,7 +123,12 @@ class LLMBackendConfig:
     max_retries: int = 3
     retry_delay: float = 2.0
     disable_reasoning: bool = False
-    reasoning_budget: int = 8192  # max tokens for chain-of-thought; 0 = unlimited
+    # Chain-of-thought token budget (Anthropic thinking mode, Cerebras
+    # reasoning models, reasoning-aware vLLM builds).  0 = don't send the
+    # field at all — the default, so stock OpenAI-compatible endpoints
+    # (e.g. plain GLM-4.7 on vLLM) won't 422 on the unknown property.
+    # Set via ATELIER_LLM_REASONING_BUDGET when the backend supports it.
+    reasoning_budget: int = 0
     # AWS Bedrock credentials (used only by "bedrock" backend)
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
@@ -595,6 +600,9 @@ class OpenAICompatibleBackend(LLMBackend):
     def __init__(self, config: LLMBackendConfig) -> None:
         super().__init__(config)
         self._client = None
+        # Set to True once the endpoint 422s on an extra_body reasoning
+        # key; future requests in this session drop the extra_body.
+        self._reasoning_unsupported = False
 
     def _get_client(self):
         if self._client is not None:
@@ -640,10 +648,17 @@ class OpenAICompatibleBackend(LLMBackend):
             ],
         }
 
+        # Reasoning fields are opt-in via config.  Some OpenAI-compatible
+        # endpoints (e.g. stock vLLM) 422 on unknown extra_body keys; we
+        # strip the offending field once and remember for the session.
         extra_body: dict[str, Any] = {}
-        if self._config.disable_reasoning:
+        if self._config.disable_reasoning and not self._reasoning_unsupported:
             extra_body["disable_reasoning"] = True
-        if self._config.reasoning_budget and not self._config.disable_reasoning:
+        if (
+            self._config.reasoning_budget
+            and not self._config.disable_reasoning
+            and not self._reasoning_unsupported
+        ):
             extra_body["reasoning_budget"] = self._config.reasoning_budget
         if extra_body:
             api_params["extra_body"] = extra_body
@@ -658,6 +673,20 @@ class OpenAICompatibleBackend(LLMBackend):
                 last_error = e
                 err_str = str(e)
                 retryable = any(code in err_str for code in ("429", "502", "503", "504"))
+                # Backend doesn't understand extra_body reasoning keys —
+                # drop them, mark the session, and retry once without delay.
+                unsupported = (
+                    "reasoning_budget" in err_str
+                    or "disable_reasoning" in err_str
+                ) and ("422" in err_str or "unsupported" in err_str.lower())
+                if unsupported and not self._reasoning_unsupported:
+                    logger.warning(
+                        "Backend rejected reasoning extra_body (%s); disabling "
+                        "reasoning for the rest of this session.", e,
+                    )
+                    self._reasoning_unsupported = True
+                    api_params.pop("extra_body", None)
+                    continue
                 if retryable and attempt < self._config.max_retries - 1:
                     delay = self._config.retry_delay * (2 ** attempt)
                     logger.warning(
