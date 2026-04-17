@@ -385,6 +385,12 @@ class TerminalSession:
 
         if cmd == "clear":
             await self._send("\x1b[2J\x1b[H")  # Clear screen + cursor home
+            # Drop conversation continuity too — ``clear`` is the
+            # natural "start fresh" affordance; operators shouldn't
+            # have to restart the terminal to break out of a wedged
+            # slash-command session.
+            self._has_conversed = False
+            self._sdk_session_id = None
             await self._send(_PROMPT)
             return
 
@@ -642,7 +648,16 @@ class TerminalSession:
                 # NOTE: only pass continue_conversation (not session_id)
                 # because the SDK CLI rejects --session-id + --continue
                 # without --fork-session.
-                continue_conversation=self._has_conversed,
+                #
+                # Slash commands are explicit fresh-intent invocations;
+                # chaining them onto a prior conversation makes the CLI
+                # treat them as client-side no-ops in some cases
+                # (observed with /health-check on Bedrock 4.6, which
+                # returned 6 turns of 0ms with no assistant output).
+                # Reset continuity when the prompt is a slash command.
+                continue_conversation=(
+                    self._has_conversed and not prompt.lstrip().startswith("/")
+                ),
                 **thinking_kwargs,
             )
 
@@ -789,6 +804,27 @@ class TerminalSession:
                         parts.append(f"{tool_errors} error{'s' if tool_errors > 1 else ''}")
 
                     summary = " \u00b7 ".join(parts) if parts else "done"
+
+                    # Silent-run diagnostic: when the SDK reports turns
+                    # happened but nothing flowed to the terminal (no
+                    # text, no tool annotations), the operator sees a
+                    # blank prompt and concludes the terminal is dead.
+                    # Usually this is a slash command that the bundled
+                    # CLI resolved client-side without hitting the API
+                    # (e.g. /health-check on Bedrock with a stale
+                    # conversation continuation).  Tell the operator
+                    # explicitly so they can retry cleanly.
+                    if not emitted_text and not tools_used and num_turns:
+                        hint = (
+                            "no assistant output — the SDK may have "
+                            "resolved the prompt client-side. If you "
+                            "used a slash command, try typing 'clear' "
+                            "and running it again."
+                        )
+                        await self._send(
+                            f"\r\n{_DIM}  \u26a0 {hint}{_RESET}\r\n"
+                        )
+
                     await self._send(
                         f"\r\n{_DONE_PREFIX}{summary}{_RESET}\r\n"
                     )
