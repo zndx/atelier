@@ -111,6 +111,21 @@ Feature: Dempster-Shafer classification pipeline
     Then the pattern mass should assign weight to "ICE.SENSITIVE.PID.CONTACT.EMAIL"
     And the pattern mass should not be vacuous
 
+  Scenario: Quarantined patterns do not contribute mass
+    # phone_pattern, date_iso_pattern, vin_pattern, license_plate_pattern,
+    # and friends have been moved to _QUARANTINED_PATTERN_MAP per the
+    # 2026-04-17 overwatch audit — they fire wrong 8× more than right
+    # and compete with LLM evidence rather than corroborating it.
+    Given a frame of discernment from the vocabulary
+    When I compute pattern_to_mass for signals ["phone_pattern"]
+    Then the pattern mass should be vacuous
+    When I compute pattern_to_mass for signals ["date_iso_pattern"]
+    Then the pattern mass should be vacuous
+    When I compute pattern_to_mass for signals ["vin_pattern"]
+    Then the pattern mass should be vacuous
+    When I compute pattern_to_mass for signals ["license_plate_pattern"]
+    Then the pattern mass should be vacuous
+
   Scenario: FSM rejects invalid transitions
     Given a fresh AgentFSM in "IDLE" state
     When I attempt to advance to "FUSING"

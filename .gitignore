@@ -1,5 +1,8 @@
 catboost_info/
 
+# Claude Code scheduler state
+.claude/scheduled_tasks.lock
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

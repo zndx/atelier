@@ -156,35 +156,59 @@ def cosine_to_mass(
 
 # Pattern → annotation code mapping.  Keys are pattern names from
 # features.detect_patterns(); values are ICE.* leaf codes.
+#
+# **Active set** below is curated to patterns whose regex + optional
+# post-validator uniquely identifies a specific instance type (not a
+# generic format class).  A pattern belongs here only if:
+#   1. It maps to a specific leaf code, not a catch-all parent, AND
+#   2. Either the regex is anchored to a distinctive literal prefix
+#      (``ssh-``, ``MRN-``, ``-----BEGIN``, ``$2[aby]$``, ``IBAN``),
+#      or a post-validator imposes real precision (Luhn for card
+#      numbers, dotted-quad range check for IPv4).
+#
+# Patterns that fire on *generic-shaped* strings (any 10-digit number,
+# any YYYY-MM-DD, any 17-char alnum) were quarantined on 2026-04-17
+# after the Synthetic overwatch audit showed they fire wrong 8× more
+# than right — they vote for parent-of-leaf codes and compete with
+# LLM's specific-leaf votes.  Quarantined entries are preserved as
+# ``_QUARANTINED_PATTERN_MAP`` below for provenance and are dormant;
+# re-activate only after weighting them below the LLM evidence source.
 DEFAULT_PATTERN_MAP: dict[str, str] = {
-    # ── Core detectors from features.py ──────────────────────────
+    # Anchored-prefix or validator-guarded patterns only.
     "email_pattern": "ICE.SENSITIVE.PID.CONTACT.EMAIL",
+    "ssn_pattern": "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN",  # strict ###-##-####
+    "ipv4_pattern": "ICE.SENSITIVE.TECHNICAL.IPADDR",       # dotted-quad + range validator
+    "uuid_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",        # standard UUID format
+    "url_pattern": "ICE.SENSITIVE.TECHNICAL.URL",           # http(s):// prefix
+    "credit_card_pattern": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN",  # + Luhn
+    "mac_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID", # HH:HH:HH:HH:HH:HH
+    "iban_pattern": "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN",  # 2-letter country + checksum
+    "monetary_pattern": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT",  # leading currency sym
+    "semver_pattern": "ICE.METADATA.VERSION",
+    "bcrypt_pattern": "ICE.SENSITIVE.TECHNICAL.PASSWORD_HASH",  # $2[aby]$ prefix
+    "mrn_pattern": "ICE.SENSITIVE.PID.HEALTH.MRN",          # MRN- prefix
+    "ssh_key_pattern": "ICE.SENSITIVE.TECHNICAL.ACCESS_KEY", # ssh-rsa/ed25519/ecdsa prefix
+    "certificate_pattern": "ICE.SENSITIVE.TECHNICAL.CERTIFICATE",  # -----BEGIN prefix
+}
+
+
+# Quarantined as of 2026-04-17 — high false-positive rate on
+# Synthetic (audit: 1,077 wrong fires vs 136 right across these 8
+# patterns) and incompatible with the transparency/explainability
+# thesis: patterns that fire on generic shapes vote for parent
+# codes and compete with LLM-specific leaf votes rather than
+# corroborating them.  To reactivate, consult the audit in
+# ``build/results/a22f1f10/overwatch.md``.
+_QUARANTINED_PATTERN_MAP: dict[str, str] = {
     "phone_pattern": "ICE.SENSITIVE.PID.CONTACT.PHONE",
-    "ssn_pattern": "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN",
-    "ipv4_pattern": "ICE.SENSITIVE.TECHNICAL.IPADDR",
-    "uuid_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
     "date_iso_pattern": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.DATE",
     "datetime_iso_pattern": "ICE.METADATA.TIMESTAMP",
-    "url_pattern": "ICE.SENSITIVE.TECHNICAL.URL",
-    "credit_card_pattern": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN",
-    # ── Expanded detectors ───────────────────────────────────────
-    "mac_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
-    "iban_pattern": "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN",
     "postal_code_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.POSTAL",
-    "monetary_pattern": "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT",
     "hex_hash_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.HASH_ID",
-    "semver_pattern": "ICE.METADATA.VERSION",
-    # iso_currency_pattern omitted — target code not in universal vocab;
-    # fires as informational signal in value_description only.
-    # ── Artifact-informed patterns (synth DB analysis) ──────────
     "vin_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
     "iata_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ABBREV",
-    "bcrypt_pattern": "ICE.SENSITIVE.TECHNICAL.PASSWORD_HASH",
-    "mrn_pattern": "ICE.SENSITIVE.PID.HEALTH.MRN",
     "license_plate_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
     "eth_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
-    "ssh_key_pattern": "ICE.SENSITIVE.TECHNICAL.ACCESS_KEY",
-    "certificate_pattern": "ICE.SENSITIVE.TECHNICAL.CERTIFICATE",
 }
 
 

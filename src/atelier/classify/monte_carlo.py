@@ -290,11 +290,14 @@ def select_sample(
     """
     rng = random.Random(seed)
 
-    # Passthrough: classify everything when below threshold
+    # Passthrough: classify everything when below the size threshold OR
+    # when the operator has explicitly requested full LLM coverage by
+    # pushing sample_fraction to 1.0.  In the latter case we bypass the
+    # max_frontier_columns cap as well — "100%" must literally mean 100%.
     all_names = set()
     for s in strata:
         all_names.update(s.column_names)
-    if total < mc_cfg.min_corpus_size:
+    if total < mc_cfg.min_corpus_size or mc_cfg.sample_fraction >= 1.0:
         return MCPlan(
             strata=strata,
             frontier_columns=all_names,

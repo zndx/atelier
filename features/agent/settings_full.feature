@@ -83,7 +83,7 @@ Feature: Runtime overlay — full parameter surface
     Examples: Out-of-range
       | key                                | value   |
       | classify_bootstrap_max_iterations  | 100     |
-      | mc_sample_fraction                 | 0.90    |
+      | mc_sample_fraction                 | 1.50    |
       | classify_catboost_depth            | 20      |
 
     Examples: Bad enum

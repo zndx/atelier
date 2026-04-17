@@ -310,15 +310,15 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     "mc_sample_fraction": {
         "hocon_path": "classify.monte_carlo.sample_fraction",
         "label": "Sample Fraction",
-        "description": "Fraction of discovered columns sent to LLM sweep per iteration",
+        "description": "Fraction of discovered columns sent to LLM sweep per iteration (1.0 bypasses MC entirely and sends every column to the LLM)",
         "group": "sampling",
         "type": "float",
         "min": 0.08,
-        "max": 0.40,
+        "max": 1.00,
         "step": 0.01,
         "default": 0.15,
         "default_focus": True,
-        "caption_template": "{value_pct}% of columns reach LLM per iteration — raise for denser first-pass coverage.",
+        "caption_template": "{value_pct}% of columns reach LLM per iteration — 100% disables Monte-Carlo stratification and sends every column to the LLM.",
     },
     "mc_min_per_stratum": {
         "hocon_path": "classify.monte_carlo.min_per_stratum",

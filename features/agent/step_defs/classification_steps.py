@@ -412,6 +412,18 @@ def step_pattern_mass_not_vacuous(context):
     assert len(masses) > 1, f"Mass function has only {len(masses)} focal elements (vacuous)"
 
 
+@then("the pattern mass should be vacuous")
+def step_pattern_mass_is_vacuous(context):
+    # Vacuous = 100% mass on Theta only.  One focal element (Theta) with mass 1.0.
+    masses = context.pattern_mass.masses
+    theta = context.frame.theta
+    theta_mass = masses.get(theta, 0.0)
+    assert len(masses) == 1 and abs(theta_mass - 1.0) < 1e-9, (
+        f"Pattern mass is not vacuous: {len(masses)} elements, theta_mass={theta_mass}; "
+        f"masses={masses}"
+    )
+
+
 # ── FSM ──────────────────────────────────────────────────────────────
 
 
