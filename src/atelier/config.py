@@ -394,7 +394,7 @@ class AtelierConfig:
     governance_dry_run: bool = False
 
     # Overwatch
-    overwatch_enabled: bool = False
+    overwatch_enabled: bool = True
     overwatch_autonomy: str = "propose"
     overwatch_model: str = "claude-opus-4-7"
     overwatch_github_app_id: str = ""
