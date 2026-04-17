@@ -177,14 +177,17 @@ def _query_overwatch(cfg, prompt: str) -> str:
 
     project_root = Path(__file__).resolve().parent.parent.parent.parent
 
-    # Opus 4.7+ requires thinking.type=adaptive + output_config.effort;
-    # pre-4.7 models (Opus 4.6 on Bedrock today) still use the legacy
-    # shape that the SDK CLI sends by default.  Only pin the adaptive
-    # shape when we're routed to a model that requires it.
+    # Opus 4.7+ requires thinking.type=adaptive + output_config.effort.
+    # SDK v0.1.56 has a bug where passing the adaptive thinking dict
+    # still causes the bundled CLI to emit --max-thinking-tokens 32000
+    # → API rejects with "thinking.type.enabled not supported".
+    # Workaround: pass max_thinking_tokens=0 + effort=<level> so the
+    # CLI sends only --effort to the API.  See terminal.py for the
+    # matching workaround + upstream-fix note.
     from atelier.model_compat import requires_adaptive_thinking
     thinking_kwargs: dict = {}
     if requires_adaptive_thinking(cfg.overwatch_model):
-        thinking_kwargs["thinking"] = {"type": "adaptive"}
+        thinking_kwargs["max_thinking_tokens"] = 0
         thinking_kwargs["effort"] = "medium"
 
     options = ClaudeAgentOptions(

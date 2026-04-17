@@ -608,14 +608,22 @@ class TerminalSession:
             # for a single session; ``max_turns=None`` disables the
             # turn gate so tool-heavy prompts don't trip a default.
             # Opus 4.7+ (direct API) only accepts thinking.type=adaptive
-            # paired with output_config.effort.  Opus 4.6 on Bedrock
-            # still uses the legacy enabled+budget_tokens shape, which
-            # the bundled CLI defaults to correctly — so only pin the
-            # adaptive shape when we're on a model that requires it.
+            # + output_config.effort.  Opus 4.6 on Bedrock still uses
+            # the legacy enabled+budget_tokens shape.
+            #
+            # SDK v0.1.56 has a latent bug: passing thinking={"type":
+            # "adaptive"} causes it to emit `--max-thinking-tokens
+            # 32000` to the bundled CLI (v2.1.92), which in turn sends
+            # `thinking.type=enabled` to the API — rejected by 4.7.
+            # Workaround: pass max_thinking_tokens=0 + effort=<level>
+            # so the CLI emits `--max-thinking-tokens 0 --effort
+            # <level>`, the API sees only `output_config.effort` and
+            # 4.7 is happy.  Remove this workaround after upgrading
+            # claude-agent-sdk to a release that fixes the mapping.
             from atelier.model_compat import requires_adaptive_thinking
             thinking_kwargs: dict = {}
             if requires_adaptive_thinking(cfg.agent_model):
-                thinking_kwargs["thinking"] = {"type": "adaptive"}
+                thinking_kwargs["max_thinking_tokens"] = 0
                 thinking_kwargs["effort"] = "medium"
 
             options = ClaudeAgentOptions(
