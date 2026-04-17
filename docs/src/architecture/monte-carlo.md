@@ -28,7 +28,7 @@ LLM_SWEEP
 VALIDATING
   └─ [existing] Full 6-source DST on ALL columns
       (propagated labels enter as discounted LLM evidence)
-      → High-K propagated columns automatically escalate to revisit
+      → High-gap / low-belief propagated columns escalate to revisit
 ```
 
 ### Phase 1: Pre-Classification
@@ -85,8 +85,8 @@ targeted-revisit loop automatically escalates the column to the frontier model.
 The evidence fusion framework makes MC sampling robust:
 
 - **Propagated evidence** carries less mass (more goes to Theta/ignorance)
-- **M0 agreement** with propagated label → high belief, low K (good)
-- **M0 disagreement** with propagated label → high K → frontier revisit
+- **M0 agreement** with propagated label → high belief, narrow gap (good)
+- **M0 disagreement** with propagated label → wide gap → frontier revisit
 - **Escalation is automatic** — no special MC-aware revisit logic needed
 
 ## Scaling Projections

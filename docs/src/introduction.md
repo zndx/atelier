@@ -31,11 +31,13 @@ probability. Its width \\( \text{Pl}(A) - \text{Bel}(A) \\) quantifies
 |----------|---------------|
 | \\( [0.82,\; 0.87] \\) | Strong evidence, low ambiguity — classify with confidence |
 | \\( [0.30,\; 0.90] \\) | Some support for \\(A\\), but high ignorance — gather more evidence |
-| \\( [0.45,\; 0.55] \\) | Two sources disagree — the conflict \\(K\\) will be high |
+| \\( [0.45,\; 0.55] \\) | Two sources disagree — wide gap, needs revisit |
 
-This distinction drives the entire pipeline: columns with high conflict
-\\( K \\) (where independent sources assign contradictory mass) are
-automatically escalated for LLM re-examination with enriched context.
+This distinction drives the entire pipeline: columns with **wide
+belief gaps** (where \\( \text{Pl}(A) - \text{Bel}(A) \\) is large)
+are automatically escalated for LLM re-examination with enriched
+context.  Conflict \\( K \\) is tracked as a diagnostic but the
+**gap width** determines which columns need attention.
 
 ## Architecture
 
@@ -125,19 +127,30 @@ specific but less certain ones.
 
 ## Convergence
 
-The bootstrap pipeline iterates three phases until \\( K \\) stabilizes:
+The bootstrap pipeline iterates three phases until the **belief gap**
+(\\( \text{Pl}(A) - \text{Bel}(A) \\)) stabilizes:
 
 1. **LLM sweep** — classify all frontier columns via batch LLM calls
-2. **ML validation** — run the full 6-source DST pipeline; compute per-column \\( K \\)
-3. **Targeted revisit** — re-classify only high-\\( K \\) disagreement columns
-   with enriched context (ML prediction + belief interval + detected patterns)
+2. **ML validation** — run the full 6-source DST pipeline; compute
+   per-column belief, plausibility, and gap
+3. **Targeted revisit** — re-classify only **uncertain** columns
+   (high gap or low belief) with enriched context (ML prediction +
+   belief interval + detected patterns + confusable pairs)
+
+The primary convergence measure is **mean belief gap** — the average
+width of the \\( [\text{Bel}, \text{Pl}] \\) interval across all
+columns.  A narrow gap means the evidence sources agree on a confident
+prediction.  Conflict \\( K \\) is tracked as a **diagnostic signal**
+(it indicates source disagreement) but does not gate convergence — a
+column can have \\( K = 0.9 \\) but \\( \text{Bel} = 0.95 \\): the
+sources fought, but the winner is clear.
 
 An **agent-driven** variant (via Claude Agent SDK with 6 tools) delegates
-the revisit strategy to an LLM that reasons about conflict patterns,
+the revisit strategy to an LLM that reasons about uncertainty patterns,
 calls `retrain_svm` to progressively improve the SVM on accumulated
 frontier labels, and declares convergence when diminishing returns are
-reached. The **programmatic** variant uses a fixed \\( K \\)-threshold
-heuristic for environments where tool-use isn't available.
+reached. The **programmatic** variant uses gap + coverage thresholds
+for environments where tool-use isn't available.
 
 ### Frontier-Label SVM Training
 

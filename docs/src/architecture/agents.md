@@ -51,9 +51,10 @@ new frontier labels have accumulated to improve classification accuracy.
 The system prompt guides the agent's strategy:
 
 1. Examine the conflict report to understand where sources disagree
-2. Inspect individual columns for ambiguous cases
-3. Revisit high-K columns to resolve disagreements
-4. Check convergence metrics to decide whether to continue
+2. Inspect individual columns for uncertain cases (high gap or low belief)
+3. Revisit uncertain columns to resolve ambiguity
+4. Check convergence metrics (mean gap, mean belief, coverage) to decide
+   whether to continue — K is available as a diagnostic but does not gate
 5. Declare convergence when satisfied (or when diminishing returns)
 
 ### State Tracking
@@ -127,7 +128,7 @@ classification convergence loop specifically.
 ## Agent vs Programmatic Loop
 
 The bootstrap pipeline (`bootstrap.py`) contains the programmatic
-convergence loop as well: sweep → validate → revisit high-K → repeat.
+convergence loop as well: sweep → validate → revisit uncertain → repeat.
 The agent loop is an alternative that delegates the revisit strategy to
 Claude. Both paths share the same underlying functions (`_llm_sweep`,
 `_run_ml_validation`, etc.) and produce identical DST evidence.
