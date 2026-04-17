@@ -176,6 +176,15 @@ DEFAULT_PATTERN_MAP: dict[str, str] = {
     "semver_pattern": "ICE.METADATA.VERSION",
     # iso_currency_pattern omitted — target code not in universal vocab;
     # fires as informational signal in value_description only.
+    # ── Artifact-informed patterns (synth DB analysis) ──────────
+    "vin_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
+    "iata_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ABBREV",
+    "bcrypt_pattern": "ICE.SENSITIVE.TECHNICAL.PASSWORD_HASH",
+    "mrn_pattern": "ICE.SENSITIVE.PID.HEALTH.MRN",
+    "license_plate_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
+    "eth_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
+    "ssh_key_pattern": "ICE.SENSITIVE.TECHNICAL.ACCESS_KEY",
+    "certificate_pattern": "ICE.SENSITIVE.TECHNICAL.CERTIFICATE",
 }
 
 
@@ -241,6 +250,54 @@ def pattern_to_mass(
 # ── Column name matching ─────────────────────────────────────────────
 
 
+# ── Column name abbreviation expansion ────────────────────────────
+
+_ABBREVIATION_MAP: dict[str, list[str]] = {
+    "medical_record_number": ["mrn", "med_rec", "medrecnum"],
+    "social_security_number": ["ssn", "soc_sec", "socsec"],
+    "date_of_birth": ["dob", "birthdate", "birth_date"],
+    "phone_number": ["phone", "tel", "mobile", "cell"],
+    "email_address": ["email", "e_mail", "mail"],
+    "credit_card": ["cc", "creditcard", "pan"],
+    "payment_card": ["pan", "card_num", "cardnum"],
+    "first_name": ["fname", "given_name", "givennm"],
+    "last_name": ["lname", "surname", "family_name"],
+    "full_name": ["name", "fullname", "display_name"],
+    "street_address": ["addr", "address", "street"],
+    "postal_code": ["zip", "zipcode", "zip_code", "postcode"],
+    "driver_license": ["dl", "driverslicense", "license_num"],
+    "passport_number": ["passport", "passportnum"],
+    "bank_account": ["ban", "account_num", "acctnum"],
+    "ip_address": ["ip", "ipaddr", "ip_addr"],
+    "user_agent": ["ua", "useragent", "browser"],
+    "latitude": ["lat"],
+    "longitude": ["lon", "lng", "long"],
+}
+
+
+def _expand_column_name(col_name: str) -> set[str]:
+    """Generate abbreviation variants for column name matching.
+
+    Produces acronyms (medical_record_number → mrn), truncations,
+    and domain-specific aliases from the static map.
+    """
+    import re as _re
+    words = _re.findall(r"[a-z]+", col_name.lower())
+    variants: set[str] = {col_name.lower().replace("_", ""), "_".join(words)}
+
+    # First-letter acronym: medical_record_number → mrn
+    if len(words) >= 2:
+        variants.add("".join(w[0] for w in words))
+
+    # Static abbreviation map
+    col_lower = col_name.lower()
+    for key, abbrevs in _ABBREVIATION_MAP.items():
+        if key in col_lower or col_lower in key:
+            variants.update(abbrevs)
+
+    return variants
+
+
 def name_match_to_mass(
     column_name: str,
     frame: FrameOfDiscernment,
@@ -263,6 +320,9 @@ def name_match_to_mass(
     col_words = column_name.replace("_", " ").lower().strip()
     col_compact = col_words.replace(" ", "")
     col_word_set = set(col_words.split())
+
+    # Generate abbreviation variants for broader matching
+    col_variants = _expand_column_name(column_name)
 
     best_code: str | None = None
     best_mass = 0.0
@@ -307,6 +367,24 @@ def name_match_to_mass(
                 if overlap_mass > best_mass:
                     best_code = cat.code
                     best_mass = overlap_mass
+
+    # Abbreviation variant matching (if no better match found)
+    if best_mass < alias_mass:
+        for cat in category_set.categories:
+            if cat.code not in frame.singletons:
+                continue
+            cat_abbrev = cat.abbrev.lower().strip()
+            cat_aliases = set()
+            if hasattr(cat, "common_names") and cat.common_names:
+                for sep in ["|", ","]:
+                    cat_aliases.update(a.strip().lower() for a in cat.common_names.split(sep) if a.strip())
+            cat_aliases.add(cat_abbrev)
+            # Check if any column variant matches any category alias/code
+            if col_variants & cat_aliases:
+                if alias_mass > best_mass:
+                    best_code = cat.code
+                    best_mass = alias_mass
+                    break
 
     if best_code is None:
         return frame.vacuous()

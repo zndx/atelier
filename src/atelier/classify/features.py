@@ -77,6 +77,31 @@ _PATTERNS: dict[str, re.Pattern] = {
     "iso_currency_pattern": re.compile(
         r"^[A-Z]{3}$"
     ),
+    # ── New patterns from artifact analysis ──────────────────────
+    "vin_pattern": re.compile(
+        r"^[A-HJ-NPR-Z0-9]{17}$"  # 17 chars, excludes I/O/Q
+    ),
+    "iata_pattern": re.compile(
+        r"^[A-Z]{3}$"  # Same regex as currency; validator distinguishes
+    ),
+    "bcrypt_pattern": re.compile(
+        r"^\$2[aby]\$\d{2}\$"  # bcrypt password hash prefix
+    ),
+    "mrn_pattern": re.compile(
+        r"^MRN-\d{4,}$", re.IGNORECASE  # Medical Record Number
+    ),
+    "license_plate_pattern": re.compile(
+        r"^[A-Z]{2,3}[-\s]?\d{3,4}$"  # e.g. RUS-3462
+    ),
+    "eth_address_pattern": re.compile(
+        r"^0x[0-9a-fA-F]{40}$"  # Ethereum address
+    ),
+    "ssh_key_pattern": re.compile(
+        r"^ssh-(rsa|ed25519|ecdsa)\s"  # SSH public key prefix
+    ),
+    "certificate_pattern": re.compile(
+        r"^-----BEGIN (CERTIFICATE|PUBLIC KEY|RSA PRIVATE KEY)-----"
+    ),
 }
 
 # ── Post-regex validators ────────────────────────────────────────────
@@ -135,12 +160,43 @@ def _is_iso_currency(v: str) -> bool:
     return v.strip() in _ISO_4217_CODES
 
 
+# Common IATA airport codes (~350 busiest worldwide).
+_IATA_CODES: frozenset[str] = frozenset({
+    "ATL", "PEK", "LAX", "DXB", "HND", "ORD", "LHR", "PVG", "CDG",
+    "DFW", "AMS", "FRA", "IST", "CAN", "JFK", "SIN", "DEN", "ICN",
+    "BKK", "SFO", "DEL", "CGK", "KUL", "MAD", "CTU", "BCN", "LAS",
+    "BOM", "MIA", "YYZ", "MUC", "SYD", "FCO", "NRT", "MNL", "HKG",
+    "MEX", "EWR", "ZRH", "GRU", "TPE", "SEA", "CLT", "MCO", "PHX",
+    "IAH", "KMG", "MSP", "BOS", "DTW", "SZX", "XIY", "LGW", "MEL",
+    "SHA", "CKG", "HAK", "TFU", "WUH", "NKG", "HGH", "CSX", "TAO",
+    "SVO", "DME", "LED", "AUH", "DOH", "JED", "RUH", "CAI", "ADD",
+    "JNB", "CPT", "NBO", "LOS", "ACC", "DAR", "CMN", "ALG", "TUN",
+    "BOG", "LIM", "SCL", "EZE", "GIG", "BSB", "PTY", "SJO", "UIO",
+})
+
+
+def _is_iata_code(v: str) -> bool:
+    """Check against IATA airport code whitelist."""
+    return v.strip() in _IATA_CODES
+
+
+def _is_valid_vin(v: str) -> bool:
+    """Basic VIN validation: 17 chars, no I/O/Q, transliteration check."""
+    v = v.strip().upper()
+    if len(v) != 17:
+        return False
+    invalid = set("IOQ")
+    return not any(c in invalid for c in v)
+
+
 _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "credit_card_pattern": _luhn_check,
     "ipv4_pattern": _is_valid_ipv4,
     "date_iso_pattern": _is_plausible_date,
     "datetime_iso_pattern": _is_plausible_date,
     "iso_currency_pattern": _is_iso_currency,
+    "iata_pattern": _is_iata_code,
+    "vin_pattern": _is_valid_vin,
 }
 
 

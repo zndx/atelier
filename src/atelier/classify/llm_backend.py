@@ -155,11 +155,20 @@ def config_from_atelier(cfg) -> LLMBackendConfig:
 
 
 def build_category_table(category_set) -> str:
-    """Build a markdown table of leaf categories for the system prompt."""
-    lines = ["| Code | Label | Description |", "|------|-------|-------------|"]
+    """Build a markdown table of leaf categories for the system prompt.
+
+    Includes common_names aliases so the LLM can match column names like
+    ``payment_card_number`` to the PAN category even when the label is
+    "Primary Account Number".
+    """
+    lines = [
+        "| Code | Label | Aliases | Description |",
+        "|------|-------|---------|-------------|",
+    ]
     for cat in category_set.categories:
-        desc = (cat.description or "")[:80]
-        lines.append(f"| {cat.code} | {cat.label} | {desc} |")
+        aliases = (getattr(cat, "common_names", "") or "")[:40]
+        desc = (cat.description or "")[:60]
+        lines.append(f"| {cat.code} | {cat.label} | {aliases} | {desc} |")
     return "\n".join(lines)
 
 
