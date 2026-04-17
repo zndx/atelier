@@ -3,10 +3,13 @@ import {
   Alert,
   Button,
   Card,
+  InputNumber,
   Segmented,
   Slider,
   Space,
   Spin,
+  Switch,
+  Tabs,
   Tag,
   Typography,
   message,
@@ -20,20 +23,24 @@ import {
 
 const { Title, Text, Paragraph } = Typography;
 
-type ChoiceMeta = {
+// ── Metadata shape ──────────────────────────────────────────────────
+
+type BaseMeta = {
   hocon_path: string;
   label: string;
   description: string;
+  group: "convergence" | "evidence" | "sampling" | "training" | "llm_system";
+  default_focus?: boolean;
+};
+
+type ChoiceMeta = BaseMeta & {
   type: "choice";
   choices: string[];
   default: string;
   captions: Record<string, string>;
 };
 
-type FloatMeta = {
-  hocon_path: string;
-  label: string;
-  description: string;
+type FloatMeta = BaseMeta & {
   type: "float";
   min: number;
   max: number;
@@ -42,11 +49,28 @@ type FloatMeta = {
   caption_template: string;
 };
 
-type ParamMeta = ChoiceMeta | FloatMeta;
+type IntMeta = BaseMeta & {
+  type: "int";
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  caption_template: string;
+};
+
+type SwitchMeta = BaseMeta & {
+  type: "switch";
+  default: boolean;
+  captions: { true: string; false: string } | Record<string, string>;
+};
+
+type ParamMeta = ChoiceMeta | FloatMeta | IntMeta | SwitchMeta;
+
+type ParamValue = string | number | boolean;
 
 type SettingsResponse = {
   metadata: Record<string, ParamMeta>;
-  values: Record<string, string | number>;
+  values: Record<string, ParamValue>;
   overlay_keys: string[];
 };
 
@@ -69,42 +93,207 @@ type AccelerationInfo = {
   };
 };
 
-const ORDER = [
-  "classify_fusion_strategy",
-  "classify_llm_discount",
-  "classify_discount_cosine",
-  "classify_bootstrap_gap_threshold",
-  "classify_bootstrap_bel_floor",
+// ── Tab config ──────────────────────────────────────────────────────
+
+type TabSpec = {
+  key: BaseMeta["group"];
+  label: string;
+};
+
+const TABS: TabSpec[] = [
+  { key: "convergence", label: "Convergence" },
+  { key: "evidence", label: "Evidence & Fusion" },
+  { key: "sampling", label: "Sampling" },
+  { key: "training", label: "Training" },
+  { key: "llm_system", label: "LLM & System" },
 ];
 
-/** Render the caption for a float — expand {value}, {value_pct}. */
-function renderCaption(meta: FloatMeta, v: number): string {
-  return meta.caption_template
+// ── Rendering helpers ───────────────────────────────────────────────
+
+/** Expand {value}, {value_pct} in a caption template. */
+function renderNumericCaption(template: string, v: number, step: number): string {
+  const decimals = step < 1 ? Math.max(0, -Math.floor(Math.log10(step))) : 0;
+  return template
     .replace(/\{value_pct\}/g, Math.round(v * 100).toString())
-    .replace(/\{value\}/g, v.toFixed(2));
+    .replace(/\{value\}/g, v.toFixed(decimals));
 }
 
-/** Classify direction of a tuned value relative to the default.
- *  Used to tint the caption (green / blue / amber). */
-function driftTone(meta: FloatMeta, v: number): "default" | "up" | "down" {
-  const delta = v - meta.default;
-  if (Math.abs(delta) < meta.step / 2) return "default";
+function driftTone(defaultV: number, current: number, step: number): "default" | "up" | "down" {
+  const delta = current - defaultV;
+  if (Math.abs(delta) < step / 2) return "default";
   return delta > 0 ? "up" : "down";
 }
 
 const toneColor: Record<"default" | "up" | "down", string> = {
   default: "#389e0d",   // green  — at HOCON default
-  up: "#d48806",        // amber  — looser / more ignorance
-  down: "#1677ff",      // blue   — stricter / more trust
+  up: "#d48806",        // amber  — looser / higher
+  down: "#1677ff",      // blue   — stricter / lower
 };
+
+// ── Control card ────────────────────────────────────────────────────
+
+type ControlCardProps = {
+  paramKey: string;
+  meta: ParamMeta;
+  current: ParamValue;
+  pending: boolean;
+  session: boolean;
+  onChange: (key: string, value: ParamValue) => void;
+};
+
+function ControlCard({ paramKey, meta, current, pending, session, onChange }: ControlCardProps) {
+  const header = (
+    <Space>
+      <Text strong>{meta.label}</Text>
+      <Text code style={{ fontSize: 11 }}>
+        {meta.hocon_path}
+      </Text>
+      {pending && <Tag color="blue">pending</Tag>}
+      {!pending && session && <Tag color="geekblue">session</Tag>}
+    </Space>
+  );
+
+  let body: React.ReactNode;
+  let captionText: string;
+  let captionColor: string;
+
+  if (meta.type === "choice") {
+    const v = String(current);
+    captionText = meta.captions[v] || "";
+    captionColor = v === meta.default ? toneColor.default : toneColor.down;
+    body = (
+      <Segmented
+        value={v}
+        options={meta.choices.map((c) => ({
+          label: c.charAt(0).toUpperCase() + c.slice(1),
+          value: c,
+        }))}
+        onChange={(val) => onChange(paramKey, String(val))}
+      />
+    );
+  } else if (meta.type === "switch") {
+    const v = Boolean(current);
+    const vs = v ? "true" : "false";
+    captionText = (meta.captions[vs as "true" | "false"] as string) || "";
+    captionColor = v === meta.default ? toneColor.default : toneColor.down;
+    body = (
+      <Switch
+        checked={v}
+        onChange={(val) => onChange(paramKey, val)}
+      />
+    );
+  } else if (meta.type === "int") {
+    const v = Number(current);
+    const tone = driftTone(meta.default, v, meta.step || 1);
+    captionText = renderNumericCaption(meta.caption_template, v, meta.step || 1);
+    captionColor = toneColor[tone];
+    body = (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 120px",
+          gap: 16,
+          alignItems: "center",
+        }}
+      >
+        <Slider
+          min={meta.min}
+          max={meta.max}
+          step={meta.step || 1}
+          value={v}
+          onChange={(val) => onChange(paramKey, Number(val))}
+          marks={{
+            [meta.min]: String(meta.min),
+            [meta.default]: { label: "default", style: { color: "#389e0d" } },
+            [meta.max]: String(meta.max),
+          }}
+        />
+        <InputNumber
+          min={meta.min}
+          max={meta.max}
+          step={meta.step || 1}
+          value={v}
+          onChange={(val) => {
+            if (val != null) onChange(paramKey, Number(val));
+          }}
+          style={{ width: "100%" }}
+        />
+      </div>
+    );
+  } else {
+    // float
+    const v = Number(current);
+    const tone = driftTone(meta.default, v, meta.step);
+    captionText = renderNumericCaption(meta.caption_template, v, meta.step);
+    captionColor = toneColor[tone];
+    const decimals = meta.step < 1
+      ? Math.max(0, -Math.floor(Math.log10(meta.step)))
+      : 0;
+    body = (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 64px",
+          gap: 16,
+          alignItems: "center",
+        }}
+      >
+        <Slider
+          min={meta.min}
+          max={meta.max}
+          step={meta.step}
+          value={v}
+          onChange={(val) => onChange(paramKey, Number(val))}
+          marks={{
+            [meta.min]: String(meta.min),
+            [meta.default]: { label: "default", style: { color: "#389e0d" } },
+            [meta.max]: String(meta.max),
+          }}
+        />
+        <Text
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 16,
+            textAlign: "right",
+          }}
+        >
+          {v.toFixed(decimals)}
+        </Text>
+      </div>
+    );
+  }
+
+  return (
+    <Card key={paramKey} size="small" title={header}>
+      <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        {meta.description}
+      </Paragraph>
+      {body}
+      <div style={{ marginTop: 12 }}>
+        <Text
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 13,
+            color: captionColor,
+          }}
+        >
+          {captionText}
+        </Text>
+      </div>
+    </Card>
+  );
+}
+
+// ── Page ────────────────────────────────────────────────────────────
 
 export default function Settings() {
   const [data, setData] = useState<SettingsResponse | null>(null);
   const [accel, setAccel] = useState<AccelerationInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<Record<string, string | number>>({});
+  const [pending, setPending] = useState<Record<string, ParamValue>>({});
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("convergence");
 
   const load = () => {
     setLoading(true);
@@ -130,11 +319,35 @@ export default function Settings() {
   }, []);
 
   const effective = useMemo(() => {
-    if (!data) return {};
+    if (!data) return {} as Record<string, ParamValue>;
     return { ...data.values, ...pending };
   }, [data, pending]);
 
+  /** Group parameter keys by tab assignment. */
+  const byTab = useMemo(() => {
+    const out: Record<string, string[]> = {
+      convergence: [],
+      evidence: [],
+      sampling: [],
+      training: [],
+      llm_system: [],
+    };
+    if (!data) return out;
+    for (const [key, meta] of Object.entries(data.metadata)) {
+      const group = meta.group;
+      if (group in out) out[group].push(key);
+    }
+    // Stable alphabetical order within each tab. Could switch to a
+    // curated ordering later if we want "most-important-first" per tab.
+    for (const g of Object.keys(out)) out[g].sort();
+    return out;
+  }, [data]);
+
   const dirty = Object.keys(pending).length > 0;
+
+  const handleChange = (key: string, value: ParamValue) => {
+    setPending((p) => ({ ...p, [key]: value }));
+  };
 
   const save = async () => {
     setSaving(true);
@@ -195,8 +408,41 @@ export default function Settings() {
     );
   }
 
+  const renderTab = (group: string) => (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {byTab[group].map((key) => {
+        const meta = data.metadata[key];
+        if (!meta) return null;
+        return (
+          <ControlCard
+            key={key}
+            paramKey={key}
+            meta={meta}
+            current={effective[key]}
+            pending={key in pending}
+            session={!(key in pending) && data.overlay_keys.includes(key)}
+            onChange={handleChange}
+          />
+        );
+      })}
+    </Space>
+  );
+
+  const tabItems = TABS.map((t) => ({
+    key: t.key,
+    label: (
+      <Space size={4}>
+        <span>{t.label}</span>
+        <Tag style={{ marginRight: 0 }} color="default">
+          {byTab[t.key]?.length ?? 0}
+        </Tag>
+      </Space>
+    ),
+    children: renderTab(t.key),
+  }));
+
   return (
-    <div style={{ maxWidth: 880, margin: "0 auto" }}>
+    <div style={{ maxWidth: 960, margin: "0 auto" }}>
       <Space direction="vertical" size={20} style={{ width: "100%" }}>
         <div>
           <Title level={2} style={{ marginBottom: 4 }}>
@@ -283,134 +529,12 @@ export default function Settings() {
           </Card>
         )}
 
-        {ORDER.map((key) => {
-          const meta = data.metadata[key];
-          if (!meta) return null;
-          const current = effective[key];
-          const isOverride = key in pending;
-          const isOverlay = data.overlay_keys.includes(key);
-
-          if (meta.type === "choice") {
-            const v = String(current);
-            const caption = meta.captions[v] || "";
-            return (
-              <Card
-                key={key}
-                size="small"
-                title={
-                  <Space>
-                    <Text strong>{meta.label}</Text>
-                    <Text code style={{ fontSize: 11 }}>
-                      {meta.hocon_path}
-                    </Text>
-                    {isOverride && <Tag color="blue">pending</Tag>}
-                    {!isOverride && isOverlay && (
-                      <Tag color="geekblue">session</Tag>
-                    )}
-                  </Space>
-                }
-              >
-                <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                  {meta.description}
-                </Paragraph>
-                <Segmented
-                  value={v}
-                  options={meta.choices.map((c) => ({
-                    label: c.charAt(0).toUpperCase() + c.slice(1),
-                    value: c,
-                  }))}
-                  onChange={(val) =>
-                    setPending((p) => ({ ...p, [key]: String(val) }))
-                  }
-                />
-                <div style={{ marginTop: 12 }}>
-                  <Text
-                    style={{
-                      fontFamily:
-                        "ui-monospace, SFMono-Regular, Menlo, monospace",
-                      fontSize: 13,
-                      color: v === meta.default ? "#389e0d" : "#1677ff",
-                    }}
-                  >
-                    {caption}
-                  </Text>
-                </div>
-              </Card>
-            );
-          }
-
-          // Float slider
-          const v = Number(current);
-          const tone = driftTone(meta, v);
-          const caption = renderCaption(meta, v);
-          return (
-            <Card
-              key={key}
-              size="small"
-              title={
-                <Space>
-                  <Text strong>{meta.label}</Text>
-                  <Text code style={{ fontSize: 11 }}>
-                    {meta.hocon_path}
-                  </Text>
-                  {isOverride && <Tag color="blue">pending</Tag>}
-                  {!isOverride && isOverlay && (
-                    <Tag color="geekblue">session</Tag>
-                  )}
-                </Space>
-              }
-            >
-              <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                {meta.description}
-              </Paragraph>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 64px",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <Slider
-                  min={meta.min}
-                  max={meta.max}
-                  step={meta.step}
-                  value={v}
-                  onChange={(val) =>
-                    setPending((p) => ({ ...p, [key]: Number(val) }))
-                  }
-                  marks={{
-                    [meta.min]: String(meta.min),
-                    [meta.default]: { label: "default", style: { color: "#389e0d" } },
-                    [meta.max]: String(meta.max),
-                  }}
-                />
-                <Text
-                  style={{
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 16,
-                    textAlign: "right",
-                  }}
-                >
-                  {v.toFixed(2)}
-                </Text>
-              </div>
-              <div style={{ marginTop: 16 }}>
-                <Text
-                  style={{
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 13,
-                    color: toneColor[tone],
-                  }}
-                >
-                  {caption}
-                </Text>
-              </div>
-            </Card>
-          );
-        })}
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={tabItems}
+          tabBarStyle={{ marginBottom: 16 }}
+        />
 
         <Space
           style={{

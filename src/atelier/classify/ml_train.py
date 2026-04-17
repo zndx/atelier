@@ -183,6 +183,8 @@ def train_catboost(
     *,
     embedding_model: str = "all-MiniLM-L6-v2",
     iterations: int = 1000,
+    depth: int = 6,
+    learning_rate: float = 0.10,
 ) -> Path:
     """Train CatBoost classifier on sentence-transformer embeddings.
 
@@ -191,7 +193,9 @@ def train_catboost(
         category_set: Used for building embedding text context.
         output_path: Where to save the .cbm model file.
         embedding_model: Sentence-transformer model name.
-        iterations: CatBoost training iterations.
+        iterations: CatBoost boosting rounds.
+        depth: CatBoost tree depth.
+        learning_rate: CatBoost learning rate (shrinkage per round).
 
     Returns:
         Path to the saved model.
@@ -223,7 +227,10 @@ def train_catboost(
 
     logger.info("Training CatBoost on %d samples (%d dims)", len(labels), embeddings.shape[1])
     classifier = CatBoostColumnClassifier()
-    classifier.fit(embeddings, labels, iterations=iterations)
+    classifier.fit(
+        embeddings, labels,
+        iterations=iterations, depth=depth, learning_rate=learning_rate,
+    )
     classifier.save(output_path)
     return output_path
 
@@ -234,6 +241,9 @@ def train_all(
     models_dir: Path,
     *,
     embedding_model: str = "all-MiniLM-L6-v2",
+    catboost_iterations: int = 1000,
+    catboost_depth: int = 6,
+    catboost_learning_rate: float = 0.10,
 ) -> dict[str, Path]:
     """Train both CatBoost and SVM classifiers.
 
@@ -246,6 +256,9 @@ def train_all(
     cb_path = train_catboost(
         synth_dir, category_set, models_dir / "catboost.cbm",
         embedding_model=embedding_model,
+        iterations=catboost_iterations,
+        depth=catboost_depth,
+        learning_rate=catboost_learning_rate,
     )
 
     return {"catboost": cb_path, "svm": svm_path}

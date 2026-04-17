@@ -141,6 +141,10 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.discounts.catboost_max": ("classify_discount_catboost_max", float),
     "classify.discounts.catboost_fallback": ("classify_discount_catboost_fallback", float),
     "classify.discounts.confusable_ratio_threshold": ("classify_discount_confusable_ratio_threshold", float),
+    # CatBoost training hyperparameters
+    "classify.catboost.iterations": ("classify_catboost_iterations", int),
+    "classify.catboost.depth": ("classify_catboost_depth", int),
+    "classify.catboost.learning_rate": ("classify_catboost_learning_rate", float),
     # SHAP explanations
     "classify.shap.enabled": ("classify_shap_enabled", bool),
     "classify.shap.top_k": ("classify_shap_top_k", int),
@@ -328,6 +332,11 @@ class AtelierConfig:
     classify_discount_catboost_max: float = 0.50
     classify_discount_catboost_fallback: float = 0.15
     classify_discount_confusable_ratio_threshold: float = 3.0
+
+    # CatBoost training hyperparameters
+    classify_catboost_iterations: int = 1000
+    classify_catboost_depth: int = 6
+    classify_catboost_learning_rate: float = 0.10
 
     # SHAP explanations
     classify_shap_enabled: bool = True

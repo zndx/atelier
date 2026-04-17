@@ -50,9 +50,18 @@ def main() -> int:
 
     from atelier.classify.taxonomy import HierarchicalCategorySet, load_universal_vocabulary
     from atelier.classify.ml_train import train_all
+    from atelier.config import load_config
+    from atelier.config_overlay import apply_to_config
 
+    cfg = apply_to_config(load_config())
     cats = load_universal_vocabulary(hierarchical=True)
-    paths = train_all(args.synth_dir, cats, args.models_dir)
+    paths = train_all(
+        args.synth_dir, cats, args.models_dir,
+        embedding_model=cfg.classify_embedding_model,
+        catboost_iterations=cfg.classify_catboost_iterations,
+        catboost_depth=cfg.classify_catboost_depth,
+        catboost_learning_rate=cfg.classify_catboost_learning_rate,
+    )
 
     for name, path in paths.items():
         logger.info("Saved %s → %s", name, path)
