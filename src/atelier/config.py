@@ -324,7 +324,7 @@ class AtelierConfig:
     classify_bootstrap_frontier_svm_min_labels: int = 20
     # Belief-gap convergence
     classify_bootstrap_gap_threshold: float = 0.15
-    classify_bootstrap_clarity_target: float = 0.10
+    classify_bootstrap_clarity_target: float = 0.20
     classify_bootstrap_bel_floor: float = 0.50
 
     # DST discount factors
@@ -363,7 +363,7 @@ class AtelierConfig:
 
     # Monte Carlo sampling
     mc_min_corpus_size: int = 200
-    mc_sample_fraction: float = 0.15
+    mc_sample_fraction: float = 1.00
     mc_min_per_stratum: int = 3
     mc_max_frontier_columns: int = 500
     mc_propagation_threshold: float = 0.85

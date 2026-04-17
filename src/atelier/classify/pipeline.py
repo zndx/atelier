@@ -62,6 +62,56 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
+# Table-name tokens that signal "this isn't real data — don't classify
+# it".  The annotations table is the vocabulary backing the run; ``ice_t1``
+# is a historical test leftover.  Extend this list rather than inlining
+# new cases at the call site.
+_NON_DATA_TABLE_NAMES: frozenset[str] = frozenset({
+    "annotations",
+    "ice_t1",
+})
+
+
+def _filter_classifiable_tables(
+    samples: list[TableSample],
+    vocab_uri: str | None,
+) -> list[TableSample]:
+    """Drop tables that shouldn't be treated as data (vocab + test leftovers).
+
+    Matches by **table name only** (case-insensitive), not schema or
+    qualifier, so `default.annotations`, `meta.annotations`, and plain
+    `annotations` all get filtered.  Additionally strips any table whose
+    name matches the trailing component of ``vocab_uri`` — when the
+    vocab URI is e.g. ``"default.annotations"`` we want that specific
+    table gone from classification even if it doesn't match the
+    hard-coded list above.
+    """
+    skip = set(_NON_DATA_TABLE_NAMES)
+    if vocab_uri:
+        # vocab_uri shapes: "db.annotations" (hive), "annotations.csv"
+        # (filesystem file path tail), "meta.vocab", etc.  Strip scheme,
+        # directory, extension, and db-qualifier to get the bare name.
+        bare = vocab_uri.rsplit("/", 1)[-1]
+        bare = bare.rsplit(".", 1)[0] if bare.lower().endswith(".csv") else bare
+        bare = bare.rsplit(".", 1)[-1] if "." in bare else bare
+        if bare:
+            skip.add(bare.lower())
+
+    kept: list[TableSample] = []
+    dropped: list[str] = []
+    for ts in samples:
+        if ts.name.lower() in skip:
+            dropped.append(ts.name)
+            continue
+        kept.append(ts)
+    if dropped:
+        logger.info(
+            "Excluded %d non-data tables from classification: %s",
+            len(dropped), dropped,
+        )
+    return kept
+
+
 def _install_fit_to_llm_catboost(
     cfg,
     state,
@@ -364,6 +414,11 @@ def run_classification_pipeline(
                     all_samples.append(ts)
                 except Exception as exc:
                     logger.warning("Failed to sample %s: %s", tname, exc)
+
+        # Strip tables that shouldn't be classified (vocabulary tables,
+        # internal test leftovers).  The annotations table IS the vocab,
+        # not data; classifying it pollutes the accuracy signal.
+        all_samples = _filter_classifiable_tables(all_samples, vocab_uri)
 
         # Flatten to column list with table mapping
         all_columns: list[ColumnSample] = []
@@ -1169,6 +1224,11 @@ def _classify_column(
         "column_type": col.column_type,
         "predicted_code": best_code,
         "predicted_label": hc.category.label,
+        # Mnemonic / formal code straight from the annotations table
+        # ("BAN", "EMAIL", "PAN").  Operators used to reviewing the
+        # annotations table want this tag in the result alongside the
+        # label — let both coexist so the UI can render either style.
+        "predicted_annotation": getattr(hc.category, "abbrev", "") or "",
         "confidence": hc.confidence,
         "belief": round(bel, 4),
         "plausibility": round(pl, 4),
@@ -1198,6 +1258,7 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "column_type": col.column_type,
         "predicted_code": None,
         "predicted_label": "",
+        "predicted_annotation": "",
         "confidence": 0.0,
         "belief": 0.0,
         "plausibility": 1.0,
@@ -1416,6 +1477,7 @@ def _write_parquet(
             "column_type": c["column_type"] or "",
             "predicted_code": c["predicted_code"] or "",
             "predicted_label": c["predicted_label"] or "",
+            "predicted_annotation": c.get("predicted_annotation", "") or "",
             "confidence": c["confidence"],
             "belief": c["belief"],
             "plausibility": c["plausibility"],
@@ -1424,7 +1486,11 @@ def _write_parquet(
             "needs_clarification": c.get("needs_clarification", False),
             "evidence": c.get("evidence", ""),
             "ground_truth": c["ground_truth"] or "",
-            "is_correct": c["is_correct"] if c["is_correct"] is not None else False,
+            # Preserve None (no ground-truth comparison available) rather
+            # than flattening to False, which mislead UAT into thinking
+            # the LLM was "checking correctness" and returning negative.
+            # Parquet writers typically render None as null / "—".
+            "is_correct": c["is_correct"],
             "embedding_text": c.get("embedding_text", ""),
             "pattern_signals": ", ".join(c.get("pattern_signals", {})),
             "dst_belief_path": json.dumps(c.get("belief_path", [])),
