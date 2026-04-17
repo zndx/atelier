@@ -305,7 +305,7 @@ class AtelierConfig:
     classify_llm_base_url: str | None = None
     classify_llm_max_tokens: int = 65536
     classify_llm_temperature: float = 0.0
-    classify_llm_columns_per_call: int = 50
+    classify_llm_columns_per_call: int = 25
     classify_llm_max_retries: int = 3
     classify_llm_disable_reasoning: bool = False
     classify_llm_reasoning_budget: int = 8192

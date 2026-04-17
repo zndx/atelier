@@ -562,8 +562,8 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "min": 10,
         "max": 200,
         "step": 5,
-        "default": 50,
-        "caption_template": "Pack {value} columns per LLM call — higher = fewer calls, larger context per call.",
+        "default": 25,
+        "caption_template": "Pack {value} columns per LLM call — higher = fewer calls but risks response truncation on vocabularies > 200 terms; 25 is safe for typical UAT corpora.",
     },
     "classify_llm_max_retries": {
         "hocon_path": "classify.llm.max_retries",
