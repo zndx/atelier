@@ -381,10 +381,27 @@ The pipeline wraps each column result in a `HierarchicalClassification` object
 - `uncertainty_gap` — `Pl - Bel` for the predicted category
 - `needs_clarification` — True when `uncertainty_gap > 0.3` or `conflict > 0.2`
 - `from_combined_evidence()` — factory method: filters vacuous sources, combines
-  via Dempster's rule, ranks by pignistic probability
+  via the configured fusion strategy, ranks by pignistic probability
 
 Confidence is **pignistic probability** `BetP(singleton)`, the decision-theoretic
 transform that distributes multi-element focal set mass equally among members.
+
+### Fusion Strategies
+
+Two DST combination rules are implemented, selectable via `classify.fusion_strategy`:
+
+- **`dempster`** (default) — Classical Dempster's rule with `(1-K)` normalization.
+  Under high conflict, surviving singletons are amplified.
+- **`yager`** — Yager's modified rule. Conflict mass is redirected to Θ
+  (ignorance) instead of being normalized away. Preserves epistemic honesty
+  at the cost of higher ignorance mass and typically lower peak belief values.
+  When `K=0`, produces identical results to Dempster.
+
+Yager is available as an opt-in alternative for empirical validation.
+The default (Dempster) remains in place pending A/B comparison on real
+pipeline runs — Yager's increased conservatism may or may not improve
+overall classification quality, and compensatory adjustments to per-source
+discounting or decision thresholds may be needed.
 
 ## Bootstrap Convergence Loop
 

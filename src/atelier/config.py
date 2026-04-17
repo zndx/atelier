@@ -112,6 +112,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.llm.disable_reasoning": ("classify_llm_disable_reasoning", bool),
     "classify.llm.reasoning_budget": ("classify_llm_reasoning_budget", int),
     "classify.llm.discount": ("classify_llm_discount", float),
+    # DST fusion strategy
+    "classify.fusion_strategy": ("classify_fusion_strategy", str),
     # Bootstrap convergence
     "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
@@ -288,6 +290,10 @@ class AtelierConfig:
     classify_llm_disable_reasoning: bool = False
     classify_llm_reasoning_budget: int = 8192
     classify_llm_discount: float = 0.10
+    # DST fusion strategy: "dempster" (default, normalizing) or "yager"
+    # (redirect conflict to Θ).  Yager preserves epistemic honesty under
+    # high conflict at the cost of higher ignorance mass.
+    classify_fusion_strategy: str = "dempster"
 
     # Bootstrap convergence
     classify_bootstrap_max_iterations: int = 5

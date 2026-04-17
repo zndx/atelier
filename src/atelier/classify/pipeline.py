@@ -556,6 +556,7 @@ def run_classification_pipeline(
                 llm_discount=boot_cfg.llm_discount,
                 use_cosine=has_embeddings,
                 discounts=discounts,
+                fusion_strategy=cfg.classify_fusion_strategy,
             )
             classifications.append(result)
 
@@ -872,6 +873,7 @@ def _classify_column(
     llm_discount: float = 0.10,
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
+    fusion_strategy: str = "dempster",
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -975,6 +977,7 @@ def _classify_column(
         source_masses=source_masses,
         frame=frame,
         category_set=category_set,
+        fusion_strategy=fusion_strategy,
     )
 
     best_code = hc.category.code

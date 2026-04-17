@@ -140,16 +140,88 @@ def dempster_combine(
     return BeliefAssignment(masses=result), conflict
 
 
+def yager_combine(
+    m1: BeliefAssignment,
+    m2: BeliefAssignment,
+    theta: FocalElement,
+) -> tuple[BeliefAssignment, float]:
+    """Yager's modified combination rule.
+
+    Redirects all conflict mass to ignorance (Θ) instead of normalizing
+    by (1-K).  Preserves epistemic honesty at the cost of higher
+    ignorance mass under conflict — the "winner" in a conflicted fusion
+    is not artificially amplified.
+
+    When K=0, produces the same result as Dempster's rule.
+
+    Args:
+        m1, m2: Mass functions to combine.
+        theta: The frame of discernment focal element (Θ), required so
+            we don't have to detect it at runtime.
+
+    Returns:
+        (combined_assignment, conflict) where conflict is the mass that
+        was redirected to Θ (diagnostic, not used for normalization).
+    """
+    combined: dict[FocalElement, float] = {}
+    conflict = 0.0
+
+    for fe1, mass1 in m1.masses.items():
+        for fe2, mass2 in m2.masses.items():
+            product = mass1 * mass2
+            intersection = fe1.codes & fe2.codes
+            if intersection:
+                fe = FocalElement(frozenset(intersection))
+                combined[fe] = combined.get(fe, 0.0) + product
+            else:
+                conflict += product
+
+    # Redirect conflict mass to Θ (no normalization)
+    if conflict > 0:
+        combined[theta] = combined.get(theta, 0.0) + conflict
+
+    # Drop near-zero masses for consistency with dempster_combine
+    result = {fe: m for fe, m in combined.items() if m > 1e-15}
+    return BeliefAssignment(masses=result), conflict
+
+
 def combine_multiple(
     assignments: list[BeliefAssignment],
+    *,
+    strategy: str = "dempster",
+    theta: FocalElement | None = None,
 ) -> tuple[BeliefAssignment, float]:
-    """Left-to-right Dempster combination of multiple sources.
+    """Left-to-right combination of multiple sources.
 
-    Returns ``(combined_assignment, cumulative_K)`` where cumulative K
-    is computed as ``K = 1 - ∏(1 - Kᵢ)`` (Smarandache & Dezert, 2005).
+    Args:
+        assignments: Mass functions to combine.
+        strategy: "dempster" (default, normalizing) or "yager"
+            (redirect conflict to Θ).
+        theta: Required when strategy="yager" — the frame of discernment.
+
+    Returns:
+        (combined_assignment, conflict) where:
+        - For Dempster: conflict is cumulative K via Smarandache's formula
+          ``K = 1 - ∏(1 - Kᵢ)``
+        - For Yager: conflict is the total mass redirected to Θ across
+          all combination steps (diagnostic, additive)
     """
     if not assignments:
         raise ValueError("Cannot combine empty list of assignments")
+
+    if strategy == "yager":
+        if theta is None:
+            raise ValueError("Yager combination requires theta parameter")
+        result = assignments[0]
+        total_conflict = 0.0
+        for other in assignments[1:]:
+            result, k_i = yager_combine(result, other, theta)
+            total_conflict += k_i
+        return result, total_conflict
+
+    if strategy != "dempster":
+        raise ValueError(f"Unknown fusion strategy: {strategy!r}")
+
     result = assignments[0]
     product_of_complements = 1.0
     for other in assignments[1:]:
@@ -372,11 +444,19 @@ class HierarchicalClassification:
         frame: FrameOfDiscernment,
         category_set,
         sensitivity_code: str | None = None,
+        *,
+        fusion_strategy: str = "dempster",
     ) -> HierarchicalClassification:
-        """Combine source masses via Dempster's rule, find best category.
+        """Combine source masses, find best category.
 
         Filters out vacuous sources, combines the rest, ranks singletons
         by pignistic probability, and builds a rich evidence string.
+
+        Args:
+            fusion_strategy: "dempster" (default, normalizing) or "yager"
+                (redirect conflict to Θ).  Yager preserves epistemic
+                honesty under high-conflict fusion at the cost of higher
+                ignorance mass.
         """
         # Filter out vacuous sources
         non_vacuous = [
@@ -389,7 +469,11 @@ class HierarchicalClassification:
             conflict = 0.0
         else:
             try:
-                combined, conflict = combine_multiple(non_vacuous)
+                combined, conflict = combine_multiple(
+                    non_vacuous,
+                    strategy=fusion_strategy,
+                    theta=frame.theta if fusion_strategy == "yager" else None,
+                )
             except ValueError:
                 combined = frame.vacuous()
                 conflict = 1.0
