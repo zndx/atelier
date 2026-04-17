@@ -306,7 +306,7 @@ class AtelierConfig:
     # Bootstrap convergence
     classify_bootstrap_max_iterations: int = 5
     classify_bootstrap_k_threshold: float = 0.2
-    classify_bootstrap_coverage_target: float = 0.95
+    classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
     classify_bootstrap_frontier_svm_retrain: bool = True
     classify_bootstrap_frontier_svm_min_labels: int = 20

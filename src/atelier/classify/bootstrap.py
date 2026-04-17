@@ -47,7 +47,7 @@ class BootstrapConfig:
 
     max_iterations: int = 5
     k_threshold: float = 0.2
-    coverage_target: float = 0.95
+    coverage_target: float = 1.0
     confidence_floor: float = 0.5
     columns_per_call: int = 50
     max_total_llm_calls: int = 5000
