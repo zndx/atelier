@@ -62,6 +62,80 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
+def _install_fit_to_llm_catboost(
+    cfg,
+    state,
+    samples_by_name: dict[str, ColumnSample],
+    category_set: HierarchicalCategorySet,
+) -> None:
+    """Fit an in-memory CatBoost on LLM-labeled columns and install it.
+
+    Gated by ``cfg.classify_catboost_fit_to_llm``.  No-ops when the LLM
+    sweep hasn't produced at least ``fit_to_llm_min_labels`` pairs, when
+    all labels collapse to a single class, or when the embedding
+    backend is unavailable.  Emits a progress log in either case.
+    """
+    min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
+    if len(state.labels) < min_labels:
+        logger.info(
+            "fit_to_llm: only %d LLM labels available (need >= %d) — skipping",
+            len(state.labels), min_labels,
+        )
+        return
+
+    texts: list[str] = []
+    codes: list[str] = []
+    for col_name, llm_code in state.labels.items():
+        if not llm_code:
+            continue
+        sample = samples_by_name.get(col_name)
+        if sample is None:
+            continue
+        try:
+            feats = extract_features(
+                column_name=sample.name,
+                column_type=sample.column_type,
+                values=sample.values,
+                siblings=sample.siblings,
+                null_count=sample.null_count,
+                total_count=sample.total_count,
+                source_table=sample.table_name,
+                distinct_count=sample.distinct_count,
+            )
+            text = feats.to_embedding_text()
+        except Exception:
+            continue
+        if not text:
+            continue
+        texts.append(text)
+        codes.append(llm_code)
+
+    if len(texts) < min_labels:
+        logger.info(
+            "fit_to_llm: %d usable (text, code) pairs after filtering — skipping",
+            len(texts),
+        )
+        return
+
+    from atelier.classify.ml_train import fit_catboost_to_llm_labels
+    from atelier.classify import ml_inference
+
+    classifier = fit_catboost_to_llm_labels(
+        texts, codes,
+        iterations=int(cfg.classify_catboost_iterations),
+        depth=int(cfg.classify_catboost_depth),
+        learning_rate=float(cfg.classify_catboost_learning_rate),
+    )
+    if classifier is None:
+        return
+
+    ml_inference.install_catboost(classifier)
+    logger.info(
+        "fit_to_llm: installed CatBoost trained on %d LLM labels across %d classes",
+        len(texts), len(set(codes)),
+    )
+
+
 def _maybe_retrain_svm(
     state,
     samples_by_name: dict[str, ColumnSample],
@@ -417,6 +491,20 @@ def run_classification_pipeline(
             len(state.labels), total_columns,
             coverage * 100, state.llm_calls_total, state.propagated_count,
         )
+
+        # ── Fit-to-LLM CatBoost ──────────────────────────────────
+        # When enabled, train an in-memory CatBoost on the (embedding_text,
+        # llm_code) pairs we just produced and install it so downstream
+        # evidence fusion + SHAP/SAGE attribute against the model that
+        # agrees with the LLM by construction.  Replaces the pre-trained
+        # classify_catboost_model_path for the rest of this run only.
+        if getattr(cfg, "classify_catboost_fit_to_llm", False):
+            try:
+                _install_fit_to_llm_catboost(
+                    cfg, state, samples_by_name, category_set,
+                )
+            except Exception as exc:
+                logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
 
         # ── Frontier SVM retrain #1: after first LLM sweep ───────
         svm_retrained = False

@@ -149,3 +149,21 @@ def reset():
         _svm_loaded = False
         _catboost_path = None
         _svm_path = None
+
+
+def install_catboost(model) -> None:
+    """Install an in-memory CatBoost model, bypassing disk-load.
+
+    Used by the fit-to-LLM mode in the classification pipeline:
+    after the LLM sweep produces labels, CatBoost is trained in-memory
+    on (embedding_text, llm_code) pairs and installed here so the rest
+    of the evidence-fusion path uses the fresh model without ever
+    touching the pre-trained ``classify.catboost_model_path`` file.
+
+    Calling :func:`reset` clears this install too.
+    """
+    global _catboost, _catboost_loaded
+    with _lock:
+        _catboost = model
+        _catboost_loaded = True
+        logger.info("CatBoost model installed in-memory (fit-to-LLM mode)")

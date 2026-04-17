@@ -235,6 +235,70 @@ def train_catboost(
     return output_path
 
 
+def fit_catboost_to_llm_labels(
+    embedding_texts: list[str],
+    llm_codes: list[str],
+    *,
+    iterations: int = 1000,
+    depth: int = 6,
+    learning_rate: float = 0.10,
+):
+    """Fit an in-memory CatBoost on (embedding_text, llm_predicted_code) pairs.
+
+    Used by the pipeline's fit-to-LLM mode: after the LLM sweep labels
+    the corpus, we embed each column's feature text and fit a CatBoost
+    model that's literally trained to agree with the LLM.  Downstream
+    evidence fusion then uses this model (installed via
+    :func:`ml_inference.install_catboost`) instead of a pre-trained
+    reference, and the subsequent SHAP / SAGE tour attributes feature
+    contributions to the model that actually reproduces the LLM's
+    labeling — turning CatBoost into the explainability surface for
+    the LLM's decisions rather than a competing classifier.
+
+    Returns the trained :class:`CatBoostColumnClassifier`, or None when
+    input is insufficient (``< 2`` distinct classes or fewer than 10
+    samples).  The caller decides how to react to None.
+    """
+    from atelier.classify.catboost_classifier import CatBoostColumnClassifier
+    from atelier.classify.embedding import embed_texts
+
+    if len(embedding_texts) != len(llm_codes):
+        raise ValueError(
+            f"len mismatch: {len(embedding_texts)} texts vs {len(llm_codes)} codes"
+        )
+    if len(embedding_texts) < 10:
+        logger.info(
+            "fit_to_llm: only %d labels — skipping (need >= 10)", len(embedding_texts),
+        )
+        return None
+
+    pairs = [
+        (t, c) for t, c in zip(embedding_texts, llm_codes)
+        if t and c
+    ]
+    if len({c for _, c in pairs}) < 2:
+        logger.info("fit_to_llm: only one distinct class — skipping")
+        return None
+
+    texts = [t for t, _ in pairs]
+    codes = [c for _, c in pairs]
+
+    import numpy as np
+    logger.info("fit_to_llm: embedding %d texts", len(texts))
+    embeddings = np.array(embed_texts(texts))
+
+    logger.info(
+        "fit_to_llm: training CatBoost (%d samples, %d classes, iter=%d)",
+        len(codes), len(set(codes)), iterations,
+    )
+    classifier = CatBoostColumnClassifier()
+    classifier.fit(
+        embeddings, codes,
+        iterations=iterations, depth=depth, learning_rate=learning_rate,
+    )
+    return classifier
+
+
 def train_all(
     synth_dir: Path,
     category_set,
