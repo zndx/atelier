@@ -96,6 +96,40 @@ class AtelierDao:
                 session.flush()
             return self._source_to_dict(r)
 
+    def force_upsert_data_source(self, source_id: str, source_type: str,
+                                 display_name: str, source_uri: str = "",
+                                 vocabulary_mode: str = "universal",
+                                 vocab_uri: str = "") -> dict:
+        """Upsert canonical fields on a data source row.
+
+        Unlike :meth:`get_or_create_data_source`, this refreshes
+        ``source_type`` / ``source_uri`` / ``display_name`` /
+        ``vocabulary_mode`` / ``vocab_uri`` on every call.  Used by
+        startup seeders that want the DB to converge to the runtime
+        mount state — e.g. flipping legacy ``source_type="sample"``
+        rows to ``"filesystem"`` and stamping the URI with its scheme
+        prefix.  ``source_metadata`` is untouched (the seeder maintains
+        it via :meth:`update_data_source_metadata`).
+        """
+        from atelier.db.model import DataSource
+        with self.get_session() as session:
+            r = session.query(DataSource).filter_by(id=source_id).first()
+            if r is None:
+                r = DataSource(
+                    id=source_id, source_type=source_type,
+                    source_uri=source_uri, display_name=display_name,
+                    vocabulary_mode=vocabulary_mode, vocab_uri=vocab_uri,
+                )
+                session.add(r)
+            else:
+                r.source_type = source_type
+                r.source_uri = source_uri
+                r.display_name = display_name
+                r.vocabulary_mode = vocabulary_mode
+                r.vocab_uri = vocab_uri
+            session.flush()
+            return self._source_to_dict(r)
+
     @staticmethod
     def _source_to_dict(r) -> dict:
         return {

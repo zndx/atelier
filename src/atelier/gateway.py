@@ -150,9 +150,20 @@ def _seed_sample_source() -> None:
 
     try:
         dao = AtelierDao()
+        # Always converge the source row to the current scheme'd URI +
+        # source_type='filesystem' (replacing any legacy 'sample' rows).
+        from atelier.classify.sampler import _SAMPLE_DIR  # type: ignore[attr-defined]
+        dao.force_upsert_data_source(
+            source_id="ootb-sample",
+            source_type="filesystem",
+            display_name="Sample",
+            source_uri=f"file://{Path(_SAMPLE_DIR).resolve()}",
+            vocabulary_mode="universal",
+        )
+
         versions = dao.list_dataset_versions("ootb-sample")
         if versions:
-            return  # Already seeded
+            return  # Dataset already seeded; source row refreshed above
 
         stats = sample_source_stats()
         if not stats["has_data"]:
@@ -221,11 +232,11 @@ def _seed_synth_source() -> None:
         if not stats["has_data"]:
             return
 
-        dao.get_or_create_data_source(
+        dao.force_upsert_data_source(
             source_id="synthetic",
-            source_type="sample",
+            source_type="filesystem",
             display_name="Synthetic",
-            source_uri=str(mount),
+            source_uri=f"file://{Path(mount).resolve()}",
             vocabulary_mode="universal",
         )
         dao.update_data_source_metadata("synthetic", json.dumps({
@@ -297,12 +308,16 @@ def _seed_meta_tagging_source() -> None:
             return
 
         dao = AtelierDao()
-        dao.get_or_create_data_source(
+        mount_abs = Path(mount).resolve()
+        dao.force_upsert_data_source(
             source_id="meta-tagging",
-            source_type="sample",
+            source_type="filesystem",
             display_name="Meta-tagging",
-            source_uri=str(mount),
+            source_uri=f"file://{mount_abs}",
             vocabulary_mode="universal",
+            # vocab_uri pins the annotations.csv path so
+            # pipeline._load_vocabulary's file:// branch activates.
+            vocab_uri=f"file://{mount_abs / 'annotations.csv'}",
         )
         dao.update_data_source_metadata("meta-tagging", json.dumps({
             "table_count": stats["table_count"],
@@ -1136,6 +1151,142 @@ def list_data_connections():
         return {"connections": list_connections(cfg)}
     except Exception as exc:
         return _error_envelope(f"list_data_connections failed: {exc}")
+
+
+@app.get("/api/data-platforms")
+def list_data_platforms():
+    """Unified CAI Data Platform list — Hive connections + filesystem mounts.
+
+    The Status page renders both kinds in a single dropdown, discriminated
+    by ``kind`` ("hive" or "filesystem").  Hive entries come from the
+    HOCON ``cml_data_connection_names`` list; filesystem entries come
+    from the ``data_sources`` table where ``source_type="filesystem"``
+    (seeded at startup from local mounts — ootb-sample, synthetic,
+    meta-tagging, plus any future entries).
+
+    Future schemes (``s3://``, ``jdbc://``) plug in here without a
+    client-side change: the dropdown already knows how to branch on
+    ``kind``.
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.data.connections import list_connections
+        from atelier.db.dao import AtelierDao
+        from atelier.db.model import DataSource
+        import json as _json
+
+        cfg = load_config()
+        platforms: list[dict] = []
+
+        # Hive connections
+        for name in list_connections(cfg):
+            platforms.append({
+                "id": name,
+                "kind": "hive",
+                "label": f"Hive: {name}",
+                "source_uri": f"hive://{name}",
+                "vocab_uri": "",
+                "mount": None,
+                "table_count": None,
+                "column_count": None,
+            })
+
+        # Filesystem sources (non-archived only)
+        dao = AtelierDao()
+        with dao.get_session() as session:
+            rows = (
+                session.query(DataSource)
+                .filter_by(source_type="filesystem", is_archived=False)
+                .order_by(DataSource.id)
+                .all()
+            )
+            for r in rows:
+                meta = {}
+                if r.source_metadata:
+                    try:
+                        meta = _json.loads(r.source_metadata) or {}
+                    except Exception:
+                        meta = {}
+                # Strip file:// scheme for the mount display string.
+                mount = None
+                if r.source_uri and r.source_uri.startswith("file://"):
+                    mount = r.source_uri[len("file://"):]
+                platforms.append({
+                    "id": r.id,
+                    "kind": "filesystem",
+                    "label": f"Filesystem: {r.display_name}",
+                    "source_uri": r.source_uri or "",
+                    "vocab_uri": r.vocab_uri or "",
+                    "mount": mount,
+                    "table_count": meta.get("table_count"),
+                    "column_count": meta.get("column_count"),
+                })
+
+        return {"platforms": platforms}
+    except Exception as exc:
+        return _error_envelope(f"list_data_platforms failed: {exc}")
+
+
+@app.get("/api/filesystem-sources/{source_id}/stats")
+def get_filesystem_source_stats(source_id: str):
+    """Return mount-side stats for a filesystem-backed source.
+
+    Used by the Data Platform card to render the row body for a
+    selected Filesystem entry: table_count, column_count, and
+    annotation_count (from ``annotations.csv`` if present).
+    """
+    try:
+        import json as _json
+        from atelier.db.dao import AtelierDao
+        from atelier.db.model import DataSource
+
+        dao = AtelierDao()
+        with dao.get_session() as session:
+            r = session.query(DataSource).filter_by(
+                id=source_id, source_type="filesystem",
+            ).first()
+            if r is None:
+                return _error_envelope(
+                    f"Filesystem source {source_id!r} not found",
+                )
+            meta = {}
+            if r.source_metadata:
+                try:
+                    meta = _json.loads(r.source_metadata) or {}
+                except Exception:
+                    meta = {}
+            mount = None
+            if r.source_uri and r.source_uri.startswith("file://"):
+                mount = r.source_uri[len("file://"):]
+
+            # Annotation count: count rows in annotations.csv if vocab_uri
+            # points at one.  Fall back to None on any error so the UI
+            # degrades gracefully (empty cell rather than red).
+            annotation_count = None
+            if r.vocab_uri and r.vocab_uri.startswith("file://"):
+                import csv as _csv
+                vocab_path = Path(r.vocab_uri[len("file://"):])
+                if vocab_path.is_file():
+                    try:
+                        with open(vocab_path, newline="") as f:
+                            annotation_count = sum(
+                                1 for _ in _csv.DictReader(f)
+                            )
+                    except Exception:
+                        annotation_count = None
+
+            return {
+                "ok": True,
+                "source_id": r.id,
+                "display_name": r.display_name,
+                "mount": mount,
+                "vocab_uri": r.vocab_uri or "",
+                "table_count": meta.get("table_count"),
+                "column_count": meta.get("column_count"),
+                "annotation_count": annotation_count,
+            }
+    except Exception as exc:
+        return _error_envelope(f"filesystem_source_stats failed: {exc}")
 
 
 @app.post("/api/data-connections/{name}/test")

@@ -41,6 +41,7 @@ from features.agent.step_defs.governance_steps import *  # noqa: F401,F403
 from features.agent.step_defs.fusion_strategy_steps import *  # noqa: F401,F403
 from features.agent.step_defs.settings_steps import *  # noqa: F401,F403
 from features.agent.step_defs.focus_steps import *  # noqa: F401,F403
+from features.agent.step_defs.platforms_steps import *  # noqa: F401,F403
 from features.agent.step_defs.synth_source_steps import *  # noqa: F401,F403
 from features.agent.step_defs.gpu_acceleration_steps import *  # noqa: F401,F403
 from features.agent.step_defs.gpu_sage_parity_steps import *  # noqa: F401,F403

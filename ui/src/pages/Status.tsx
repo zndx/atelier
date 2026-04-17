@@ -438,8 +438,37 @@ export default function Status() {
   const [smoke, setSmoke] = useState<SmokeResult | null>(null);
   const [smokeLoading, setSmokeLoading] = useState(false);
 
-  const [connections, setConnections] = useState<string[]>([]);
-  const [selectedConn, setSelectedConn] = useState<string | undefined>();
+  // Unified CAI Data Platform list — Hive connections + filesystem mounts.
+  type Platform = {
+    id: string;
+    kind: "hive" | "filesystem";
+    label: string;
+    source_uri: string;
+    vocab_uri: string;
+    mount: string | null;
+    table_count: number | null;
+    column_count: number | null;
+  };
+  type FsStats = {
+    ok: boolean;
+    source_id: string;
+    display_name: string;
+    mount: string | null;
+    vocab_uri: string;
+    table_count: number | null;
+    column_count: number | null;
+    annotation_count: number | null;
+    error?: string;
+  };
+  const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [selectedPlatformId, setSelectedPlatformId] = useState<string | undefined>();
+  const selectedPlatform = platforms.find((p) => p.id === selectedPlatformId);
+  // Hive code paths still key on the connection name; filesystem paths
+  // don't use it.
+  const selectedConn = selectedPlatform?.kind === "hive"
+    ? selectedPlatform.id
+    : undefined;
+  const [fsStats, setFsStats] = useState<FsStats | null>(null);
   const [connLoading, setConnLoading] = useState(false);
   const [refreshResult, setRefreshResult] = useState<RefreshResult | null>(null);
   // Per-database state: which are enabled, and their vocab_uri selection
@@ -457,17 +486,31 @@ export default function Status() {
 
   useEffect(() => {
     fetchStatus();
-    fetch("/api/data-connections")
+    fetch("/api/data-platforms")
       .then((r) => r.json())
       .then((data) => {
-        const list: string[] = Array.isArray(data?.connections)
-          ? data.connections
+        const list: Platform[] = Array.isArray(data?.platforms)
+          ? data.platforms
           : [];
-        setConnections(list);
-        if (list.length > 0) setSelectedConn(list[0]);
+        setPlatforms(list);
+        if (list.length > 0) setSelectedPlatformId(list[0].id);
       })
-      .catch(() => setConnections([]));
+      .catch(() => setPlatforms([]));
   }, []);
+
+  // When the selected platform becomes a filesystem entry, fetch its
+  // stats to populate the body.  Hive entries use the existing Refresh
+  // path and don't touch fsStats.
+  useEffect(() => {
+    if (!selectedPlatform || selectedPlatform.kind !== "filesystem") {
+      setFsStats(null);
+      return;
+    }
+    fetch(`/api/filesystem-sources/${encodeURIComponent(selectedPlatform.id)}/stats`)
+      .then((r) => r.json())
+      .then((data: FsStats) => setFsStats(data))
+      .catch(() => setFsStats(null));
+  }, [selectedPlatformId]);
 
   const runCredentialCheck = () => {
     setCredLoading(true);
@@ -791,41 +834,122 @@ export default function Status() {
             extra={
               <Space>
                 <Select
-                  value={selectedConn}
-                  onChange={(v) => { setSelectedConn(v); setRefreshResult(null); }}
-                  style={{ minWidth: 240 }}
-                  placeholder="Select connection"
-                  options={connections.map((c) => ({ label: c, value: c }))}
-                  disabled={!connections.length}
+                  value={selectedPlatformId}
+                  onChange={(v) => {
+                    setSelectedPlatformId(v);
+                    setRefreshResult(null);
+                  }}
+                  style={{ minWidth: 280 }}
+                  placeholder="Select platform"
+                  options={platforms.map((p) => ({
+                    label: p.label,
+                    value: p.id,
+                  }))}
+                  disabled={!platforms.length}
                   size="small"
                 />
-                <Button
-                  icon={<ReloadOutlined />}
-                  onClick={runConnectionRefresh}
-                  loading={connLoading}
-                  disabled={!selectedConn}
-                  size="small"
-                >
-                  Refresh
-                </Button>
+                {selectedPlatform?.kind === "hive" && (
+                  <Button
+                    icon={<ReloadOutlined />}
+                    onClick={runConnectionRefresh}
+                    loading={connLoading}
+                    disabled={!selectedConn}
+                    size="small"
+                  >
+                    Refresh
+                  </Button>
+                )}
               </Space>
             }
           >
-            <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-              Probe databases via <Text code>cml.data_v1</Text>. Toggle
-              databases on for classification and assign a vocabulary.
-            </Paragraph>
-            {connections.length === 0 && (
+            {selectedPlatform?.kind === "hive" && (
+              <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                Probe databases via <Text code>cml.data_v1</Text>. Toggle
+                databases on for classification and assign a vocabulary.
+              </Paragraph>
+            )}
+            {selectedPlatform?.kind === "filesystem" && (
+              <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                Local filesystem mount. Annotations (when present) come from
+                an <Text code>annotations.csv</Text> inside the mount —
+                mirroring the <Text code>{"{db}.annotations"}</Text> table
+                that backs Hive sources.
+              </Paragraph>
+            )}
+            {platforms.length === 0 && (
               <Text type="secondary">
-                No connections configured. Set{" "}
-                <Text code>ATELIER_DATA_CONNECTIONS</Text> (comma-separated) at
-                deploy time.
+                No data platforms registered. Configure Hive via{" "}
+                <Text code>ATELIER_DATA_CONNECTIONS</Text> or mount a local
+                directory via <Text code>ATELIER_META_TAGGING_DIR</Text>.
               </Text>
             )}
-            {refreshResult && !refreshResult.ok && (
+            {selectedPlatform?.kind === "hive" && refreshResult && !refreshResult.ok && (
               <Text type="danger">{refreshResult.error}</Text>
             )}
-            {refreshResult?.ok && refreshResult.databases && (() => {
+            {selectedPlatform?.kind === "filesystem" && fsStats && (
+              <Table
+                size="small"
+                pagination={false}
+                rowKey="source_id"
+                dataSource={[fsStats]}
+                columns={[
+                  {
+                    title: "Mount",
+                    dataIndex: "mount",
+                    key: "mount",
+                    render: (v: string | null) => (
+                      <Text code style={{ fontSize: 12 }}>
+                        {v ?? "—"}
+                      </Text>
+                    ),
+                  },
+                  {
+                    title: "Tables",
+                    dataIndex: "table_count",
+                    key: "table_count",
+                    width: 80,
+                    render: (v: number | null) =>
+                      v?.toLocaleString() ?? <Text type="secondary">—</Text>,
+                  },
+                  {
+                    title: "Columns",
+                    dataIndex: "column_count",
+                    key: "column_count",
+                    width: 90,
+                    render: (v: number | null) =>
+                      v?.toLocaleString() ?? <Text type="secondary">—</Text>,
+                  },
+                  {
+                    title: "Vocabulary",
+                    key: "vocab",
+                    render: (_: unknown, row: FsStats) => {
+                      if (!row.vocab_uri) {
+                        return (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            bundled / universal
+                          </Text>
+                        );
+                      }
+                      const label = row.vocab_uri.replace(/^file:\/\//, "");
+                      const count = row.annotation_count;
+                      return (
+                        <Space size={6}>
+                          <Text code style={{ fontSize: 12 }}>
+                            {label}
+                          </Text>
+                          {count != null && (
+                            <Text type="secondary" style={{ fontSize: 11 }}>
+                              ({count} rows)
+                            </Text>
+                          )}
+                        </Space>
+                      );
+                    },
+                  },
+                ]}
+              />
+            )}
+            {selectedPlatform?.kind === "hive" && refreshResult?.ok && refreshResult.databases && (() => {
               const dbs = refreshResult.databases!;
               // Build vocab options from databases that have annotations
               const vocabOptions = dbs

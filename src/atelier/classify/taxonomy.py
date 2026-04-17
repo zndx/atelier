@@ -269,6 +269,74 @@ def load_annotations_from_json(
     return _build_category_set_from_records(records, hierarchical=hierarchical)
 
 
+def load_annotations_from_filesystem(
+    path: str | Path,
+    *,
+    hierarchical: bool = True,
+    taxonomy: str = "filesystem",
+) -> CategorySet:
+    """Load annotations from a local ``annotations.csv`` file.
+
+    Accepts either the CSV path directly or a directory containing an
+    ``annotations.csv`` entry — mirrors the Hive flow where the source
+    is a database whose ``<db>.annotations`` table supplies the vocab.
+
+    Row-shape expectations match the first-column-is-``'ID`` layout the
+    UAT reference uses (leading apostrophe preserved from Excel export)
+    as well as plain ``ID`` / ``id``.  Ontology labels, annotation
+    mnemonics, definitions, common-names, specifics, and the four
+    sensitivity flags (NON_CORP / EMP, CONTRACTOR / INDIVIDUAL / CORP)
+    map to the same keys ``_build_category_set_from_records`` already
+    understands, so leaf filtering, parent derivation, and embedding-
+    text composition behave identically between Hive- and
+    filesystem-sourced vocabularies.
+
+    The ``taxonomy`` argument stamps the namespace discriminator on
+    each loaded category so blended vocabularies can tell sources
+    apart; defaults to ``"filesystem"`` for generality but callers
+    that maintain a branded namespace (e.g. ``"meta-tagging"``) should
+    pass their own.
+    """
+    import csv
+
+    path = Path(path).expanduser().resolve()
+    if path.is_dir():
+        path = path / "annotations.csv"
+    if not path.is_file():
+        raise FileNotFoundError(f"annotations.csv not found: {path}")
+
+    records: list[dict] = []
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Tolerate the leading-apostrophe quirk from Excel exports
+            # ("'ID") as well as plain "ID"/"id".
+            code = (row.get("'ID") or row.get("ID") or row.get("id") or "").strip()
+            if not code:
+                continue
+            records.append({
+                "id": code,
+                "ontology": (row.get("Ontology") or row.get("ontology") or "").strip(),
+                "annotation": (row.get("Annotation") or row.get("annotation") or "").strip(),
+                "definition": (row.get("Definition") or row.get("definition") or "").strip(),
+                "common_names": (
+                    row.get("Common Names") or row.get("common_names") or ""
+                ).strip(),
+                "specifics": (
+                    row.get("Specifics, Examples and/or Additional Context")
+                    or row.get("specifics")
+                    or ""
+                ).strip(),
+                "deprecated": (row.get("Deprecated") or "").strip().lower(),
+                "non_corp": (row.get("NON_CORP") or "").strip(),
+                "emp_contractor": (row.get("EMP, CONTRACTOR") or "").strip(),
+                "individual": (row.get("INDIVIDUAL") or "").strip(),
+                "corp": (row.get("CORP") or "").strip(),
+                "taxonomy": taxonomy,
+            })
+    return _build_category_set_from_records(records, hierarchical=hierarchical)
+
+
 # ── Mock/fixture loader ──────────────────────────────────────────────
 
 

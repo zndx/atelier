@@ -252,4 +252,6 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260416000000_archive_flag'),
     ('20260416100000'),
     ('20260416100000_vocab_uri'),
-    ('20260417000000');
+    ('20260417000000'),
+    ('20260417000000_rename_ootb_sample_display'),
+    ('20260417190000');

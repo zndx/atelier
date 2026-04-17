@@ -102,13 +102,18 @@ def resolve_meta_tagging_mount(cfg=None) -> Path | None:  # type: ignore[no-unty
     return None
 
 
-def _load_annotations_records(mount: Path) -> list[dict]:
-    """Read annotations.csv rows into normalized records for the taxonomy loader."""
+def _read_annotation_rows(annotations_csv: Path) -> list[dict]:
+    """Read annotations.csv into normalized records (local helper).
+
+    Parallels :func:`taxonomy.load_annotations_from_filesystem`'s row
+    parsing but returns the intermediate ``list[dict]`` so callers can
+    build auxiliary indices (name→code, fallback code) without having
+    to walk a CategorySet.
+    """
     records: list[dict] = []
-    with open(mount / "annotations.csv", newline="") as f:
+    with open(annotations_csv, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Normalize keys — first column is ``'ID`` with a leading apostrophe.
             code = (row.get("'ID") or row.get("ID") or row.get("id") or "").strip()
             if not code:
                 continue
@@ -116,19 +121,7 @@ def _load_annotations_records(mount: Path) -> list[dict]:
                 "id": code,
                 "ontology": (row.get("Ontology") or "").strip(),
                 "annotation": (row.get("Annotation") or "").strip(),
-                "definition": (row.get("Definition") or "").strip(),
                 "common_names": (row.get("Common Names") or "").strip(),
-                "specifics": (
-                    row.get("Specifics, Examples and/or Additional Context")
-                    or ""
-                ).strip(),
-                "deprecated": (row.get("Deprecated") or "").strip().lower(),
-                # Sensitivity flags per data-subject role
-                "non_corp": (row.get("NON_CORP") or "").strip(),
-                "emp_contractor": (row.get("EMP, CONTRACTOR") or "").strip(),
-                "individual": (row.get("INDIVIDUAL") or "").strip(),
-                "corp": (row.get("CORP") or "").strip(),
-                "taxonomy": "meta-tagging",
             })
     return records
 
@@ -136,21 +129,22 @@ def _load_annotations_records(mount: Path) -> list[dict]:
 def load_meta_tagging_vocabulary(mount: Path) -> HierarchicalCategorySet:
     """Build the hierarchical CategorySet from ``annotations.csv``.
 
-    Delegates construction to :func:`taxonomy._build_reference_categories`
-    — the same loader used for the Hive-sourced UAT path — so label
-    normalization, leaf filtering, and parent derivation behave
-    identically between environments.
+    Thin wrapper over :func:`taxonomy.load_annotations_from_filesystem`
+    that pins the ``taxonomy`` namespace to ``"meta-tagging"`` so
+    blended-vocabulary downstream code can tell this source apart from
+    other filesystem-loaded vocabularies.
     """
-    records = _load_annotations_records(mount)
-    cs = _build_category_set_from_records(records, hierarchical=True)
+    from atelier.classify.taxonomy import load_annotations_from_filesystem
+    cs = load_annotations_from_filesystem(
+        mount / "annotations.csv",
+        hierarchical=True,
+        taxonomy="meta-tagging",
+    )
     if not isinstance(cs, HierarchicalCategorySet):
         cs = HierarchicalCategorySet(
             name="meta-tagging", categories=list(cs.categories),
         )
-    log.info(
-        "meta-tagging vocab: %d leaves (from %d annotation records)",
-        len(cs.categories), len(records),
-    )
+    log.info("meta-tagging vocab: %d leaves from %s", len(cs.categories), mount)
     return cs
 
 
@@ -239,7 +233,10 @@ def load_meta_tagging_source(
         log.warning("meta-tagging: no mount resolved")
         return []
 
-    records = _load_annotations_records(mount)
+    # Build the annotation records once for both the name→code index
+    # and the fallback-code heuristic.  Uses the same normalized shape
+    # as the filesystem vocab loader in taxonomy.py.
+    records = _read_annotation_rows(mount / "annotations.csv")
     name_index = _build_name_to_code_index(records)
     fallback = _fallback_code(records)
 

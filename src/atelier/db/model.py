@@ -15,7 +15,13 @@ class DataSource(Base):
     __tablename__ = "data_sources"
 
     id = Column(String, primary_key=True, nullable=False)
-    source_type = Column(String, nullable=False)      # 'sample' | 'hive'
+    # 'filesystem' (local dir/zip mount, optional annotations.csv)
+    # | 'hive' (Cloudera data-platform connection + database).
+    # Future schemes — 's3', 'jdbc' — slot in without further model
+    # changes; source_uri carries the scheme prefix
+    # (file:///…, hive://…, s3://…).  'sample' is retired from this
+    # field but the migration keeps the row intact.
+    source_type = Column(String, nullable=False)
     source_uri = Column(String, nullable=False, default="")
     display_name = Column(String, nullable=False)
     vocabulary_mode = Column(String, nullable=False, default="universal")

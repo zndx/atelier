@@ -936,6 +936,29 @@ def _load_vocabulary(cfg, build_dir: Path, connection_name, vocab_uri: str | Non
     log = logging.getLogger(__name__)
 
     if vocab_uri:
+        # Scheme-aware dispatch: file:// reads annotations.csv from a
+        # local mount; everything else falls through to the Hive / cache
+        # path.  Add s3:// / jdbc:// branches here as they come online.
+        if vocab_uri.startswith("file://"):
+            from atelier.classify.taxonomy import load_annotations_from_filesystem
+            fs_path = Path(vocab_uri[len("file://"):]).expanduser().resolve()
+            try:
+                domain_cs = load_annotations_from_filesystem(fs_path)
+                if not isinstance(domain_cs, HierarchicalCategorySet):
+                    domain_cs = HierarchicalCategorySet(
+                        name=domain_cs.name,
+                        categories=list(domain_cs.categories),
+                    )
+                log.info(
+                    "Loaded filesystem vocabulary: %d leaves (vocab_uri=%s)",
+                    len(domain_cs.categories), vocab_uri,
+                )
+                return domain_cs
+            except FileNotFoundError:
+                raise RuntimeError(
+                    f"Filesystem vocab_uri={vocab_uri!r} points at a missing file"
+                )
+
         domain_cs = _load_domain_annotations(cfg, build_dir, connection_name)
         if domain_cs is not None and len(domain_cs.categories) > 0:
             if not isinstance(domain_cs, HierarchicalCategorySet):
