@@ -173,6 +173,23 @@ def run_classification_pipeline(
         samples = load_synth_source()
         if category_set is None:
             category_set = load_sample_vocabulary(hierarchical=True)
+    elif source_id == "meta-tagging" and samples is None:
+        # Private reference source — mount path never committed to git.
+        from atelier.classify.meta_tagging_source import (
+            load_meta_tagging_source,
+            load_meta_tagging_vocabulary,
+            resolve_meta_tagging_mount,
+        )
+        mount = resolve_meta_tagging_mount(cfg)
+        if mount is None:
+            raise RuntimeError(
+                "meta-tagging source requested but no mount resolved — "
+                "set ATELIER_META_TAGGING_DIR or cfg.classify_meta_tagging_dir "
+                "to a directory containing annotations.csv"
+            )
+        samples = load_meta_tagging_source(mount)
+        if category_set is None:
+            category_set = load_meta_tagging_vocabulary(mount)
     # ── LLM backend resolution ────────────────────────────────
     # The pipeline cannot function without an LLM.  Resolve early
     # so callers get a clear error before any FSM state is created.

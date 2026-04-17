@@ -101,6 +101,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.auto_start": ("classify_auto_start", bool),
     "classify.default_source": ("classify_default_source", str),
     "classify.subagent_model": ("classify_subagent_model", str),
+    "classify.meta_tagging_dir": ("classify_meta_tagging_dir", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm_model_path": ("classify_svm_model_path", str),
@@ -285,6 +286,11 @@ class AtelierConfig:
     classify_auto_start: bool = False
     classify_default_source: str = ""  # empty = ootb-sample
     classify_subagent_model: str | None = None
+    # Meta-tagging source — private reference data mount path.  Never
+    # committed to git.  When empty, the module falls back to the
+    # ATELIER_META_TAGGING_DIR env var and then to the maintainer
+    # default at ~/local/tmp/meta-tagging.
+    classify_meta_tagging_dir: str = ""
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"

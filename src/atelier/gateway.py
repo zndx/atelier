@@ -44,6 +44,10 @@ async def _lifespan(app: FastAPI):
         except Exception as exc:
             _log.warning("Synth source seeding skipped: %s", exc)
         try:
+            _seed_meta_tagging_source()
+        except Exception as exc:
+            _log.warning("Meta-tagging source seeding skipped: %s", exc)
+        try:
             _discover_and_register_hive_sources()
         except Exception as exc:
             _log.warning("Hive source discovery skipped: %s", exc)
@@ -256,6 +260,81 @@ def _seed_synth_source() -> None:
         )
     except Exception as exc:
         _log.warning("Synthetic source seeding failed: %s", exc)
+
+
+def _seed_meta_tagging_source() -> None:
+    """Register the Meta-tagging source when a local mount is available.
+
+    Meta-tagging data is a private reference corpus held outside the
+    repo (``~/local/tmp/meta-tagging/`` by convention, or wherever
+    ``ATELIER_META_TAGGING_DIR`` / ``cfg.classify_meta_tagging_dir``
+    points).  Its contents — annotation labels, sample values, any
+    numeric codes beyond what's already in the pipeline — must never
+    land in git.  This seeder reads stats only (row counts, mount
+    path) and registers the source so the UI selector can offer it.
+
+    Silent no-op when no mount is found — the source stays hidden
+    on deployments that don't have the reference data.
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.db.dao import AtelierDao
+        from atelier.classify.meta_tagging_source import (
+            meta_tagging_stats,
+            resolve_meta_tagging_mount,
+        )
+    except Exception:
+        return
+
+    try:
+        cfg = load_config()
+        mount = resolve_meta_tagging_mount(cfg)
+        if mount is None:
+            return
+
+        stats = meta_tagging_stats(mount)
+        if not stats["has_data"]:
+            return
+
+        dao = AtelierDao()
+        dao.get_or_create_data_source(
+            source_id="meta-tagging",
+            source_type="sample",
+            display_name="Meta-tagging",
+            source_uri=str(mount),
+            vocabulary_mode="universal",
+        )
+        dao.update_data_source_metadata("meta-tagging", json.dumps({
+            "table_count": stats["table_count"],
+            "column_count": stats["column_count"],
+            "mount": stats["mount"],
+        }))
+
+        versions = dao.list_dataset_versions("meta-tagging")
+        if not versions:
+            import uuid
+            dataset_id = str(uuid.uuid4())[:8]
+            dao.upsert_dataset(
+                dataset_id=dataset_id,
+                name="Meta-tagging v1",
+                parquet_path="",
+                description=(
+                    f"{stats['table_count']} tables, {stats['column_count']} "
+                    f"columns (private reference corpus — not committed)"
+                ),
+                row_count=stats["column_count"],
+                source_id="meta-tagging",
+                version_number=1,
+                is_active=True,
+                summary=f"{stats['table_count']} tables, {stats['column_count']} columns",
+            )
+
+        _log.info(
+            "Seeded Meta-tagging source: %d tables, %d columns",
+            stats["table_count"], stats["column_count"],
+        )
+    except Exception as exc:
+        _log.warning("Meta-tagging source seeding failed: %s", exc)
 
 
 def _discover_and_register_hive_sources() -> None:
