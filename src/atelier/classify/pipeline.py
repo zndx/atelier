@@ -223,12 +223,13 @@ def _maybe_retrain_svm(
     if result is None:
         return False, last_retrain_count
 
-    # Hot-swap: reset cached models then reconfigure paths
-    ml_inference.reset()
-    ml_inference.configure_paths(
-        svm_path=str(svm_frontier_path),
-        catboost_path=cfg.classify_catboost_model_path,
-    )
+    # Hot-swap: install the freshly-retrained SVM in place of whatever
+    # was loaded before.  Must NOT touch CatBoost state — the fit-to-LLM
+    # install happens earlier in the same run, and a blanket reset here
+    # would silently wipe it (classifications emitted with catboost=0
+    # evidence despite fit_to_llm=True).
+    from atelier.classify.svm_classifier import SVMClassifier
+    ml_inference.install_svm(SVMClassifier.load(svm_frontier_path))
     logger.info("SVM hot-swapped to frontier-trained model: %s", svm_frontier_path)
     return True, frontier_count
 
@@ -1247,6 +1248,15 @@ def _classify_column(
             if col.ground_truth and best_code
             else None
         ),
+        # Raw LLM vote preserved alongside the fused label so operators
+        # can see (a) whether the LLM covered this column at all and
+        # (b) whether the final prediction agrees with the LLM.  When
+        # fit-to-LLM is on these match by construction on LLM-covered
+        # columns; divergence on LLM-missing columns means CatBoost /
+        # SVM carried the prediction.  ``llm_code`` is None when the
+        # LLM didn't see this column (e.g. batch truncation).
+        "llm_code": llm_code,
+        "llm_confidence": float(llm_confidence or 0.0),
     }
 
 
@@ -1424,10 +1434,27 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
     avg_conflict = sum(c["conflict"] for c in classifications) / total
     avg_uncertainty = sum(c["uncertainty"] for c in classifications) / total
 
+    # LLM coverage + LLM-fusion agreement — the two metrics that
+    # actually reflect pipeline health under the fit-to-llm regime.
+    # Coverage = fraction with any LLM evidence at all.  Agreement =
+    # of those, fraction where the fused predicted_code equals the
+    # LLM's top pick.  With fit-to-LLM on, agreement should track
+    # 100% on LLM-covered columns; divergence is a diagnostic signal
+    # that CatBoost disagreed with the LLM after fine-tuning.
+    llm_covered = [c for c in classifications if c.get("llm_code")]
+    llm_matches = sum(
+        1 for c in llm_covered
+        if c.get("llm_code") == c.get("predicted_code")
+    )
+
     return {
         "total_columns": total,
         "classified": classified,
         "coverage": round(classified / total, 4) if total else 0.0,
+        "llm_coverage": round(len(llm_covered) / total, 4) if total else 0.0,
+        "llm_agreement": (
+            round(llm_matches / len(llm_covered), 4) if llm_covered else None
+        ),
         "with_ground_truth": len(with_truth),
         "correct": correct,
         "accuracy": round(correct / len(with_truth), 4) if with_truth else None,
@@ -1478,6 +1505,8 @@ def _write_parquet(
             "predicted_code": c["predicted_code"] or "",
             "predicted_label": c["predicted_label"] or "",
             "predicted_annotation": c.get("predicted_annotation", "") or "",
+            "llm_code": c.get("llm_code") or "",
+            "llm_confidence": c.get("llm_confidence", 0.0),
             "confidence": c["confidence"],
             "belief": c["belief"],
             "plausibility": c["plausibility"],

@@ -160,10 +160,49 @@ def install_catboost(model) -> None:
     of the evidence-fusion path uses the fresh model without ever
     touching the pre-trained ``classify.catboost_model_path`` file.
 
-    Calling :func:`reset` clears this install too.
+    Calling :func:`reset` clears this install too; prefer
+    :func:`reset_catboost` when you want to swap only one model.
     """
     global _catboost, _catboost_loaded
     with _lock:
         _catboost = model
         _catboost_loaded = True
         logger.info("CatBoost model installed in-memory (fit-to-LLM mode)")
+
+
+def install_svm(model) -> None:
+    """Install an in-memory SVM model, bypassing disk-load.
+
+    Parallel to :func:`install_catboost`.  Used by the frontier-SVM
+    hot-swap during bootstrap: after re-training on accumulated LLM
+    labels, the new model is installed here so subsequent ML validation
+    and final classification see it without touching the serialized
+    ``svm_frontier.pkl`` on disk.
+
+    Crucially this does NOT touch ``_catboost`` state — previously the
+    hot-swap called :func:`reset` which silently wiped the fit-to-LLM
+    CatBoost install.
+    """
+    global _svm, _svm_loaded
+    with _lock:
+        _svm = model
+        _svm_loaded = True
+        logger.info("SVM model installed in-memory")
+
+
+def reset_catboost() -> None:
+    """Surgical reset of CatBoost state only.  SVM state preserved."""
+    global _catboost, _catboost_loaded, _catboost_path
+    with _lock:
+        _catboost = None
+        _catboost_loaded = False
+        _catboost_path = None
+
+
+def reset_svm() -> None:
+    """Surgical reset of SVM state only.  CatBoost state preserved."""
+    global _svm, _svm_loaded, _svm_path
+    with _lock:
+        _svm = None
+        _svm_loaded = False
+        _svm_path = None

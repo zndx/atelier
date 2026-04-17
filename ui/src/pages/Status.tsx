@@ -266,6 +266,36 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             </Tag>
           </Descriptions.Item>
         )}
+        {progress.llm_coverage != null && (
+          <Descriptions.Item label="LLM Coverage">
+            <Tag
+              color={
+                Number(progress.llm_coverage) >= 0.95
+                  ? "green"
+                  : Number(progress.llm_coverage) >= 0.80
+                    ? "orange"
+                    : "red"
+              }
+            >
+              {(Number(progress.llm_coverage) * 100).toFixed(1)}%
+            </Tag>
+          </Descriptions.Item>
+        )}
+        {progress.llm_agreement != null && (
+          <Descriptions.Item label="LLM Agreement">
+            <Tag
+              color={
+                Number(progress.llm_agreement) >= 0.98
+                  ? "green"
+                  : Number(progress.llm_agreement) >= 0.90
+                    ? "orange"
+                    : "red"
+              }
+            >
+              {(Number(progress.llm_agreement) * 100).toFixed(1)}%
+            </Tag>
+          </Descriptions.Item>
+        )}
         {progress.avg_confidence != null && (
           <Descriptions.Item label="Avg Confidence">
             {Number(progress.avg_confidence).toFixed(3)}
