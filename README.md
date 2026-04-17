@@ -125,10 +125,19 @@ The entry point for both methods is **`scripts/startup_app.py`**:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Agent SDK | (none) |
-| `ATELIER_DB_URL` | PostgreSQL connection URI (overrides pgserver) | auto (pgserver) |
+| `AWS_ACCESS_KEY_ID` | Bedrock access key | (none) |
+| `AWS_SECRET_ACCESS_KEY` | Bedrock secret | (none) |
+| `SOPS_AGE_KEY` | age private key that decrypts `.env.cai.enc` at startup | (none) |
+| `ANTHROPIC_API_KEY` | Anthropic direct API key (overwatch, local dev) | (none) |
+| `ATELIER_DB_URL` | PostgreSQL connection URI (overrides PGlite) | auto (PGlite) |
 | `QDRANT_HOST` | Qdrant hostname | localhost |
 | `QDRANT_PORT` | Qdrant HTTP port | 6333 |
+
+CAI operators typically only need the first three — the encrypted
+`.env.cai.enc` file bundles every other deployment default. See
+**[Operations → Encrypted Deployment Defaults](./docs/src/operations/secrets.md)**
+in the mdbook for the full pattern (`just docs-serve` to browse
+locally).
 
 ### Local vs CML Infrastructure
 

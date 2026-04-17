@@ -18,6 +18,10 @@
 - [Data Sources & Versioning](./architecture/data-sources.md)
 - [Proposed Integrations](./architecture/integrations.md)
 
+# Operations
+
+- [Encrypted Deployment Defaults](./operations/secrets.md)
+
 # Scenarios
 
 - [Overview](./scenarios/overview.md)
