@@ -11,6 +11,7 @@ const EmbeddingsIndex = lazy(() => import("./pages/EmbeddingsIndex"));
 const Status = lazy(() => import("./pages/Status"));
 const TerminalPage = lazy(() => import("./pages/TerminalPage"));
 const Workflows = lazy(() => import("./pages/Workflows"));
+const OverwatchReport = lazy(() => import("./pages/OverwatchReport"));
 
 function App() {
   return (
@@ -168,6 +169,29 @@ function App() {
                   }
                 >
                   <Embeddings />
+                </Suspense>
+              </Layout>
+            }
+          />
+          <Route
+            path="/overwatch/:runId"
+            element={
+              <Layout>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        height: "calc(100vh - 128px)",
+                      }}
+                    >
+                      <Spin size="large" />
+                    </div>
+                  }
+                >
+                  <OverwatchReport />
                 </Suspense>
               </Layout>
             }

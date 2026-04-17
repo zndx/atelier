@@ -400,6 +400,19 @@ function DataSourceCard() {
               ellipsis: true,
               render: (v: string) => v || "—",
             },
+            {
+              title: "",
+              key: "overwatch",
+              width: 90,
+              render: (_: unknown, record: any) =>
+                record.fsm_run_id ? (
+                  <Link to={`/overwatch/${record.fsm_run_id}`}>
+                    <Tag color="purple" style={{ cursor: "pointer", margin: 0 }}>
+                      Overwatch
+                    </Tag>
+                  </Link>
+                ) : null,
+            },
           ]}
         />
       )}
