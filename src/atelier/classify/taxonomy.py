@@ -211,22 +211,45 @@ def _build_parents(
 # ── Hive loader ──────────────────────────────────────────────────────
 
 
+_HIVE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def load_annotations_from_hive(
     cfg,
     connection_name: str | None = None,
+    database: str = "default",
     *,
     hierarchical: bool = True,
 ) -> CategorySet:
-    """Load annotations from default.annotations via CAI Data Platform.
+    """Load annotations from ``{database}.annotations`` via CAI Data Platform.
 
     Args:
         cfg: AtelierConfig with data connection settings.
         connection_name: CAI connection name. Falls back to first configured.
+        database: Hive database holding the ``annotations`` table.
+            Defaults to ``"default"`` to preserve the pre-parameterization
+            behavior; operators can target any database by passing a
+            whitelisted identifier (alnum + underscore, leading letter).
         hierarchical: Return HierarchicalCategorySet if True.
 
     Returns:
-        CategorySet loaded from hive annotations table.
+        CategorySet loaded from the hive annotations table.
+
+    Raises:
+        ValueError: when ``database`` contains characters that can't be
+            safely interpolated into the SQL (SQL-injection guard — we
+            whitelist rather than quote because Hive dialect handling of
+            backtick-quoted identifiers varies across connectors).
     """
+    # User-input sanity check first — rejects bad identifiers without
+    # needing cml.data_v1 (so we catch misconfigured env vars even on
+    # dev machines without the Cloudera runtime).
+    if not _HIVE_IDENT_RE.match(database or ""):
+        raise ValueError(
+            f"refusing to load annotations from unsafe database identifier "
+            f"{database!r}; expected alnum + underscore (leading letter)."
+        )
+
     try:
         import cml.data_v1 as cmldata
     except ImportError:
@@ -241,7 +264,7 @@ def load_annotations_from_hive(
         connection_name = names[0]
 
     conn = cmldata.get_connection(connection_name)
-    df = conn.get_pandas_dataframe("SELECT * FROM default.annotations")
+    df = conn.get_pandas_dataframe(f"SELECT * FROM {database}.annotations")
 
     return _build_category_set_from_records(
         df.to_dict("records"),

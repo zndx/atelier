@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Button,
   Card,
   Col,
   Divider,
@@ -11,7 +10,6 @@ import {
   Typography,
 } from "antd";
 import {
-  ArrowLeftOutlined,
   CloudServerOutlined,
   DashboardOutlined,
   DotChartOutlined,
@@ -20,7 +18,6 @@ import {
   MergeCellsOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
-import { Link } from "react-router-dom";
 import type { AgentInfo } from "../types/canvas";
 import type { ReactNode } from "react";
 
@@ -180,14 +177,6 @@ export default function Agents() {
 
   return (
     <>
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/">
-          <Button icon={<ArrowLeftOutlined />} size="small">
-            Back
-          </Button>
-        </Link>
-      </div>
-
       <Title level={2}>Keystone Agents</Title>
       <Paragraph type="secondary">
         Atelier's classification pipeline is driven by keystone agents,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -16,7 +17,6 @@ import {
   Typography,
 } from "antd";
 import {
-  ArrowLeftOutlined,
   EyeOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -26,6 +26,14 @@ import { Link } from "react-router-dom";
 import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Paragraph, Text } = Typography;
+
+function formatAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return `${Math.max(1, Math.floor(diff / 1000))}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
 
 interface ServiceCheck {
   ok: boolean;
@@ -670,13 +678,29 @@ function StatusBadge({ ok }: { ok: boolean }) {
 }
 
 export default function Status() {
+  // Status-page selection state (platform, smoke result) lives in
+  // DatasetContext so it survives in-app navigation.  activeSourceId
+  // is here so the env-seeded source banner can compare against the
+  // currently-selected source.
+  const {
+    sources,
+    activeSourceId,
+    statusPlatformId,
+    setStatusPlatformId,
+    smokeTest,
+    setSmokeTest,
+  } = useDataset();
+
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
   const [credLoading, setCredLoading] = useState(false);
 
-  const [smoke, setSmoke] = useState<SmokeResult | null>(null);
+  // Smoke test result is cached in DatasetContext (localStorage-backed)
+  // so the last run survives navigation; the "Last run Nm ago" chip +
+  // staleness hint read from there.
+  const smoke = smokeTest?.result ?? null;
   const [smokeLoading, setSmokeLoading] = useState(false);
 
   // Unified CAI Data Platform list — Hive connections + filesystem mounts.
@@ -702,7 +726,12 @@ export default function Status() {
     error?: string;
   };
   const [platforms, setPlatforms] = useState<Platform[]>([]);
-  const [selectedPlatformId, setSelectedPlatformId] = useState<string | undefined>();
+  // Selected platform id lives in the dataset context so it survives
+  // in-app navigation.  Context exposes `string | null`; local code
+  // reads it as `string | undefined` to keep antd's Select happy.
+  const selectedPlatformId = statusPlatformId ?? undefined;
+  const setSelectedPlatformId = (id: string | undefined) =>
+    setStatusPlatformId(id ?? null);
   const selectedPlatform = platforms.find((p) => p.id === selectedPlatformId);
   // Hive code paths still key on the connection name; filesystem paths
   // don't use it.
@@ -727,6 +756,10 @@ export default function Status() {
 
   useEffect(() => {
     fetchStatus();
+    // Auto-fire credential validation on every /status visit — cheap
+    // probe ($0 vs ~$0.007 for the smoke test) so it's worth keeping
+    // current state on screen without a manual button press.
+    runCredentialCheck();
     fetch("/api/data-platforms")
       .then((r) => r.json())
       .then((data) => {
@@ -734,14 +767,21 @@ export default function Status() {
           ? data.platforms
           : [];
         setPlatforms(list);
-        if (list.length > 0) setSelectedPlatformId(list[0].id);
+        // Preserve the operator's persisted choice when it still exists
+        // in the platform list; otherwise default to the first entry.
+        const persistedStillValid =
+          statusPlatformId && list.some((p) => p.id === statusPlatformId);
+        if (!persistedStillValid && list.length > 0) {
+          setSelectedPlatformId(list[0].id);
+        }
       })
       .catch(() => setPlatforms([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When the selected platform becomes a filesystem entry, fetch its
   // stats to populate the body.  Hive entries use the existing Refresh
-  // path and don't touch fsStats.
+  // path (auto-fired below) to populate their database list.
   useEffect(() => {
     if (!selectedPlatform || selectedPlatform.kind !== "filesystem") {
       setFsStats(null);
@@ -752,6 +792,17 @@ export default function Status() {
       .then((data: FsStats) => setFsStats(data))
       .catch(() => setFsStats(null));
   }, [selectedPlatformId]);
+
+  // Auto-refresh the Hive database list when a Hive platform becomes
+  // selected (on mount via persisted statusPlatformId, or when the
+  // operator picks a new platform).  Keeps the panel populated without
+  // demanding a Refresh click every navigation.
+  useEffect(() => {
+    if (selectedPlatform?.kind === "hive") {
+      runConnectionRefresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlatform?.id]);
 
   const runCredentialCheck = () => {
     setCredLoading(true);
@@ -773,8 +824,15 @@ export default function Status() {
     setSmokeLoading(true);
     fetch("/api/agents/smoke-test", { method: "POST" })
       .then((r) => r.json())
-      .then(setSmoke)
-      .catch((e) => setSmoke({ success: false, error: String(e) }))
+      .then((result: SmokeResult) =>
+        setSmokeTest({ result, lastRunAt: Date.now() }),
+      )
+      .catch((e) =>
+        setSmokeTest({
+          result: { success: false, error: String(e) },
+          lastRunAt: Date.now(),
+        }),
+      )
       .finally(() => setSmokeLoading(false));
   };
 
@@ -813,13 +871,6 @@ export default function Status() {
 
   return (
     <>
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/">
-          <Button icon={<ArrowLeftOutlined />} size="small">
-            Back
-          </Button>
-        </Link>
-      </div>
       <Title level={2}>System Status</Title>
       <Paragraph type="secondary">
         Infrastructure health and SDK connectivity dashboard.
@@ -1014,18 +1065,40 @@ export default function Status() {
           <Card
             title="SDK Smoke Test"
             extra={
-              <Button
-                icon={<ThunderboltOutlined />}
-                onClick={runSmokeTest}
-                loading={smokeLoading}
-                size="small"
-              >
-                Run
-              </Button>
+              <Space>
+                {smokeTest && (
+                  <Tag
+                    color={
+                      Date.now() - smokeTest.lastRunAt > 10 * 60 * 1000
+                        ? "orange"
+                        : "cyan"
+                    }
+                  >
+                    Last run {formatAgo(smokeTest.lastRunAt)}
+                  </Tag>
+                )}
+                <Button
+                  icon={<ThunderboltOutlined />}
+                  onClick={runSmokeTest}
+                  loading={smokeLoading}
+                  size="small"
+                >
+                  {smokeTest ? "Re-run" : "Run"}
+                </Button>
+              </Space>
             }
           >
             <Paragraph type="secondary" style={{ marginBottom: 12 }}>
               Full Claude Agent SDK round-trip. Costs ~$0.02.
+              {smokeTest &&
+                Date.now() - smokeTest.lastRunAt > 10 * 60 * 1000 && (
+                  <>
+                    {" · "}
+                    <Text type="warning">
+                      Result is over 10 minutes old — consider re-running.
+                    </Text>
+                  </>
+                )}
             </Paragraph>
             {smoke ? (
               smoke.success ? (
@@ -1110,6 +1183,29 @@ export default function Status() {
               </Space>
             }
           >
+            {(() => {
+              const active = sources.find((s) => s.id === activeSourceId);
+              if (!active) return null;
+              let meta: { seeded_from_env?: boolean; connection?: string; database?: string } = {};
+              try { meta = JSON.parse(active.metadata || "{}"); } catch { /* ignore */ }
+              if (!meta?.seeded_from_env) return null;
+              const conn = meta.connection ?? "";
+              const db = meta.database ?? "";
+              return (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message={
+                    <Text>
+                      Env defaults active: <Text strong>{conn}</Text> ·{" "}
+                      <Text strong>{db}</Text>. Edit vocab or switch platforms
+                      below; your changes persist.
+                    </Text>
+                  }
+                />
+              );
+            })()}
             {selectedPlatform?.kind === "hive" && (
               <Paragraph type="secondary" style={{ marginBottom: 12 }}>
                 Probe databases via <Text code>cml.data_v1</Text>. Toggle

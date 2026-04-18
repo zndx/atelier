@@ -14,6 +14,9 @@ from sqlalchemy.orm import sessionmaker
 
 # Default engine settings for PGlite resilience. Callers can override
 # individual keys via engine_args (e.g. tests may set pool_size=1).
+# Keys touching PG-only connection kwargs are filtered when the URL
+# is SQLite so tier-0 tests can use an in-memory or tempfile DAO
+# without tripping on unsupported kwargs.
 _DEFAULT_ENGINE_ARGS = {
     "pool_pre_ping": True,
     "pool_recycle": 300,
@@ -21,6 +24,19 @@ _DEFAULT_ENGINE_ARGS = {
     "max_overflow": 2,
     "connect_args": {"connect_timeout": 10},
 }
+
+
+def _engine_args_for(url: str) -> dict:
+    """Return a defaults dict appropriate for the URL's dialect.
+
+    SQLite doesn't accept ``connect_timeout`` or the pool kwargs that
+    apply to PGlite's connection lifecycle — the sqlite driver rejects
+    ``connect_timeout`` and the pool_* values are no-ops for the
+    single-connection StaticPool it uses by default.  Strip them.
+    """
+    if url.startswith("sqlite"):
+        return {}
+    return dict(_DEFAULT_ENGINE_ARGS)
 
 
 class AtelierDao:
@@ -36,7 +52,7 @@ class AtelierDao:
             from atelier.config import load_config
             engine_url = load_config().db_url
 
-        merged = {**_DEFAULT_ENGINE_ARGS, **(engine_args or {})}
+        merged = {**_engine_args_for(engine_url), **(engine_args or {})}
         self.engine = create_engine(engine_url, echo=echo, **merged)
         self.Session = sessionmaker(
             bind=self.engine, autoflush=True, autocommit=False,
@@ -72,6 +88,23 @@ class AtelierDao:
         from atelier.db.model import DataSource
         with self.get_session() as session:
             r = session.query(DataSource).filter_by(id=source_id).first()
+            if r is None:
+                return None
+            return self._source_to_dict(r)
+
+    def get_data_source_by_source_uri(self, source_uri: str) -> dict | None:
+        """Return a data source by source_uri as dict, or None.
+
+        Used by the env-var-driven startup seeder to check whether a
+        row for ``{connection}/{database}`` already exists before
+        inserting.  Idempotent-add semantics are provided by
+        :meth:`get_or_create_data_source` (keyed on ``id``); this
+        helper is the orthogonal lookup when the caller only knows
+        the URI shape.
+        """
+        from atelier.db.model import DataSource
+        with self.get_session() as session:
+            r = session.query(DataSource).filter_by(source_uri=source_uri).first()
             if r is None:
                 return None
             return self._source_to_dict(r)

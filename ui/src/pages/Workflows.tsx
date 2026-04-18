@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
 import {
   ReactFlow,
   Background,
@@ -12,7 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button, Spin, Typography, Alert, Space } from "antd";
-import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 import { nodeTypes } from "../components/canvas/nodeTypes";
 import { buildKeystoneTopology } from "../lib/canvasLayout";
 import type { AgentInfo } from "../types/canvas";
@@ -127,9 +126,6 @@ function WorkflowsInner() {
         }}
       >
         <Space>
-          <Link to="/">
-            <Button type="text" icon={<ArrowLeftOutlined />} size="small" />
-          </Link>
           <Title level={5} style={{ margin: 0 }}>
             Orchestration Canvas
           </Title>

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Card, Col, Empty, Row, Tag, Typography } from "antd";
-import { ArrowLeftOutlined, DotChartOutlined } from "@ant-design/icons";
+import { DotChartOutlined } from "@ant-design/icons";
 import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Paragraph } = Typography;
@@ -10,14 +10,9 @@ export default function EmbeddingsIndex() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <Link to="/">
-          <ArrowLeftOutlined style={{ fontSize: 16, color: "#1890ff" }} />
-        </Link>
-        <Title level={3} style={{ margin: 0 }}>
-          Embeddings
-        </Title>
-      </div>
+      <Title level={3} style={{ marginBottom: 24 }}>
+        Embeddings
+      </Title>
 
       {datasets.length === 0 ? (
         <Empty

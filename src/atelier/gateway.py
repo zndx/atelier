@@ -51,6 +51,10 @@ async def _lifespan(app: FastAPI):
             _discover_and_register_hive_sources()
         except Exception as exc:
             _log.warning("Hive source discovery skipped: %s", exc)
+        try:
+            _seed_classify_data_source()
+        except Exception as exc:
+            _log.warning("Classify data source seeding skipped: %s", exc)
 
     seed_task = asyncio.create_task(_seed_with_retry())
 
@@ -350,6 +354,66 @@ def _seed_meta_tagging_source() -> None:
         )
     except Exception as exc:
         _log.warning("Meta-tagging source seeding failed: %s", exc)
+
+
+def _seed_classify_data_source() -> None:
+    """Seed a ``data_source`` row from ATELIER_CLASSIFY_CONNECTION
+    + ATELIER_CLASSIFY_DATABASE env vars so the env-driven default
+    appears in the Data Platform panel as an editable row.
+
+    Makes the env vars behave like *defaults* — visible via
+    ``/api/data-sources``, selectable as ``activeSourceId``, and
+    overridable from the UI (vocab_uri edits, archival, etc).
+    Without this, env vars only affected pipeline resolution, the
+    UI had nothing to show, and operators couldn't diverge from the
+    env defaults without restarting with different env vars.
+
+    Idempotent via ``get_or_create_data_source`` keyed on a stable
+    ``source_id`` shape (``classify-{connection}-{database}``).  If
+    the row already exists (operator edited vocab_uri, for example),
+    this is a no-op.
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.db.dao import AtelierDao
+    except Exception:
+        return  # DB or config not available yet
+
+    cfg = load_config()
+    connection = (getattr(cfg, "classify_connection_name", "") or "").strip()
+    database = (getattr(cfg, "classify_database", "") or "").strip()
+    if not connection or not database:
+        return
+
+    # Stable id lets operator edits persist across restarts.  The
+    # source_uri matches what fsm_start already splits on "/"
+    # (gateway.py:1785), so the env-seeded row is directly consumable
+    # by the pipeline when selected as activeSourceId in the UI.
+    source_id = f"classify-{connection}-{database}"
+    source_uri = f"{connection}/{database}"
+    display_name = f"{connection} · {database}"
+
+    try:
+        dao = AtelierDao()
+        dao.get_or_create_data_source(
+            source_id=source_id,
+            source_type="hive",
+            display_name=display_name,
+            source_uri=source_uri,
+            vocabulary_mode="hive",
+            vocab_uri=f"{database}.annotations",
+            metadata=json.dumps({
+                "connection": connection,
+                "database": database,
+                "seeded_from_env": True,
+            }),
+        )
+        _log.info(
+            "Seeded classify data source from env: %s (%s → %s.annotations)",
+            source_id, source_uri, database,
+        )
+    except Exception as exc:
+        _log.warning("Classify data source seed failed: %s", exc)
 
 
 def _discover_and_register_hive_sources() -> None:
@@ -1767,17 +1831,24 @@ def fsm_start(source_id: str | None = None):
                     "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
         # Resolve source metadata: connection, database, vocab_uri.
+        # Precedence ladder (lowest → highest):
+        #   base.conf < .env.cai.enc < ATELIER_CLASSIFY_* operator env
+        #     < data_sources DAO row (UI-saved) < fsm_start source_id
+        # Start from the env-var defaults so a deploy with CONNECTION +
+        # DATABASE set reaches a usable Classification Pipeline without
+        # the operator having to click through the Data Platform panel.
+        # Any UI-saved source row for `source_id` overrides per-run.
+        vocab_uri = None
+        connection_name = getattr(cfg, "classify_connection_name", "") or None
+        database = getattr(cfg, "classify_database", "") or "default"
         # OOTB sample and local Synthetic skip the DAO lookup — the
         # pipeline handles their auto-resolution internally.
-        vocab_uri = None
-        connection_name = None
-        database = "default"
         if source_id and source_id not in ("ootb-sample", "synthetic"):
             try:
                 from atelier.db.dao import AtelierDao
                 src = AtelierDao().get_data_source(source_id)
                 if src:
-                    vocab_uri = src.get("vocab_uri") or None
+                    vocab_uri = src.get("vocab_uri") or vocab_uri
                     # source_uri format: "{connection}/{database}"
                     uri = src.get("source_uri", "")
                     if "/" in uri:
@@ -1785,7 +1856,7 @@ def fsm_start(source_id: str | None = None):
                     elif uri:
                         connection_name = uri
             except Exception:
-                pass  # proceed without — pipeline will use fallback
+                pass  # proceed without — pipeline will use env-var fallback
 
         nautilus_watcher = None
 

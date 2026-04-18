@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   Button,
   Card,
@@ -12,7 +12,6 @@ import {
   Typography,
 } from "antd";
 import {
-  ArrowLeftOutlined,
   CopyOutlined,
   DislikeOutlined,
   EyeOutlined,
@@ -79,10 +78,7 @@ export default function OverwatchReport() {
   if (error) {
     return (
       <div style={{ padding: 24 }}>
-        <Link to="/status">
-          <Button icon={<ArrowLeftOutlined />} size="small">Back</Button>
-        </Link>
-        <Card style={{ marginTop: 16 }}>
+        <Card>
           <Text type="danger">{error}</Text>
         </Card>
       </div>
@@ -92,9 +88,6 @@ export default function OverwatchReport() {
   return (
     <div style={{ padding: "0" }}>
       <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Link to="/status">
-          <Button icon={<ArrowLeftOutlined />} size="small">Back</Button>
-        </Link>
         <Title level={4} style={{ margin: 0 }}>
           Overwatch Report
         </Title>

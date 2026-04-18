@@ -31,6 +31,21 @@ export interface DatasetInfo {
   created_at: string;
 }
 
+export interface SmokeTestResult {
+  success: boolean;
+  reply?: string;
+  duration_ms?: number;
+  session_id?: string;
+  total_cost_usd?: number;
+  retried?: boolean;
+  error?: string;
+}
+
+export interface SmokeTestState {
+  result: SmokeTestResult;
+  lastRunAt: number; // Date.now() milliseconds
+}
+
 interface DatasetContextValue {
   sources: DataSourceInfo[];
   activeSourceId: string | null;
@@ -40,12 +55,43 @@ interface DatasetContextValue {
   setActiveDatasetId: (id: string | null) => void;
   refreshSources: () => Promise<void>;
   refreshDatasets: () => Promise<void>;
+  // Status-page state that should survive navigation.
+  statusPlatformId: string | null;
+  setStatusPlatformId: (id: string | null) => void;
+  smokeTest: SmokeTestState | null;
+  setSmokeTest: (s: SmokeTestState | null) => void;
 }
 
 const DatasetContext = createContext<DatasetContextValue | null>(null);
 
 const SOURCE_KEY = "atelier:activeSourceId";
 const DATASET_KEY = "atelier:activeDatasetId";
+const STATUS_PLATFORM_KEY = "atelier:statusPlatformId";
+const SMOKE_KEY = "atelier:smokeTest";
+
+function readSmokeTest(): SmokeTestState | null {
+  try {
+    const raw = localStorage.getItem(SMOKE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SmokeTestState;
+    // Sanity check — stored state must have both fields.
+    if (!parsed || typeof parsed.lastRunAt !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isEnvSeeded(s: DataSourceInfo): boolean {
+  // metadata is a JSON string; seeder stamps {"seeded_from_env": true}.
+  if (!s.metadata) return false;
+  try {
+    const m = JSON.parse(s.metadata);
+    return m?.seeded_from_env === true;
+  } catch {
+    return false;
+  }
+}
 
 export function DatasetProvider({ children }: { children: ReactNode }) {
   const [sources, setSources] = useState<DataSourceInfo[]>([]);
@@ -55,6 +101,12 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
   );
   const [activeDatasetId, setActiveDatasetRaw] = useState<string | null>(
     () => localStorage.getItem(DATASET_KEY),
+  );
+  const [statusPlatformId, setStatusPlatformRaw] = useState<string | null>(
+    () => localStorage.getItem(STATUS_PLATFORM_KEY),
+  );
+  const [smokeTest, setSmokeTestRaw] = useState<SmokeTestState | null>(
+    () => readSmokeTest(),
   );
 
   const setActiveSourceId = useCallback((id: string | null) => {
@@ -75,6 +127,24 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(DATASET_KEY, id);
     } else {
       localStorage.removeItem(DATASET_KEY);
+    }
+  }, []);
+
+  const setStatusPlatformId = useCallback((id: string | null) => {
+    setStatusPlatformRaw(id);
+    if (id) {
+      localStorage.setItem(STATUS_PLATFORM_KEY, id);
+    } else {
+      localStorage.removeItem(STATUS_PLATFORM_KEY);
+    }
+  }, []);
+
+  const setSmokeTest = useCallback((s: SmokeTestState | null) => {
+    setSmokeTestRaw(s);
+    if (s) {
+      localStorage.setItem(SMOKE_KEY, JSON.stringify(s));
+    } else {
+      localStorage.removeItem(SMOKE_KEY);
     }
   }, []);
 
@@ -111,11 +181,17 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
     refreshDatasets();
   }, [refreshDatasets]);
 
-  // Auto-select first source if none active
+  // Auto-select first source if none active.  Env-seeded rows (from
+  // ATELIER_CLASSIFY_CONNECTION + ATELIER_CLASSIFY_DATABASE via the
+  // startup seeder) win over the default `sources[0]` so fresh CAI
+  // deploys land on the operator-intended classification target
+  // without a click.  Operator selections persist in localStorage and
+  // short-circuit this path on subsequent loads.
   useEffect(() => {
     if (sources.length === 0) return;
     if (activeSourceId == null || !sources.some((s) => s.id === activeSourceId)) {
-      setActiveSourceId(sources[0].id);
+      const seeded = sources.find(isEnvSeeded);
+      setActiveSourceId((seeded ?? sources[0]).id);
     }
   }, [activeSourceId, sources, setActiveSourceId]);
 
@@ -143,6 +219,10 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
         setActiveDatasetId,
         refreshSources,
         refreshDatasets,
+        statusPlatformId,
+        setStatusPlatformId,
+        smokeTest,
+        setSmokeTest,
       }}
     >
       {children}

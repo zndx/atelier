@@ -1,9 +1,9 @@
 import { Coordinator, wasmConnector } from "@uwdata/mosaic-core";
 import { EmbeddingAtlas } from "embedding-atlas/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { Alert, Spin, Typography, Button, Tag } from "antd";
-import { ArrowLeftOutlined, SyncOutlined } from "@ant-design/icons";
+import { useParams } from "react-router-dom";
+import { Alert, Spin, Typography, Tag } from "antd";
+import { SyncOutlined } from "@ant-design/icons";
 import type { DatasetInfo } from "../contexts/DatasetContext";
 
 const { Title, Paragraph } = Typography;
@@ -131,11 +131,6 @@ export default function Embeddings() {
     const isNoData = error === "no-data";
     return (
       <div style={{ padding: 24 }}>
-        <Link to="/">
-          <Button icon={<ArrowLeftOutlined />} style={{ marginBottom: 16 }}>
-            Back
-          </Button>
-        </Link>
         {isNoData ? (
           fsmState && fsmState !== "IDLE" && fsmState !== "ERROR" ? (
             <Alert
@@ -202,11 +197,6 @@ export default function Embeddings() {
           padding: "8px 8px",
         }}
       >
-        <Link to="/">
-          <Button icon={<ArrowLeftOutlined />} size="small">
-            Back
-          </Button>
-        </Link>
         <Title level={5} style={{ margin: 0 }}>
           {dataset?.name || datasetId}
         </Title>

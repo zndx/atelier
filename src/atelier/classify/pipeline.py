@@ -375,7 +375,10 @@ def run_classification_pipeline(
         # ── LOADING_VOCAB ────────────────────────────────────────
         fsm.advance(run_id, FSMState.LOADING_VOCAB, progress={"step": "loading_vocab"})
         if category_set is None:
-            category_set = _load_vocabulary(cfg, build_dir, connection_name, vocab_uri=vocab_uri)
+            category_set = _load_vocabulary(
+                cfg, build_dir, connection_name,
+                vocab_uri=vocab_uri, database=database,
+            )
         logger.info("Loaded %d leaf categories", len(category_set.categories))
 
         if not isinstance(category_set, HierarchicalCategorySet):
@@ -1028,7 +1031,13 @@ def run_classification_pipeline(
             pass
 
 
-def _load_vocabulary(cfg, build_dir: Path, connection_name, vocab_uri: str | None = None):
+def _load_vocabulary(
+    cfg,
+    build_dir: Path,
+    connection_name,
+    vocab_uri: str | None = None,
+    database: str | None = None,
+):
     """Load vocabulary for classification.
 
     Vocabulary routing by source type:
@@ -1039,6 +1048,12 @@ def _load_vocabulary(cfg, build_dir: Path, connection_name, vocab_uri: str | Non
       the annotations table specified by *vocab_uri*.  The customer's
       domain codes are the classification targets — the LLM reads labels
       and descriptions and classifies into hierarchical dot-codes.
+    - **Env-default Hive**: when *vocab_uri* is empty but
+      *connection_name* and *database* are both set (via
+      ``ATELIER_CLASSIFY_CONNECTION`` + ``ATELIER_CLASSIFY_DATABASE``),
+      try ``{database}.annotations`` via ``load_annotations_from_hive``
+      before falling through.  This is the auto-classification-at-deploy
+      path that matches the env-seeded ``data_source`` row.
     - **Fallback**: 16-leaf universal (only when no domain annotations).
 
     Hive sources always require annotations; the annotations table
@@ -1087,6 +1102,36 @@ def _load_vocabulary(cfg, build_dir: Path, connection_name, vocab_uri: str | Non
             f"Could not load domain annotations from vocab_uri={vocab_uri!r} "
             f"via connection {connection_name!r}"
         )
+
+    # Env-default Hive: when the operator set ATELIER_CLASSIFY_CONNECTION
+    # + ATELIER_CLASSIFY_DATABASE but no explicit vocab_uri was threaded
+    # through, try {database}.annotations on that connection before
+    # falling through to the universal fixture.  Matches the stable
+    # data_source seeded at startup when the env vars are present.
+    if connection_name and database:
+        try:
+            from atelier.classify.taxonomy import load_annotations_from_hive
+            domain_cs = load_annotations_from_hive(
+                cfg, connection_name, database, hierarchical=True,
+            )
+            if domain_cs is not None and len(domain_cs.categories) > 0:
+                if not isinstance(domain_cs, HierarchicalCategorySet):
+                    domain_cs = HierarchicalCategorySet(
+                        name=domain_cs.name,
+                        categories=list(domain_cs.categories),
+                    )
+                log.info(
+                    "Loaded env-default vocabulary: %d leaf categories "
+                    "(%s.annotations via %s)",
+                    len(domain_cs.categories), database, connection_name,
+                )
+                return domain_cs
+        except Exception as exc:
+            log.warning(
+                "Env-default Hive vocab load failed (%s.annotations via %s): %s. "
+                "Falling through to universal fixture.",
+                database, connection_name, exc,
+            )
 
     # Fallback: universal vocabulary (16 BFO-grounded leaves)
     universal = load_universal_vocabulary(hierarchical=True)
