@@ -45,3 +45,4 @@ from features.agent.step_defs.platforms_steps import *  # noqa: F401,F403
 from features.agent.step_defs.synth_source_steps import *  # noqa: F401,F403
 from features.agent.step_defs.gpu_acceleration_steps import *  # noqa: F401,F403
 from features.agent.step_defs.gpu_sage_parity_steps import *  # noqa: F401,F403
+from features.agent.step_defs.supervisor_steps import *  # noqa: F401,F403

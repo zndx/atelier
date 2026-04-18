@@ -560,6 +560,15 @@ def run_classification_pipeline(
             state.mc_strata_count = len(mc_plan.strata)
             state.mc_sample_fraction = mc_plan.effective_sample_fraction
 
+        # Register the live state with nautilus so it can observe
+        # batch_audit + request cooperative cancellation.  Unregistered
+        # in the outer ``finally`` regardless of outcome.
+        try:
+            from atelier.overwatch.nautilus import register_state as _nautilus_register
+            _nautilus_register(run_id, state)
+        except Exception as exc:
+            logger.debug("nautilus registration skipped: %s", exc)
+
         _llm_sweep(
             state, boot_cfg, llm_backend, system_prompt,
             sweep_columns, samples_by_name, column_table,
@@ -1000,6 +1009,17 @@ def run_classification_pipeline(
             "state": "ERROR",
             "error": str(exc),
         }
+    finally:
+        # Always tear down the nautilus registration so the watcher
+        # thread stops observing a state object the pipeline no longer
+        # owns.  Safe to call even if registration never happened.
+        try:
+            from atelier.overwatch.nautilus import (
+                unregister_state as _nautilus_unregister,
+            )
+            _nautilus_unregister(run_id)
+        except Exception:
+            pass
 
 
 def _load_vocabulary(cfg, build_dir: Path, connection_name, vocab_uri: str | None = None):

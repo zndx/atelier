@@ -251,5 +251,11 @@ tasks:
     bypass_authentication: false
     cpu: 2
     memory: 4
+    # Request one NVIDIA GPU so SAGE/SHAP, CatBoost training, and
+    # sentence-transformer embedding all route through CUDA kernels
+    # when available.  On A10G hosts (22 GB VRAM) this cuts full
+    # pipeline wall time from ~20 min to ~4 min; on CPU hosts the
+    # pipeline falls back automatically (preflight_gpu()).
+    nvidia_gpu: 1
     environment_variables:
       TASK_TYPE: START_APPLICATION

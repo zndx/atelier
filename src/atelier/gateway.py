@@ -1715,16 +1715,60 @@ def fsm_start(source_id: str | None = None):
             except Exception:
                 pass  # proceed without — pipeline will use fallback
 
+        nautilus_watcher = None
+
         def _background():
+            nonlocal nautilus_watcher
             # Pipeline owns run creation via fsm.start_run() — don't
             # create a run here (avoids double-run bug).
-            run_classification_pipeline(
-                cfg, fsm, source_id=source_id, vocab_uri=vocab_uri,
-                connection_name=connection_name, database=database,
-            )
+            try:
+                result = run_classification_pipeline(
+                    cfg, fsm, source_id=source_id, vocab_uri=vocab_uri,
+                    connection_name=connection_name, database=database,
+                )
+            finally:
+                # Start the nautilus watcher as soon as the pipeline
+                # has a run_id attached to the FSM.  We do this here
+                # (after pipeline returns) only when a watcher wasn't
+                # attached during the run — the inline hook below is
+                # the normal path; this is a best-effort cleanup.
+                if nautilus_watcher is not None:
+                    try:
+                        nautilus_watcher.stop()
+                    except Exception:
+                        logger.debug("nautilus stop failed", exc_info=True)
+                    from atelier.overwatch.nautilus import clear_active_watcher
+                    run_id = getattr(nautilus_watcher, "run_id", None)
+                    if run_id:
+                        clear_active_watcher(run_id)
+            return result
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()
+
+        # Attach nautilus once the pipeline has claimed its run_id.
+        # The pipeline calls fsm.start_run() very early; poll briefly
+        # so the watcher covers the LLM sweep (where the interesting
+        # failures live) rather than waiting for the run to end.
+        try:
+            from atelier.overwatch.nautilus import (
+                NautilusWatcher, nautilus_config_from_cfg, set_active_watcher,
+            )
+            ncfg = nautilus_config_from_cfg(cfg)
+            if ncfg.enabled:
+                for _ in range(20):  # up to ~1s — pipeline registers quickly
+                    curr = fsm.get_status()
+                    if curr and curr.id:
+                        nautilus_watcher = NautilusWatcher(
+                            run_id=curr.id, fsm=fsm, cfg=ncfg,
+                        )
+                        set_active_watcher(curr.id, nautilus_watcher)
+                        nautilus_watcher.start()
+                        break
+                    import time as _time
+                    _time.sleep(0.05)
+        except Exception:
+            logger.exception("nautilus attach failed (non-fatal)")
 
         return {"started": True, "source_id": source_id}
     except Exception as exc:
@@ -1750,6 +1794,37 @@ def fsm_runs():
         return {"runs": [r.to_dict() for r in runs]}
     except Exception as exc:
         return _error_envelope(f"FSM runs failed: {exc}")
+
+
+# ── Nautilus (mid-run overwatch watcher) ──────────────────────────
+
+
+@app.get("/api/overwatch/nautilus/{run_id}")
+def overwatch_nautilus_status(run_id: str):
+    """Return the nautilus watcher status for a specific run.
+
+    Populated while the run is executing; after the run terminates the
+    watcher stops but its intervention history remains queryable until
+    the gateway restarts.
+    """
+    try:
+        from atelier.overwatch.nautilus import get_active_watcher
+        watcher = get_active_watcher(run_id)
+        if watcher is None:
+            return {"run_id": run_id, "running": False, "interventions": []}
+        return watcher.status()
+    except Exception as exc:
+        return _error_envelope(f"nautilus status failed: {exc}")
+
+
+@app.get("/api/overwatch/nautilus")
+def overwatch_nautilus_list():
+    """List all active nautilus watchers (at most one per concurrent run)."""
+    try:
+        from atelier.overwatch.nautilus import list_active_watchers
+        return {"watchers": [w.status() for w in list_active_watchers()]}
+    except Exception as exc:
+        return _error_envelope(f"nautilus list failed: {exc}")
 
 
 # ── Orchestration WebSocket ────────────────────────────────────────

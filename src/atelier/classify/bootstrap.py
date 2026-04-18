@@ -26,6 +26,7 @@ FSM, HOCON config, and classification pipeline.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,72 @@ from atelier.classify.sampler import ColumnSample
 from atelier.classify.taxonomy import HierarchicalCategorySet
 
 logger = logging.getLogger(__name__)
+
+
+# ── Error classification for halving retry ───────────────────────
+#
+# Recoverable failures (transient or response-shape issues) halve the
+# batch and recurse — at min_columns_per_call=1 this degenerates into
+# per-column best-effort with each failure recorded, so overwatch sees
+# the specific column that blocked rather than a silent 25-column drop.
+#
+# Fatal failures (auth, invariant violations) abort the sweep with a
+# clear error — halving can't fix a 401 and would just burn budget.
+
+_FATAL_CLASS_NAMES: frozenset[str] = frozenset({
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "NotFoundError",         # model ID wrong — halving won't help
+    "BadRequestError",       # invariant / schema violation
+    "InvalidRequestError",
+    "ClientError",           # boto core-level auth/permission wrapper
+    "UnrecognizedClientException",
+    "AccessDeniedException",
+})
+
+_FATAL_MSG_SUBSTRINGS: tuple[str, ...] = (
+    "invalid api key",
+    "invalid_api_key",
+    "unauthorized",
+    "forbidden",
+    "access denied",
+    "accessdenied",
+    "authentication",
+    "credential",
+    "not authorized",
+    "model not found",
+    "not a valid model",
+    "resource not found",
+)
+
+
+def _classify_error(exc: Exception) -> str:
+    """Return ``"fatal"`` or ``"recoverable"`` for an LLM call exception.
+
+    Fatal errors abort the sweep immediately — halving a batch cannot
+    repair auth problems or a wrong model ID, and silently retrying
+    would waste compute budget while producing a false "partial
+    coverage" result.  Everything else (timeouts, 5xx, JSON parse
+    issues, rate limits, connection resets) halves and retries down
+    to the configured ``min_columns_per_call`` (default 1).
+    """
+    cls_name = type(exc).__name__
+    if cls_name in _FATAL_CLASS_NAMES:
+        return "fatal"
+    msg = str(exc).lower()
+    for marker in _FATAL_MSG_SUBSTRINGS:
+        if marker in msg:
+            return "fatal"
+    return "recoverable"
+
+
+class FatalLLMError(RuntimeError):
+    """Raised when the LLM backend reports an unrecoverable error.
+
+    Halving cannot fix auth, permission, or invariant violations, so
+    the sweep aborts rather than continuing with partial labels that
+    would be indistinguishable from clean output to downstream stages.
+    """
 
 
 # ── State types ──────────────────────────────────────────────────
@@ -50,6 +117,11 @@ class BootstrapConfig:
     coverage_target: float = 1.0
     confidence_floor: float = 0.5
     columns_per_call: int = 50
+    # Floor for exhaustive-halving retry.  A failing batch is repeatedly
+    # halved and recursed; 1 means "fall back to per-column attempts" so
+    # no column is silently dropped.  Bump only when the backend cannot
+    # tolerate single-column calls.
+    min_columns_per_call: int = 1
     max_total_llm_calls: int = 5000
     llm_discount: float = 0.10
     frontier_svm_retrain: bool = True
@@ -67,6 +139,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         k_threshold=cfg.classify_bootstrap_k_threshold,
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,
+        min_columns_per_call=getattr(cfg, "classify_llm_min_columns_per_call", 1),
         max_total_llm_calls=cfg.classify_bootstrap_max_total_llm_calls,
         llm_discount=cfg.classify_llm_discount,
         frontier_svm_retrain=cfg.classify_bootstrap_frontier_svm_retrain,
@@ -98,6 +171,26 @@ class IterationMetrics:
 
 
 @dataclass
+class BatchAttempt:
+    """Audit record for a single LLM batch call (success, truncated, or failed).
+
+    Populated by ``_classify_batch_with_retry``; exposed to overwatch
+    and to the Status page so the reason every column was (or wasn't)
+    classified is inspectable rather than hidden behind a warning log.
+    """
+
+    batch_index: int           # zero-based index within the sweep
+    col_count: int             # number of columns attempted
+    depth: int                 # recursion depth (0 = initial batch)
+    status: str                # "success" | "truncated" | "failed" | "fatal"
+    retry_of: int | None = None  # parent batch_index when halved (else None)
+    error_class: str | None = None
+    error_message: str | None = None
+    columns: list[str] = field(default_factory=list)
+    ts: float = 0.0
+
+
+@dataclass
 class BootstrapState:
     """Mutable per-column tracking across bootstrap phases."""
 
@@ -115,6 +208,17 @@ class BootstrapState:
     tokens_input: int = 0
     tokens_output: int = 0
     iteration_metrics: list[IterationMetrics] = field(default_factory=list)
+    # Halving-retry audit: every LLM batch attempt, success or failure.
+    # Nautilus (the mid-run watcher) observes the length + tail of this
+    # list to decide whether to intervene.
+    batch_audit: list[BatchAttempt] = field(default_factory=list)
+    failed_columns: list[str] = field(default_factory=list)
+    # Cooperative cancellation.  Nautilus sets ``cancelled=True`` when it
+    # decides the run isn't worth continuing (stall or accumulated
+    # failures); phase helpers poll the flag between batches and exit
+    # cleanly rather than being SIGKILLed mid-call.
+    cancelled: bool = False
+    cancellation_reason: str = ""
     # Agent-driven convergence (populated when classify.agent.enabled=true)
     agent_reasoning: list[str] = field(default_factory=list)
     agent_turns: int = 0
@@ -170,50 +274,127 @@ def _classify_batch_with_retry(
     *,
     revisit_context: dict[str, dict] | None = None,
     table_name: str | None = None,
-    min_batch: int = 3,
+    min_batch: int = 1,
+    _depth: int = 0,
+    _batch_index: int | None = None,
+    _parent_index: int | None = None,
 ) -> list:
-    """Classify a batch, retrying with halved batch on truncation.
+    """Classify a batch; on truncation OR recoverable failure, halve and recurse.
 
-    When the LLM response is truncated (``response.truncated``), the batch
-    is split in half and each half retried recursively.  This ensures all
-    columns receive classifications even when the vocabulary is large.
+    Halving terminates at ``min_batch`` (default 1 = per-column fallback),
+    at which point a failed sub-batch records a ``failed`` audit entry
+    and returns no classifications rather than silently dropping the
+    column.  Fatal failures (auth, permission, invariant) raise
+    ``FatalLLMError`` immediately so the sweep aborts with a clear
+    diagnostic instead of burning retry budget.
+
+    Every call — success, truncation, halved retry, or terminal failure
+    — appends a ``BatchAttempt`` to ``state.batch_audit`` so the mid-run
+    nautilus watcher (Pillar 2) and the post-mortem overwatch (Pillar 3)
+    can reconstruct exactly which columns were attempted and what the
+    outcome was.
     """
-    response = backend.classify_batch(
-        chunk_samples, system_prompt,
-        revisit_context=revisit_context,
-        table_name=table_name,
-    )
+    n = len(chunk_samples)
+    batch_index = len(state.batch_audit) if _batch_index is None else _batch_index
+    col_names = [s.name for s in chunk_samples]
+
+    def _record(status: str, error: Exception | None = None) -> None:
+        state.batch_audit.append(BatchAttempt(
+            batch_index=batch_index,
+            col_count=n,
+            depth=_depth,
+            status=status,
+            retry_of=_parent_index,
+            error_class=type(error).__name__ if error else None,
+            error_message=str(error)[:500] if error else None,
+            columns=col_names,
+            ts=time.time(),
+        ))
+
+    try:
+        response = backend.classify_batch(
+            chunk_samples, system_prompt,
+            revisit_context=revisit_context,
+            table_name=table_name,
+        )
+    except Exception as exc:
+        kind = _classify_error(exc)
+        if kind == "fatal":
+            _record("fatal", exc)
+            raise FatalLLMError(
+                f"LLM backend reported unrecoverable error ({type(exc).__name__}): {exc}"
+            ) from exc
+
+        # Recoverable: halve if possible, else record per-column failure.
+        if n <= min_batch:
+            _record("failed", exc)
+            for name in col_names:
+                if name not in state.failed_columns:
+                    state.failed_columns.append(name)
+            logger.warning(
+                "LLM call failed at minimum batch size (%d col%s): %s",
+                n, "s" if n != 1 else "", exc,
+            )
+            return []
+
+        _record("halved_on_error", exc)
+        mid = n // 2
+        logger.warning(
+            "Recoverable LLM error on batch of %d — halving to 2x%d (%s)",
+            n, mid, type(exc).__name__,
+        )
+        results: list = []
+        for sub in (chunk_samples[:mid], chunk_samples[mid:]):
+            sub_context = None
+            if revisit_context:
+                sub_names = [s.name for s in sub]
+                sub_context = {n2: revisit_context[n2] for n2 in sub_names if n2 in revisit_context}
+            results.extend(_classify_batch_with_retry(
+                backend, sub, system_prompt, state,
+                revisit_context=sub_context,
+                table_name=table_name,
+                min_batch=min_batch,
+                _depth=_depth + 1,
+                _parent_index=batch_index,
+            ))
+        return results
+
+    # Call returned — record token usage.
     state.llm_calls_total += 1
     state.tokens_input += response.input_tokens
     state.tokens_output += response.output_tokens
 
-    if not response.truncated or len(chunk_samples) <= min_batch:
+    if not response.truncated or n <= min_batch:
         if response.truncated:
             state.truncation_count += 1
+            _record("truncated_at_min")
             logger.warning(
-                "Truncated response at minimum batch size (%d columns)",
-                len(chunk_samples),
+                "Truncated response at minimum batch size (%d columns)", n,
             )
+        else:
+            _record("success")
         return list(response.classifications)
 
-    # Truncation detected — halve and retry
+    # Truncation detected — halve and retry.
     state.truncation_count += 1
-    mid = len(chunk_samples) // 2
+    _record("truncated")
+    mid = n // 2
     logger.warning(
-        "Truncated response for %d columns — retrying as 2x%d",
-        len(chunk_samples), mid,
+        "Truncated response for %d columns — retrying as 2x%d", n, mid,
     )
     results = []
     for sub in (chunk_samples[:mid], chunk_samples[mid:]):
         sub_context = None
         if revisit_context:
             sub_names = [s.name for s in sub]
-            sub_context = {n: revisit_context[n] for n in sub_names if n in revisit_context}
+            sub_context = {n2: revisit_context[n2] for n2 in sub_names if n2 in revisit_context}
         results.extend(_classify_batch_with_retry(
             backend, sub, system_prompt, state,
             revisit_context=sub_context,
             table_name=table_name,
             min_batch=min_batch,
+            _depth=_depth + 1,
+            _parent_index=batch_index,
         ))
     return results
 
@@ -251,13 +432,22 @@ def _llm_sweep(
         by_table.setdefault(table, []).append(name)
 
     batches_attempted = 0
-    batches_failed = 0
-    last_error: Exception | None = None
+    audit_start = len(state.batch_audit)
+    fatal_error: FatalLLMError | None = None
 
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
             if state.llm_calls_total >= cfg.max_total_llm_calls:
                 break
+            # Cooperative cancellation — nautilus (or an operator via the
+            # gateway) sets this flag between batches; exit cleanly here
+            # rather than in the middle of a multi-minute LLM call.
+            if state.cancelled:
+                logger.warning(
+                    "LLM sweep aborting — cancellation requested: %s",
+                    state.cancellation_reason or "(no reason given)",
+                )
+                return
 
             chunk = table_cols[i: i + effective_batch]
             chunk_samples = [samples[n] for n in chunk]
@@ -268,12 +458,14 @@ def _llm_sweep(
                 classifications = _classify_batch_with_retry(
                     backend, chunk_samples, system_prompt, state,
                     table_name=tname,
+                    min_batch=cfg.min_columns_per_call,
                 )
-            except Exception as e:
-                batches_failed += 1
-                last_error = e
-                logger.warning("LLM call failed (%d/%d): %s", batches_failed, batches_attempted, e)
-                continue
+            except FatalLLMError as exc:
+                # Halving can't fix auth/permission/invariant failures.
+                # Abort immediately with a clear diagnostic rather than
+                # continuing with partial coverage that looks like success.
+                fatal_error = exc
+                break
 
             for c in classifications:
                 if c.category_code and c.confidence > 0:
@@ -281,12 +473,25 @@ def _llm_sweep(
                     state.confidence[c.column_name] = c.confidence
                     state.label_source[c.column_name] = "llm"
 
-    # Fail fast if every single batch call failed — this is almost
-    # certainly a configuration error, not a transient issue.
-    if batches_attempted > 0 and batches_failed == batches_attempted:
+        if fatal_error is not None:
+            break
+
+    if fatal_error is not None:
+        raise fatal_error
+
+    # Fail fast if every top-level batch attempt bottomed out without
+    # producing any labels — almost certainly a configuration problem
+    # rather than a pattern the halving retry can unstick.
+    new_audit = state.batch_audit[audit_start:]
+    top_level_attempts = [a for a in new_audit if a.depth == 0]
+    if top_level_attempts and all(
+        a.status in {"failed", "fatal"} for a in top_level_attempts
+    ):
+        last = top_level_attempts[-1]
         raise RuntimeError(
-            f"LLM sweep failed: all {batches_attempted} batch calls failed. "
-            f"Last error: {last_error!r}. "
+            f"LLM sweep produced no labels after {len(top_level_attempts)} "
+            f"top-level batches (every attempt halved down to failure). "
+            f"Last error: {last.error_class}: {last.error_message!r}. "
             f"Check LLM backend config (region, credentials, model ID)."
         )
 
@@ -430,10 +635,13 @@ def _llm_revisit(
                     backend, chunk_samples, system_prompt, state,
                     revisit_context=chunk_context,
                     table_name=tname,
+                    min_batch=cfg.min_columns_per_call,
                 )
-            except Exception as e:
-                logger.warning("LLM revisit call failed: %s", e)
-                continue
+            except FatalLLMError as exc:
+                logger.error(
+                    "Fatal LLM error during revisit — aborting revisit phase: %s", exc,
+                )
+                raise
 
             for c in classifications:
                 if c.category_code and c.confidence > 0:

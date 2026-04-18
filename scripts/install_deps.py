@@ -22,11 +22,41 @@ pip = [sys.executable, "-m", "pip"]
 print(f"Python: {sys.executable} ({sys.version})")
 print(f"Working directory: {os.getcwd()}")
 
+# Detect a CUDA-capable GPU via nvidia-smi so we pull the RAPIDS
+# extras (cuml-cu12, cupy-cuda12x) on GPU hosts only — they're multi-
+# hundred-MB wheels and pointless on CPU runtimes.  We probe before
+# the install so the package set matches the runtime the Application
+# task declares (``nvidia_gpu: 1`` in .project-metadata.yaml).
+def _detect_gpu() -> bool:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    except subprocess.TimeoutExpired:
+        return False
+    if result.returncode != 0:
+        return False
+    # ``nvidia-smi -L`` emits one "GPU N: <name>" line per device.
+    return bool(result.stdout.strip())
+
+
+extras = ["viz", "agents"]
+if _detect_gpu():
+    print("\n--- CUDA GPU detected — including [gpu] extras ---")
+    extras.append("gpu")
+else:
+    print("\n--- No CUDA GPU detected — skipping [gpu] extras ---")
+
 # Install Python package + dependencies into system Python.
 # [viz] = pyarrow, pandas, sentence-transformers, umap (embedding pipeline)
 # [agents] = claude-agent-sdk, anthropic (Terminal + smoke test + validation)
+# [gpu] = cuml-cu12, cupy-cuda12x (only installed when nvidia-smi finds a device)
 print("\n--- Installing Python dependencies ---")
-subprocess.run([*pip, "install", "-e", ".[viz,agents]"], check=True)
+extras_spec = ",".join(extras)
+subprocess.run([*pip, "install", "-e", f".[{extras_spec}]"], check=True)
 print("Python dependencies installed")
 
 # Verify atelier is importable

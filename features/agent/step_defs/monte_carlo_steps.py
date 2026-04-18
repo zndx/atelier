@@ -105,7 +105,9 @@ def step_mc_config_defaults(context):
     cfg = load_config()
     mc = MCConfig.from_cfg(cfg)
     assert mc.min_corpus_size == 200
-    assert mc.sample_fraction == 0.15
+    # sample_fraction=1.00 is the thesis-aligned default (commit cc68385)
+    # — MC passthrough mode where every column goes to the LLM.
+    assert mc.sample_fraction == 1.00
     assert mc.min_per_stratum == 3
     assert mc.max_frontier_columns == 500
     assert mc.propagation_threshold == 0.85

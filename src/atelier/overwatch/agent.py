@@ -1,17 +1,22 @@
-"""Overwatch agent — monitors classification pipeline runs and writes
-recommendations to build/results/{run_id}/overwatch.md.
+"""Overwatch agent — monitors classification pipeline runs.
 
-Requires direct Anthropic API access (``has_overwatch=True``). Uses the
-Claude Agent SDK in single-turn mode to analyze pipeline artifacts and
-produce actionable insights.
+Two entry points live here:
 
-The agent is invoked after each pipeline run reaches CONVERGED. It reads:
-- classifications.json (per-column predictions + confidence + evidence)
-- evaluation_report.json (accuracy, macro/micro F1, per-category metrics)
-- The pipeline summary dict (K, gap, coverage, iterations, token usage)
+1. :func:`run_overwatch_analysis` — the existing single-turn post-mortem
+   that writes ``overwatch.md``.  Kept as-is for operators who only
+   want the markdown report.
 
-And writes:
-- overwatch.md — structured recommendations for the operator
+2. :func:`run_supervisor_overwatch` — the Pillar 3 tool-using
+   supervisor.  Given a completed (or errored) run, the supervisor is
+   authorized to investigate (Read/Grep/Glob/Bash), propose an overlay,
+   and — in autonomous mode — apply the overlay and trigger a rerun.
+   All side-effecting operations go through the four controlled CLIs
+   (``write_proposal``, ``ingest_ground_truth``, ``apply_and_rerun``,
+   ``kill_run``); the agent has no direct ``Write`` tool.
+
+Both entry points require a direct Anthropic API key (``has_overwatch``).
+Bedrock-only deployments get neither — the classifier runs on Bedrock,
+but the supervisor overwatch itself requires the Anthropic direct API.
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from atelier.overwatch.hooks import evaluate_hook
 
 log = logging.getLogger(__name__)
 
@@ -259,3 +266,263 @@ def _query_overwatch(cfg, prompt: str) -> str:
         asyncio.run(_run())
 
     return "\n".join(text_parts) if text_parts else "# Overwatch Analysis\n\n*No analysis generated.*\n"
+
+
+# ── Supervisor overwatch (Pillar 3) ─────────────────────────────
+
+
+def _make_pretooluse_hook():
+    """Return an async PreToolUse hook enforcing the supervisor sandbox.
+
+    The SDK expects an awaitable returning ``SyncHookJSONOutput`` with
+    a ``hookSpecificOutput.permissionDecision`` of ``"allow"`` / ``"deny"``.
+    The pure decision logic lives in :mod:`atelier.overwatch.hooks`;
+    this shim just adapts to the SDK contract.
+    """
+
+    async def _hook(input_data, tool_use_id, context):  # noqa: ANN001 — SDK-typed
+        tool_name = getattr(input_data, "tool_name", None) or input_data.get("tool_name", "")
+        tool_input = getattr(input_data, "tool_input", None) or input_data.get("tool_input", {})
+        decision = evaluate_hook(tool_name, tool_input)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": decision["decision"],
+                "permissionDecisionReason": decision["reason"],
+            }
+        }
+
+    return _hook
+
+
+def _supervisor_system_prompt(cfg, autonomy: str) -> str:
+    """System prompt that teaches the supervisor its bounds and tools."""
+    return (
+        "You are the Atelier supervisor overwatch.  Your job is to adapt "
+        "the classification pipeline's scaffolding when a run fails or "
+        "underperforms, NOT to change the classifier provider.\n\n"
+        "## Hard invariant (Bedrock-only)\n"
+        "The classification LLM must continue to run on AWS Bedrock.  "
+        "You MAY NOT propose changes to `classify_llm_backend`, "
+        "`classify_llm_api_key`, `classify_llm_base_url`, "
+        "`classify_llm_model`, or any agent/subagent model pin.  These "
+        "keys are rejected at the CLI layer.\n\n"
+        f"## Autonomy tier: {autonomy}\n"
+        + (
+            "- **monitor** — write a markdown report only.  Do not invoke "
+            "the CLIs.  No side effects.\n"
+            if autonomy == "monitor"
+            else (
+                "- **propose** — investigate freely, then call "
+                "`write_proposal` to persist a `proposed_overlay.json`.  "
+                "You MAY NOT call `apply_and_rerun` or `kill_run`; the "
+                "operator chooses whether to apply.\n"
+                if autonomy == "propose"
+                else
+                "- **autonomous** — you may call any of the four CLIs: "
+                "`write_proposal`, `ingest_ground_truth`, `apply_and_rerun`, "
+                "`kill_run`.  Bounded by `overwatch.max_retries` per session.\n"
+            )
+        )
+        + "\n## Tools available\n"
+        "- `Read`, `Grep`, `Glob` — inspect anything under the repository "
+        "root; not /etc, not ~/.ssh.\n"
+        "- `Bash` — only the four controlled CLIs above plus read-only "
+        "inspection commands (`ls`, `cat`, `head`, `tail`, `git status`, "
+        "`git log`, etc).  Destructive commands are denied.\n\n"
+        "## Preferred workflow\n"
+        "1. Read `build/results/<run_id>/classifications.json`, "
+        "`settings_snapshot.json`, and `evaluation_report.json`.\n"
+        "2. If nautilus fired an intervention trigger mid-run, read the "
+        "gateway `/api/overwatch/nautilus/<run_id>` dump embedded in "
+        "your prompt — it explains why you were invoked.\n"
+        "3. Identify the specific failure mode and pick ONE targeted "
+        "overlay change.  Small, verifiable changes beat broad sweeps.\n"
+        "4. Call `write_proposal` with a clear rationale + expected "
+        "effect.  If autonomous and the change is safe, also call "
+        "`apply_and_rerun`.\n"
+        "5. End with a brief summary of what you tried and why.\n\n"
+        "Do NOT recommend K-based fixes or iteration-count bumps under "
+        "the fit-to-LLM regime (K is diagnostic; CatBoost agrees with "
+        "the LLM by construction).\n"
+    )
+
+
+def _build_supervisor_prompt(
+    *,
+    run_id: str,
+    summary: dict[str, Any],
+    session_id: str | None,
+    intervention_detail: str | None,
+    results_dir: Path,
+) -> str:
+    """Construct the initial user prompt for a supervisor invocation."""
+    parts: list[str] = []
+
+    if intervention_detail:
+        parts.append(
+            "## You were invoked by a mid-run intervention\n\n"
+            f"{intervention_detail}\n\n"
+            "Decide whether to continue, request cancellation, or "
+            "propose an overlay for the next attempt.  Prefer the "
+            "lightest intervention that addresses the specific "
+            "failure — don't cancel a run that's merely slow.\n\n"
+        )
+    else:
+        parts.append(
+            "## Post-mortem investigation\n\n"
+            "The pipeline run completed.  Investigate whether a "
+            "follow-up attempt with a targeted overlay would help.  "
+            "If the run is healthy (LLM coverage 100%, LLM agreement "
+            "100%, no failed batches), say so and stop.\n\n"
+        )
+
+    parts.append(f"### Run: `{run_id}`\n")
+    parts.append(f"### Results directory: `{results_dir}`\n")
+    if session_id:
+        parts.append(f"### Supervisor session: `{session_id}`\n")
+    parts.append("\n### Pipeline summary (as returned by the pipeline)\n")
+    parts.append(f"```json\n{json.dumps(summary, indent=2, default=str)}\n```\n\n")
+
+    parts.append(
+        "### What to do\n\n"
+        "Read the artifacts, decide on one targeted remediation (or "
+        "none), and execute the controlled CLIs per the system prompt.  "
+        "Respond with a concise summary — the operator already has the "
+        "artifacts; you don't need to paste them back.\n"
+    )
+    return "".join(parts)
+
+
+def run_supervisor_overwatch(
+    cfg,
+    *,
+    run_id: str,
+    summary: dict[str, Any],
+    results_dir: Path | str,
+    session_id: str | None = None,
+    intervention_detail: str | None = None,
+    max_turns: int = 30,
+    max_budget_usd: float = 15.0,
+) -> dict[str, Any]:
+    """Run the tool-using supervisor overwatch on a pipeline run.
+
+    Returns a dict with ``{"status", "transcript", "error"}``.
+    ``status`` is ``"ok"`` on clean completion, ``"skipped"`` when
+    overwatch isn't available, or ``"error"`` on failure.  The
+    supervisor's side-effects (proposal writes, reruns) happen via
+    the controlled CLIs — read them from the session/results dir.
+    """
+    autonomy = getattr(cfg, "overwatch_autonomy", "propose")
+
+    if not cfg.has_overwatch:
+        return {"status": "skipped", "reason": "overwatch disabled or no Anthropic key"}
+
+    results_dir = Path(results_dir)
+
+    try:
+        from claude_agent_sdk import (
+            AssistantMessage, ClaudeAgentOptions, HookMatcher, TextBlock, query,
+        )
+    except ImportError as exc:
+        return {"status": "skipped", "reason": f"claude_agent_sdk unavailable: {exc}"}
+
+    project_root = Path(__file__).resolve().parents[3]
+
+    env: dict[str, str] = {"ANTHROPIC_API_KEY": cfg.anthropic_api_key}
+
+    from atelier.model_compat import requires_adaptive_thinking
+    thinking_kwargs: dict[str, Any] = {}
+    if requires_adaptive_thinking(cfg.overwatch_model):
+        # SDK v0.1.56 workaround — see the matching comment in
+        # run_overwatch_analysis above.
+        thinking_kwargs["max_thinking_tokens"] = 0
+        thinking_kwargs["effort"] = "medium"
+
+    hook = _make_pretooluse_hook()
+    options = ClaudeAgentOptions(
+        allowed_tools=["Read", "Grep", "Glob", "Bash"],
+        disallowed_tools=["Write", "Edit", "NotebookEdit"],
+        permission_mode="default",
+        model=cfg.overwatch_model,
+        max_turns=max_turns,
+        max_budget_usd=max_budget_usd,
+        cwd=str(project_root),
+        env=env,
+        system_prompt=_supervisor_system_prompt(cfg, autonomy),
+        hooks={"PreToolUse": [HookMatcher(hooks=[hook])]},
+        **thinking_kwargs,
+    )
+
+    user_prompt = _build_supervisor_prompt(
+        run_id=run_id,
+        summary=summary,
+        session_id=session_id,
+        intervention_detail=intervention_detail,
+        results_dir=results_dir,
+    )
+
+    transcript: list[str] = []
+    import asyncio
+
+    async def _run():
+        async for message in query(prompt=user_prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        transcript.append(block.text)
+
+    try:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    pool.submit(asyncio.run, _run()).result(timeout=600)
+            else:
+                loop.run_until_complete(_run())
+        except RuntimeError:
+            asyncio.run(_run())
+    except Exception as exc:
+        log.exception("supervisor overwatch failed")
+        return {"status": "error", "error": str(exc), "transcript": transcript}
+
+    return {"status": "ok", "transcript": transcript}
+
+
+def run_supervisor_intervention(
+    cfg,
+    *,
+    intervention_record: dict[str, Any],
+    run_id: str,
+    summary: dict[str, Any] | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Short-budget supervisor invocation triggered by nautilus.
+
+    Compared to the post-mortem ``run_supervisor_overwatch``, this is:
+
+    - bounded to ``max_turns=10`` and ``max_budget_usd=3`` so a
+      stalled run doesn't sink budget into investigation
+    - expected to produce one concrete decision (continue / cancel /
+      proposal), not a full report
+    """
+    detail = (
+        f"Trigger: **{intervention_record.get('trigger', 'unknown')}**\n"
+        f"Detail: {intervention_record.get('trigger_detail', '')}\n"
+        f"FSM state: {intervention_record.get('fsm_state', '?')} "
+        f"(last update {intervention_record.get('fsm_updated_at', '?')})\n"
+        f"Batch audit length: {intervention_record.get('batch_audit_len', 0)}\n"
+        f"Failed batches: {intervention_record.get('failed_batch_count', 0)}\n"
+    )
+    results_dir = Path(__file__).resolve().parents[3] / "build" / "results" / run_id
+    return run_supervisor_overwatch(
+        cfg,
+        run_id=run_id,
+        summary=summary or {},
+        results_dir=results_dir,
+        session_id=session_id,
+        intervention_detail=detail,
+        max_turns=10,
+        max_budget_usd=3.0,
+    )

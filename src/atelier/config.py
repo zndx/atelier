@@ -86,6 +86,12 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "overwatch.github_app_id": ("overwatch_github_app_id", str),
     "overwatch.github_private_key_path": ("overwatch_github_private_key_path", str),
     "overwatch.github_repo": ("overwatch_github_repo", str),
+    # Nautilus mid-run watcher
+    "overwatch.nautilus.enabled": ("overwatch_nautilus_enabled", bool),
+    "overwatch.nautilus.poll_interval_s": ("overwatch_nautilus_poll_interval_s", float),
+    "overwatch.nautilus.stall_threshold_s": ("overwatch_nautilus_stall_threshold_s", float),
+    "overwatch.nautilus.llm_sweep_threshold_s": ("overwatch_nautilus_llm_sweep_threshold_s", float),
+    "overwatch.nautilus.failed_batch_threshold": ("overwatch_nautilus_failed_batch_threshold", int),
     "classify.connection_name": ("classify_connection_name", str),
     "classify.database": ("classify_database", str),
     "classify.sample_size": ("classify_sample_size", int),
@@ -114,6 +120,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.llm.max_tokens": ("classify_llm_max_tokens", int),
     "classify.llm.temperature": ("classify_llm_temperature", float),
     "classify.llm.columns_per_call": ("classify_llm_columns_per_call", int),
+    "classify.llm.min_columns_per_call": ("classify_llm_min_columns_per_call", int),
     "classify.llm.max_retries": ("classify_llm_max_retries", int),
     "classify.llm.disable_reasoning": ("classify_llm_disable_reasoning", bool),
     "classify.llm.reasoning_budget": ("classify_llm_reasoning_budget", int),
@@ -311,6 +318,10 @@ class AtelierConfig:
     classify_llm_max_tokens: int = 65536
     classify_llm_temperature: float = 0.0
     classify_llm_columns_per_call: int = 25
+    # Exhaustive-halving floor: a failing batch halves recursively until
+    # this size, at which point a per-batch failure is recorded rather
+    # than the columns being silently dropped.  1 = per-column fallback.
+    classify_llm_min_columns_per_call: int = 1
     classify_llm_max_retries: int = 3
     classify_llm_disable_reasoning: bool = False
     classify_llm_reasoning_budget: int = 8192
@@ -424,6 +435,15 @@ class AtelierConfig:
     overwatch_github_app_id: str = ""
     overwatch_github_private_key_path: str = ""
     overwatch_github_repo: str = ""
+    # Nautilus mid-run watcher — polls FSM + batch_audit between LLM
+    # calls and fires interventions on stall / slow-sweep / accumulated
+    # batch failures.  Cooperative cancellation only (sets a flag on the
+    # live BootstrapState); no SIGKILL of the pipeline thread.
+    overwatch_nautilus_enabled: bool = True
+    overwatch_nautilus_poll_interval_s: float = 10.0
+    overwatch_nautilus_stall_threshold_s: float = 120.0
+    overwatch_nautilus_llm_sweep_threshold_s: float = 300.0
+    overwatch_nautilus_failed_batch_threshold: int = 10
 
     @property
     def has_overwatch(self) -> bool:
