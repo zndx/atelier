@@ -135,6 +135,12 @@ bdd-runtime:
 
 # ── Secrets ───────────────────────────────────────────────────────
 
+# Materialize all SOPS-encrypted artifacts into their runtime paths.
+# Called automatically by bin/start-app.sh (CAI) and devenv enterShell
+# (local); also safe to run manually from any checkout.
+bootstrap-secrets:
+    bash bin/bootstrap-secrets.sh
+
 # Decrypt CAI env defaults (requires age private key)
 decrypt-secrets:
     sops --decrypt --input-type dotenv --output-type dotenv .env.cai.enc > .env.cai
@@ -144,6 +150,25 @@ decrypt-secrets:
 encrypt-secrets:
     sops --encrypt --input-type dotenv --output-type dotenv .env.cai > .env.cai.enc
     @echo "Encrypted .env.cai.enc"
+
+# Decrypt the ground-truth CSV from BDD fixtures into build/data/
+# for local inspection. Safe to re-run; plaintext is gitignored.
+decrypt-gt:
+    mkdir -p build/data
+    sops --decrypt features/fixtures/ground_truth.csv.enc > build/data/ground_truth.csv
+    @echo "Decrypted build/data/ground_truth.csv ($(wc -l < build/data/ground_truth.csv) lines)"
+
+# Encrypt the ground-truth CSV at build/data/ground_truth.csv back
+# into features/fixtures/ for commit. Maintainer runs this after
+# updating the answer key. --filename-override lets SOPS resolve
+# creation_rules against the intended destination path without
+# staging plaintext under features/fixtures/.
+encrypt-gt:
+    mkdir -p features/fixtures
+    sops --encrypt --input-type binary --output-type binary \
+        --filename-override features/fixtures/ground_truth.csv \
+        build/data/ground_truth.csv > features/fixtures/ground_truth.csv.enc
+    @echo "Encrypted features/fixtures/ground_truth.csv.enc"
 
 # ── Versioning ────────────────────────────────────────────────────
 

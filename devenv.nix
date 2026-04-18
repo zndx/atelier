@@ -175,6 +175,14 @@
       done
       export LD_LIBRARY_PATH="$NVIDIA_DRIVER_LIBS''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
+
+    # Materialize SOPS-encrypted artifacts so local dev mirrors the
+    # CAI boot state: decrypt .env.cai.enc and the GT fixture into
+    # their runtime paths.  Safe to skip if sops or the age key
+    # isn't present; the script no-ops and the dev shell still loads.
+    if [ -x bin/bootstrap-secrets.sh ]; then
+      bash bin/bootstrap-secrets.sh || true
+    fi
   '';
 
   enterTest = ''

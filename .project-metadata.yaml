@@ -9,32 +9,53 @@ specification_version: 1.0
 prototype_version: 0.2.0
 
 environment_variables:
-  # ── AWS / Bedrock Credentials ──────────────────────────────────
+  # ══════════════════════════════════════════════════════════════════
+  # REQUIRED — paste these four values, then start the Application.
+  # Everything else is optional (defaults ship encrypted in
+  # .env.cai.enc; SOPS_AGE_KEY unlocks them at boot).
+  # ══════════════════════════════════════════════════════════════════
+
   AWS_ACCESS_KEY_ID:
     default: ""
     description: >-
-      AWS access key for Bedrock inference. Production default for CAI deployments.
+      **Required.** AWS access key for Bedrock inference.
   AWS_SECRET_ACCESS_KEY:
     default: ""
     description: >-
-      AWS secret key for Bedrock inference.
+      **Required.** AWS secret key for Bedrock inference.
+  ANTHROPIC_API_KEY:
+    default: ""
+    description: >-
+      **Required.** Direct Anthropic API key. Powers the overwatch
+      supervisor (Bedrock cannot run overwatch; it classifies only).
+      Can coexist with Bedrock credentials — both are validated at startup.
+  SOPS_AGE_KEY:
+    default: ""
+    description: >-
+      **Required.** Full `AGE-SECRET-KEY-1…` string provided by the
+      Atelier maintainer out-of-band. Unlocks the encrypted deployment
+      defaults in `.env.cai.enc` plus the ground-truth CSV fixture at
+      startup. Alternative: set `SOPS_AGE_KEY_FILE` to a mounted path.
+      Without this key, the four above are the only config the app sees.
+
+  # ══════════════════════════════════════════════════════════════════
+  # OPTIONAL — values below ship encrypted in `.env.cai.enc` and are
+  # decrypted at boot when `SOPS_AGE_KEY` is present. Set an entry
+  # here only to override the SOPS-decrypted default on this deploy.
+  # ══════════════════════════════════════════════════════════════════
+
+  # ── AWS / Bedrock region + session ─────────────────────────────
   AWS_REGION:
     default: "us-east-1"
     description: >-
+      _Optional. SOPS-decrypted default ships in `.env.cai.enc`;
+      override only for non-us-east-1 deploys._
       AWS region for Bedrock inference.
   AWS_SESSION_TOKEN:
     default: ""
     description: >-
-      AWS session token for temporary credentials (STS AssumeRole). Leave
-      blank when using permanent IAM credentials.
-
-  # ── Anthropic Direct API ───────────────────────────────────────
-  ANTHROPIC_API_KEY:
-    default: ""
-    description: >-
-      Direct Anthropic API key. Provides overwatch capability for onboarding
-      and configuration assistance, or serves as primary provider when preferred.
-      Can coexist with Bedrock credentials — both are validated at startup.
+      _Optional._ AWS session token for temporary credentials (STS
+      AssumeRole). Leave blank when using permanent IAM credentials.
 
   # ── Agent SDK (Claude Code) ────────────────────────────────────
   ATELIER_AGENT_MODEL:

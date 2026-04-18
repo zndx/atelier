@@ -8,3 +8,10 @@ creation_rules:
     age: age1sfpdmc0ap0y2y378u2ge0e8x6rxygjd5j6gzd4fhfecknl7ac4yswpqajw
   - path_regex: 'config/secrets/.*\.env'
     age: age1sfpdmc0ap0y2y378u2ge0e8x6rxygjd5j6gzd4fhfecknl7ac4yswpqajw
+  # Ground-truth CSV co-located with the BDD corpus it validates.
+  # Binary-mode SOPS, shared age recipient with .env.cai.enc.
+  # Matches the plaintext name because SOPS resolves creation rules
+  # from the input file path (or --filename-override); the encrypt
+  # helpers pass the plaintext-styled path and redirect stdout to .enc.
+  - path_regex: 'features/fixtures/.*\.(csv|tsv|json)'
+    age: age1sfpdmc0ap0y2y378u2ge0e8x6rxygjd5j6gzd4fhfecknl7ac4yswpqajw

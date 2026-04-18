@@ -158,21 +158,27 @@ fi
 # Ensure pip-installed tools are on PATH
 export PATH="$HOME/.local/bin:$PATH"
 
-# ── Decrypt CAI secrets (if encrypted defaults are present) ────────
-# .env.cai.enc is committed to git (SOPS+age encrypted).
-# Decrypt at startup so values feed into HOCON ${?VAR} substitution.
-# Requires SOPS_AGE_KEY or ~/.config/sops/age/keys.txt.
-if [ -f .env.cai.enc ] && ! [ -f .env.cai ]; then
-  if command -v sops &>/dev/null; then
-    echo "Decrypting .env.cai from SOPS..."
-    sops --decrypt --input-type dotenv --output-type dotenv .env.cai.enc > .env.cai 2>/dev/null || true
-  fi
+# ── Decrypt SOPS-encrypted artifacts ──────────────────────────────
+# bin/bootstrap-secrets.sh is the shared entry point (CAI here,
+# devenv enterShell locally, `just bootstrap-secrets` on demand).
+# It handles .env.cai.enc → .env.cai AND
+# features/fixtures/ground_truth.csv.enc → build/data/ground_truth.csv.
+# Idempotent + no-op on missing ciphertext, so a clean checkout
+# without encrypted defaults still boots.
+if [ -f bin/bootstrap-secrets.sh ]; then
+  bash bin/bootstrap-secrets.sh || true
 fi
 if [ -f .env.cai ]; then
   echo "Loading CAI defaults from .env.cai..."
   set -a
   source .env.cai
   set +a
+fi
+# Point the pipeline at the materialized ground-truth CSV unless the
+# operator overrode ATELIER_GROUND_TRUTH_URI directly (env-var wins).
+if [ -z "${ATELIER_GROUND_TRUTH_URI:-}" ] && [ -f build/data/ground_truth.csv ]; then
+  export ATELIER_GROUND_TRUTH_URI=build/data/ground_truth.csv
+  echo "ground truth: $ATELIER_GROUND_TRUTH_URI"
 fi
 
 # Load nvm so node/npm are available (needed by PGlite below)
