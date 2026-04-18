@@ -74,15 +74,26 @@ environment_variables:
       Bedrock path. Leave blank to accept the provider default.
 
   # ── Classification LLM ─────────────────────────────────────────
+  ATELIER_CLASSIFY_MODEL:
+    default: ""
+    description: >-
+      **Primary classification model setting.** Bedrock inference-profile
+      ARN (preferred on CAI) or plain Anthropic model ID. Backend is
+      inferred from the identifier format — arn:... or us.anthropic.*
+      routes through Bedrock invoke_model; claude-sonnet-* / claude-opus-*
+      uses the direct Messages API. Takes precedence over
+      ANTHROPIC_SUBAGENT_MODEL when both are set.
+      Example (Bedrock Opus 4.6): us.anthropic.claude-opus-4-6-v1:0
+      Example (Bedrock Sonnet 4.5): us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      Example (direct API): claude-opus-4-7
   ANTHROPIC_SUBAGENT_MODEL:
     default: ""
     description: >-
-      Model ID for classification subagent work (structured output). Backend
-      type is inferred from format: Bedrock ARN/ID (arn:... or
-      us.anthropic.*) uses invoke_model; plain Anthropic ID (claude-sonnet-*)
-      uses direct Messages API. Required when ATELIER_LLM_API_KEY is not set.
-      Example (Bedrock): us.anthropic.claude-sonnet-4-5-20250929-v1:0
-      Example (direct): claude-sonnet-4-5-20250929
+      Legacy alias for ATELIER_CLASSIFY_MODEL. Kept so deployments
+      provisioned before the rename continue to work. Prefer
+      ATELIER_CLASSIFY_MODEL for new deployments — identical behavior,
+      but groups with the other ATELIER_CLASSIFY_* controls in the AMP
+      configuration page.
   ATELIER_LLM_BACKEND:
     default: ""
     description: >-
