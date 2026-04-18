@@ -217,3 +217,52 @@ def step_row_custom_preserved(context):
     row = context.dao.get_data_source(context.source_id)
     assert row is not None
     assert row["vocab_uri"] == "custom.annotations", row
+
+
+# ── Web Terminal provider-routing scenarios ───────────────────
+#
+# The Web Terminal picker lets the operator override cfg.agent_model
+# per-session.  _build_sdk_env must honor the selection when deciding
+# whether to set CLAUDE_CODE_USE_BEDROCK — without this, a direct-API
+# pick on a CAI deploy (which has both Bedrock creds and an
+# ANTHROPIC_API_KEY) still force-routes through Bedrock.
+
+_BEDROCK_ARN = (
+    "arn:aws:bedrock:us-east-1:440464140575:inference-profile/"
+    "us.anthropic.claude-opus-4-6-v1"
+)
+
+
+@given("a cfg with both Bedrock ARN default and ANTHROPIC_API_KEY")
+def step_mixed_cred_cfg(context):
+    from atelier.config import AtelierConfig
+    context.cfg = AtelierConfig(
+        anthropic_api_key="sk-ant-bdd",
+        aws_access_key_id="AKIAEXAMPLE",
+        aws_secret_access_key="SECRETEXAMPLE",
+        aws_region="us-east-1",
+        agent_model=_BEDROCK_ARN,
+    )
+
+
+@when('_build_sdk_env is called with selected_model "{model}"')
+def step_build_env_with_model(context, model):
+    from atelier.agents.client import _build_sdk_env
+    context.env = _build_sdk_env(context.cfg, selected_model=model)
+
+
+@when("_build_sdk_env is called with the Bedrock ARN as selected_model")
+def step_build_env_with_arn(context):
+    from atelier.agents.client import _build_sdk_env
+    context.env = _build_sdk_env(context.cfg, selected_model=_BEDROCK_ARN)
+
+
+@then("the env dict omits CLAUDE_CODE_USE_BEDROCK")
+def step_no_bedrock_flag(context):
+    assert "CLAUDE_CODE_USE_BEDROCK" not in context.env, context.env
+
+
+@then('the env dict sets CLAUDE_CODE_USE_BEDROCK to "{value}"')
+def step_bedrock_flag_set(context, value):
+    got = context.env.get("CLAUDE_CODE_USE_BEDROCK")
+    assert got == value, f"expected {value!r}, got {got!r}; env={context.env}"

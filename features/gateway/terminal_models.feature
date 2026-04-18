@@ -8,12 +8,13 @@ Feature: Web Terminal Agent model catalog + selection
     Given ANTHROPIC_API_KEY is set so Anthropic rows are available
     And the terminal model override is cleared
 
-  Scenario: Catalog exposes six frontier entries across two providers
+  Scenario: Catalog exposes two Opus-class entries across two providers
     When I GET the terminal models catalog
-    Then the catalog has 6 entries
+    Then the catalog has 2 entries
     And the catalog includes a "bedrock" provider row
     And the catalog includes an "anthropic" provider row
     And at least one "anthropic" row is available
+    And every catalog entry is an Opus-class model
 
   Scenario: Selecting an available model sets the override
     When I POST terminal model id "anthropic-opus-4-7"

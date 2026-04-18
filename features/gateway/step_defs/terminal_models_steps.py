@@ -117,6 +117,16 @@ def step_stats_present(context):
         assert m["stats"]["n"] >= 0, m["stats"]
 
 
+@then("every catalog entry is an Opus-class model")
+def step_opus_only(context):
+    for m in context.tc_json["models"]:
+        label = (m.get("label") or "").lower()
+        ref = (m.get("model_ref") or "").lower()
+        assert "opus" in label or "opus" in ref, (
+            f"non-Opus entry in catalog: {m}"
+        )
+
+
 # ── POST active ────────────────────────────────────────────────
 
 

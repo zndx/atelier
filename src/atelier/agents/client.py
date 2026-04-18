@@ -146,7 +146,10 @@ def validate_credentials(cfg: AtelierConfig) -> dict:
 validate_api_key = validate_credentials
 
 
-def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
+def _build_sdk_env(
+    cfg: AtelierConfig,
+    selected_model: str | None = None,
+) -> dict[str, str]:
     """Build environment dict for ClaudeAgentOptions.
 
     Passes all available credentials — they don't conflict at the SDK
@@ -163,6 +166,13 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
       (CLI defaults to direct API).
     - When both are configured, prefer the direct API unless the model
       is explicitly a Bedrock ARN — that's the production signal.
+
+    ``selected_model`` wins over ``cfg.agent_model`` when passed — the
+    Web Terminal Agent picker lets an operator override the deployment
+    default for an interactive session.  When both Bedrock and direct
+    API credentials are present, this is the only way a direct-API
+    pick can escape the Bedrock flag, since ``cfg.agent_model`` is
+    typically a Bedrock ARN on CAI deploys.
     """
     env: dict[str, str] = {}
     if cfg.anthropic_api_key:
@@ -178,14 +188,15 @@ def _build_sdk_env(cfg: AtelierConfig) -> dict[str, str]:
 
     from atelier.config import is_bedrock_model, region_from_arn
 
-    model_is_bedrock = is_bedrock_model(cfg.agent_model)
+    effective_model = selected_model or cfg.agent_model
+    model_is_bedrock = is_bedrock_model(effective_model)
     prefer_bedrock = model_is_bedrock or (cfg.has_bedrock and not cfg.has_anthropic)
     if prefer_bedrock and cfg.has_bedrock:
         env["CLAUDE_CODE_USE_BEDROCK"] = "1"
         # Cross-region inference profiles embed the target region in the
         # ARN.  Prefer that over cfg.aws_region so the CLI connects to
         # the correct endpoint.
-        arn_region = region_from_arn(cfg.agent_model)
+        arn_region = region_from_arn(effective_model)
         effective_region = arn_region or cfg.aws_region
         if effective_region:
             env["AWS_REGION"] = effective_region

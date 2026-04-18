@@ -597,7 +597,19 @@ class TerminalSession:
             from atelier.agents.client import _build_sdk_env
 
             cfg = load_config()
-            env = _build_sdk_env(cfg)
+
+            # Resolve the active model first — the picker can override
+            # the deployment default, and the env-builder needs to see
+            # the live selection to decide whether to set
+            # CLAUDE_CODE_USE_BEDROCK. Without this, picking a direct-
+            # API model on a deploy that has Bedrock creds still routes
+            # through Bedrock (because cfg.agent_model is a Bedrock ARN).
+            from atelier.model_compat import requires_adaptive_thinking
+            from atelier.terminal_selection import get_active, active_model_ref
+            active_entry = get_active(cfg)
+            resolved_model = active_model_ref(cfg)
+
+            env = _build_sdk_env(cfg, selected_model=resolved_model)
 
             # Load project-level .claude/commands so the interactive
             # session exposes our 9 keystone skills as slash commands.
@@ -627,15 +639,11 @@ class TerminalSession:
             # <level>`, the API sees only `output_config.effort` and
             # 4.7 is happy.  Remove this workaround after upgrading
             # claude-agent-sdk to a release that fixes the mapping.
-            # Resolve the active model from the in-memory selection
-            # (gateway-lifetime override), falling back to cfg.agent_model.
-            # The catalog entry (when one matches) tells us which
-            # rolling-stats bucket to write to when this query completes.
-            from atelier.model_compat import requires_adaptive_thinking
-            from atelier.terminal_selection import get_active, active_model_ref
-            active_entry = get_active(cfg)
-            resolved_model = active_model_ref(cfg)
-
+            # ``active_entry`` / ``resolved_model`` computed above
+            # (before env-build) so provider selection sees the picker
+            # choice; the catalog entry (when one matches) tells us
+            # which rolling-stats bucket to write to when this query
+            # completes.
             thinking_kwargs: dict = {}
             if requires_adaptive_thinking(resolved_model):
                 thinking_kwargs["max_thinking_tokens"] = 0

@@ -55,6 +55,10 @@ async def _lifespan(app: FastAPI):
             _seed_classify_data_source()
         except Exception as exc:
             _log.warning("Classify data source seeding skipped: %s", exc)
+        try:
+            _maybe_auto_start_classify()
+        except Exception as exc:
+            _log.warning("Classify auto-start skipped: %s", exc)
 
     seed_task = asyncio.create_task(_seed_with_retry())
 
@@ -414,6 +418,39 @@ def _seed_classify_data_source() -> None:
         )
     except Exception as exc:
         _log.warning("Classify data source seed failed: %s", exc)
+
+
+def _maybe_auto_start_classify() -> None:
+    """Kick off a classification run on boot when configured.
+
+    Gated by ``ATELIER_CLASSIFY_AUTO_START`` (HOCON: ``classify.auto_start``).
+    Uses the same stable source_id shape as ``_seed_classify_data_source``
+    (``classify-{connection}-{database}``) so the run targets the
+    env-seeded row — operator edits to vocab_uri still apply, because
+    the DAO row wins over the raw env in the fsm_start precedence ladder.
+
+    Runs inside the lifespan seed task, but ``fsm_start`` dispatches the
+    pipeline to its own worker thread, so this call returns quickly.
+    The existing in-flight guard in ``fsm_start`` (IDLE/CONVERGED/ERROR)
+    prevents a double-launch if the lifespan replays on reload.
+    """
+    try:
+        from atelier.config import load_config
+    except Exception:
+        return
+    cfg = load_config()
+    if not getattr(cfg, "classify_auto_start", False):
+        return
+    connection = (getattr(cfg, "classify_connection_name", "") or "").strip()
+    database = (getattr(cfg, "classify_database", "") or "").strip()
+    if not connection or not database:
+        _log.warning(
+            "classify_auto_start=true but CONNECTION/DATABASE unset; skipping"
+        )
+        return
+    source_id = f"classify-{connection}-{database}"
+    result = fsm_start(source_id=source_id)
+    _log.info("Classify auto-start dispatched: %s → %s", source_id, result)
 
 
 def _discover_and_register_hive_sources() -> None:

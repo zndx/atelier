@@ -41,3 +41,13 @@ Feature: Classify source layering — env vars, UI-saved rows, per-run overrides
     Given a data_source row with id "classify-test-conn-hive_poc" and a custom vocab_uri
     When _seed_classify_data_source runs a second time
     Then the row's custom vocab_uri is preserved
+
+  Scenario: Web Terminal direct-API pick escapes the Bedrock flag
+    Given a cfg with both Bedrock ARN default and ANTHROPIC_API_KEY
+    When _build_sdk_env is called with selected_model "claude-opus-4-7"
+    Then the env dict omits CLAUDE_CODE_USE_BEDROCK
+
+  Scenario: Web Terminal Bedrock pick sets the Bedrock flag
+    Given a cfg with both Bedrock ARN default and ANTHROPIC_API_KEY
+    When _build_sdk_env is called with the Bedrock ARN as selected_model
+    Then the env dict sets CLAUDE_CODE_USE_BEDROCK to "1"

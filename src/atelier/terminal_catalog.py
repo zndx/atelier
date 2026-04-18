@@ -8,10 +8,14 @@ current config's credential presence (``cfg.has_bedrock`` /
 env-layer values so a per-deploy override via ``.env.cai.enc`` still
 flows through without editing the catalog.
 
-The catalog is deliberately small — six frontier entries. Operators
-wanting something outside this list still route via the
-ATELIER_AGENT_MODEL env var directly; this module is the in-app UX
-surface, not the source of truth.
+The catalog is deliberately small — two Opus-class frontier entries
+(one per provider). The Web Terminal Agent is the operator's
+interactive surface; Sonnet/Haiku tiers are reserved for pipeline
+internals (subagent dispatch, classification LLM, tool search) and
+route via ``ANTHROPIC_DEFAULT_SONNET_MODEL`` / ``_HAIKU_MODEL`` /
+``CLAUDE_CODE_SUBAGENT_MODEL``, not this catalog. Operators wanting
+something outside this list still route via the ``ATELIER_AGENT_MODEL``
+env var directly.
 """
 
 from __future__ import annotations
@@ -89,26 +93,6 @@ _CATALOG: tuple[_CatalogEntry, ...] = (
         notes="Current ATELIER_AGENT_MODEL default.",
     ),
     _CatalogEntry(
-        id="bedrock-sonnet-4-5",
-        label="Sonnet 4.5",
-        provider="bedrock",
-        model_ref_source="@attr:agent_default_sonnet_model",
-        context_window=200_000,
-        max_output_tokens=64_000,
-        thinking="extended",
-        notes="Routes through ANTHROPIC_DEFAULT_SONNET_MODEL.",
-    ),
-    _CatalogEntry(
-        id="bedrock-haiku-4-5",
-        label="Haiku 4.5",
-        provider="bedrock",
-        model_ref_source="@attr:agent_default_haiku_model",
-        context_window=200_000,
-        max_output_tokens=32_000,
-        thinking="none",
-        notes="Routes through ANTHROPIC_DEFAULT_HAIKU_MODEL.",
-    ),
-    _CatalogEntry(
         id="anthropic-opus-4-7",
         label="Opus 4.7",
         provider="anthropic",
@@ -117,24 +101,6 @@ _CATALOG: tuple[_CatalogEntry, ...] = (
         max_output_tokens=64_000,
         thinking="adaptive",
         notes="Latest Opus on the direct API; 1M context window.",
-    ),
-    _CatalogEntry(
-        id="anthropic-sonnet-4-6",
-        label="Sonnet 4.6",
-        provider="anthropic",
-        model_ref_source="claude-sonnet-4-6",
-        context_window=200_000,
-        max_output_tokens=64_000,
-        thinking="extended",
-    ),
-    _CatalogEntry(
-        id="anthropic-haiku-4-5",
-        label="Haiku 4.5",
-        provider="anthropic",
-        model_ref_source="claude-haiku-4-5-20251001",
-        context_window=200_000,
-        max_output_tokens=32_000,
-        thinking="none",
     ),
 )
 
