@@ -108,11 +108,14 @@ environment_variables:
       open-weights models served via vLLM, LiteLLM, or similar.
       Example: http://hgx-node:8000/v1
   ATELIER_LLM_COLUMNS_PER_CALL:
-    default: "50"
+    default: "25"
     description: >-
-      Number of columns to classify per LLM call. Higher values reduce API
-      round-trips but increase per-call token usage. Reduce for models with
-      smaller context windows.
+      Number of columns to classify per LLM call. Higher values reduce
+      API round-trips but risk response truncation when vocabulary
+      exceeds ~200 terms (the LLM silently drops trailing columns from
+      the JSON response as it nears max_tokens). 25 is the safe default
+      for UAT-scale corpora. Reduce further only if LLM Coverage on the
+      Status page lands below 95%.
 
   # ── Classification Pipeline ────────────────────────────────────
   ATELIER_CLASSIFY_CONNECTION:
@@ -161,10 +164,52 @@ environment_variables:
       Mean Cohen's Kappa conflict threshold for convergence. Lower values
       require tighter LLM-ML agreement before stopping. Range: 0.0-1.0.
   ATELIER_BOOTSTRAP_COVERAGE_TARGET:
-    default: "0.95"
+    default: "1.00"
     description: >-
-      Fraction of columns that must be classified before the pipeline
-      considers converging. Range: 0.0-1.0.
+      Fraction of columns that must have a predicted_code before the
+      bootstrap loop considers itself converged. 1.00 (the default)
+      forces the pipeline to keep iterating until every column has a
+      label; lower values let partial coverage count as done. Range:
+      0.0-1.0.
+  ATELIER_BOOTSTRAP_CLARITY_TARGET:
+    default: "0.20"
+    description: >-
+      Revisit any column whose clarity (top-1 confidence margin) is
+      below this fraction. Higher values make the LLM re-sweep more
+      aggressive on ambiguous columns. Range: 0.05-0.25.
+
+  # ── Monte Carlo sampling ───────────────────────────────────────
+  ATELIER_MC_SAMPLE_FRACTION:
+    default: "1.00"
+    description: >-
+      Fraction of discovered columns sent to the LLM on the initial
+      sweep. 1.00 (the default) disables Monte-Carlo stratification and
+      sends every column to the LLM — the thesis-aligned mode where
+      CatBoost then fine-tunes to agree with the LLM. Scale back only
+      if LLM budget is the constraint. Range: 0.08-1.00.
+
+  # ── CatBoost training ──────────────────────────────────────────
+  ATELIER_CATBOOST_FIT_TO_LLM:
+    default: "true"
+    description: >-
+      When true (the default), CatBoost is trained in-memory on the
+      LLM's per-column labels after the sweep, then joins DST fusion
+      with mass that agrees with the LLM by construction. SHAP / SAGE
+      then attribute the LLM's decisions to the 12 embedding features —
+      the explainability surface. Set "false" to fall back to the
+      pre-trained CatBoost model on disk.
+
+  # ── Ground truth (optional) ────────────────────────────────────
+  ATELIER_GROUND_TRUTH_URI:
+    default: ""
+    description: >-
+      Optional path (or file:// URI) to a CSV of expected labels used
+      for accuracy reporting in evaluation_report.json and overwatch.
+      Schema (either form):
+        column_name,code[,annotation]            (qualified names)
+        table_name,column_name,code[,annotation]
+      The loader indexes keys in multiple forms so qualifier
+      conventions don't matter. Leave blank to skip accuracy scoring.
 
   # ── Data Connections ───────────────────────────────────────────
   ATELIER_DATA_CONNECTIONS:
