@@ -115,6 +115,32 @@ interface FSMStatus {
   result_path?: string | null;
 }
 
+interface TerminalModelStats {
+  n: number;
+  ttft_ms_p50: number;
+  tokps_p50: number;
+}
+
+interface TerminalModelEntry {
+  id: string;
+  label: string;
+  provider: string;
+  model_ref: string;
+  context_window: number;
+  max_output_tokens: number;
+  thinking: string;
+  available: boolean;
+  unavailable_reason: string;
+  notes: string;
+  stats: TerminalModelStats;
+}
+
+interface TerminalModelsResponse {
+  models: TerminalModelEntry[];
+  active: TerminalModelEntry | null;
+  override_set: boolean;
+}
+
 const FSM_STATE_COLORS: Record<string, string> = {
   IDLE: "default",
   LOADING_VOCAB: "processing",
@@ -130,6 +156,191 @@ const FSM_STATE_COLORS: Record<string, string> = {
   CONVERGED: "success",
   ERROR: "error",
 };
+
+function WebTerminalAgentCard() {
+  const [data, setData] = useState<TerminalModelsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [selecting, setSelecting] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const fetchModels = () => {
+    setLoading(true);
+    fetch("/api/terminal/models")
+      .then((r) => r.json())
+      .then((body: TerminalModelsResponse) => setData(body))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchModels();
+    // Poll rolling stats every 15 s so the panel reflects live usage
+    // without the operator having to refresh manually.
+    const interval = setInterval(fetchModels, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSelect = (id: string) => {
+    setSelecting(id);
+    setErrorMsg(null);
+    fetch("/api/terminal/models/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    })
+      .then((r) => r.json())
+      .then((body) => {
+        if (body.error) {
+          setErrorMsg(String(body.error));
+          return;
+        }
+        fetchModels();
+      })
+      .catch((e) => setErrorMsg(String(e)))
+      .finally(() => setSelecting(null));
+  };
+
+  const handleClear = () => {
+    setSelecting("__clear__");
+    setErrorMsg(null);
+    fetch("/api/terminal/models/active", { method: "DELETE" })
+      .then(() => fetchModels())
+      .finally(() => setSelecting(null));
+  };
+
+  const formatContext = (n: number) =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(0)}M` :
+    n >= 1_000 ? `${(n / 1_000).toFixed(0)}K` : String(n);
+
+  const activeId = data?.active?.id ?? null;
+  const rows = data?.models ?? [];
+
+  const columns = [
+    {
+      title: "",
+      dataIndex: "id",
+      key: "radio",
+      width: 40,
+      render: (id: string, row: TerminalModelEntry) => (
+        <input
+          type="radio"
+          name="terminal-model"
+          checked={activeId === id}
+          disabled={!row.available || selecting !== null}
+          onChange={() => handleSelect(id)}
+          aria-label={`Select ${row.label}`}
+        />
+      ),
+    },
+    {
+      title: "Model",
+      dataIndex: "label",
+      key: "label",
+      render: (label: string, row: TerminalModelEntry) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{label}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {row.thinking === "adaptive" ? "adaptive thinking" :
+             row.thinking === "extended" ? "extended thinking" :
+             "no thinking"}
+          </Text>
+        </Space>
+      ),
+    },
+    {
+      title: "Provider",
+      dataIndex: "provider",
+      key: "provider",
+      render: (provider: string, row: TerminalModelEntry) => (
+        <Tooltip title={row.unavailable_reason || row.model_ref}>
+          <Tag color={provider === "bedrock" ? "blue" : "green"}>
+            {provider === "bedrock" ? "Bedrock" : "Anthropic"}
+          </Tag>
+          {!row.available && <Tag color="default">unavailable</Tag>}
+        </Tooltip>
+      ),
+    },
+    {
+      title: "Context",
+      dataIndex: "context_window",
+      key: "context",
+      render: (n: number) => <Text code>{formatContext(n)}</Text>,
+    },
+    {
+      title: "Max Output",
+      dataIndex: "max_output_tokens",
+      key: "max_out",
+      render: (n: number) => <Text code>{formatContext(n)}</Text>,
+    },
+    {
+      title: "TTFT (p50)",
+      key: "ttft",
+      render: (_: unknown, row: TerminalModelEntry) =>
+        row.stats.n >= 3
+          ? <Text>{row.stats.ttft_ms_p50.toFixed(0)} ms</Text>
+          : <Text type="secondary">—</Text>,
+    },
+    {
+      title: "Throughput (p50)",
+      key: "tokps",
+      render: (_: unknown, row: TerminalModelEntry) =>
+        row.stats.n >= 3
+          ? <Text>{row.stats.tokps_p50.toFixed(1)} tok/s</Text>
+          : <Text type="secondary">—</Text>,
+    },
+    {
+      title: "n",
+      key: "n",
+      width: 50,
+      render: (_: unknown, row: TerminalModelEntry) =>
+        <Tag color={row.stats.n > 0 ? "cyan" : "default"}>{row.stats.n}</Tag>,
+    },
+  ];
+
+  return (
+    <Card
+      title="Web Terminal Agent"
+      size="small"
+      extra={
+        <Space>
+          {data?.override_set && (
+            <Button size="small" onClick={handleClear}
+                    disabled={selecting !== null}>
+              Reset to default
+            </Button>
+          )}
+          <Button size="small" icon={<ReloadOutlined />}
+                  onClick={fetchModels} loading={loading}>
+            Refresh
+          </Button>
+        </Space>
+      }
+    >
+      <Paragraph type="secondary" style={{ marginTop: 0 }}>
+        Pick the model the embedded Claude Agent SDK session routes through.
+        Selection is gateway-lifetime — it sticks until the service restarts.
+        Rolling stats accumulate over the last 20 queries per model.
+        {data?.override_set && (
+          <Text strong> · Override active: {data.active?.label}</Text>
+        )}
+      </Paragraph>
+      {errorMsg && (
+        <Paragraph type="danger" style={{ marginBottom: 12 }}>
+          {errorMsg}
+        </Paragraph>
+      )}
+      <Table
+        rowKey="id"
+        dataSource={rows}
+        columns={columns}
+        pagination={false}
+        size="small"
+        loading={loading && !data}
+      />
+    </Card>
+  );
+}
+
 
 function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boolean }) {
   const [fsm, setFsm] = useState<FSMStatus | null>(null);
@@ -853,6 +1064,13 @@ export default function Status() {
               </Text>
             )}
           </Card>
+        </Col>
+      </Row>
+
+      {/* ── Web Terminal Agent model selector ─────────── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <WebTerminalAgentCard />
         </Col>
       </Row>
 

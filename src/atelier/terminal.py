@@ -220,7 +220,8 @@ class TerminalSession:
     def _get_model_name(self) -> str:
         try:
             from atelier.config import load_config
-            return load_config().agent_model
+            from atelier.terminal_selection import active_model_ref
+            return active_model_ref(load_config())
         except Exception:
             return "unknown"
 
@@ -626,16 +627,24 @@ class TerminalSession:
             # <level>`, the API sees only `output_config.effort` and
             # 4.7 is happy.  Remove this workaround after upgrading
             # claude-agent-sdk to a release that fixes the mapping.
+            # Resolve the active model from the in-memory selection
+            # (gateway-lifetime override), falling back to cfg.agent_model.
+            # The catalog entry (when one matches) tells us which
+            # rolling-stats bucket to write to when this query completes.
             from atelier.model_compat import requires_adaptive_thinking
+            from atelier.terminal_selection import get_active, active_model_ref
+            active_entry = get_active(cfg)
+            resolved_model = active_model_ref(cfg)
+
             thinking_kwargs: dict = {}
-            if requires_adaptive_thinking(cfg.agent_model):
+            if requires_adaptive_thinking(resolved_model):
                 thinking_kwargs["max_thinking_tokens"] = 0
                 thinking_kwargs["effort"] = "medium"
 
             options = ClaudeAgentOptions(
                 allowed_tools=[],
                 permission_mode="bypassPermissions",
-                model=cfg.agent_model,
+                model=resolved_model,
                 max_turns=None,
                 max_budget_usd=1250.0,
                 cwd=str(project_root),
@@ -666,6 +675,14 @@ class TerminalSession:
             tools_used: list[str] = []
             tool_errors = 0
             is_thinking = False
+
+            # TTFT / duration measurement — anchored at the start of
+            # message iteration.  First AssistantMessage TextBlock
+            # stamps the TTFT; ResultMessage branch below records the
+            # final sample to the rolling-stats buffer.
+            import time as _time
+            query_started_at = _time.monotonic()
+            ttft_ms: float | None = None
 
             async for message in query(prompt=prompt, options=options):
                 # Capture session_id early for conversation continuity
@@ -725,6 +742,9 @@ class TerminalSession:
                     if text_blocks:
                         await _stop_spinner_inner()
                         is_thinking = False
+                        if ttft_ms is None:
+                            # First assistant text block = TTFT anchor.
+                            ttft_ms = (_time.monotonic() - query_started_at) * 1000.0
                         if emitted_text:
                             await self._send("\r\n\r\n")
                         for block in text_blocks:
@@ -785,6 +805,31 @@ class TerminalSession:
                     duration = getattr(message, "duration_ms", None)
                     num_turns = getattr(message, "num_turns", None)
                     usage = getattr(message, "usage", None)
+
+                    # Rolling-stats observation.  Record only when the
+                    # active entry is in the catalog — "custom" agent_model
+                    # values produce no catalog match and no stats bucket.
+                    if active_entry is not None:
+                        try:
+                            from atelier.terminal_stats import record as _rec_stat
+                            dur_ms = float(duration) if duration is not None else \
+                                (_time.monotonic() - query_started_at) * 1000.0
+                            inp_t = 0
+                            out_t = 0
+                            if isinstance(usage, dict):
+                                inp_t = int(usage.get("input_tokens", 0) or 0)
+                                out_t = int(usage.get("output_tokens", 0) or 0)
+                            _rec_stat(
+                                active_entry.provider, active_entry.id,
+                                ttft_ms=ttft_ms if ttft_ms is not None else 0.0,
+                                duration_ms=dur_ms,
+                                input_tokens=inp_t,
+                                output_tokens=out_t,
+                            )
+                        except Exception:
+                            # Stats are advisory — never let a measurement
+                            # failure break the user's terminal session.
+                            pass
 
                     parts = []
                     if num_turns is not None and num_turns > 1:

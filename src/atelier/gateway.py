@@ -1642,6 +1642,78 @@ def terminal_sessions():
     return {"sessions": list_sessions()}
 
 
+# ── Web Terminal Agent model catalog + selection ──────────────────
+
+
+@app.get("/api/terminal/models")
+def terminal_models():
+    """Return the frontier-model catalog with per-row availability,
+    rolling-stats summaries, and the currently active selection.
+
+    Populates the Web Terminal Agent card on the Status page.
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.terminal_catalog import available_models
+        from atelier.terminal_selection import get_active, has_override
+        from atelier.terminal_stats import summary
+
+        cfg = load_config()
+        catalog = available_models(cfg)
+        active = get_active(cfg)
+
+        rows = []
+        for entry in catalog:
+            stats = summary(entry.provider, entry.id)
+            d = entry.to_dict()
+            d["stats"] = stats
+            rows.append(d)
+
+        return {
+            "models": rows,
+            "active": active.to_dict() if active else None,
+            "override_set": has_override(),
+        }
+    except Exception as exc:
+        return _error_envelope(f"terminal model catalog failed: {exc}")
+
+
+@app.post("/api/terminal/models/active")
+def terminal_models_set_active(payload: dict):
+    """Set the active terminal model. Body: ``{"id": "<entry_id>"}``.
+
+    Rejects unknown or unavailable ids (e.g. Bedrock entries without
+    AWS credentials, or Anthropic entries without ANTHROPIC_API_KEY).
+    """
+    try:
+        entry_id = (payload or {}).get("id", "")
+        if not isinstance(entry_id, str) or not entry_id.strip():
+            return _error_envelope("missing 'id' in request body")
+        from atelier.config import load_config
+        from atelier.terminal_selection import set_active
+        cfg = load_config()
+        entry = set_active(entry_id.strip(), cfg)
+        return {"active": entry.to_dict(), "override_set": True}
+    except ValueError as exc:
+        return _error_envelope(str(exc))
+    except Exception as exc:
+        return _error_envelope(f"terminal model set failed: {exc}")
+
+
+@app.delete("/api/terminal/models/active")
+def terminal_models_clear_active():
+    """Clear the override — next query falls back to ``cfg.agent_model``."""
+    try:
+        from atelier.config import load_config
+        from atelier.terminal_selection import clear_active, get_active
+        clear_active()
+        cfg = load_config()
+        active = get_active(cfg)
+        return {"active": active.to_dict() if active else None, "override_set": False}
+    except Exception as exc:
+        return _error_envelope(f"terminal model clear failed: {exc}")
+
+
 # ── Classification FSM ─────────────────────────────────────────────
 
 
