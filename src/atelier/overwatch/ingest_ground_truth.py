@@ -10,11 +10,16 @@ loader scans every row for a short uppercase mnemonic (2–15 chars,
 alnum + ``_``/``-``) and pairs it with the column name in the first
 field.  Multiple sheets may be ingested in one pass.
 
-The emitted CSV has the two-column ``column_name,annotation`` shape
-that :mod:`atelier.classify.ground_truth` indexes under multiple key
-forms (bare, qualified, stripped).  Subsequent pipeline runs that set
-``classify_ground_truth_uri`` to this path will populate
-``evaluation_report.json`` with real accuracy numbers.
+The emitted CSV has the two-column ``column_name,annotation`` shape.
+The mnemonic in the ``annotation`` column (e.g. ``PAN``, ``SSN``,
+``EMAIL``) is resolved to a vocabulary code at load time by
+:func:`atelier.classify.ground_truth.load_ground_truth_csv`, which
+consults ``category_set.by_abbrev`` for the lookup.  Mnemonics
+outside the loaded vocabulary are logged as unresolved and skipped.
+
+Subsequent pipeline runs that set ``classify_ground_truth_uri`` to
+this path will populate ``evaluation_report.json`` with real accuracy
+numbers for every column whose mnemonic resolves.
 """
 
 from __future__ import annotations

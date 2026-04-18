@@ -26,6 +26,21 @@ Or a pre-qualified single column (``annotation`` optional)::
     column_name,code,annotation
     personal_data.payment_card_number,1.1.1.1.1.1.1,PAN
 
+Or mnemonic-only — shape emitted by ``ingest_ground_truth`` when
+reading a reviewer xlsx where each row has only ``(column_name,
+MNEMONIC)`` and the vocabulary code has to be resolved by looking
+the mnemonic up in the loaded taxonomy::
+
+    column_name,annotation
+    personal_data.payment_card_number,PAN
+    personal_data.attr_1_1_1_1_1_1_1,PAN
+
+In the mnemonic-only case, ``load_ground_truth_csv`` needs a
+``category_set`` to resolve ``PAN → 1.1.1.1.1.1.1`` via
+``category_set.by_abbrev``.  Without a category_set, mnemonic-only
+rows are skipped with a warning — they can't be matched against
+predictions that carry codes, not mnemonics.
+
 Keys are indexed both with and without the ``table_name.`` prefix so
 pipelines that strip qualifiers (e.g. the local meta-tagging loader)
 and pipelines that keep them (Hive) both resolve correctly.
@@ -40,7 +55,10 @@ from __future__ import annotations
 import csv
 import logging
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from atelier.classify.taxonomy import CategorySet
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +75,38 @@ def _resolve_uri(uri: str, project_root: Path) -> Path | None:
     return p if p.is_file() else None
 
 
+def _build_abbrev_index(category_set: "CategorySet | None") -> dict[str, str]:
+    """Case-insensitive mnemonic → code lookup from a category set.
+
+    The xlsx → CSV ingest path (``ingest_ground_truth`` CLI) emits
+    reviewer mnemonics in the ``annotation`` column; this index is
+    what turns those mnemonics into the codes the pipeline compares
+    against ``predicted_code``.  Returns an empty dict when no
+    category_set is provided, which preserves the historical
+    "code or predicted_code" behavior for callers that don't plumb
+    the vocabulary through.
+    """
+    if category_set is None:
+        return {}
+    idx: dict[str, str] = {}
+    for cat in getattr(category_set, "categories", []):
+        abbrev = getattr(cat, "abbrev", "") or ""
+        if abbrev:
+            idx[abbrev.upper()] = cat.code
+    # HierarchicalCategorySet also exposes all_by_code which includes
+    # non-leaf ancestors; walk it too so MNEMONICs anywhere in the
+    # taxonomy resolve, not just leaves.
+    for cat in getattr(category_set, "all_by_code", {}).values():
+        abbrev = getattr(cat, "abbrev", "") or ""
+        if abbrev:
+            idx.setdefault(abbrev.upper(), cat.code)
+    return idx
+
+
 def load_ground_truth_csv(
     uri: str,
     project_root: Path,
+    category_set: "CategorySet | None" = None,
 ) -> dict[str, str]:
     """Return a ``{key: code}`` map; empty dict if *uri* is missing.
 
@@ -73,19 +120,43 @@ def load_ground_truth_csv(
     When both forms appear in the CSV, the last one wins (dicts
     behave deterministically).  ``code`` may be any non-empty string
     — the pipeline compares it to ``predicted_code`` verbatim.
+
+    When a row carries no ``code`` column but does carry an
+    ``annotation`` mnemonic AND a ``category_set`` is provided, the
+    mnemonic is resolved to a code via ``category_set.by_abbrev``.
+    This is the shape emitted by ``ingest_ground_truth`` from a
+    reviewer xlsx.
     """
     path = _resolve_uri(uri, project_root)
     if path is None:
         log.info("No ground-truth CSV resolvable from uri=%r", uri)
         return {}
 
+    abbrev_index = _build_abbrev_index(category_set)
+
     mapping: dict[str, str] = {}
+    rows_total = 0
+    rows_no_match = 0
+    rows_via_annotation = 0
+    unresolved_mnemonics: set[str] = set()
+
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            rows_total += 1
             code = (row.get("code") or row.get("predicted_code") or "").strip()
             if not code:
-                continue
+                annotation = (row.get("annotation") or "").strip()
+                if annotation and abbrev_index:
+                    code = abbrev_index.get(annotation.upper(), "")
+                    if code:
+                        rows_via_annotation += 1
+                    else:
+                        unresolved_mnemonics.add(annotation)
+                if not code:
+                    rows_no_match += 1
+                    continue
+
             table = (row.get("table_name") or "").strip()
             col = (row.get("column_name") or "").strip()
             if not col:
@@ -101,9 +172,18 @@ def load_ground_truth_csv(
                 mapping.setdefault(bare, code)
 
     log.info(
-        "Loaded %d ground-truth entries (%d unique codes) from %s",
+        "Loaded %d ground-truth entries (%d unique codes) from %s "
+        "[%d rows total; %d resolved via annotation mnemonic; %d unresolved]",
         len(mapping), len({v for v in mapping.values()}), path,
+        rows_total, rows_via_annotation, rows_no_match,
     )
+    if unresolved_mnemonics:
+        log.warning(
+            "Ground-truth CSV had %d mnemonic(s) missing from the vocabulary: %s",
+            len(unresolved_mnemonics),
+            ", ".join(sorted(unresolved_mnemonics)[:10])
+            + ("…" if len(unresolved_mnemonics) > 10 else ""),
+        )
     return mapping
 
 

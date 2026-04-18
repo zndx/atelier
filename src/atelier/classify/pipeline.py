@@ -433,7 +433,13 @@ def run_classification_pipeline(
                     apply_ground_truth,
                     load_ground_truth_csv,
                 )
-                gt_map = load_ground_truth_csv(gt_uri, _PROJECT_ROOT)
+                # Pass category_set so rows with only a mnemonic
+                # (shape emitted by ingest_ground_truth when the
+                # reviewer xlsx has no explicit code column) resolve
+                # via the vocabulary rather than being silently dropped.
+                gt_map = load_ground_truth_csv(
+                    gt_uri, _PROJECT_ROOT, category_set=category_set,
+                )
                 hits = apply_ground_truth(all_samples, gt_map)
                 if hits:
                     logger.info(
