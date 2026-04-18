@@ -421,6 +421,36 @@ def run_classification_pipeline(
         # not data; classifying it pollutes the accuracy signal.
         all_samples = _filter_classifiable_tables(all_samples, vocab_uri)
 
+        # Apply ground-truth CSV (when configured) so evaluation_report
+        # gets real accuracy numbers.  Hive-backed runs don't carry GT
+        # through sample_table_metadata, but an operator with an
+        # external reference (UAT reviewer's xlsx → CSV) can point the
+        # pipeline at it via cfg.classify_ground_truth_uri.
+        gt_uri = getattr(cfg, "classify_ground_truth_uri", "") or ""
+        if gt_uri:
+            try:
+                from atelier.classify.ground_truth import (
+                    apply_ground_truth,
+                    load_ground_truth_csv,
+                )
+                gt_map = load_ground_truth_csv(gt_uri, _PROJECT_ROOT)
+                hits = apply_ground_truth(all_samples, gt_map)
+                if hits:
+                    logger.info(
+                        "Ground-truth applied to %d/%d columns from %s",
+                        hits,
+                        sum(len(t.columns) for t in all_samples),
+                        gt_uri,
+                    )
+                else:
+                    logger.warning(
+                        "Ground-truth URI %s resolved but matched zero columns — "
+                        "check column_name qualifier convention",
+                        gt_uri,
+                    )
+            except Exception as exc:
+                logger.warning("Ground-truth injection failed (non-fatal): %s", exc)
+
         # Flatten to column list with table mapping
         all_columns: list[ColumnSample] = []
         column_table: dict[str, str] = {}
