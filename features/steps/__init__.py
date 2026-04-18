@@ -49,3 +49,4 @@ from features.agent.step_defs.supervisor_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.terminal_models_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_layering_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.auto_start_steps import *  # noqa: F401,F403
+from features.gateway.step_defs.terminal_line_editor_steps import *  # noqa: F401,F403

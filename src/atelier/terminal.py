@@ -123,7 +123,19 @@ class TerminalSession:
     """
 
     def __init__(self, session_id: str | None = None) -> None:
+        # ── Line editor state ──────────────────────────────────────
+        # ``_line_buffer`` holds one character per slot so cursor
+        # arithmetic stays O(1).  Every edit goes through the helpers
+        # below so echo to the client and the internal model stay in
+        # sync — bypassing the helpers breaks cursor tracking after a
+        # mid-line insert or kill.
         self._line_buffer: list[str] = []
+        self._cursor: int = 0
+        # Command history — most recent last, capped at HISTORY_LIMIT.
+        # Up/Down arrows browse; typing any edit exits browse mode.
+        self._history: list[str] = []
+        self._history_pos: int | None = None
+        self._saved_edit: list[str] = []
         self._session_id = session_id or str(uuid.uuid4())
         self._sdk_available: bool | None = None
         self._creds_available: bool | None = None
@@ -253,6 +265,176 @@ class TerminalSession:
         lines.append(f"\r\n{_PROMPT}")
         return [_text("".join(lines))]
 
+    # ── Line editor primitives ───────────────────────────────────
+    #
+    # Every edit goes through these helpers so the internal line buffer
+    # and the on-wire cursor position stay consistent.  Echoes use
+    # ANSI CSI sequences (``\x1b[…``) understood by every VT100-ish
+    # terminal emulator — ghostty-web, xterm.js, an embedded tmux pane.
+    #
+    # Cursor model: ``_cursor`` is the index where the next typed char
+    # would land (0..len(_line_buffer)).  The client's visible cursor
+    # must always match this value after every helper returns.
+
+    _HISTORY_LIMIT = 500
+
+    def _exit_history_browse(self) -> None:
+        """Commit the current line as the user's own edit.
+
+        Called whenever the user edits (insert, backspace, delete, kill)
+        while browsing history.  After this, Up arrow starts a new
+        browse from the most recent entry rather than resuming mid-browse.
+        """
+        self._history_pos = None
+        self._saved_edit = []
+
+    async def _emit_insert(self, ch: str) -> None:
+        """Insert ``ch`` at cursor; redraw the tail if present."""
+        self._line_buffer.insert(self._cursor, ch)
+        self._cursor += 1
+        tail = "".join(self._line_buffer[self._cursor:])
+        if tail:
+            await self._send(ch + tail + f"\x1b[{len(tail)}D")
+        else:
+            await self._send(ch)
+
+    async def _emit_backspace(self) -> None:
+        """Delete the char *before* the cursor (classic backspace)."""
+        if self._cursor == 0:
+            return
+        self._cursor -= 1
+        del self._line_buffer[self._cursor]
+        tail = "".join(self._line_buffer[self._cursor:])
+        await self._send("\b\x1b[K" + tail)
+        if tail:
+            await self._send(f"\x1b[{len(tail)}D")
+
+    async def _emit_delete(self) -> None:
+        """Delete the char *at* the cursor (the Delete key / ``^D`` on
+        some layouts).  No-op when the cursor sits at end of line."""
+        if self._cursor >= len(self._line_buffer):
+            return
+        del self._line_buffer[self._cursor]
+        tail = "".join(self._line_buffer[self._cursor:])
+        await self._send("\x1b[K" + tail)
+        if tail:
+            await self._send(f"\x1b[{len(tail)}D")
+
+    async def _move_cursor(self, delta: int) -> None:
+        """Move cursor by ``delta`` (+ right, − left), clamped to [0, len]."""
+        new_pos = max(0, min(len(self._line_buffer), self._cursor + delta))
+        actual = new_pos - self._cursor
+        if actual == 0:
+            return
+        if actual > 0:
+            await self._send(f"\x1b[{actual}C")
+        else:
+            await self._send(f"\x1b[{-actual}D")
+        self._cursor = new_pos
+
+    async def _cursor_to(self, pos: int) -> None:
+        """Absolute cursor move — used by Home/End and Ctrl-A/E."""
+        await self._move_cursor(pos - self._cursor)
+
+    async def _kill_to_end(self) -> None:
+        """Ctrl-K — delete from cursor to end of line."""
+        if self._cursor >= len(self._line_buffer):
+            return
+        del self._line_buffer[self._cursor:]
+        await self._send("\x1b[K")
+
+    async def _kill_to_start(self) -> None:
+        """Ctrl-U — delete from cursor to start of line."""
+        if self._cursor == 0:
+            return
+        killed = self._cursor
+        del self._line_buffer[:self._cursor]
+        self._cursor = 0
+        # Backspace over the killed region, clear to EOL, redraw tail.
+        await self._send("\b" * killed + "\x1b[K")
+        tail = "".join(self._line_buffer)
+        if tail:
+            await self._send(tail + f"\x1b[{len(tail)}D")
+
+    async def _delete_word_back(self) -> None:
+        """Ctrl-W — delete one whitespace-delimited word before cursor.
+
+        Matches bash/readline: skip trailing whitespace first, then
+        non-whitespace, so ``foo bar `` with cursor at end deletes
+        ``bar `` (leaving ``foo ``) rather than the trailing space alone.
+        """
+        if self._cursor == 0:
+            return
+        j = self._cursor
+        while j > 0 and self._line_buffer[j - 1].isspace():
+            j -= 1
+        while j > 0 and not self._line_buffer[j - 1].isspace():
+            j -= 1
+        if j == self._cursor:
+            return
+        killed = self._cursor - j
+        del self._line_buffer[j:self._cursor]
+        self._cursor = j
+        await self._send("\b" * killed + "\x1b[K")
+        tail = "".join(self._line_buffer[self._cursor:])
+        if tail:
+            await self._send(tail + f"\x1b[{len(tail)}D")
+
+    async def _replace_line(self, new_line: str) -> None:
+        """Replace the entire current line with ``new_line``.
+
+        Used by history navigation (Up/Down) and any other operation
+        that wants to swap the whole input.  Cursor ends at the end of
+        the new content (matches readline's history-recall behavior).
+        """
+        if self._cursor:
+            await self._send("\b" * self._cursor)
+        await self._send("\x1b[K")
+        self._line_buffer = list(new_line)
+        self._cursor = len(new_line)
+        if new_line:
+            await self._send(new_line)
+
+    async def _history_prev(self) -> None:
+        """Up arrow — walk backwards through history."""
+        if not self._history:
+            return
+        if self._history_pos is None:
+            # Starting a browse — stash the in-progress edit so Down
+            # arrow past the newest entry can restore it.
+            self._saved_edit = list(self._line_buffer)
+            self._history_pos = len(self._history) - 1
+        elif self._history_pos > 0:
+            self._history_pos -= 1
+        else:
+            return  # already at oldest — no wraparound
+        await self._replace_line(self._history[self._history_pos])
+
+    async def _history_next(self) -> None:
+        """Down arrow — walk forwards; past the newest entry restores
+        whatever the user was typing before they started browsing."""
+        if self._history_pos is None:
+            return
+        if self._history_pos < len(self._history) - 1:
+            self._history_pos += 1
+            await self._replace_line(self._history[self._history_pos])
+        else:
+            saved = "".join(self._saved_edit)
+            self._history_pos = None
+            self._saved_edit = []
+            await self._replace_line(saved)
+
+    def _record_history(self, line: str) -> None:
+        """Append ``line`` to history, deduping against the last entry."""
+        if not line:
+            return
+        if self._history and self._history[-1] == line:
+            return
+        self._history.append(line)
+        if len(self._history) > self._HISTORY_LIMIT:
+            # Trim from the oldest end so browse order is preserved.
+            del self._history[: len(self._history) - self._HISTORY_LIMIT]
+
     # ── Input handling ───────────────────────────────────────────
 
     async def handle_input(self, data: str) -> None:
@@ -271,26 +453,33 @@ class TerminalSession:
         # single onData() frame. When data has length > 1 and
         # contains a line break we preserve the multi-line structure
         # rather than dispatching on each \n like we do for
-        # interactive input.
+        # interactive input.  Paste always lands at end-of-line to
+        # keep the cursor model simple — embedded \n in the payload
+        # breaks the single-line invariant anyway.
         if len(data) > 1 and ("\n" in data or "\r" in data):
             if self._busy:
                 await self._send(
                     f"\r\n{_DIM}(busy \u2014 press Ctrl-C to interrupt){_RESET}\r\n"
                 )
                 return
+            self._exit_history_browse()
+            if self._cursor < len(self._line_buffer):
+                await self._cursor_to(len(self._line_buffer))
             normalized = data.replace("\r\n", "\n").replace("\r", "\n")
             trailing_newline = normalized.endswith("\n")
-            # Strip only the trailing newline — keep internal \n intact.
             body = normalized[:-1] if trailing_newline else normalized
-            self._line_buffer.append(body)
-            # Echo with CR+LF so the terminal renders the paste the
-            # same way an interactive user would see it.
+            # One char per buffer slot so subsequent cursor arithmetic works.
+            self._line_buffer.extend(body)
+            self._cursor = len(self._line_buffer)
             await self._send(body.replace("\n", "\r\n"))
             if trailing_newline:
                 line = "".join(self._line_buffer).strip()
                 self._line_buffer.clear()
+                self._cursor = 0
+                self._exit_history_browse()
                 await self._send("\r\n")
                 if line:
+                    self._record_history(line)
                     await self._dispatch(line)
                 else:
                     await self._send(_PROMPT)
@@ -306,6 +495,8 @@ class TerminalSession:
                     self._current_task.cancel()
                 else:
                     self._line_buffer.clear()
+                    self._cursor = 0
+                    self._exit_history_browse()
                     await self._send(f"^C\r\n{_PROMPT}")
                 i += 1
                 continue
@@ -318,7 +509,7 @@ class TerminalSession:
                     j += 1
                 if j < len(data):
                     final = data[j]
-                    seq = data[i + 2 : j + 1]
+                    params = data[i + 2 : j]
                     j += 1  # consume final byte
                 else:
                     # Incomplete sequence — discard
@@ -330,11 +521,23 @@ class TerminalSession:
                 if self._busy:
                     continue
 
-                if seq == "3~":  # Delete key
-                    # No-op for now (cursor is always at end of line)
-                    pass
-                # Arrow keys, Home, End — silently ignore (no cursor
-                # movement in this simple line editor)
+                # Dispatch on final byte (with optional ``params`` for
+                # the tilde-terminated navigation keys).
+                if final == "A":       # ↑  — history back
+                    await self._history_prev()
+                elif final == "B":     # ↓  — history forward
+                    await self._history_next()
+                elif final == "C":     # →  — cursor right
+                    await self._move_cursor(1)
+                elif final == "D":     # ←  — cursor left
+                    await self._move_cursor(-1)
+                elif final == "H" or (final == "~" and params in ("1", "7")):
+                    await self._cursor_to(0)
+                elif final == "F" or (final == "~" and params in ("4", "8")):
+                    await self._cursor_to(len(self._line_buffer))
+                elif final == "~" and params == "3":
+                    await self._emit_delete()
+                # else: unknown CSI — ignore silently
                 continue
 
             i += 1
@@ -345,27 +548,40 @@ class TerminalSession:
                 # SDK output and confuse the user.
                 continue
 
-            if ch in ("\r", "\n"):
+            # ── Control-key shortcuts (readline-style) ───────────
+            if ch == "\x01":          # Ctrl-A — start of line
+                await self._cursor_to(0)
+            elif ch == "\x05":        # Ctrl-E — end of line
+                await self._cursor_to(len(self._line_buffer))
+            elif ch == "\x0b":        # Ctrl-K — kill to end
+                self._exit_history_browse()
+                await self._kill_to_end()
+            elif ch == "\x15":        # Ctrl-U — kill to start
+                self._exit_history_browse()
+                await self._kill_to_start()
+            elif ch == "\x17":        # Ctrl-W — delete word back
+                self._exit_history_browse()
+                await self._delete_word_back()
+            elif ch in ("\r", "\n"):
                 line = "".join(self._line_buffer).strip()
                 self._line_buffer.clear()
+                self._cursor = 0
+                self._exit_history_browse()
                 await self._send("\r\n")
                 if line:
+                    self._record_history(line)
                     await self._dispatch(line)
                 else:
                     await self._send(_PROMPT)
-
             elif ch in ("\x7f", "\x08"):  # Backspace
-                if self._line_buffer:
-                    self._line_buffer.pop()
-                    await self._send("\x08 \x08")
-
+                self._exit_history_browse()
+                await self._emit_backspace()
             elif ch == "\x1b":
-                # Lone escape (no CSI) — ignore
+                # Lone escape (no CSI follows) — ignore.
                 pass
-
-            elif ch >= " " or ch == "\t":  # Printable
-                self._line_buffer.append(ch)
-                await self._send(ch)
+            elif ch >= " " or ch == "\t":  # Printable (or Tab)
+                self._exit_history_browse()
+                await self._emit_insert(ch)
 
     # ── Dispatch ─────────────────────────────────────────────────
 
