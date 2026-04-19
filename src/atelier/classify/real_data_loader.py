@@ -4,22 +4,33 @@ Parses CSV files from ``<repo>/build/meta-tagging/`` (UAT snapshot, in-repo
 but gitignored) or ``~/local/tmp/meta-tagging/`` (legacy default) — the
 full search chain lives in
 ``atelier.classify.meta_tagging_source.resolve_meta_tagging_mount``.
-Ground-truth annotation codes are interspersed as adjacent columns.
 **The CSV contents must NEVER enter git** — they carry Cloudera-internal
 Ontology/Annotation mappings.
 
-Column naming pattern:
-  tablename.target_column         — the data column
-  tablename.prefix_1_2_3_4       — ground truth code 1.2.3.4
+Column-pair convention: the UAT synth generator emits each natural-
+named column immediately followed by a *reference column* whose name
+encodes the natural column's ground-truth code in its suffix.
 
-Prefixes: attr, code, ref, key, val, var, field, data, item, col.
+  tablename.first_name             ← natural-named (the data column)
+  tablename.attr_1_1_1_9_2_1       ← reference column (answer key)
+
+Reference columns are answer keys, not inputs — this loader returns
+only the natural-named targets, using each reference column purely as
+the ground-truth source for its paired neighbor.  The reference-column
+pattern ``^(attr|code|col|data|field|item|key|ref|val|var)_\\d+(_\\d+)*$``
+is defined canonically in ``meta_tagging_source._REFERENCE_COL_RE``;
+this module re-imports that regex so both loaders stay in sync.
+
+UAT provides the provisional corpus loaded here.  The authoritative
+ground-truth reference — built from reference-column evidence plus
+close-inspection corrections — lives at
+``build/meta-tagging-clean/ground_truth.csv``.
 """
 
 from __future__ import annotations
 
 import csv
 import logging
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -28,10 +39,12 @@ from atelier.classify.sampler import ColumnSample, TableSample
 
 logger = logging.getLogger(__name__)
 
-# Matches annotation columns like attr_1_1_1_1_1_1_1 or code_1_1_1_1_2_1
-_GT_PREFIX = re.compile(
-    r"^(?:attr|code|ref|key|val|var|field|data|item|col)_(\d+(?:_\d+)*)$"
-)
+# Reference-column regex — re-imported from meta_tagging_source so the
+# two modules share a single source of truth.  Reference columns are
+# the answer-key half of the UAT synth pairing; this loader uses them
+# as GT for their paired natural-named column and never returns them
+# as classifiable samples.
+from atelier.classify.meta_tagging_source import _REFERENCE_COL_RE
 
 # CSV header mapping: annotations.csv → hive record schema
 _HEADER_MAP = {
@@ -154,7 +167,7 @@ def parse_real_csv(
 
     # Identify annotation columns and pair them with preceding target columns
     for i, name in enumerate(clean_headers):
-        m = _GT_PREFIX.match(name)
+        m = _REFERENCE_COL_RE.match(name)
         if not m:
             continue
 
@@ -172,7 +185,7 @@ def parse_real_csv(
         if i == 0:
             continue
         prev_name = clean_headers[i - 1]
-        if _GT_PREFIX.match(prev_name):
+        if _REFERENCE_COL_RE.match(prev_name):
             # Skip consecutive annotation columns
             continue
         if prev_name == "row_id":

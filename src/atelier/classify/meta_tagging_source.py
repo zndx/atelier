@@ -1,28 +1,39 @@
 """Meta-tagging data source — optional local directory mount.
 
 Mounts a directory of CSV tables plus an ``annotations.csv`` vocabulary
-file. This is the "sanctioned private dev source" for parity-testing
-against UAT — the directory's contents are gitignored and nothing here
-persists values, labels, or codes back into the repo.
+file.  The UAT meta-tagging snapshot is the provisional corpus we load
+here; it does **not** provide authoritative ground truth on its own
+(see ``build/meta-tagging-clean/ground_truth.csv`` for the authoritative
+reference — UAT's labels carry known obfuscation leaks and name-index
+bugs which we correct at derivation time).  Directory contents are
+gitignored and nothing here persists values, labels, or codes back
+into the repo.
 
 Directory shape (matches the UAT reference layout)::
 
     <mount>/
       annotations.csv           # vocabulary: id, ontology, annotation, ...
-      business_data.csv         # table — columns named + obfuscated pairs
+      business_data.csv         # table — natural-named + reference column pairs
       customer_data.csv
       ...
 
-The tables follow a paired-column convention: each "clear" column
-(e.g. ``personal_data.first_name``) has an obfuscated twin
-(``personal_data.attr_1_1_1_9_2_1``) carrying the same data but whose
-name *encodes* its ground-truth code (``1_1_1_9_2_1`` →
-``1.1.1.9.2.1``).  Ground truth is thus derivable at load time:
+The tables follow a paired-column convention: each natural-named
+column (e.g. ``personal_data.first_name``) has a *reference column*
+twin (e.g. ``personal_data.attr_1_1_1_9_2_1``) whose name *encodes*
+the paired column's ground-truth code (``1_1_1_9_2_1`` →
+``1.1.1.9.2.1``).  **Reference columns are answer keys, not inputs**
+— by invariant, they never appear in the sample set returned by this
+loader.  Ground truth is derived at load time:
 
-- Obfuscated-named columns: parse code from the name suffix.
-- Clear-named columns: map the name to the term's ontology label via
-  a name→code lookup built from ``annotations.csv``.
+- Natural-named column with a paired reference twin: code from the
+  twin's name suffix (authoritative — the synth generator guaranteed
+  the pairing).
+- Natural-named column without a twin: map the name to the term's
+  ontology label via a name→code lookup built from
+  ``annotations.csv`` with Ontology > Annotation > Common Names
+  priority and a depth-winning tie-break (high/medium confidence).
 - ``row_id`` columns: pinned to the ``0.1`` (non-sensitive) fallback.
+- Reference-named columns: excluded; not classified and not in siblings.
 
 Activation: mount resolution prefers, in order:
 1. The ``ATELIER_META_TAGGING_DIR`` environment variable
@@ -60,15 +71,26 @@ from atelier.classify.taxonomy import (
 log = logging.getLogger(__name__)
 
 
-# Obfuscated column-name prefixes seen in the UAT reference.  The code
-# pattern is ``<prefix>_<digit>_<digit>_...`` where the digit tuple is
-# the ontology path.
-_OBFUSCATED_PREFIXES = (
-    "attr", "field", "key", "code", "var", "ref", "data", "col",
+# Reference-column name pattern: ``<prefix>_<digit>_<digit>_...`` where
+# the digit tuple encodes the ground-truth ontology code of the
+# natural-named column immediately preceding it in schema order.
+#
+# Reference columns carry no independent classification signal — they
+# are answer keys for their paired natural-named column, not data to
+# classify.  By invariant, they never appear in train / test /
+# validation / evaluation sample sets; they only contribute their
+# encoded code as authoritative GT for the paired column.
+#
+# The prefix list is the union of prefixes observed across
+# meta_tagging_source and real_data_loader historically, kept here as
+# the single source of truth so both modules resolve the same pattern.
+_REFERENCE_COL_PREFIXES = (
+    "attr", "code", "col", "data", "field", "item", "key", "ref",
+    "val", "var",
 )
 
-_OBFUSCATED_RE = re.compile(
-    r"^(?:" + "|".join(_OBFUSCATED_PREFIXES) + r")_(\d+(?:_\d+)*)$"
+_REFERENCE_COL_RE = re.compile(
+    r"^(?:" + "|".join(_REFERENCE_COL_PREFIXES) + r")_(\d+(?:_\d+)*)$"
 )
 
 
@@ -233,13 +255,18 @@ def _derive_ground_truth(
 ) -> str | None:
     """Resolve ground-truth code for a single column name.
 
-    Obfuscated names (``attr_1_1_1_9_2_1``) → decode directly.
-    Clear names (``first_name``) → look up in the name→code index.
-    ``row_id``-style generic names → the fallback (non-sensitive).
+    Reference names (``attr_1_1_1_9_2_1``) → decode directly.  Note:
+    reference columns themselves are *not* classified — they exist to
+    encode GT for their paired natural-named column.  This helper is
+    still used to decode their embedded code when we need it as the
+    paired column's ground truth.
+
+    Natural names (``first_name``) → name→code index lookup.
+    ``row_id`` generic names → the non-sensitive fallback.
     Anything else → None (unlabeled; evaluation counts as unknown).
     """
-    # Obfuscated: prefix_1_1_1_9_2_1 → 1.1.1.9.2.1
-    m = _OBFUSCATED_RE.match(col_name)
+    # Reference-column form: prefix_1_1_1_9_2_1 → 1.1.1.9.2.1
+    m = _REFERENCE_COL_RE.match(col_name)
     if m:
         code = m.group(1).replace("_", ".")
         # UAT Hive export normalized the "Not Sensitive" root code
@@ -319,30 +346,31 @@ def load_meta_tagging_source(
             for h in header
         ]
 
-        # Ground-truth leakage guard.  Obfuscated column names
-        # (``attr_1_2_3_4`` etc.) ARE the ground-truth code in the UAT
-        # reference schema.  Two leak vectors to close:
+        # Reference-column exclusion invariant.  Reference columns
+        # (``attr_1_2_3_4``, ``code_1_1``, etc.) encode the paired
+        # natural-named column's GT directly in their name.  They are
+        # answer keys, not classifiable inputs.  Two exclusion vectors:
         #
-        #   1. Classifying the obfuscated column itself is trivial — its
-        #      name literally is the answer.  Drop it from the sample
-        #      list so these rows don't inflate accuracy metrics.
-        #   2. The obfuscated twin of a clean-named column (its row-wise
-        #      neighbor in the CSV) appears in ``siblings`` and carries
-        #      the ground truth through the rendered embedding_text
-        #      (``siblings: code 1 2 3 4 | ...``).  Strip obfuscated
-        #      names from the siblings list for every clean column.
+        #   1. Reference columns are not returned as samples.  Dropping
+        #      them prevents trivial name-parse "predictions" from
+        #      inflating accuracy metrics.
+        #   2. A natural-named column's sibling context (rendered into
+        #      its ``embedding_text``) would otherwise include its
+        #      reference twin, leaking the answer code through siblings.
+        #      Strip reference names from the siblings list.
         #
-        # Production data doesn't have this synthetic pairing, so these
-        # filters are no-ops there.  On the UAT reference they isolate
-        # the honest evaluation signal — accuracy on columns that had
-        # to be classified from data, not read off the name.
+        # Production data doesn't use the reference-column convention,
+        # so these filters are no-ops there.  On the UAT reference
+        # corpus they isolate the honest evaluation signal — accuracy
+        # on columns that must be classified from values + name, not
+        # from an adjacent answer key.
         clean_sibling_names = [
-            n for n in col_names if not _OBFUSCATED_RE.match(n)
+            n for n in col_names if not _REFERENCE_COL_RE.match(n)
         ]
 
         columns: list[ColumnSample] = []
         for i, col_name in enumerate(col_names):
-            if _OBFUSCATED_RE.match(col_name):
+            if _REFERENCE_COL_RE.match(col_name):
                 continue  # leak vector #1: don't classify the answer key
             all_vals = [row[i] for row in rows if i < len(row) and row[i]]
             values = all_vals[:5]
@@ -374,8 +402,19 @@ def load_meta_tagging_source(
     labeled = sum(
         1 for t in samples for c in t.columns if c.ground_truth is not None
     )
+    # Reference-exclusion invariant — catch any regression that would
+    # let an answer-key column back into the classifiable sample set.
+    leaked_refs = [
+        c.name for t in samples for c in t.columns
+        if _REFERENCE_COL_RE.match(c.name)
+    ]
+    assert not leaked_refs, (
+        f"reference columns leaked into samples (should be excluded as "
+        f"answer keys): {leaked_refs[:5]}"
+    )
     log.info(
-        "meta-tagging source loaded: %d tables, %d columns (%d with ground truth) from %s",
+        "meta-tagging source loaded: %d tables, %d columns "
+        "(%d with ground truth; reference columns excluded) from %s",
         len(samples), total_cols, labeled, mount,
     )
     return samples
