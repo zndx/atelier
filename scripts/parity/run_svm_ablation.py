@@ -409,6 +409,46 @@ def main() -> int:
     arm_preds["G_full_compact_tfidf"] = preds
     results["G_full_compact_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
 
+    # Arm J — Arm A's exact setup (S-short + TF-IDF + OvR), but trained
+    # on the full 296-class vocabulary including internal-node codes
+    # (220 leaves + 76 internals).  The 232 eval columns include 8 whose
+    # ground truth is an internal node (``City``, ``Country``,
+    # ``Phone Number``, etc.) — with leaf-only training, the classifier
+    # literally cannot exact-match those rows because the target code
+    # isn't in its output space.
+    from atelier.classify.taxonomy import load_annotations_from_filesystem
+    from atelier.classify.real_data_loader import extract_value_templates as _val_templates
+
+    cs_flat = load_annotations_from_filesystem(
+        mount / "annotations.csv", hierarchical=False, taxonomy="meta-tagging",
+    )
+    log.info("full-vocab CategorySet: %d classes (leaves + internals)",
+             len(cs_flat.categories))
+    # Separate synth dir so the 296-class arm doesn't overwrite the
+    # 220-class synth used by arms A–I.
+    synth_dir_j = work / "synth_296"
+    templates_j = _val_templates(mount)
+    generate_synth_tables(
+        cs_flat, synth_dir_j,
+        value_templates=templates_j, variants_per_category=30, seed=42,
+    )
+    synth_cols_j, synth_gt_j = _load_synth_columns(synth_dir_j)
+    train_names_j = [n for n in synth_cols_j if synth_gt_j.get(n)]
+    train_values_j = [synth_cols_j[n] for n in train_names_j]
+    train_labels_j = [synth_gt_j[n] for n in train_names_j]
+    log.info("296-class synth training set: %d columns", len(train_names_j))
+
+    model_j = _tfidf_linear_svc()  # OvR, same as Arm A
+    def train_j():
+        texts = [_build_svm_short(n, vs) for n, vs in zip(train_names_j, train_values_j)]
+        model_j.fit(texts, train_labels_j)
+    def predict_j(cols):
+        texts = [_build_svm_short(c.name, c.values) for c in cols]
+        return list(model_j.predict(texts))
+    preds, ex, hi = _arm_result("J:S-short+tfidf+296cls", train_j, predict_j)
+    arm_preds["J_short_tfidf_296"] = preds
+    results["J_short_tfidf_296"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
+
     # Arm H — Crammer-Singer multi-class SVM on S-short.
     # Direct comparison against Arm A: same features, same TF-IDF, same
     # corpus, only the multi-class decomposition differs.  Tests whether
