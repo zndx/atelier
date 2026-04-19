@@ -177,22 +177,48 @@ def load_meta_tagging_vocabulary(mount: Path) -> HierarchicalCategorySet:
 def _build_name_to_code_index(records: list[dict]) -> dict[str, str]:
     """Map human-readable names → ontology code for clear-named ground truth.
 
-    For each annotation record we index: the ontology label, the
-    annotation mnemonic, and any pipe-or-comma-separated common_names
-    — all lowercased and underscore-normalized so ``"First Name"`` and
+    Each annotation record contributes up to three alias sources:
+    ``ontology`` (the canonical label), ``annotation`` (the mnemonic),
+    and ``common_names`` (pipe/comma-separated examples).  All are
+    lowercased + underscore-normalized so ``"First Name"`` and
     ``"first_name"`` collide.
+
+    Priority order — critical for correctness:
+
+      1. ``ontology`` matches win over anything else.
+      2. ``annotation`` matches win over ``common_names``.
+      3. Within a tier, deeper (more specific) codes win over ancestors.
+
+    Why this matters: annotations.csv parent entries often list their
+    own children in ``common_names`` as examples (``First Name`` as a
+    Common Name under ``Name (Full)``).  A naive first-writer-wins
+    over CSV row order then incorrectly maps ``first_name`` → parent
+    code.  Canonical Ontology matches and deeper codes take precedence
+    so the leaf with ``Ontology = "First Name"`` wins as it should.
     """
-    index: dict[str, str] = {}
+    tiered: dict[str, tuple[int, int, str]] = {}
+    TIER = {"ontology": 0, "annotation": 1, "common_names": 2}
     for r in records:
         code = r["id"]
-        for key in (r.get("ontology"), r.get("annotation"), r.get("common_names")):
+        depth = code.count(".")
+        for src_key, tier in TIER.items():
+            key = r.get(src_key)
             if not key:
                 continue
             for token in re.split(r"[|,]", key):
                 norm = _normalize(token)
-                if norm and norm not in index:
-                    index[norm] = code
-    return index
+                if not norm:
+                    continue
+                existing = tiered.get(norm)
+                # Replace when: no entry yet; strictly-higher-priority
+                # tier; same tier with strictly-deeper code.
+                if (
+                    existing is None
+                    or tier < existing[0]
+                    or (tier == existing[0] and depth > existing[1])
+                ):
+                    tiered[norm] = (tier, depth, code)
+    return {norm: code for norm, (_, _, code) in tiered.items()}
 
 
 def _normalize(name: str) -> str:
