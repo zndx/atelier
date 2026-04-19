@@ -55,15 +55,12 @@ def _configure_logging() -> None:
 def _apply_overrides() -> None:
     """Pin the config knobs for the do-no-harm run.
 
-    Only the fusion strategy is forced; everything else runs at config
-    defaults so the baseline is honest to what a real deployment would
-    produce on this corpus.
+    Everything runs at config defaults (Dempster fusion).  Override
+    the fusion strategy by setting ``ATELIER_FUSION_STRATEGY`` in the
+    shell before invoking this script — e.g. for a Yager comparison
+    run, ``ATELIER_FUSION_STRATEGY=yager uv run python …``.
     """
-    # HOCON uses the short name ``${?ATELIER_FUSION_STRATEGY}`` rather
-    # than the full ``ATELIER_CLASSIFY_FUSION_STRATEGY`` pattern — bug
-    # worth normalizing later but set both so we're robust to the fix.
-    os.environ["ATELIER_FUSION_STRATEGY"] = "yager"
-    os.environ["ATELIER_CLASSIFY_FUSION_STRATEGY"] = "yager"
+    pass
 
 
 def _compute_parity(parquet_path: Path) -> dict:

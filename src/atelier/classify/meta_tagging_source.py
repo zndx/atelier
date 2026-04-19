@@ -293,8 +293,31 @@ def load_meta_tagging_source(
             for h in header
         ]
 
+        # Ground-truth leakage guard.  Obfuscated column names
+        # (``attr_1_2_3_4`` etc.) ARE the ground-truth code in the UAT
+        # reference schema.  Two leak vectors to close:
+        #
+        #   1. Classifying the obfuscated column itself is trivial — its
+        #      name literally is the answer.  Drop it from the sample
+        #      list so these rows don't inflate accuracy metrics.
+        #   2. The obfuscated twin of a clean-named column (its row-wise
+        #      neighbor in the CSV) appears in ``siblings`` and carries
+        #      the ground truth through the rendered embedding_text
+        #      (``siblings: code 1 2 3 4 | ...``).  Strip obfuscated
+        #      names from the siblings list for every clean column.
+        #
+        # Production data doesn't have this synthetic pairing, so these
+        # filters are no-ops there.  On the UAT reference they isolate
+        # the honest evaluation signal — accuracy on columns that had
+        # to be classified from data, not read off the name.
+        clean_sibling_names = [
+            n for n in col_names if not _OBFUSCATED_RE.match(n)
+        ]
+
         columns: list[ColumnSample] = []
         for i, col_name in enumerate(col_names):
+            if _OBFUSCATED_RE.match(col_name):
+                continue  # leak vector #1: don't classify the answer key
             all_vals = [row[i] for row in rows if i < len(row) and row[i]]
             values = all_vals[:5]
             total = len(rows)
@@ -310,7 +333,7 @@ def load_meta_tagging_source(
                 null_count=nulls,
                 table_name=table_name,
                 database="meta-tagging",
-                siblings=col_names,
+                siblings=clean_sibling_names,  # leak vector #2: sanitized
                 ground_truth=gt,
                 distinct_count=len(set(row[i] for row in rows if i < len(row))),
             ))
