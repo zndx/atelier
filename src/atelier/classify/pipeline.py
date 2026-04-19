@@ -117,6 +117,7 @@ def _install_fit_to_llm_catboost(
     state,
     samples_by_name: dict[str, ColumnSample],
     category_set: HierarchicalCategorySet,
+    save_path: Path | None = None,
 ) -> None:
     """Fit an in-memory CatBoost on LLM-labeled columns and install it.
 
@@ -124,6 +125,13 @@ def _install_fit_to_llm_catboost(
     sweep hasn't produced at least ``fit_to_llm_min_labels`` pairs, when
     all labels collapse to a single class, or when the embedding
     backend is unavailable.  Emits a progress log in either case.
+
+    When ``save_path`` is provided, the trained CatBoost model is also
+    persisted to disk (native ``.cbm`` format + sibling ``.classes.json``)
+    so downstream consumers can replay inference without retraining.
+    This is the hook that makes ML-only reproducibility auditable from
+    a run directory alone — pair it with ``svm_frontier.pkl`` and the
+    full ML stack for a given run is on disk.
     """
     min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
     if len(state.labels) < min_labels:
@@ -184,6 +192,12 @@ def _install_fit_to_llm_catboost(
         "fit_to_llm: installed CatBoost trained on %d LLM labels across %d classes",
         len(texts), len(set(codes)),
     )
+    if save_path is not None:
+        try:
+            classifier.save(save_path)
+        except Exception as exc:
+            logger.warning("fit_to_llm: could not save CatBoost to %s: %s",
+                           save_path, exc)
 
 
 def _maybe_retrain_svm(
@@ -606,6 +620,7 @@ def run_classification_pipeline(
             try:
                 _install_fit_to_llm_catboost(
                     cfg, state, samples_by_name, category_set,
+                    save_path=results_dir / "catboost_fit_to_llm.cbm",
                 )
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
