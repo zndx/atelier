@@ -59,7 +59,7 @@ def main() -> int:
     )
     import pandas as pd
 
-    gt = _load_gt(Path("build/meta-tagging-clean/ground_truth.csv"))
+    gt = _load_gt(Path("build/meta-tagging-clean/curated_reference.csv"))
 
     atelier_json = json.loads(
         Path("build/results/parity/atelier_scored.json").read_text()
@@ -146,7 +146,7 @@ def main() -> int:
     atelier_covered_gopala_didnt: list[tuple] = []
     both_uncovered: list[tuple] = []
     for (table, col), row in gt.items():
-        gt_code = row["ground_truth_code"]
+        gt_code = row["reference_code"]
         a = atelier_preds.get((table, col), "")
         g = gopala_preds.get((table, col), "")
         a_right = a == gt_code
@@ -218,7 +218,7 @@ def main() -> int:
     lines = [
         "# Atelier vs UAT (Gopala LLM) — scored against authoritative GT",
         "",
-        f"Authoritative ground truth: `build/meta-tagging-clean/ground_truth.csv` ({len(gt)} resolvable columns; reference columns excluded by invariant)",
+        f"Curated reference: `build/meta-tagging-clean/curated_reference.csv` ({len(gt)} resolvable columns; reference columns excluded by invariant)",
         f"Atelier parquet: `build/results/{atelier_run}/atelier_embeddings.parquet`",
         f"UAT xlsx:        `build/Atelier_Results_Default_DB_4-16.xlsx`",
         "",

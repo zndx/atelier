@@ -1358,7 +1358,17 @@ def _classify_column(
         "pattern_signals": features.pattern_signals,
         "belief_path": belief_path,
         "cautious_code": hc.cautious_code(0.7),
+        # Curated reference (per-column answer key for accuracy checks)
+        # attached at sample-load time by the source loader.  Name
+        # reflects that it is a reference for accuracy checking, not
+        # an external ground truth.  ``reference_label`` is resolved
+        # via the category_set to humanize the code for display.
         "ground_truth": col.ground_truth,
+        "ground_truth_label": (
+            getattr(category_set.all_by_code.get(col.ground_truth), "label", "")
+            if col.ground_truth and hasattr(category_set, "all_by_code")
+            else ""
+        ),
         "is_correct": (
             col.ground_truth == best_code
             if col.ground_truth and best_code
@@ -1396,6 +1406,7 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         "ground_truth": col.ground_truth,
+        "ground_truth_label": "",
         "is_correct": None,
     }
 
@@ -1600,11 +1611,20 @@ def _write_parquet(
     if not classifications:
         return None
 
-    # Build text column for atlas hover/search
+    # Build the atlas hover/search text.  Format: ``{Ontology} - {Annotation}``
+    # so the embedding-atlas tooltip shows e.g. ``"Bank Account - BAN"``
+    # rather than a numeric code.  Falls back gracefully when either
+    # field is missing.
     texts = []
     for c in classifications:
-        label = c["predicted_label"] or c["predicted_code"] or "unknown"
-        texts.append(f"{c['table_name']}.{c['column_name']} — {label}")
+        ontology = c["predicted_label"] or ""
+        annotation = c.get("predicted_annotation", "") or ""
+        if ontology and annotation:
+            texts.append(f"{ontology} - {annotation}")
+        elif ontology:
+            texts.append(ontology)
+        else:
+            texts.append(c["predicted_code"] or "unknown")
 
     # Compute 2D projection
     x_vals, y_vals = _compute_projection(classifications, texts)
@@ -1630,12 +1650,19 @@ def _write_parquet(
             "conflict": c["conflict"],
             "needs_clarification": c.get("needs_clarification", False),
             "evidence": c.get("evidence", ""),
-            "ground_truth": c["ground_truth"] or "",
-            # Preserve None (no ground-truth comparison available) rather
-            # than flattening to False, which mislead UAT into thinking
-            # the LLM was "checking correctness" and returning negative.
-            # Parquet writers typically render None as null / "—".
-            "is_correct": c["is_correct"],
+            # Curated reference (per-column answer key from the
+            # generator-derived + spot-checked ``curated_reference.csv``).
+            # This is distinct from an external ground truth — name
+            # reflects that the code is a reference for accuracy
+            # checking, not a published human-curated label.
+            "reference_code": c.get("ground_truth") or "",
+            "reference_label": c.get("ground_truth_label") or "",
+            # True/False when a reference is available and comparable to
+            # the pipeline's prediction; None when no reference exists
+            # for this column.  Renamed from ``is_correct`` for
+            # unambiguous framing: the check is against the reference,
+            # not an external oracle.
+            "matches_reference": c["is_correct"],
             "embedding_text": c.get("embedding_text", ""),
             "pattern_signals": ", ".join(c.get("pattern_signals", {})),
             "dst_belief_path": json.dumps(c.get("belief_path", [])),

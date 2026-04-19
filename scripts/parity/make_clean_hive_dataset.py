@@ -21,14 +21,15 @@ Output:
     build/meta-tagging-clean/
       README.md                        (provenance + cleaning rules)
       annotations.csv                  (vocabulary, verbatim from UAT)
-      ground_truth.csv                 (authoritative per-column GT;
-                                       built by build_authoritative_ground_truth.py)
+      curated_reference.csv            (generator-derived + spot-checked
+                                       per-column reference; built by
+                                       build_curated_reference.py)
       <table>.csv × 8                  (natural-named columns only,
                                        stripped headers)
     build/meta-tagging-clean.zip       (same, zipped for hand-off)
 
 Re-run idempotently.  Nothing leaves ``build/`` so annotations.csv,
-the labeled tables, and the authoritative GT stay out of git.
+the labeled tables, and the curated reference stay out of git.
 """
 
 from __future__ import annotations
@@ -98,13 +99,13 @@ def main() -> int:
     # Preserve the authoritative ground-truth CSV (if it exists) across
     # the rmtree + rebuild so we don't nuke it when rewriting the
     # cleaned-data directory.  It's produced by
-    # build_authoritative_ground_truth.py separately.
+    # build_curated_reference.py separately.
     out_dir = Path("build/meta-tagging-clean").resolve()
     preserved_gt: bytes | None = None
     preserved_gt_summary: bytes | None = None
     if out_dir.exists():
-        gt_path = out_dir / "ground_truth.csv"
-        gt_summary = out_dir / "ground_truth_summary.json"
+        gt_path = out_dir / "curated_reference.csv"
+        gt_summary = out_dir / "curated_reference_summary.json"
         if gt_path.is_file():
             preserved_gt = gt_path.read_bytes()
         if gt_summary.is_file():
@@ -112,9 +113,9 @@ def main() -> int:
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     if preserved_gt is not None:
-        (out_dir / "ground_truth.csv").write_bytes(preserved_gt)
+        (out_dir / "curated_reference.csv").write_bytes(preserved_gt)
     if preserved_gt_summary is not None:
-        (out_dir / "ground_truth_summary.json").write_bytes(preserved_gt_summary)
+        (out_dir / "curated_reference_summary.json").write_bytes(preserved_gt_summary)
 
     # 1. annotations.csv — verbatim.  (The Hive export already has
     # ``annotations.<col>`` headers which Hive imports unchanged;
@@ -172,18 +173,20 @@ def main() -> int:
         readme_lines.append(f"| {name} | {kept} | {dropped} |")
     readme_lines += [
         "",
-        "## Authoritative ground-truth labels",
+        "## Curated reference labels",
         "",
-        "``ground_truth.csv`` in this bundle is the authoritative "
-        "per-column GT reference derived by "
-        "``scripts/parity/build_authoritative_ground_truth.py``. It is "
-        "built from direct column-pair evidence (reference-column codes) "
-        "plus name-index lookup with "
-        "Ontology > Annotation > Common Names priority and "
-        "depth-winning tie-breaking. Both the Atelier DST-fused pipeline "
-        "(recorded in ``build/results/323cfbbc/``) and Gopala's LLM-only "
-        "Agent-Studio workflow should be scored against this reference "
-        "so the comparison uses a single, honest ruler.",
+        "``curated_reference.csv`` in this bundle is a generator-derived, "
+        "spot-checked per-column reference produced by "
+        "``scripts/parity/build_curated_reference.py``.  For the "
+        "UAT synthetic corpus, 193 / 246 rows come from direct "
+        "column-pair evidence (the synth generator encodes each code "
+        "in a paired reference-column twin, making that row's label "
+        "deterministic by design); the remainder use name-index "
+        "lookup with Ontology > Annotation > Common Names priority "
+        "and depth-winning tie-breaking.  Reserve the phrase "
+        "*ground truth* for external, human-curated benchmarks "
+        "(e.g. SOTAB); the file in this bundle is a **curated "
+        "reference**, not a ground truth.",
         "",
         "UAT's own classification outputs (e.g. "
         "``Atelier_Results_Default_DB_4-16.xlsx``) are **provisional** — "

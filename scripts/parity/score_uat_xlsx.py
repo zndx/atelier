@@ -3,7 +3,7 @@
 
 Input:
   build/Atelier_Results_Default_DB_4-16.xlsx
-  build/meta-tagging-clean/ground_truth.csv   (from build_authoritative_ground_truth.py)
+  build/meta-tagging-clean/curated_reference.csv   (from build_authoritative_ground_truth.py)
 
 The xlsx contains *both* pipelines' predictions side-by-side on each
 data sheet (row 0 = section titles, row 1 = sub-headers, rows 2+ = data):
@@ -39,7 +39,7 @@ from pathlib import Path
 log = logging.getLogger("score_uat_xlsx")
 
 
-def _load_ground_truth(path: Path) -> dict[tuple[str, str], dict]:
+def _load_curated_reference(path: Path) -> dict[tuple[str, str], dict]:
     gt: dict[tuple[str, str], dict] = {}
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
@@ -103,8 +103,8 @@ def _score_arm(arm: str, preds: dict[tuple[str, str], str],
             n_unresolved += 1
             continue
         n_scored += 1
-        ex = pred == row["ground_truth_code"]
-        hi = _hier_match(pred, row["ground_truth_code"])
+        ex = pred == row["reference_code"]
+        hi = _hier_match(pred, row["reference_code"])
         if ex:
             n_exact += 1
         elif hi:
@@ -166,14 +166,14 @@ def main() -> int:
     import pandas as pd
 
     xlsx_path = Path("build/Atelier_Results_Default_DB_4-16.xlsx")
-    gt_path = Path("build/meta-tagging-clean/ground_truth.csv")
+    gt_path = Path("build/meta-tagging-clean/curated_reference.csv")
     if not xlsx_path.is_file():
         log.error("missing %s", xlsx_path); return 1
     if not gt_path.is_file():
-        log.error("missing %s — run build_authoritative_ground_truth.py first", gt_path)
+        log.error("missing %s — run build_curated_reference.py first", gt_path)
         return 1
 
-    gt = _load_ground_truth(gt_path)
+    gt = _load_curated_reference(gt_path)
     mnem_to_code = _mnemonic_to_code()
     log.info("gt columns (resolvable): %d", len(gt))
     log.info("mnemonic→code map: %d entries", len(mnem_to_code))

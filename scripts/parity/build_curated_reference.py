@@ -1,33 +1,39 @@
 #!/usr/bin/env python
-"""Build the authoritative per-column ground-truth reference.
+"""Build the curated reference (per-column) for the synthetic corpus.
 
 Walks every natural-named column in the UAT snapshot under
-``build/meta-tagging/`` and emits exactly one GT row per column with
-explicit derivation provenance.
+``build/meta-tagging/`` and emits exactly one reference row per column
+with explicit derivation provenance.  The artifact is called a
+**curated reference** — not "ground truth" — because it is a
+generator-truth record (the synth generator stuffed the correct code
+into each reference-column twin) that we review and curate by hand
+as needed for quality checks.  Reserve the term "ground truth" for
+external, human-curated labels like the published SOTAB annotations.
 
-Reference columns are answer keys, not inputs — they never appear as
-GT rows themselves; their encoded code becomes the GT for the
-natural-named column immediately preceding them in schema order.
+Reference columns (paired twins) are answer keys, not inputs; they
+never appear as reference rows themselves — their encoded code
+becomes the reference for the natural-named column immediately
+preceding them in schema order.
 
 Output:
 
-    build/meta-tagging-clean/ground_truth.csv
-        table, column, ground_truth_code, ground_truth_label,
+    build/meta-tagging-clean/curated_reference.csv
+        table, column, reference_code, reference_label,
         derivation, confidence
 
-    build/meta-tagging-clean/ground_truth_summary.json
+    build/meta-tagging-clean/curated_reference_summary.json
         counts per derivation, per-class distribution, invariant
         audits (reference-column exclusion, unresolved tail).
 
 Derivation provenance (one per natural-named column):
 
     reference_encoded   natural-named col paired with reference twin;
-                        code from twin's suffix.  Authoritative —
+                        code from twin's suffix.  Generator-truth —
                         synth generator guaranteed the pairing.
     ontology_match      name maps to a unique Ontology field.  High.
     annotation_match    name maps to Annotation mnemonic.          High.
     common_names_match  Common Names alias; deepest code wins.     Medium.
-    row_id_fallback     literal ``row_id`` → ``0.1``.               Authoritative.
+    row_id_fallback     literal ``row_id`` → ``0.1``.               Convention.
     unresolved          no match found; excluded from scoring.       Unknown.
 """
 
@@ -40,7 +46,7 @@ import sys
 from pathlib import Path
 
 
-log = logging.getLogger("build_authoritative_gt")
+log = logging.getLogger("build_curated_reference")
 
 
 def _normalize(name: str) -> str:
@@ -181,8 +187,8 @@ def main() -> int:
                     prev = rows[-1]
                     # only override prior derivations — reference
                     # evidence is authoritative.
-                    prev["ground_truth_code"] = code
-                    prev["ground_truth_label"] = id_to_label.get(code, "")
+                    prev["reference_code"] = code
+                    prev["reference_label"] = id_to_label.get(code, "")
                     prev["derivation"] = "reference_encoded"
                     prev["confidence"] = "authoritative"
                     # rebalance the histogram
@@ -203,8 +209,8 @@ def main() -> int:
             row = {
                 "table": table,
                 "column": name,
-                "ground_truth_code": code,
-                "ground_truth_label": id_to_label.get(code, "") if code else "",
+                "reference_code": code,
+                "reference_label": id_to_label.get(code, "") if code else "",
                 "derivation": derivation,
                 "confidence": confidence,
                 "_prev_deriv": derivation,
@@ -216,13 +222,13 @@ def main() -> int:
     for r in rows:
         r.pop("_prev_deriv", None)
 
-    csv_out = out_dir / "ground_truth.csv"
+    csv_out = out_dir / "curated_reference.csv"
     with open(csv_out, "w", newline="") as f:
         writer = csv.DictWriter(
             f,
             fieldnames=[
-                "table", "column", "ground_truth_code",
-                "ground_truth_label", "derivation", "confidence",
+                "table", "column", "reference_code",
+                "reference_label", "derivation", "confidence",
             ],
         )
         writer.writeheader()
@@ -231,12 +237,12 @@ def main() -> int:
     # Per-class distribution
     per_class: dict[str, int] = {}
     for r in rows:
-        c = r["ground_truth_code"]
+        c = r["reference_code"]
         if c:
             per_class[c] = per_class.get(c, 0) + 1
 
     summary = {
-        "total_gt_rows": len(rows),
+        "total_reference_rows": len(rows),
         "per_derivation": dict(sorted(per_derivation.items(), key=lambda kv: -kv[1])),
         "per_table_reference_columns_dropped": per_table_ref_drops,
         "reference_columns_dropped_total": sum(per_table_ref_drops.values()),
@@ -249,10 +255,10 @@ def main() -> int:
             for r in rows if r["derivation"] == "unresolved"
         ],
     }
-    summary_out = out_dir / "ground_truth_summary.json"
+    summary_out = out_dir / "curated_reference_summary.json"
     summary_out.write_text(json.dumps(summary, indent=2))
 
-    print(f"\n=== authoritative ground truth ===")
+    print(f"\n=== curated reference ===")
     print(f"  rows written    : {len(rows)}  (natural-named columns only)")
     print(f"  reference drops : {summary['reference_columns_dropped_total']}")
     print(f"  derivations     : {summary['per_derivation']}")

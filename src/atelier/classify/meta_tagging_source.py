@@ -2,10 +2,13 @@
 
 Mounts a directory of CSV tables plus an ``annotations.csv`` vocabulary
 file.  The UAT meta-tagging snapshot is the provisional corpus we load
-here; it does **not** provide authoritative ground truth on its own
-(see ``build/meta-tagging-clean/ground_truth.csv`` for the authoritative
-reference — UAT's labels carry known obfuscation leaks and name-index
-bugs which we correct at derivation time).  Directory contents are
+here.  Published human-curated ground truth does not exist for this
+corpus; we produce a **curated reference** at
+``build/meta-tagging-clean/curated_reference.csv`` that is
+generator-deterministic (the synth generator encodes each code in a
+paired "reference column" twin — see below) and spot-checked by hand
+for quality.  Reserve the term "ground truth" for external,
+human-curated benchmarks (e.g. SOTAB published labels).  Directory contents are
 gitignored and nothing here persists values, labels, or codes back
 into the repo.
 

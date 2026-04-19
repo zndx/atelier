@@ -36,7 +36,7 @@ def _is_reference_col(name: str) -> bool:
     return bool(_REFERENCE_COL_RE.match(name))
 
 
-def _load_ground_truth(path: Path) -> dict[tuple[str, str], dict]:
+def _load_curated_reference(path: Path) -> dict[tuple[str, str], dict]:
     gt: dict[tuple[str, str], dict] = {}
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
@@ -53,7 +53,7 @@ def _score_arm(arm: str, preds: dict[tuple[str, str], str],
     n_overspec = n_wrong = n_unpred = 0
     for (table, col), row in gt.items():
         n_total += 1
-        gt_code = row["ground_truth_code"]
+        gt_code = row["reference_code"]
         pt = per_table.setdefault(
             table,
             {"n": 0, "exact": 0, "hier": 0, "unpred": 0,
@@ -114,13 +114,13 @@ def main() -> int:
 
     run_id = sys.argv[1] if len(sys.argv) > 1 else "323cfbbc"
     parquet = Path(f"build/results/{run_id}/atelier_embeddings.parquet")
-    gt_path = Path("build/meta-tagging-clean/ground_truth.csv")
+    gt_path = Path("build/meta-tagging-clean/curated_reference.csv")
     if not parquet.is_file():
         log.error("missing %s", parquet); return 1
     if not gt_path.is_file():
         log.error("missing %s", gt_path); return 1
 
-    gt = _load_ground_truth(gt_path)
+    gt = _load_curated_reference(gt_path)
     df = pd.read_parquet(parquet)
 
     # Collect predictions, skipping reference columns.
