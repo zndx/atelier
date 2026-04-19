@@ -6,11 +6,21 @@ from pathlib import Path
 from behave import given, when, then
 
 
-_DEFAULT_DATA_DIR = Path("~/local/tmp/meta-tagging").expanduser()
+# Prefer the in-repo UAT snapshot (gitignored under build/) and fall
+# back to the legacy maintainer-convention location.  See
+# ``src/atelier/classify/meta_tagging_source.py`` for the full
+# resolution chain used by runtime code.
+_REPO_SNAPSHOT = Path(__file__).resolve().parents[3] / "build" / "meta-tagging"
+_LEGACY_DATA_DIR = Path("~/local/tmp/meta-tagging").expanduser()
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("ATELIER_REAL_DATA_DIR", str(_DEFAULT_DATA_DIR)))
+    env = os.environ.get("ATELIER_REAL_DATA_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
+    if (_REPO_SNAPSHOT / "annotations.csv").is_file():
+        return _REPO_SNAPSHOT
+    return _LEGACY_DATA_DIR
 
 
 @given("the real data directory is available")

@@ -2,10 +2,8 @@
 
 Mounts a directory of CSV tables plus an ``annotations.csv`` vocabulary
 file. This is the "sanctioned private dev source" for parity-testing
-against UAT — the directory lives outside the repository
-(``~/local/tmp/meta-tagging/`` by convention), its contents are never
-committed, and nothing here persists values, labels, or codes back
-into the repo.
+against UAT — the directory's contents are gitignored and nothing here
+persists values, labels, or codes back into the repo.
 
 Directory shape (matches the UAT reference layout)::
 
@@ -29,7 +27,14 @@ name *encodes* its ground-truth code (``1_1_1_9_2_1`` →
 Activation: mount resolution prefers, in order:
 1. The ``ATELIER_META_TAGGING_DIR`` environment variable
 2. ``cfg.classify_meta_tagging_dir`` (HOCON)
-3. ``~/local/tmp/meta-tagging/`` (maintainer-convention default)
+3. ``<repo>/build/meta-tagging/`` — in-repo, gitignored, UAT snapshot
+4. ``~/local/tmp/meta-tagging/`` — legacy maintainer-convention default
+
+The in-repo ``build/meta-tagging/`` slot is a symlink pointing at the
+most recent dated UAT snapshot (e.g. ``meta-tagging-0418/``).  This
+keeps the annotation vocabulary + table corpus co-located with the
+runs that reference them while still respecting the "never commit
+annotations.csv" privacy constraint (``build/`` is gitignored).
 
 Returns ``None`` when no valid mount exists, at which point the source
 is hidden from the UI and the pipeline won't accept ``source_id =
@@ -67,8 +72,21 @@ _OBFUSCATED_RE = re.compile(
 )
 
 
-def _default_mount_candidate() -> Path:
-    """Maintainer-convention location for the private meta-tagging dir."""
+def _repo_mount_candidate() -> Path:
+    """In-repo gitignored slot for the UAT snapshot.
+
+    Resolves to ``<repo_root>/build/meta-tagging/`` — typically a symlink
+    to the most recent dated snapshot directory (``meta-tagging-0418/``
+    at the time of writing).  ``build/`` is gitignored so the CSVs
+    themselves never land in version control.
+    """
+    # <this file>: src/atelier/classify/meta_tagging_source.py
+    # project_root = parents[3]  (classify → atelier → src → project)
+    return Path(__file__).resolve().parents[3] / "build" / "meta-tagging"
+
+
+def _legacy_mount_candidate() -> Path:
+    """Maintainer-convention fallback for the private meta-tagging dir."""
     return Path.home() / "local" / "tmp" / "meta-tagging"
 
 
@@ -78,7 +96,8 @@ def resolve_meta_tagging_mount(cfg=None) -> Path | None:  # type: ignore[no-unty
     Probes (in precedence order):
       1. ``ATELIER_META_TAGGING_DIR`` env var
       2. ``cfg.classify_meta_tagging_dir`` (when a cfg is passed)
-      3. ``~/local/tmp/meta-tagging/`` default
+      3. ``<repo>/build/meta-tagging/`` — in-repo, gitignored, UAT snapshot
+      4. ``~/local/tmp/meta-tagging/`` — legacy fallback
 
     A candidate passes only when it's an existing directory containing
     ``annotations.csv``.  Missing-or-malformed sources return None.
@@ -91,7 +110,8 @@ def resolve_meta_tagging_mount(cfg=None) -> Path | None:  # type: ignore[no-unty
         cfg_path = getattr(cfg, "classify_meta_tagging_dir", "") or ""
         if cfg_path:
             candidates.append(Path(cfg_path).expanduser())
-    candidates.append(_default_mount_candidate())
+    candidates.append(_repo_mount_candidate())
+    candidates.append(_legacy_mount_candidate())
 
     for candidate in candidates:
         if not candidate.is_dir():
@@ -110,18 +130,24 @@ def _read_annotation_rows(annotations_csv: Path) -> list[dict]:
     build auxiliary indices (name→code, fallback code) without having
     to walk a CategorySet.
     """
+    from atelier.classify.taxonomy import _normalize_annotations_row
     records: list[dict] = []
     with open(annotations_csv, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            row = _normalize_annotations_row(row)
             code = (row.get("'ID") or row.get("ID") or row.get("id") or "").strip()
             if not code:
                 continue
             records.append({
                 "id": code,
-                "ontology": (row.get("Ontology") or "").strip(),
-                "annotation": (row.get("Annotation") or "").strip(),
-                "common_names": (row.get("Common Names") or "").strip(),
+                "ontology": (row.get("Ontology") or row.get("ontology") or "").strip(),
+                "annotation": (
+                    row.get("Annotation") or row.get("annotation") or ""
+                ).strip(),
+                "common_names": (
+                    row.get("Common Names") or row.get("common_names") or ""
+                ).strip(),
             })
     return records
 

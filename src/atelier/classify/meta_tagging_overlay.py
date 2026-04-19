@@ -5,7 +5,10 @@ Maps the enterprise meta-tagging annotation codes (numeric dot-notation like
 is hand-maintained because the two taxonomies use different conceptual
 groupings — automatic alignment would be unreliable.
 
-The meta-tagging data files live in ~/local/tmp/meta-tagging/ (NEVER in git).
+The meta-tagging data files live in ``<repo>/build/meta-tagging/`` (UAT
+snapshot, gitignored) or the legacy ``~/local/tmp/meta-tagging/`` —
+resolved by ``meta_tagging_source.resolve_meta_tagging_mount``.  Never
+committed to git.
 """
 
 from __future__ import annotations

@@ -332,6 +332,7 @@ def load_annotations_from_filesystem(
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            row = _normalize_annotations_row(row)
             # Tolerate the leading-apostrophe quirk from Excel exports
             # ("'ID") as well as plain "ID"/"id".
             code = (row.get("'ID") or row.get("ID") or row.get("id") or "").strip()
@@ -350,14 +351,42 @@ def load_annotations_from_filesystem(
                     or row.get("specifics")
                     or ""
                 ).strip(),
-                "deprecated": (row.get("Deprecated") or "").strip().lower(),
-                "non_corp": (row.get("NON_CORP") or "").strip(),
-                "emp_contractor": (row.get("EMP, CONTRACTOR") or "").strip(),
-                "individual": (row.get("INDIVIDUAL") or "").strip(),
-                "corp": (row.get("CORP") or "").strip(),
+                "deprecated": (row.get("Deprecated") or row.get("deprecated") or "").strip().lower(),
+                "non_corp": (row.get("NON_CORP") or row.get("non_corp") or "").strip(),
+                "emp_contractor": (
+                    row.get("EMP, CONTRACTOR") or row.get("emp_contractor") or ""
+                ).strip(),
+                "individual": (row.get("INDIVIDUAL") or row.get("individual") or "").strip(),
+                "corp": (row.get("CORP") or row.get("corp") or "").strip(),
                 "taxonomy": taxonomy,
             })
     return _build_category_set_from_records(records, hierarchical=hierarchical)
+
+
+def _normalize_annotations_row(row: dict) -> dict:
+    """Strip a ``<table>.`` prefix common to Hive CSV exports.
+
+    The Gopala-vintage Excel export of ``annotations.csv`` used plain
+    column names (``ID``, ``Ontology``, …).  The UAT Hive export, by
+    contrast, prefixes every column with the table name — ``annotations.id``,
+    ``annotations.ontology``, and so on.  We detect a uniform dotted
+    prefix and strip it so the downstream ``row.get(…)`` fallbacks match
+    either format.  When no uniform prefix is present the row is
+    returned unchanged.
+    """
+    keys = [k for k in row.keys() if k]
+    if not keys:
+        return row
+    prefixes = {k.split(".", 1)[0] for k in keys if "." in k}
+    if len(prefixes) != 1:
+        return row
+    prefix = next(iter(prefixes)) + "."
+    # Only strip when *every* key starts with that prefix (avoids
+    # accidental stripping when a single column legitimately contains
+    # a dot).
+    if not all(k.startswith(prefix) for k in keys):
+        return row
+    return {k[len(prefix):]: v for k, v in row.items()}
 
 
 # ── Mock/fixture loader ──────────────────────────────────────────────

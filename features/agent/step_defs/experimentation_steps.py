@@ -2,7 +2,8 @@
 
 Exercises the critical phase transition: orienting → experimentation.
 Uses mock customer taxonomy by default; overrides with real meta-tagging
-annotations when ATELIER_REAL_DATA_DIR is available.
+annotations when ATELIER_REAL_DATA_DIR is available or when the in-repo
+UAT snapshot at ``build/meta-tagging/`` is populated.
 """
 
 import logging
@@ -13,11 +14,19 @@ from behave import given, when, then
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_DATA_DIR = Path("~/local/tmp/meta-tagging").expanduser()
+# Prefer the in-repo UAT snapshot (gitignored under build/) and fall
+# back to the legacy maintainer-convention location.
+_REPO_SNAPSHOT = Path(__file__).resolve().parents[3] / "build" / "meta-tagging"
+_LEGACY_DATA_DIR = Path("~/local/tmp/meta-tagging").expanduser()
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("ATELIER_REAL_DATA_DIR", str(_DEFAULT_DATA_DIR)))
+    env = os.environ.get("ATELIER_REAL_DATA_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
+    if (_REPO_SNAPSHOT / "annotations.csv").is_file():
+        return _REPO_SNAPSHOT
+    return _LEGACY_DATA_DIR
 
 
 # ── Background: load user taxonomy ──────────────────────────────────

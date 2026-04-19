@@ -297,9 +297,9 @@ class AtelierConfig:
     classify_default_source: str = ""  # empty = ootb-sample
     classify_subagent_model: str | None = None
     # Meta-tagging source — private reference data mount path.  Never
-    # committed to git.  When empty, the module falls back to the
-    # ATELIER_META_TAGGING_DIR env var and then to the maintainer
-    # default at ~/local/tmp/meta-tagging.
+    # committed to git.  When empty, the resolver walks:
+    # ATELIER_META_TAGGING_DIR env var → <repo>/build/meta-tagging/ (UAT
+    # snapshot, gitignored) → ~/local/tmp/meta-tagging/ (legacy default).
     classify_meta_tagging_dir: str = ""
     # Optional ground-truth CSV — per-column expected codes used by
     # evaluation_report + overwatch.  Set to a path or file:// URI.

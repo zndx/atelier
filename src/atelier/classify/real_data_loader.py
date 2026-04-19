@@ -1,8 +1,12 @@
 """Load real annotated data from CSV files for validation.
 
-Parses CSV files from ~/local/tmp/meta-tagging/ (or configurable path)
-where ground truth annotation codes are interspersed as adjacent columns.
-The data must NEVER enter git — it stays external to the repo.
+Parses CSV files from ``<repo>/build/meta-tagging/`` (UAT snapshot, in-repo
+but gitignored) or ``~/local/tmp/meta-tagging/`` (legacy default) — the
+full search chain lives in
+``atelier.classify.meta_tagging_source.resolve_meta_tagging_mount``.
+Ground-truth annotation codes are interspersed as adjacent columns.
+**The CSV contents must NEVER enter git** — they carry Cloudera-internal
+Ontology/Annotation mappings.
 
 Column naming pattern:
   tablename.target_column         — the data column
@@ -31,6 +35,7 @@ _GT_PREFIX = re.compile(
 
 # CSV header mapping: annotations.csv → hive record schema
 _HEADER_MAP = {
+    # Gopala-vintage Excel export headers.
     "'ID": "id",
     "ID": "id",
     "Ontology": "ontology",
@@ -43,7 +48,39 @@ _HEADER_MAP = {
     "INDIVIDUAL": "individual",
     "CORP": "corp",
     "Deprecated": "deprecated",
+    # UAT Hive export headers — lowercase, underscore-separated.  The
+    # dotted ``annotations.`` prefix is stripped before lookup (see
+    # ``_normalize_annotations_row`` below).
+    "id": "id",
+    "ontology": "ontology",
+    "annotation": "annotation",
+    "definition": "definition",
+    "common_names": "common_names",
+    "non_corp": "non_corp",
+    "emp_contractor": "emp_contractor",
+    "individual": "individual",
+    "corp": "corp",
+    "deprecated": "deprecated",
 }
+
+
+def _strip_table_prefix(fieldnames: list[str]) -> tuple[list[str], str]:
+    """Detect + strip a uniform ``<table>.`` prefix on column headers.
+
+    The UAT Hive export of ``annotations.csv`` prefixes every column with
+    ``annotations.`` (``annotations.id``, ``annotations.ontology``, …).
+    Strip the prefix up-front so header-map lookups match.  Returns
+    ``(stripped_fieldnames, prefix)`` — prefix is ``""`` when no uniform
+    prefix is present.
+    """
+    dotted = [f for f in fieldnames if "." in f]
+    if not dotted or len(dotted) != len(fieldnames):
+        return fieldnames, ""
+    prefixes = {f.split(".", 1)[0] for f in fieldnames}
+    if len(prefixes) != 1:
+        return fieldnames, ""
+    prefix = next(iter(prefixes)) + "."
+    return [f[len(prefix):] for f in fieldnames], prefix
 
 
 def load_annotations_csv(path: Path) -> list[dict]:
@@ -61,13 +98,16 @@ def load_annotations_csv(path: Path) -> list[dict]:
         if reader.fieldnames is None:
             return records
 
-        # Build field mapping from actual headers
+        # Build field mapping from actual headers.  Two tolerances:
+        #   1. ``<table>.`` prefix stripping for the UAT Hive export
+        #      (``annotations.id`` → ``id``).
+        #   2. Leading apostrophe from the Excel export (``'ID`` → ``ID``).
+        stripped_names, _prefix = _strip_table_prefix(list(reader.fieldnames))
         field_map: dict[str, str] = {}
-        for raw_name in reader.fieldnames:
-            clean = raw_name.strip().strip("'")
-            # Try exact match first, then cleaned
-            if raw_name in _HEADER_MAP:
-                field_map[raw_name] = _HEADER_MAP[raw_name]
+        for raw_name, stripped in zip(reader.fieldnames, stripped_names):
+            clean = stripped.strip().strip("'")
+            if stripped in _HEADER_MAP:
+                field_map[raw_name] = _HEADER_MAP[stripped]
             elif clean in _HEADER_MAP:
                 field_map[raw_name] = _HEADER_MAP[clean]
 
@@ -119,6 +159,14 @@ def parse_real_csv(
             continue
 
         code = m.group(1).replace("_", ".")
+        # UAT's Hive export normalized the "Not Sensitive" root code
+        # from ``0.0`` to ``0``.  Column names in the data CSVs still
+        # encode the Gopala-vintage ``0_0`` suffix; strip a trailing
+        # ``.0`` from the root so the extracted ground truth matches
+        # the UAT vocabulary.  Safe under the current tree: no
+        # non-root code ends in ``.0`` (all sub-tiers start at ``.1``).
+        if "." in code and code.count(".") == 1 and code.endswith(".0"):
+            code = code[:-2]
 
         # The target column is the one immediately before this annotation column
         if i == 0:

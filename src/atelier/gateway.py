@@ -284,10 +284,11 @@ def _seed_synth_source() -> None:
 def _seed_meta_tagging_source() -> None:
     """Register the Meta-tagging source when a local mount is available.
 
-    Meta-tagging data is a private reference corpus held outside the
-    repo (``~/local/tmp/meta-tagging/`` by convention, or wherever
-    ``ATELIER_META_TAGGING_DIR`` / ``cfg.classify_meta_tagging_dir``
-    points).  Its contents — annotation labels, sample values, any
+    Meta-tagging data is a private reference corpus.  Resolution prefers
+    ``<repo>/build/meta-tagging/`` (UAT snapshot, gitignored) and falls
+    back to ``~/local/tmp/meta-tagging/``; both can be overridden via
+    ``ATELIER_META_TAGGING_DIR`` / ``cfg.classify_meta_tagging_dir``.
+    Its contents — annotation labels, sample values, any
     numeric codes beyond what's already in the pipeline — must never
     land in git.  This seeder reads stats only (row counts, mount
     path) and registers the source so the UI selector can offer it.
