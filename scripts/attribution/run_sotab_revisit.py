@@ -95,38 +95,72 @@ def _rebuild_state(run_dir: Path):
     category_set = pilot_mod["_build_category_set"](all_labels)
     feats = pilot_mod["_extract_features"](samples)
 
-    # Rehydrate pass-1 LLM labels from the emitted attribution JSONL.
+    # Rehydrate pass-1 LLM labels + any saved CatBoost predictions.
     attrib_records = []
     with open(run_dir / "feature_attributions.jsonl") as f:
         for line in f:
             attrib_records.append(json.loads(line))
-    # Map by (table, column_id)
-    pass1_labels_by_key = {
-        (r["table_id"], r["column_id"]): r["llm_label"] for r in attrib_records
+    by_key = {
+        (r["table_id"], r["column_id"]): r for r in attrib_records
     }
-    # Filter feats/samples to those that have pass-1 labels
-    filtered = [
-        (s, f, pass1_labels_by_key.get((s.table_name, s.name), ""))
-        for s, f in zip(samples, feats)
-    ]
-    filtered = [(s, f, y) for s, f, y in filtered if y]
-    log.info("rehydrated %d (sample, feature, pass1_label) triples", len(filtered))
 
-    samples = [s for s, _, _ in filtered]
-    feats = [f for _, f, _ in filtered]
-    pass1_labels = [y for _, _, y in filtered]
+    # Retain ALL samples — including rows where the LLM abstained on
+    # pass 1.  Those are the cases that benefit most from a revisit
+    # with CatBoost's extrapolated prediction as fresh signal.
+    pass1_labels = []
+    cb_top3_saved: list[list[tuple[str, float]]] = []
+    pass1_present_mask: list[bool] = []
+    for s in samples:
+        rec = by_key.get((s.table_name, s.name))
+        if rec is None:
+            pass1_labels.append("")
+            cb_top3_saved.append([])
+            pass1_present_mask.append(False)
+            continue
+        pass1_labels.append(rec.get("llm_label") or "")
+        cb_top3_saved.append([
+            (lbl, float(p)) for lbl, p in (rec.get("catboost_top3") or [])
+        ])
+        pass1_present_mask.append(bool(rec.get("llm_label")))
 
-    # Retrain CatBoost (same deterministic seed path as pilot)
-    clf, X, labels = pilot_mod["_train_catboost"](feats, pass1_labels)
+    n_all = len(samples)
+    n_labeled = sum(pass1_present_mask)
+    log.info(
+        "rehydrated %d samples  (pass-1 labeled: %d  · abstained: %d)",
+        n_all, n_labeled, n_all - n_labeled,
+    )
+
+    # Retrain CatBoost on labeled subset if we don't have saved top-3
+    # from a newer pilot run.  Older pilot outputs won't have
+    # ``catboost_top3`` — detect that and retrain.
+    needs_retrain = any(not t for t in cb_top3_saved)
+    if needs_retrain:
+        log.info("retraining CatBoost (saved top-3 absent or incomplete)")
+        clf, X_train, labels = pilot_mod["_train_catboost"](
+            [f for f, y in zip(feats, pass1_labels) if y],
+            [y for y in pass1_labels if y],
+        )
+        from atelier.classify.embedding import embed_texts
+        import numpy as np
+        X_all = np.asarray(embed_texts([f.to_embedding_text() for f in feats]))
+        proba_all = clf.predict_proba(X_all)
+        cb_top3 = [
+            sorted(p.items(), key=lambda kv: -kv[1])[:3] for p in proba_all
+        ]
+    else:
+        clf = None
+        X_all = None
+        cb_top3 = cb_top3_saved
 
     return {
         "samples": samples,
         "feats": feats,
         "pass1_labels": pass1_labels,
+        "pass1_present_mask": pass1_present_mask,
+        "catboost_top3": cb_top3,
         "category_set": category_set,
         "clf": clf,
-        "X": X,
-        "train_labels": labels,
+        "X": X_all,
         "meta": meta,
         "pilot_mod": pilot_mod,
     }
@@ -233,16 +267,25 @@ def main() -> int:
     samples = state["samples"]
     feats = state["feats"]
     pass1_labels = state["pass1_labels"]
+    pass1_present_mask = state["pass1_present_mask"]
     category_set = state["category_set"]
-    clf = state["clf"]
+    catboost_top3 = state["catboost_top3"]
     X = state["X"]
 
-    # ── Uncertainty + attribution signals ─────────────────────
-    catboost_top3 = _catboost_topk(clf, X, k=3)
-    log.info("CatBoost top-1 prob mean=%.3f  median=%.3f  min=%.3f",
-             sum(t[0][1] for t in catboost_top3) / len(catboost_top3),
-             sorted(t[0][1] for t in catboost_top3)[len(catboost_top3)//2],
-             min(t[0][1] for t in catboost_top3))
+    # If X wasn't materialized during rehydrate, embed now for neighbors.
+    if X is None:
+        from atelier.classify.embedding import embed_texts
+        import numpy as np
+        X = np.asarray(embed_texts([f.to_embedding_text() for f in feats]))
+
+    labeled_probs = [t[0][1] for t in catboost_top3 if t]
+    if labeled_probs:
+        log.info(
+            "CatBoost top-1 prob mean=%.3f  median=%.3f  min=%.3f",
+            sum(labeled_probs) / len(labeled_probs),
+            sorted(labeled_probs)[len(labeled_probs) // 2],
+            min(labeled_probs),
+        )
 
     log.info("computing per-column embedding SHAP (12 conceptual features)")
     shap = _run_embedding_shap_safe(feats, category_set)
@@ -332,16 +375,28 @@ def main() -> int:
     # ── Tabulate convergence ──────────────────────────────────
     improvements = 0
     regressions = 0
-    unchanged = 0
+    changed_still_wrong = 0
     same_decision = 0
-    unparsed = 0
+    unparsed_p2 = 0
+    abstention_resolved_correct = 0
+    abstention_resolved_wrong = 0
+    abstention_still_unresolved = 0
     published_gt = [s.ground_truth for s in samples]
     for i in revisit_idx:
         p1 = pass1_labels[i]
         p2 = pass2_labels.get(i, "")
         gt = published_gt[i]
+        if not p1:
+            # LLM abstained on pass 1 — a different bucket
+            if not p2:
+                abstention_still_unresolved += 1
+            elif p2 == gt:
+                abstention_resolved_correct += 1
+            else:
+                abstention_resolved_wrong += 1
+            continue
         if not p2:
-            unparsed += 1
+            unparsed_p2 += 1
             continue
         if p2 == p1:
             same_decision += 1
@@ -352,7 +407,7 @@ def main() -> int:
         elif p1 == gt and p2 != gt:
             regressions += 1
         else:
-            unchanged += 1  # changed but neither pass hit GT
+            changed_still_wrong += 1  # changed but neither pass hit GT
 
     # Overall fidelity change: merge pass-2 decisions into the label set.
     final_labels = list(pass1_labels)
@@ -369,14 +424,22 @@ def main() -> int:
     summary = {
         "pilot_run_id": sys.argv[1],
         "total_columns": len(samples),
+        "pass1_labeled": sum(pass1_present_mask),
+        "pass1_abstained": len(samples) - sum(pass1_present_mask),
         "catboost_uncertainty_threshold": CATBOOST_UNCERTAINTY_THRESHOLD,
         "revisit_subset_size": len(revisit_idx),
         "revisit_outcomes": {
-            "improvements_p1_wrong_p2_right": improvements,
-            "regressions_p1_right_p2_wrong": regressions,
-            "changed_still_wrong": unchanged,
-            "unchanged_same_as_pass1": same_decision,
-            "unparsed_response": unparsed,
+            # cols with a pass-1 label
+            "labeled_rows_improvements_p1_wrong_p2_right": improvements,
+            "labeled_rows_regressions_p1_right_p2_wrong": regressions,
+            "labeled_rows_changed_still_wrong": changed_still_wrong,
+            "labeled_rows_unchanged": same_decision,
+            "labeled_rows_unparsed_p2": unparsed_p2,
+            # cols where pass-1 abstained — CatBoost gave them a
+            # pseudo-label which went to LLM on revisit
+            "abstention_resolved_correct": abstention_resolved_correct,
+            "abstention_resolved_wrong": abstention_resolved_wrong,
+            "abstention_still_unresolved": abstention_still_unresolved,
         },
         "fidelity_vs_published_gt": {
             "pass1": round(pass1_fidelity, 4),

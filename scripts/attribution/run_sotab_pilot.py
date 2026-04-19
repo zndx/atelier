@@ -342,20 +342,37 @@ def main() -> int:
     ) / len(samples) if samples else 0.0
     log.info("LLM vs SOTAB published GT fidelity: %.4f", fidelity_exact)
 
-    # CatBoost fit-to-LLM + attributions
-    clf, X, labels = _train_catboost(feats, llm_labels)
-    # CatBoostColumnClassifier exposes predict_proba; derive top-1 via argmax
-    proba = clf.predict_proba(X)
+    # CatBoost fit-to-LLM + attributions.
+    # Train on the subset with LLM labels, then predict on ALL 400
+    # columns — including those where the LLM abstained on pass 1.
+    # For an unlabeled column, the CatBoost prediction is NEW
+    # independent information (the model's extrapolation from the
+    # labeled subset) that the LLM can consume on a revisit pass.
+    clf, X_train, labels = _train_catboost(feats, llm_labels)
+    # Embed ALL features (including those from unlabeled rows)
+    from atelier.classify.embedding import embed_texts
+    import numpy as np
+    all_texts = [f.to_embedding_text() for f in feats]
+    X_all = np.asarray(embed_texts(all_texts))
+    proba_all = clf.predict_proba(X_all)
     cb_preds = [
         max(p.items(), key=lambda kv: kv[1])[0] if p else ""
-        for p in proba
+        for p in proba_all
     ]
+    # Top-3 per row for the downstream revisit pass
+    cb_top3 = [
+        sorted(p.items(), key=lambda kv: -kv[1])[:3] for p in proba_all
+    ]
+    # Fit-to-LLM fidelity measured only where a pass-1 label exists
+    cb_train_preds = [cb_preds[i] for i, y in enumerate(llm_labels) if y]
     cb_fidelity = sum(
-        1 for a, b in zip(cb_preds, labels) if a == b
+        1 for a, b in zip(cb_train_preds, labels) if a == b
     ) / len(labels) if labels else 0.0
-    log.info("CatBoost fit-to-LLM fidelity: %.4f", cb_fidelity)
+    log.info("CatBoost fit-to-LLM fidelity (labeled subset): %.4f", cb_fidelity)
+    log.info("LLM-abstained rows rescued by CatBoost: %d (predicted labels available)",
+             sum(1 for y, c in zip(llm_labels, cb_preds) if not y and c))
 
-    shap = _run_shap(clf, X, cb_preds)
+    shap = _run_shap(clf, X_all, cb_preds)
     sage = _run_sage(feats, llm_labels, category_set)
 
     # ── Emit artifacts ─────────────────────────────────────────
@@ -364,10 +381,16 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Per-column records
+    # IMPORTANT: retain ALL samples including those where the LLM
+    # abstained on pass 1 (y == "").  CatBoost trained on the labeled
+    # subset will still produce predictions for those rows at inference
+    # time — that extrapolated prediction is NEW independent signal for
+    # the LLM on a subsequent revisit pass.  Dropping unlabeled rows
+    # here would discard exactly the rows the revisit loop is designed
+    # to help.
     import pandas as pd
     shap_records = shap.to_records(k=5) if shap else [{} for _ in samples]
-    # Align shap records to non-empty LLM predictions
-    filtered_samples = [(s, f, y) for s, f, y in zip(samples, feats, llm_labels) if y]
+    filtered_samples = list(zip(samples, feats, llm_labels))
     per_col: list[dict] = []
     attrib_jsonl: list[dict] = []
     for i, (s, f, y) in enumerate(filtered_samples):
@@ -397,9 +420,14 @@ def main() -> int:
             "published_label": s.ground_truth,
             "llm_label": y,
             "catboost_label": cb_preds[i] if i < len(cb_preds) else "",
+            "catboost_top3": (
+                [(lbl, round(p, 4)) for lbl, p in cb_top3[i]]
+                if i < len(cb_top3) else []
+            ),
             "llm_matches_published": y == s.ground_truth,
+            "llm_abstained_pass1": not y,
             "catboost_matches_llm": (
-                cb_preds[i] == y if i < len(cb_preds) else False
+                cb_preds[i] == y if i < len(cb_preds) and y else False
             ),
             "feature_snapshot": {
                 "cardinality": f.cardinality,
