@@ -315,7 +315,9 @@ src/atelier/classify/
 ├── fsm.py               # AgentFSM state machine
 ├── fixtures/
 │   ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
-│   └── fixture_tables.json        # 8 tables, 50 columns with ground truth
+│   └── fixture_tables.json        # 8 tables, 50 cols — fixture GT for unit tests
+│                                    (NOT the UAT-corpus authoritative GT; see
+│                                    build/meta-tagging-clean/ground_truth.csv)
 data/sample/
 └── ontology.json                  # Expanded vocabulary (300 leaves, 25 internal)
 └── ontology/

@@ -1,5 +1,17 @@
 # UAT Acceptance Review — Default DB, 2026-04-16
 
+> **Post-hoc correction (2026-04-19):** this review pre-dates the
+> authoritative ground truth at
+> `build/meta-tagging-clean/ground_truth.csv`.  The "reference
+> annotations" mentioned below refer to UAT's provisional labels,
+> which carry three known bugs we've since corrected (reference-
+> column name leakage, sibling-context leakage, name-index
+> parent-vs-leaf mis-mapping).  The 93% baseline cited in this
+> review was scored against UAT's buggy labels — see
+> `build/results/parity/delta_report.md` for the re-scored
+> comparison against our authoritative GT (Atelier 94.56% exact,
+> Gopala 65.27% exact, Δ +29.29).
+
 UAT feedback workbook: `build/Atelier_Results_Default_DB_4-16.xlsx`
 (gitignored). Environment: Bedrock-only (no direct Anthropic API,
 so no overwatch).

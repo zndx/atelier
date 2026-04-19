@@ -95,10 +95,26 @@ def main() -> int:
         log.error("missing %s/annotations.csv", src_dir)
         return 1
 
+    # Preserve the authoritative ground-truth CSV (if it exists) across
+    # the rmtree + rebuild so we don't nuke it when rewriting the
+    # cleaned-data directory.  It's produced by
+    # build_authoritative_ground_truth.py separately.
     out_dir = Path("build/meta-tagging-clean").resolve()
+    preserved_gt: bytes | None = None
+    preserved_gt_summary: bytes | None = None
     if out_dir.exists():
+        gt_path = out_dir / "ground_truth.csv"
+        gt_summary = out_dir / "ground_truth_summary.json"
+        if gt_path.is_file():
+            preserved_gt = gt_path.read_bytes()
+        if gt_summary.is_file():
+            preserved_gt_summary = gt_summary.read_bytes()
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
+    if preserved_gt is not None:
+        (out_dir / "ground_truth.csv").write_bytes(preserved_gt)
+    if preserved_gt_summary is not None:
+        (out_dir / "ground_truth_summary.json").write_bytes(preserved_gt_summary)
 
     # 1. annotations.csv — verbatim.  (The Hive export already has
     # ``annotations.<col>`` headers which Hive imports unchanged;

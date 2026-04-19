@@ -1,5 +1,17 @@
 # Phase-gate validation — LLM-agreement thesis on meta-tagging source
 
+> **Post-hoc correction (2026-04-19):** this note frames UAT's
+> meta-tagging corpus labels as ground truth.  They aren't —
+> the authoritative GT is now at
+> `build/meta-tagging-clean/ground_truth.csv`, built from direct
+> reference-column evidence plus priority-fixed name-index lookup.
+> "Obfuscated columns" as used below are now called **reference
+> columns** (answer keys, excluded from all train/test/eval
+> sample sets by invariant).  The phase-gate numbers here were
+> scored against UAT's provisional labels; the objective
+> re-scored comparison lives at
+> `build/results/parity/delta_report.md`.
+
 Today's accuracy phase gate cleared comfortably on the local
 meta-tagging source after four targeted changes:
 
