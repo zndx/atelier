@@ -215,7 +215,14 @@ def _derive_ground_truth(
     # Obfuscated: prefix_1_1_1_9_2_1 → 1.1.1.9.2.1
     m = _OBFUSCATED_RE.match(col_name)
     if m:
-        return m.group(1).replace("_", ".")
+        code = m.group(1).replace("_", ".")
+        # UAT Hive export normalized the "Not Sensitive" root code
+        # ``0.0`` → ``0``.  Column names still carry the Gopala-vintage
+        # ``0_0`` suffix; strip a trailing ``.0`` at the root so GT
+        # matches the UAT vocabulary.  Safe: no sub-tier ends in ``.0``.
+        if "." in code and code.count(".") == 1 and code.endswith(".0"):
+            code = code[:-2]
+        return code
 
     # Generic pass-through names stay non-sensitive.
     if col_name in {"row_id"}:
