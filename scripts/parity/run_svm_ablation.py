@@ -179,8 +179,20 @@ def _compact_anchors(text: str) -> str:
     return text
 
 
-def _tfidf_linear_svc():
-    """Reconstruct the current SVMClassifier pipeline — char+word TF-IDF + LinearSVC + Platt."""
+def _tfidf_linear_svc(*, multi_class: str = "ovr"):
+    """TF-IDF (char+word) + LinearSVC, optionally Crammer-Singer.
+
+    ``multi_class="ovr"``             — sklearn default; train K
+        independent binary classifiers.  Arms A, B, E, F, G.
+    ``multi_class="crammer_singer"``  — true joint multi-class SVM
+        (Crammer & Singer 2001), single weight matrix optimised so
+        class y's margin dominates max_{y'≠y} over sibling classes.
+        Arms H, I.
+
+    Platt calibration via ``CalibratedClassifierCV`` wraps either —
+    it calibrates per-class against ``decision_function`` output
+    regardless of the underlying multi_class setting.
+    """
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.pipeline import FeatureUnion, Pipeline
     from sklearn.svm import LinearSVC
@@ -196,10 +208,16 @@ def _tfidf_linear_svc():
             max_features=50_000, lowercase=True, sublinear_tf=True,
         )),
     ])
+    svc_kwargs = {"C": 1.0, "max_iter": 2000}
+    if multi_class == "crammer_singer":
+        # Crammer-Singer requires primal solver; dual=False is incompatible
+        # with hinge loss, so we use the default loss.  class_weight
+        # doesn't apply to the joint formulation.
+        svc_kwargs["multi_class"] = "crammer_singer"
     return Pipeline([
         ("feats", features),
         ("svc", CalibratedClassifierCV(
-            LinearSVC(C=1.0, max_iter=2000), method="sigmoid", cv=3,
+            LinearSVC(**svc_kwargs), method="sigmoid", cv=3,
         )),
     ])
 
@@ -390,6 +408,37 @@ def main() -> int:
     preds, ex, hi = _arm_result("G:S-full-compact+tfidf", train_g, predict_g)
     arm_preds["G_full_compact_tfidf"] = preds
     results["G_full_compact_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
+
+    # Arm H — Crammer-Singer multi-class SVM on S-short.
+    # Direct comparison against Arm A: same features, same TF-IDF, same
+    # corpus, only the multi-class decomposition differs.  Tests whether
+    # the joint-margin formulation recovers accuracy on leaf-vs-parent
+    # taxonomy errors (first_name vs Person Name) that OvR might miss.
+    model_h = _tfidf_linear_svc(multi_class="crammer_singer")
+    def train_h():
+        texts = [_build_svm_short(n, vs) for n, vs in zip(train_names, train_values)]
+        model_h.fit(texts, train_labels)
+    def predict_h(cols):
+        texts = [_build_svm_short(c.name, c.values) for c in cols]
+        return list(model_h.predict(texts))
+    preds, ex, hi = _arm_result("H:CS-short+tfidf", train_h, predict_h)
+    arm_preds["H_cs_short_tfidf"] = preds
+    results["H_cs_short_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
+
+    # Arm I — Crammer-Singer on the full embedding_text (no stop-wording).
+    # Direct comparison against Arm B: does C-S's intrinsic sibling-class
+    # awareness compensate for the vocabulary-saturation problem that sunk
+    # OvR on rich text?
+    model_i = _tfidf_linear_svc(multi_class="crammer_singer")
+    def train_i():
+        texts = [_build_embedding_text_synth(n, vs) for n, vs in zip(train_names, train_values)]
+        model_i.fit(texts, train_labels)
+    def predict_i(cols):
+        texts = [_extract_feature_text(c) for c in cols]
+        return list(model_i.predict(texts))
+    preds, ex, hi = _arm_result("I:CS-full+tfidf", train_i, predict_i)
+    arm_preds["I_cs_full_tfidf"] = preds
+    results["I_cs_full_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
 
     # Arm D — RBF-SVC on MiniLM embeddings
     model_d = _rbf_svc_on_embedding()
