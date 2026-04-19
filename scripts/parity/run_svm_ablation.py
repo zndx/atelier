@@ -106,6 +106,79 @@ def _build_embedding_text_synth(name: str, values: list[str]) -> str:
     return feats.to_embedding_text()
 
 
+# Template anchors we author ourselves in ``features.to_embedding_text()``.
+# Because we own the template, we know with certainty which tokens are
+# structural skeleton (non-discriminative, appear in every column) versus
+# which tokens carry signal (values, pattern names, descriptions, etc.).
+# Strip only the anchor strings — not the content they wrap — so TF-IDF's
+# 50k-feature budget concentrates on the discriminative vocabulary rather
+# than on char n-grams of ``cardinality=``, ``entropy=``, and the like.
+#
+# Char n-grams can't use a standard word-level ``stop_words`` parameter,
+# so pre-stripping is the surgical tool.  Conservative: strip exactly the
+# tokens we chose to put in; don't touch generic language in descriptions.
+_TEMPLATE_ANCHORS = (
+    # Exhaustively enumerated from ``features.ColumnFeatures.to_embedding_text``
+    # — every ``f"<key>=..."`` prefix and every ``"<key>: "`` prefix the
+    # template emits.  Kept in sync with that function; adding a new
+    # structural key there means adding it here.
+    "cardinality=", "null_ratio=", "entropy=",
+    "avg_len=", "numeric=",
+    "table=",
+    "patterns: ", "siblings: ",
+)
+
+
+def _strip_template_anchors(text: str) -> str:
+    """Remove template keywords AND the ``|`` separator.
+
+    Arm E — the naive "stop-word" move.  Surprisingly hurts performance
+    because the ``|`` was a real boundary token: without it, structured
+    fields bleed into each other (``99 1.52 3.8 last name, email …``).
+    """
+    for anchor in _TEMPLATE_ANCHORS:
+        text = text.replace(anchor, " ")
+    text = text.replace("|", " ")
+    return " ".join(text.split())
+
+
+def _strip_anchors_keep_pipes(text: str) -> str:
+    """Arm F — strip keyword anchors but preserve ``|`` as field boundary.
+
+    Controls for the effect isolated from the separator removal.  Tests
+    whether the anchors themselves carry signal (beyond just delimiting).
+    """
+    for anchor in _TEMPLATE_ANCHORS:
+        text = text.replace(anchor, "")
+    return " ".join(text.split())
+
+
+# Compact type markers — replace ``cardinality=99`` with ``CARD99``, etc.
+# Preserves type context in a dense form that costs fewer vocabulary slots.
+# Arm G tests whether this ends up outperforming bare anchors (Arm B).
+_COMPACT_MAP = {
+    "cardinality=": "CARD",
+    "null_ratio=": "NULLR",
+    "entropy=": "ENT",
+    "avg_len=": "AVGL",
+    "numeric=": "NUM",
+    "table=": "TBL_",
+    "patterns: ": "PAT_",
+    "siblings: ": "SIB_",
+}
+
+
+def _compact_anchors(text: str) -> str:
+    """Arm G — replace anchors with short typed prefixes.
+
+    ``cardinality=99`` → ``CARD99``.  Same type-context information in
+    ~5× fewer char n-gram fragments, freeing vocabulary budget.
+    """
+    for anchor, short in _COMPACT_MAP.items():
+        text = text.replace(anchor, short)
+    return text
+
+
 def _tfidf_linear_svc():
     """Reconstruct the current SVMClassifier pipeline — char+word TF-IDF + LinearSVC + Platt."""
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -268,6 +341,55 @@ def main() -> int:
     preds, ex, hi = _arm_result("C:linear-on-embed", train_c, predict_c)
     arm_preds["C_linear_embed"] = preds
     results["C_linear_embed"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
+
+    # Arm E — S-full *with template anchors stripped* + TF-IDF + LinearSVC.
+    # Tests whether the 19-point loss in Arm B was actually about TF-IDF
+    # drowning on boilerplate tokens (``cardinality=``, ``entropy=``, etc.)
+    # rather than a fundamental rich-text problem.  We author the template,
+    # so we know exactly which tokens are structural skeleton.
+    model_e = _tfidf_linear_svc()
+    def train_e():
+        texts = [
+            _strip_template_anchors(_build_embedding_text_synth(n, vs))
+            for n, vs in zip(train_names, train_values)
+        ]
+        model_e.fit(texts, train_labels)
+    def predict_e(cols):
+        texts = [_strip_template_anchors(_extract_feature_text(c)) for c in cols]
+        return list(model_e.predict(texts))
+    preds, ex, hi = _arm_result("E:S-full-stopwords+tfidf", train_e, predict_e)
+    arm_preds["E_full_stopwords_tfidf"] = preds
+    results["E_full_stopwords_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
+
+    # Arm F — strip keyword anchors but KEEP the ``|`` field separator.
+    model_f = _tfidf_linear_svc()
+    def train_f():
+        texts = [
+            _strip_anchors_keep_pipes(_build_embedding_text_synth(n, vs))
+            for n, vs in zip(train_names, train_values)
+        ]
+        model_f.fit(texts, train_labels)
+    def predict_f(cols):
+        texts = [_strip_anchors_keep_pipes(_extract_feature_text(c)) for c in cols]
+        return list(model_f.predict(texts))
+    preds, ex, hi = _arm_result("F:S-full-nokw-pipes+tfidf", train_f, predict_f)
+    arm_preds["F_full_nokw_pipes_tfidf"] = preds
+    results["F_full_nokw_pipes_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
+
+    # Arm G — compact typed markers: ``cardinality=99`` → ``CARD99``.
+    model_g = _tfidf_linear_svc()
+    def train_g():
+        texts = [
+            _compact_anchors(_build_embedding_text_synth(n, vs))
+            for n, vs in zip(train_names, train_values)
+        ]
+        model_g.fit(texts, train_labels)
+    def predict_g(cols):
+        texts = [_compact_anchors(_extract_feature_text(c)) for c in cols]
+        return list(model_g.predict(texts))
+    preds, ex, hi = _arm_result("G:S-full-compact+tfidf", train_g, predict_g)
+    arm_preds["G_full_compact_tfidf"] = preds
+    results["G_full_compact_tfidf"] = {"exact": round(ex, 4), "hier": round(hi, 4)}
 
     # Arm D — RBF-SVC on MiniLM embeddings
     model_d = _rbf_svc_on_embedding()
