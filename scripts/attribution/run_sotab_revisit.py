@@ -324,6 +324,61 @@ def main() -> int:
                  len(revisit_idx), len(samples),
                  {r: reasons.count(r) for r in set(reasons) if r})
 
+    # ── Prescriptive system prompt for the revisit pass ──────
+    # GLM-4.7 migration doc recommends "explicit directives (MUST,
+    # REQUIRED, STRICTLY)" and "early prompt positioning".  For a
+    # revisit that tests whether the LLM will lean into new signals,
+    # the prompt needs to be unambiguous about three things:
+    #   1. New evidence is provided and MUST be consulted.
+    #   2. Updating the pass-1 answer is expected when new evidence
+    #      contradicts it.
+    #   3. Explicit "UNCERTAIN" is a valid response when signal is
+    #      genuinely weak — we want honest abstention, not silent
+    #      blank output that masks uncertainty.
+    def _revisit_system_prompt(category_set):
+        from atelier.classify.llm_backend import build_category_table
+        table = build_category_table(category_set)
+        example_code = category_set.categories[0].code
+        example_alt = category_set.categories[1].code if len(category_set.categories) > 1 else example_code
+        # Prescriptive tone per the GLM-4.7 migration guide: rules
+        # front-loaded, imperative verbs (MUST, REQUIRED, STRICTLY),
+        # explicit response-format example matching the pipeline's
+        # ``_parse_classifications`` schema.  This is a second-pass
+        # prompt — it MUST direct the model to consult the new evidence
+        # and admit honest uncertainty rather than silently abstain.
+        return (
+            "You are performing a SECOND-PASS data-governance "
+            "classification.  Your previous (pass-1) label, an "
+            "independent ML classifier's top-3 candidates, "
+            "feature-attribution signals, and similar-column labels "
+            "are ALL provided per column.\n"
+            "\n"
+            "STRICT RULES:\n"
+            "1. You MUST consult the new evidence.  Sticking to the "
+            "   pass-1 label without engaging with the ML prediction "
+            "   and SHAP features is NOT acceptable.\n"
+            "2. If the new evidence strongly contradicts pass-1, "
+            "   UPDATE your answer.  Contradicting evidence is the "
+            "   point of this pass.\n"
+            "3. If the evidence is genuinely ambiguous, respond with "
+            "   the literal token ``UNCERTAIN`` as ``category_code``. "
+            "   Silent abstention (null or empty) is NOT acceptable.\n"
+            "4. Respond with ONLY a JSON array (no markdown fencing), "
+            "   one object per column, using the Response Format below.\n"
+            "\n"
+            "## Categories\n"
+            "\n"
+            f"{table}\n"
+            "\n"
+            "## Response Format\n"
+            "\n"
+            f'[{{"column_name": "col_7", '
+            f'"category_code": "{example_code}", "confidence": 0.82, '
+            f'"evidence": "updated from pass-1 based on CatBoost top-1 and '
+            f'phone-pattern SHAP feature", "alternatives": '
+            f'[{{"code": "{example_alt}", "confidence": 0.11}}]}}]'
+        )
+
     # ── Build revisit context + batched re-classify ───────────
     from atelier.classify.llm_backend import (
         create_backend_from_cfg, build_system_prompt, build_category_table,
@@ -332,8 +387,7 @@ def main() -> int:
 
     cfg = load_config()
     backend = create_backend_from_cfg(cfg)
-    table = build_category_table(category_set)
-    system_prompt = build_system_prompt(table, category_set=category_set)
+    system_prompt = _revisit_system_prompt(category_set)
 
     # Pre-compute neighbor labels per row (across the full sample set).
     neighbor_labels_per_row = [
@@ -349,6 +403,7 @@ def main() -> int:
     # Batch 25 at a time like the main pilot.
     BATCH = 25
     pass2_labels: dict[int, str] = {}
+    reasoning_traces_p2: list[dict] = []
     t0 = time.time()
     for b in range(0, len(revisit_idx), BATCH):
         batch_idxs = revisit_idx[b : b + BATCH]
@@ -369,18 +424,48 @@ def main() -> int:
         for j, c in enumerate(resp.classifications):
             global_idx = batch_idxs[j]
             pass2_labels[global_idx] = c.category_code or ""
+        reasoning_traces_p2.append({
+            "batch_id": b // BATCH + 1,
+            "column_ids": [f"{s.table_name}:{s.name}" for s in chunk],
+            "predicted_codes": [c.category_code or "" for c in resp.classifications],
+            "reasoning_text": resp.reasoning_text,
+            "reasoning_tokens": resp.reasoning_tokens,
+            "input_tokens": resp.input_tokens,
+            "output_tokens": resp.output_tokens,
+            "pass": "pass2_revisit",
+        })
 
     log.info("revisit LLM calls done in %.1fs", time.time() - t0)
 
+    # Append pass-2 reasoning traces to the run's reasoning artifact
+    # (append mode — preserves pass-1 entries from the pilot).
+    traces_path = run_dir / "reasoning_traces.jsonl"
+    with open(traces_path, "a") as f:
+        for tr in reasoning_traces_p2:
+            f.write(json.dumps(tr) + "\n")
+    log.info(
+        "appended %d pass-2 reasoning traces (%d chars total) to %s",
+        len(reasoning_traces_p2),
+        sum(len(t["reasoning_text"]) for t in reasoning_traces_p2),
+        traces_path,
+    )
+
     # ── Tabulate convergence ──────────────────────────────────
+    # ``UNCERTAIN`` is an explicit pass-2 response (per the revisit
+    # prompt) meaning "signal genuinely too weak to commit".  We
+    # surface it as its own bucket — honest abstention is a valid and
+    # useful outcome, distinct from silent failure.
+    UNCERTAIN = "UNCERTAIN"
     improvements = 0
     regressions = 0
     changed_still_wrong = 0
     same_decision = 0
     unparsed_p2 = 0
+    p2_uncertain_from_labeled = 0
     abstention_resolved_correct = 0
     abstention_resolved_wrong = 0
     abstention_still_unresolved = 0
+    abstention_resolved_uncertain = 0
     published_gt = [s.ground_truth for s in samples]
     for i in revisit_idx:
         p1 = pass1_labels[i]
@@ -388,7 +473,9 @@ def main() -> int:
         gt = published_gt[i]
         if not p1:
             # LLM abstained on pass 1 — a different bucket
-            if not p2:
+            if p2 == UNCERTAIN:
+                abstention_resolved_uncertain += 1
+            elif not p2:
                 abstention_still_unresolved += 1
             elif p2 == gt:
                 abstention_resolved_correct += 1
@@ -397,6 +484,9 @@ def main() -> int:
             continue
         if not p2:
             unparsed_p2 += 1
+            continue
+        if p2 == UNCERTAIN:
+            p2_uncertain_from_labeled += 1
             continue
         if p2 == p1:
             same_decision += 1
@@ -435,10 +525,12 @@ def main() -> int:
             "labeled_rows_changed_still_wrong": changed_still_wrong,
             "labeled_rows_unchanged": same_decision,
             "labeled_rows_unparsed_p2": unparsed_p2,
+            "labeled_rows_honest_uncertain_p2": p2_uncertain_from_labeled,
             # cols where pass-1 abstained — CatBoost gave them a
             # pseudo-label which went to LLM on revisit
             "abstention_resolved_correct": abstention_resolved_correct,
             "abstention_resolved_wrong": abstention_resolved_wrong,
+            "abstention_resolved_honest_uncertain": abstention_resolved_uncertain,
             "abstention_still_unresolved": abstention_still_unresolved,
         },
         "fidelity_vs_published_gt": {

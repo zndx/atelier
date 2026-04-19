@@ -99,6 +99,15 @@ class LLMResponse:
     output_tokens: int
     model: str
     finish_reason: str = "stop"
+    # Reasoning/thinking-trace text when the backend + model expose one
+    # (e.g. GLM-4.7 via Cerebras with ``reasoning_format="parsed"``,
+    # which returns ``choices[0].message.reasoning`` separate from
+    # ``content``).  Empty string for backends without reasoning
+    # capture or for models that don't emit thinking text.  Stored as a
+    # single string per batch — one reasoning trace covers the whole
+    # batch's decisions, not per-column.
+    reasoning_text: str = ""
+    reasoning_tokens: int = 0
 
     @property
     def truncated(self) -> bool:
@@ -735,8 +744,15 @@ class OpenAICompatibleBackend(LLMBackend):
         else:
             raise last_error  # type: ignore[misc]
 
-        text = response.choices[0].message.content or ""
-        text = text.strip()
+        msg = response.choices[0].message
+        text = (msg.content or "").strip()
+        # GLM-4.7 on Cerebras with ``reasoning_format="parsed"`` (default)
+        # returns the thinking trace in a dedicated ``reasoning`` field
+        # separate from the final answer in ``content``.  Capture it when
+        # present so downstream pipelines can persist the reasoning as a
+        # research artifact.  Other OpenAI-compatible backends simply
+        # don't emit this field — getattr keeps us compatible.
+        reasoning_text = (getattr(msg, "reasoning", None) or "").strip()
 
         finish_reason = response.choices[0].finish_reason or "stop"
         input_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
@@ -756,8 +772,9 @@ class OpenAICompatibleBackend(LLMBackend):
             )
         else:
             logger.info(
-                "LLM response: %d chars, finish=%s, in=%d, out=%d (reasoning=%d)",
-                len(text), finish_reason, input_tokens, output_tokens, reasoning_tokens,
+                "LLM response: %d chars, finish=%s, in=%d, out=%d (reasoning=%d, reasoning_text_chars=%d)",
+                len(text), finish_reason, input_tokens, output_tokens,
+                reasoning_tokens, len(reasoning_text),
             )
 
         classifications = _parse_classifications(text, expected_names)
@@ -768,6 +785,8 @@ class OpenAICompatibleBackend(LLMBackend):
             output_tokens=output_tokens,
             model=self._config.model,
             finish_reason=finish_reason,
+            reasoning_text=reasoning_text,
+            reasoning_tokens=reasoning_tokens,
         )
 
     def health_check(self) -> bool:

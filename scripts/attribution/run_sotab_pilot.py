@@ -226,6 +226,16 @@ def _extract_features(samples):
 
 
 def _llm_classify(samples, category_set, batch_size: int):
+    """Pass-1 LLM classification + capture reasoning traces per batch.
+
+    Returns ``(predictions, reasoning_traces)`` where ``reasoning_traces``
+    is a list of per-batch dicts recording the thinking trace GLM-4.7
+    emits alongside each JSON answer, plus the column names that batch
+    covers.  Captured as a research artifact — these traces are the
+    per-batch "how did the LLM arrive at these labels" record, and are
+    memorization-safe to share since they are signal-level artifacts
+    about features rather than published labels.
+    """
     from atelier.classify.llm_backend import (
         create_backend_from_cfg, build_system_prompt, build_category_table,
     )
@@ -236,6 +246,7 @@ def _llm_classify(samples, category_set, batch_size: int):
     prompt = build_system_prompt(table, category_set=category_set)
 
     predictions: list[str] = [""] * len(samples)
+    reasoning_traces: list[dict] = []
     t0 = time.time()
     total_batches = (len(samples) + batch_size - 1) // batch_size
     for b in range(0, len(samples), batch_size):
@@ -252,8 +263,18 @@ def _llm_classify(samples, category_set, batch_size: int):
             continue
         for i, c in enumerate(resp.classifications):
             predictions[b + i] = c.category_code or ""
+        reasoning_traces.append({
+            "batch_id": bnum,
+            "column_ids": [f"{s.table_name}:{s.name}" for s in chunk],
+            "predicted_codes": [c.category_code or "" for c in resp.classifications],
+            "reasoning_text": resp.reasoning_text,
+            "reasoning_tokens": resp.reasoning_tokens,
+            "input_tokens": resp.input_tokens,
+            "output_tokens": resp.output_tokens,
+            "pass": "pass1",
+        })
     log.info("LLM classify done in %.1fs", time.time() - t0)
-    return predictions
+    return predictions, reasoning_traces
 
 
 def _train_catboost(feats, llm_labels):
@@ -333,7 +354,9 @@ def main() -> int:
     all_labels = sorted({r[2] for r in gt_rows})
     category_set = _build_category_set(all_labels)
     feats = _extract_features(samples)
-    llm_labels = _llm_classify(samples, category_set, batch_size=args.batch_size)
+    llm_labels, reasoning_traces = _llm_classify(
+        samples, category_set, batch_size=args.batch_size,
+    )
 
     # Fidelity vs published GT — the memorization-safe check.
     published = [s.ground_truth for s in samples]
@@ -372,8 +395,18 @@ def main() -> int:
     log.info("LLM-abstained rows rescued by CatBoost: %d (predicted labels available)",
              sum(1 for y, c in zip(llm_labels, cb_preds) if not y and c))
 
+    # SKIP_HEAVY_GPU disables SAGE (the most expensive step) when set.
+    # Set via ATELIER_ATTRIB_SKIP_SAGE=1 in the environment.  Useful
+    # when the local GPUs are pinned by a different job.
+    import os as _os
+    skip_sage = _os.environ.get("ATELIER_ATTRIB_SKIP_SAGE", "").lower() in ("1", "true", "yes")
+
     shap = _run_shap(clf, X_all, cb_preds)
-    sage = _run_sage(feats, llm_labels, category_set)
+    if skip_sage:
+        log.info("SAGE skipped via ATELIER_ATTRIB_SKIP_SAGE=1")
+        sage = None
+    else:
+        sage = _run_sage(feats, llm_labels, category_set)
 
     # ── Emit artifacts ─────────────────────────────────────────
     run_id = time.strftime("run_%Y%m%d_%H%M%S")
@@ -447,6 +480,20 @@ def main() -> int:
     with open(out_dir / "feature_attributions.jsonl", "w") as f:
         for rec in attrib_jsonl:
             f.write(json.dumps(rec) + "\n")
+
+    # Reasoning traces — the long-term research artifact we're building
+    # while we work.  One record per LLM batch; each carries the
+    # thinking text alongside the columns it covers.  Stored as JSONL
+    # so appending pass-2 reasoning later is trivial.
+    with open(out_dir / "reasoning_traces.jsonl", "w") as f:
+        for tr in reasoning_traces:
+            f.write(json.dumps(tr) + "\n")
+    total_reasoning_chars = sum(len(tr["reasoning_text"]) for tr in reasoning_traces)
+    total_reasoning_tokens = sum(tr["reasoning_tokens"] for tr in reasoning_traces)
+    log.info(
+        "reasoning-trace artifact: %d batches, %d chars, %d tokens",
+        len(reasoning_traces), total_reasoning_chars, total_reasoning_tokens,
+    )
     if sage:
         (out_dir / "sage_importance.json").write_text(
             json.dumps(sage.to_dict(), indent=2)
