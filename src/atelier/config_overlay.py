@@ -385,7 +385,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": True,
         "captions": {
             True: "Reference columns are excluded — classifier only sees natural-named columns on the UAT synth corpus (production default).",
-            False: "Reference columns are INCLUDED — each gets classified from its values like any other column. The pipeline does not parse the numeric suffix; it treats the name as an opaque string. Use as a falsification test to show renamed reference columns behave the same.",
+            False: "Answer-key columns flow through the full classifier (LLM + cosine + CatBoost + SVM + DST fusion) as ordinary inputs and may influence classification results for adjacent columns.",
         },
     },
     "row_mc_k": {

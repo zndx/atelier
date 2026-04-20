@@ -775,7 +775,7 @@ function ReferenceColumnHandlingCard() {
         message={
           enabled
             ? "Exclude mode (production default)"
-            : "Include mode — classifier sees answer-key columns too"
+            : "Include mode"
         }
         description={
           enabled ? (
@@ -783,24 +783,14 @@ function ReferenceColumnHandlingCard() {
               Answer-key columns such as{" "}
               <Text code>attr_1_1_1_9_2_1</Text> are filtered out of
               the sample set before the LLM sweep. On production data
-              the regex matches nothing, so this is a no-op there. On
-              the UAT synth corpus it isolates the honest classifier
-              signal on natural-named columns — the ones a real
-              deployment would need to get right.
+              the regex matches nothing, so this is a no-op there.
             </>
           ) : (
             <>
-              Answer-key columns flow through the full classifier
-              (LLM + cosine + CatBoost + SVM + DST fusion) as ordinary
-              inputs. The pipeline does <b>not</b> parse the suffix;
-              it classifies from the column's values, which by
-              synth-generator construction match the paired natural
-              column.  Useful as a falsification test: rename a
-              reference column to an arbitrary string in this mode
-              and the prediction should still track the values, not
-              the name. If a reviewer mis-names reference columns to
-              probe for name-parse cheating, the result will be the
-              same as on natural columns carrying those values.
+              Answer-key columns flow through the full classifier (LLM
+              + cosine + CatBoost + SVM + DST fusion) as ordinary
+              inputs and may influence classification results for
+              adjacent columns.
             </>
           )
         }
