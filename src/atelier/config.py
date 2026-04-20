@@ -97,6 +97,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.sample_size": ("classify_sample_size", int),
     "classify.column_sample_limit": ("classify_column_sample_limit", int),
     "classify.tables_limit": ("classify_tables_limit", int),
+    "classify.exclude_reference_columns": ("classify_exclude_reference_columns", bool),
     "classify.embedding_model": ("classify_embedding_model", str),
     "classify.embedding_device": ("classify_embedding_device", str),
     "classify.embedding_batch_size": ("classify_embedding_batch_size", int),
@@ -286,6 +287,11 @@ class AtelierConfig:
     classify_sample_size: int = 50
     classify_column_sample_limit: int = 1000
     classify_tables_limit: int = 100
+    # Reference-column exclusion — see config/base.conf for the
+    # regex pattern and rationale.  Kept as a toggle so UAT reviewers
+    # can demonstrate classifier quality in both configurations on
+    # the synth corpus that motivated it.
+    classify_exclude_reference_columns: bool = True
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_embedding_device: str = "auto"
     classify_embedding_batch_size: int = 32

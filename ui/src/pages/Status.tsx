@@ -6,6 +6,7 @@ import {
   Card,
   Col,
   Descriptions,
+  message,
   Row,
   Select,
   Space,
@@ -669,6 +670,146 @@ function DataSourceCard() {
   );
 }
 
+function ReferenceColumnHandlingCard() {
+  // UAT-compatibility toggle.  The synth corpus UAT uses pairs every
+  // natural-named column with an answer-key twin named attr_*, code_*,
+  // etc. — the numeric suffix literally IS the code.  Production
+  // column naming doesn't hit this regex, so the toggle is a no-op on
+  // real data.  Kept visible (not buried in Settings) because UAT
+  // reviewers want to see accuracy in both configurations.  This
+  // whole card — along with the backend flag — is slated for removal
+  // once the synth-dataset lineage retires.
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((body) => {
+        const values = body?.values ?? {};
+        const v = values["classify_exclude_reference_columns"];
+        setEnabled(typeof v === "boolean" ? v : true);
+      })
+      .catch(() => setEnabled(true))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const toggle = async (next: boolean) => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classify_exclude_reference_columns: next }),
+      });
+      const body = await r.json();
+      if (!r.ok || body.error) {
+        message.error(body.error || `PATCH failed: ${r.status}`);
+      } else {
+        setEnabled(next);
+        message.success(
+          next
+            ? "Reference columns will be excluded on the next run."
+            : "Reference columns will be included on the next run.",
+        );
+      }
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      title={
+        <Space>
+          <span>Reference Column Handling</span>
+          <Tag color="gold" style={{ margin: 0 }}>
+            UAT compatibility
+          </Tag>
+        </Space>
+      }
+      extra={
+        <Space>
+          {loading ? (
+            <Spin size="small" />
+          ) : (
+            <>
+              <Text type="secondary">
+                {enabled ? "Excluded" : "Included"}
+              </Text>
+              <Switch
+                checked={enabled ?? true}
+                onChange={toggle}
+                loading={saving}
+                disabled={loading}
+              />
+            </>
+          )}
+        </Space>
+      }
+    >
+      <Paragraph style={{ marginBottom: 8 }}>
+        The UAT synth corpus pairs every natural-named column with an
+        answer-key twin (pattern below) whose numeric suffix literally
+        encodes the expected code. This toggle controls whether those
+        twins enter the classification pipeline. Nowhere in the
+        prediction path does the pipeline regex-decode the name; the
+        toggle is strictly a pre-filter over the sample set.
+      </Paragraph>
+      <Paragraph style={{ marginBottom: 8 }}>
+        <Text code>
+          ^(attr|code|col|data|field|item|key|ref|val|var)_\d+(_\d+)*$
+        </Text>
+      </Paragraph>
+      <Alert
+        type={enabled ? "info" : "warning"}
+        showIcon
+        message={
+          enabled
+            ? "Exclude mode (production default)"
+            : "Include mode — classifier sees answer-key columns too"
+        }
+        description={
+          enabled ? (
+            <>
+              Answer-key columns such as{" "}
+              <Text code>attr_1_1_1_9_2_1</Text> are filtered out of
+              the sample set before the LLM sweep. On production data
+              the regex matches nothing, so this is a no-op there. On
+              the UAT synth corpus it isolates the honest classifier
+              signal on natural-named columns — the ones a real
+              deployment would need to get right.
+            </>
+          ) : (
+            <>
+              Answer-key columns flow through the full classifier
+              (LLM + cosine + CatBoost + SVM + DST fusion) as ordinary
+              inputs. The pipeline does <b>not</b> parse the suffix;
+              it classifies from the column's values, which by
+              synth-generator construction match the paired natural
+              column.  Useful as a falsification test: rename a
+              reference column to an arbitrary string in this mode
+              and the prediction should still track the values, not
+              the name. If a reviewer mis-names reference columns to
+              probe for name-parse cheating, the result will be the
+              same as on natural columns carrying those values.
+            </>
+          )
+        }
+        style={{ marginBottom: 0 }}
+      />
+    </Card>
+  );
+}
+
 function StatusBadge({ ok }: { ok: boolean }) {
   return ok ? (
     <Badge status="success" text="Healthy" />
@@ -1007,6 +1148,13 @@ export default function Status() {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24}>
           <DataSourceCard />
+        </Col>
+      </Row>
+
+      {/* ── Reference Column Handling (UAT compatibility knob) ── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <ReferenceColumnHandlingCard />
         </Col>
       </Row>
 

@@ -496,16 +496,29 @@ def run_classification_pipeline(
         # every loader path ends up with reference columns excluded,
         # with zero behavior change on production data (pattern doesn't
         # match production column names).
-        from atelier.classify.meta_tagging_source import exclude_reference_columns
-        pre_filter_cols = sum(len(t.columns) for t in all_samples)
-        all_samples = exclude_reference_columns(all_samples)
-        post_filter_cols = sum(len(t.columns) for t in all_samples)
-        if pre_filter_cols != post_filter_cols:
+        #
+        # Gated by ``classify_exclude_reference_columns`` so UAT
+        # reviewers can demonstrate accuracy in both configurations
+        # (the toggle lives on the Status page).  Default ON; flag
+        # exists purely for the UAT synth corpus that motivated it
+        # and will be removed once that dataset is retired.
+        if cfg.classify_exclude_reference_columns:
+            from atelier.classify.meta_tagging_source import exclude_reference_columns
+            pre_filter_cols = sum(len(t.columns) for t in all_samples)
+            all_samples = exclude_reference_columns(all_samples)
+            post_filter_cols = sum(len(t.columns) for t in all_samples)
+            if pre_filter_cols != post_filter_cols:
+                logger.info(
+                    "Reference-column exclusion: %d → %d columns "
+                    "(%d answer-key columns dropped from %d tables)",
+                    pre_filter_cols, post_filter_cols,
+                    pre_filter_cols - post_filter_cols, len(all_samples),
+                )
+        else:
             logger.info(
-                "Reference-column exclusion: %d → %d columns "
-                "(%d answer-key columns dropped from %d tables)",
-                pre_filter_cols, post_filter_cols,
-                pre_filter_cols - post_filter_cols, len(all_samples),
+                "Reference-column exclusion DISABLED — answer-key "
+                "columns will be sent through the classifier (UAT "
+                "demonstration mode only; see Status page toggle)."
             )
 
         # Flatten to column list with table mapping

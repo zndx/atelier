@@ -41,3 +41,24 @@ Feature: LLM sweep must classify every column the operator asked for
     Given an AtelierConfig with classify_tables_limit=42 and classify_sample_size=17
     When a caller invokes the pipeline without passing those values
     Then the pipeline uses 42 and 17, not the hard-coded function defaults
+
+  Scenario: No prediction path regex-decodes reference column names
+    # Defends against the "UAT renames reference columns, our numbers
+    # collapse" accusation.  The reference regex must ONLY be used to
+    # (a) filter the sample set, (b) build the curated reference
+    # (answer key for evaluation).  It must NOT appear in the LLM
+    # sweep, cosine, pattern, mass-function, or DST fusion paths.
+    Given the set of modules on the classifier prediction path
+    When I scan each for uses of the reference-column regex
+    Then no prediction-path module imports or matches the regex
+
+  Scenario: All-columns parquet does not fabricate predictions from names
+    # The UAT-coverage parquet ships reference-column rows so row-audit
+    # scripts find every source column, but those rows must not carry
+    # predictions decoded from the column name — that would pass our
+    # synth corpus and silently fail any renamed-column validation set.
+    Given the bundle's atelier_predictions_all_columns.parquet
+    When I inspect the reference-column rows
+    Then predicted_code is empty on every reference-column row
+    And matches_reference is None on every reference-column row
+    And the evidence field explains the row is excluded by configuration

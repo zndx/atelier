@@ -313,3 +313,131 @@ def _cfg_then(context):
     assert context.resolved_sample_size == 17, (
         f"sample_size not respected: got {context.resolved_sample_size}"
     )
+
+
+# ── Scenario 6: no name-parse on the prediction path ───────────────
+
+
+# Modules the pipeline calls during PREDICTION.  Loaders and the
+# curated-reference builder are deliberately excluded — the regex is
+# legitimate there (it's reading the synth generator's self-labeling
+# convention to know the answer key, not to generate a prediction).
+_PREDICTION_PATH_MODULES = (
+    "src/atelier/classify/bootstrap.py",
+    "src/atelier/classify/pipeline.py",
+    "src/atelier/classify/llm_backend.py",
+    "src/atelier/classify/features.py",
+    "src/atelier/classify/mass_functions.py",
+    "src/atelier/classify/belief.py",
+    "src/atelier/classify/catboost_classifier.py",
+    "src/atelier/classify/svm_classifier.py",
+    "src/atelier/classify/ml_inference.py",
+    "src/atelier/classify/embedding.py",
+    "src/atelier/classify/monte_carlo.py",
+    "src/atelier/classify/row_sampler.py",
+    "src/atelier/classify/agent_loop.py",
+)
+
+
+@given("the set of modules on the classifier prediction path")
+def _pred_path_given(context):
+    from pathlib import Path
+    context.pred_path_files = [Path(p) for p in _PREDICTION_PATH_MODULES]
+
+
+@when("I scan each for uses of the reference-column regex")
+def _pred_path_scan(context):
+    violations: list[str] = []
+    for p in context.pred_path_files:
+        if not p.is_file():
+            # pipeline.py uses exclude_reference_columns to PRE-FILTER
+            # the sample set; that's not on the prediction path, so a
+            # named-import of the helper is fine.  What would be bad:
+            # a direct import of _REFERENCE_COL_RE for use inside a
+            # classify_column / evidence-fusion / mass-function code
+            # path.  We treat any occurrence of the regex name in
+            # these files as a violation worth flagging — the helper
+            # is the one exception.
+            continue
+        text = p.read_text()
+        if "_REFERENCE_COL_RE" in text:
+            # pipeline.py imports exclude_reference_columns, which
+            # transitively touches the regex.  That's the pre-filter,
+            # not prediction.  Only flag if the regex itself appears.
+            violations.append(str(p))
+    context.pred_path_violations = violations
+
+
+@then("no prediction-path module imports or matches the regex")
+def _pred_path_clean(context):
+    assert not context.pred_path_violations, (
+        "reference-column regex leaked into prediction path modules: "
+        f"{context.pred_path_violations}"
+    )
+
+
+# ── Scenario 7: all-columns parquet doesn't fabricate ──────────────
+
+
+@given("the bundle's atelier_predictions_all_columns.parquet")
+def _all_cols_given(context):
+    import io
+    import zipfile
+    import pyarrow.parquet as pq
+    from pathlib import Path
+
+    bundle = Path("build/meta-tagging-clean.zip")
+    if not bundle.is_file():
+        # Bundle is a build artifact; if it's not materialized in this
+        # checkout, skip the scenario rather than fail it.  The
+        # assertions below only make sense against a built bundle.
+        context.scenario.skip("bundle not built (run make_clean_hive_dataset.py)")
+        return
+    zf = zipfile.ZipFile(bundle)
+    with zf.open("meta-tagging-clean/atelier_predictions_all_columns.parquet") as f:
+        context.all_cols_df = pq.read_table(io.BytesIO(f.read())).to_pandas()
+
+
+@when("I inspect the reference-column rows")
+def _all_cols_when(context):
+    from atelier.classify.meta_tagging_source import _REFERENCE_COL_RE
+    df = context.all_cols_df
+    mask = df["column_name"].astype(str).map(lambda n: bool(_REFERENCE_COL_RE.match(n)))
+    context.ref_rows = df[mask]
+
+
+@then("predicted_code is empty on every reference-column row")
+def _all_cols_predicted_empty(context):
+    rows = context.ref_rows
+    nonempty = rows[rows["predicted_code"].astype(str).str.len() > 0]
+    assert len(nonempty) == 0, (
+        f"found {len(nonempty)} reference rows with a predicted_code — "
+        "looks like name-parse prediction snuck back in: "
+        f"{list(nonempty['column_name'].head(5))}"
+    )
+
+
+@then("matches_reference is None on every reference-column row")
+def _all_cols_matches_none(context):
+    rows = context.ref_rows
+    non_null = rows["matches_reference"].notna().sum()
+    assert int(non_null) == 0, (
+        f"found {non_null} reference rows with non-null matches_reference — "
+        "these would leak into accuracy computations"
+    )
+
+
+@then("the evidence field explains the row is excluded by configuration")
+def _all_cols_evidence(context):
+    rows = context.ref_rows
+    if len(rows) == 0:
+        return
+    missing_evidence = rows[
+        ~rows["evidence"].astype(str).str.contains(
+            "excluded from classification", case=False, na=False,
+        )
+    ]
+    assert len(missing_evidence) == 0, (
+        f"{len(missing_evidence)} reference rows lack the excluded-by-config "
+        f"evidence string: {list(missing_evidence['column_name'].head(3))}"
+    )

@@ -222,11 +222,16 @@ def _build_all_columns_parquet(
     the honest-evaluation semantics of ``atelier_predictions.parquet``
     while letting UAT's row-count check find every source column.
 
-    Reference rows are trivially correct by construction:
-    ``predicted_code`` is decoded from the column name
-    (``attr_1_1_1_9_2_1`` → ``1.1.1.9.2.1``); ``reference_code`` is the
-    same code; ``matches_reference`` is therefore True.  The evidence
-    field documents that the row was name-decoded rather than classified.
+    Reference rows carry NO prediction and NO reference_code.  Decoding
+    the column-name suffix to a code would be name-parse cheating — if
+    a reviewer renames ``attr_1_1_1_9_2_1`` to ``xyz_9876`` for a
+    validation test, any pipeline that name-parses silently "succeeds"
+    for the wrong reason.  The honest behavior: leave these rows
+    unscored; a reviewer who wants predictions on reference columns
+    runs the pipeline with
+    ``classify_exclude_reference_columns=false`` and lets the LLM +
+    ML classifiers classify them from values alone, exactly as they
+    would on a renamed validation set.
     """
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -234,19 +239,6 @@ def _build_all_columns_parquet(
     from atelier.classify.meta_tagging_source import _REFERENCE_COL_RE
 
     src_dir = Path("build/meta-tagging")
-    ann_csv = src_dir / "annotations.csv"
-
-    # Code → (ontology label, annotation mnemonic) from annotations.csv
-    code_to_label: dict[str, tuple[str, str]] = {}
-    with open(ann_csv, newline="") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            cid = (r.get("id") or r.get("annotations.id") or "").strip().lstrip("'")
-            if not cid:
-                continue
-            label = (r.get("ontology") or r.get("annotations.ontology") or "").strip()
-            mnem = (r.get("annotation") or r.get("annotations.annotation") or "").strip()
-            code_to_label[cid] = (label, mnem)
 
     # Natural parquet rows we've already emitted — dedup key (table, col)
     existing: set[tuple[str, str]] = set()
@@ -255,8 +247,10 @@ def _build_all_columns_parquet(
         existing.add((str(row["table_name"]).strip(),
                       str(row["column_name"]).strip()))
 
-    # Walk source CSV headers and emit a row for every reference column
-    # not already represented in the natural parquet.
+    # Walk source CSV headers and emit ONE row per reference column not
+    # already in the natural parquet — predictions deliberately empty.
+    # This gives UAT's row-count script every source column without
+    # silently declaring "correct by name parse" on synth answer keys.
     new_rows: list[dict] = []
     for csv_path in sorted(src_dir.glob("*.csv")):
         if csv_path.name == "annotations.csv":
@@ -269,37 +263,41 @@ def _build_all_columns_parquet(
         prefix = f"{table_name}."
         names = [h[len(prefix):] if h.startswith(prefix) else h for h in header]
         for col_name in names:
-            m = _REFERENCE_COL_RE.match(col_name)
-            if not m:
+            if not _REFERENCE_COL_RE.match(col_name):
                 continue
             if (table_name, col_name) in existing:
                 continue
-            code = m.group(1).replace("_", ".")
-            # Normalize ``X.0`` at the root, mirrors _derive_reference_code
-            if "." in code and code.count(".") == 1 and code.endswith(".0"):
-                code = code[:-2]
-            label, mnem = code_to_label.get(code, ("", ""))
             new_rows.append({
                 "table_name": table_name,
                 "column_name": col_name,
-                "predicted_code": code,
-                "predicted_label": label,
-                "predicted_annotation": mnem,
-                "reference_code": code,
-                "reference_label": label,
-                "matches_reference": True,
-                "confidence": 1.0,
-                "belief": 1.0,
+                # predictions and reference intentionally empty — see
+                # docstring; matches_reference=None so they don't enter
+                # any accuracy numerator or denominator.
+                "predicted_code": "",
+                "predicted_label": "",
+                "predicted_annotation": "",
+                "reference_code": "",
+                "reference_label": "",
+                "matches_reference": None,
+                "confidence": 0.0,
+                "belief": 0.0,
                 "plausibility": 1.0,
-                "uncertainty": 0.0,
+                "uncertainty": 1.0,
                 "conflict": 0.0,
                 "llm_code": "",
                 "llm_confidence": 0.0,
                 "needs_clarification": False,
-                "evidence": "synth reference column — name encodes the code directly; classified by name parse, no LLM or ML evidence used",
-                "cautious_code": code,
+                "evidence": (
+                    "synth reference column — excluded from "
+                    "classification in the default configuration "
+                    "(classify.exclude_reference_columns=true). Re-run "
+                    "with the toggle flipped on the Status page to "
+                    "have the LLM + ML classifiers predict this column "
+                    "from its values alone (no name parse)."
+                ),
+                "cautious_code": "",
                 "column_type": "object",
-                "text": f"{col_name} — {label}" if label else col_name,
+                "text": col_name,
                 "embedding_text": "",
                 "pattern_signals": "",
                 "dst_belief_path": "[]",
@@ -584,35 +582,49 @@ def main() -> int:
         "",
         f"{parquet_stats['full_rows']}-row parquet — every column in "
         "the source corpus, including synth-generator answer-key "
-        "columns (the paired ``attr_1_1_1_9_2_1``, ``code_1_2_3``, etc. "
-        "twins dropped from the evaluation artifact).  Provided because "
-        "UAT scoring scripts iterate every source column and flag any "
-        "missing from the output.",
+        "columns (the paired ``attr_*``, ``code_*``, ``item_*``, "
+        "``val_*`` etc. twins that the default configuration drops "
+        "from the evaluation artifact).  Provided so UAT's scoring "
+        "scripts can iterate every source column without flagging any "
+        "as missing.",
+        "",
+        "### How reference-column rows are populated — read this carefully",
         "",
         "The 246 natural-named rows are byte-identical to "
         "``atelier_predictions.parquet``.  The 213 reference-column "
-        "rows are appended with a deterministic name-parse "
-        "classification:",
+        "rows are **deliberately unscored**:",
         "",
-        "- ``predicted_code`` is decoded from the column name "
-        "(``attr_1_1_1_9_2_1`` → ``1.1.1.9.2.1``).",
-        "- ``reference_code`` is the same code (by construction, the "
-        "name IS the answer).",
-        "- ``matches_reference`` is True for all reference rows — they "
-        "cannot be misclassified by name parse.",
-        "- ``evidence`` reads ``\"synth reference column — name encodes "
-        "the code directly; classified by name parse, no LLM or ML "
-        "evidence used\"`` so reviewers can filter these rows out of "
-        "any accuracy metric they care about.",
-        "- DST fields (``belief``, ``plausibility``, ``confidence``) "
-        "are set to 1.0 / 0.0 accordingly; SHAP / embedding / UMAP "
-        "fields are empty (these rows never passed through the "
-        "statistical pipeline).",
+        "- ``predicted_code``, ``predicted_label``, ``reference_code``, "
+        "``reference_label`` are all empty.",
+        "- ``matches_reference`` is ``None`` so these rows enter "
+        "neither numerator nor denominator of any accuracy metric.",
+        "- ``evidence`` explains why: the column was excluded from "
+        "classification in the default configuration.",
         "",
-        "### Accuracy on all-columns (diagnostic, not the headline)",
+        "**We intentionally do NOT decode the column-name suffix and "
+        "claim it as a prediction.**  If we did, a reviewer who "
+        "renamed ``attr_1_1_1_9_2_1`` to ``xyz_9876`` on a validation "
+        "test would break the silent name-parse and our accuracy "
+        "would collapse.  Any pipeline that name-parses in its "
+        "prediction path is cheating against the corpus rather than "
+        "classifying it.",
+        "",
+        "### To get predictions on reference columns, flip the toggle",
+        "",
+        "On the Status page, turn **Reference Column Handling** from "
+        "*Exclude* to *Include*.  The next pipeline run will push "
+        "every column — reference twins included — through the LLM "
+        "sweep and ML classifiers.  The LLM sees the column name as "
+        "an opaque string plus the column's values (identical to the "
+        "paired natural column by synth-generator construction) and "
+        "classifies from value evidence.  That's the honest test of "
+        "whether classification holds up when names carry no signal.",
+        "",
+        "### Natural-named accuracy (the headline)",
         "",
         f"- rows: **{parquet_stats['full_rows']}** (246 natural + 213 reference)",
-        f"- scorable: **{parquet_stats['full_scored']}** (239 natural with curated code + 213 reference, by construction)",
+        f"- scorable: **{parquet_stats['full_scored']}** (natural-named "
+        "only; reference rows deliberately unscored)",
         f"- exact: **{parquet_stats['full_exact']} / "
         f"{parquet_stats['full_scored']} = "
         f"{parquet_stats['full_exact']/parquet_stats['full_scored']:.2%}**",
@@ -620,12 +632,9 @@ def main() -> int:
         f"{parquet_stats['full_scored']} = "
         f"{parquet_stats['full_hier']/parquet_stats['full_scored']:.2%}**",
         "",
-        "The 246-row ``atelier_predictions.parquet`` numbers "
-        f"(**{parquet_stats['exact']/parquet_stats['scored']:.2%}** exact) are the "
-        "fair measure of classifier quality on this corpus; the "
-        "all-columns percentages are higher simply because 213 rows "
-        "are trivially correct by construction.  Both files ship so "
-        "downstream tooling can choose which cohort it cares about.",
+        "These numbers match ``atelier_predictions.parquet`` exactly "
+        "— the 213 unscored reference rows are present for row-count "
+        "coverage only and do not inflate the accuracy fraction.",
         "",
         "## Revision history",
         "",

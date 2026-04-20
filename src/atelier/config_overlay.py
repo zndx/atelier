@@ -369,6 +369,25 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
             False: "Row values held constant across iterations — cheaper, but masks variance on ambiguous columns.",
         },
     },
+    "classify_exclude_reference_columns": {
+        "hocon_path": "classify.exclude_reference_columns",
+        "label": "Exclude synth reference columns",
+        "description": (
+            "Drop synth-generator answer-key columns (names matching "
+            "attr_*, code_*, col_*, data_*, field_*, item_*, key_*, "
+            "ref_*, val_*, var_* with numeric suffixes) from the "
+            "sample set before the LLM sweep.  Strictly a pre-filter; "
+            "the prediction path never regex-decodes column names. "
+            "No effect on production data (regex matches none of it)."
+        ),
+        "group": "sampling",
+        "type": "switch",
+        "default": True,
+        "captions": {
+            True: "Reference columns are excluded — classifier only sees natural-named columns on the UAT synth corpus (production default).",
+            False: "Reference columns are INCLUDED — each gets classified from its values like any other column. The pipeline does not parse the numeric suffix; it treats the name as an opaque string. Use as a falsification test to show renamed reference columns behave the same.",
+        },
+    },
     "row_mc_k": {
         "hocon_path": "classify.row_mc.k",
         "label": "Row MC K",
