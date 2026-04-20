@@ -88,6 +88,27 @@ log = logging.getLogger(__name__)
 # The prefix list is the union of prefixes observed across
 # meta_tagging_source and real_data_loader historically, kept here as
 # the single source of truth so both modules resolve the same pattern.
+# Deliberately strict shape (``<prefix>_<digit>(_<digit>)*`` anchored,
+# case-sensitive) so production-style paired column naming such as
+# ``product_id_classified``, ``account_number_coded``, or
+# ``customer_email_pii`` does NOT match.
+#
+# Some business groups intentionally ship paired pre-coded columns as
+# a manual classification-audit workflow (the coded column alongside
+# the natural column so downstream code can reference either, and
+# auditors can see every column classified).  Those pairs inevitably
+# drift from the actual values over time — that drift is exactly
+# what Atelier exists to catch.  We therefore never treat a
+# production paired column's encoded name as authoritative, and the
+# filter here intentionally ignores them: they flow through the
+# classifier and get reclassified from values, so drift surfaces as
+# a disagreement between the human-maintained code and Atelier's
+# prediction rather than silently masquerading as ground truth.
+#
+# Adding a new prefix to this list should come with a
+# ``@given a column name "..."`` case in
+# ``features/agent/coverage_guarantees.feature`` so the filter
+# contract stays pinned.
 _REFERENCE_COL_PREFIXES = (
     "attr", "code", "col", "data", "field", "item", "key", "ref",
     "val", "var",

@@ -62,3 +62,35 @@ Feature: LLM sweep must classify every column the operator asked for
     Then predicted_code is empty on every reference-column row
     And matches_reference is None on every reference-column row
     And the evidence field explains the row is excluded by configuration
+
+  Scenario Outline: Reference-column regex filters every known prefix
+    # Pin the prefix list so someone adding a new one has to come
+    # through this test.  Shape is <prefix>_<digit>(_<digit>)*, anchored,
+    # case-sensitive — deliberately strict so production naming
+    # (e.g. ``product_id_classified``, ``account_coded``) doesn't
+    # accidentally match.
+    Given a column name "<name>"
+    Then the reference-column regex match is <expected>
+
+    Examples: synth answer-key prefixes (all must filter)
+      | name           | expected |
+      | attr_1_1_1     | True     |
+      | code_1_4_2     | True     |
+      | col_1_2        | True     |
+      | data_1         | True     |
+      | field_1_2_3    | True     |
+      | item_1_5_2_1   | True     |
+      | key_1          | True     |
+      | ref_1_2        | True     |
+      | val_1_7_1      | True     |
+      | var_1          | True     |
+
+    Examples: production-style names (must NOT filter)
+      | name                   | expected |
+      | first_name             | False    |
+      | customer_id            | False    |
+      | product_id_classified  | False    |
+      | account_number_coded   | False    |
+      | ATTR_1_1               | False    |
+      | attr_name              | False    |
+      | attr_1x                | False    |

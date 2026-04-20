@@ -441,3 +441,21 @@ def _all_cols_evidence(context):
         f"{len(missing_evidence)} reference rows lack the excluded-by-config "
         f"evidence string: {list(missing_evidence['column_name'].head(3))}"
     )
+
+
+# ── Scenario 8: prefix-by-prefix filter table ──────────────────────
+
+
+@given('a column name "{name}"')
+def _prefix_given(context, name):
+    context.prefix_name = name
+
+
+@then("the reference-column regex match is {expected}")
+def _prefix_then(context, expected):
+    from atelier.classify.meta_tagging_source import _REFERENCE_COL_RE
+    expected_bool = expected.strip().lower() == "true"
+    actual = bool(_REFERENCE_COL_RE.match(context.prefix_name))
+    assert actual == expected_bool, (
+        f"{context.prefix_name!r}: regex match={actual}, expected {expected_bool}"
+    )
