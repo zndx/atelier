@@ -72,22 +72,22 @@ def step_check_llm_vacuous(context):
 class _MockLLMBackend:
     """Deterministic LLM backend for tier-0 BDD tests.
 
-    Returns ground truth labels from mock fixtures with high confidence.
+    Returns curated reference labels from mock fixtures with high confidence.
     """
 
-    def __init__(self, ground_truth: dict[str, str]):
-        self._gt = ground_truth
+    def __init__(self, reference_labels: dict[str, str]):
+        self._reference = reference_labels
 
     def classify_batch(self, samples, system_prompt, revisit_context=None, table_name=None):
         from atelier.classify.llm_backend import ColumnClassification, LLMResponse
         classifications = []
         for sample in samples:
-            code = self._gt.get(sample.name)
+            code = self._reference.get(sample.name)
             classifications.append(ColumnClassification(
                 column_name=sample.name,
                 category_code=code,
                 confidence=0.9 if code else 0.0,
-                evidence="mock ground truth",
+                evidence="mock curated reference",
                 alternatives=[],
             ))
         return LLMResponse(
@@ -111,17 +111,17 @@ def step_run_bootstrap(context):
     from atelier.classify.fsm import AgentFSM
     from atelier.classify.sampler import load_fixture_samples
 
-    # Collect ground truth from fixtures
+    # Collect curated reference labels from fixtures
     samples = load_fixture_samples()
-    gt = {}
+    reference_labels = {}
     for ts in samples:
         for col in ts.columns:
-            if col.ground_truth:
-                gt[col.name] = col.ground_truth
+            if col.reference_code:
+                reference_labels[col.name] = col.reference_code
 
     cfg = load_config()
     fsm = AgentFSM()
-    mock_backend = _MockLLMBackend(gt)
+    mock_backend = _MockLLMBackend(reference_labels)
 
     context.bootstrap_result = run_classification_pipeline(
         cfg, fsm, samples=samples, llm_backend=mock_backend,
@@ -154,17 +154,17 @@ def step_run_bootstrap_realistic(context):
     from atelier.classify.sampler import load_fixture_samples
 
     samples = load_fixture_samples()
-    gt = {}
+    reference_labels = {}
     for ts in samples:
         for col in ts.columns:
-            if col.ground_truth:
-                gt[col.name] = col.ground_truth
+            if col.reference_code:
+                reference_labels[col.name] = col.reference_code
 
     cfg = load_config()
     fsm = AgentFSM()
     # Lower accuracy to force disagreements and trigger revisit loop
     mock_backend = RealisticMockLLMBackend(
-        gt, base_accuracy=0.55, seed=42,
+        reference_labels, base_accuracy=0.55, seed=42,
     )
 
     context.bootstrap_result = run_classification_pipeline(

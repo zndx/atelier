@@ -201,7 +201,7 @@ def _build_column_samples(
             table_name=table.replace("_CTA.json.gz", ""),
             database="sotab",
             siblings=siblings,
-            ground_truth=label,  # published SOTAB GT — retained for fidelity scoring only
+            reference_code=label,  # published SOTAB label — retained for fidelity scoring only
             distinct_count=len(set(values)),
         ))
     return samples
@@ -359,7 +359,7 @@ def main() -> int:
     )
 
     # Fidelity vs published GT — the memorization-safe check.
-    published = [s.ground_truth for s in samples]
+    published = [s.reference_code for s in samples]
     fidelity_exact = sum(
         1 for p, g in zip(llm_labels, published) if p and p == g
     ) / len(samples) if samples else 0.0
@@ -431,10 +431,10 @@ def main() -> int:
         rec_col = {
             "table": s.table_name,
             "column_idx": s.name,
-            "published_label": s.ground_truth,
+            "published_label": s.reference_code,
             "llm_label": y,
             "catboost_label": cb_preds[i] if i < len(cb_preds) else "",
-            "llm_matches_published": y == s.ground_truth,
+            "llm_matches_published": y == s.reference_code,
             "catboost_matches_llm": (
                 cb_preds[i] == y if i < len(cb_preds) else False
             ),
@@ -450,14 +450,14 @@ def main() -> int:
             "corpus": "sotab_schemaorg_cta",
             "table_id": s.table_name,
             "column_id": s.name,
-            "published_label": s.ground_truth,
+            "published_label": s.reference_code,
             "llm_label": y,
             "catboost_label": cb_preds[i] if i < len(cb_preds) else "",
             "catboost_top3": (
                 [(lbl, round(p, 4)) for lbl, p in cb_top3[i]]
                 if i < len(cb_top3) else []
             ),
-            "llm_matches_published": y == s.ground_truth,
+            "llm_matches_published": y == s.reference_code,
             "llm_abstained_pass1": not y,
             "catboost_matches_llm": (
                 cb_preds[i] == y if i < len(cb_preds) and y else False

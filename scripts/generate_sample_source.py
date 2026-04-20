@@ -16,8 +16,8 @@ Usage:
     uv run python scripts/generate_sample_source.py
 
 Output:
-    data/sample/tables/*.csv       — ~25 mixed-domain tables, 100 rows each
-    data/sample/ground_truth.json  — column → category mapping
+    data/sample/tables/*.csv          — ~25 mixed-domain tables, 100 rows each
+    data/sample/reference_labels.json — column → category mapping
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ build_generators = _mod.build_generators
 
 ONTOLOGY_PATH = PROJECT_ROOT / "data" / "sample" / "ontology.json"
 TABLES_DIR = PROJECT_ROOT / "data" / "sample" / "tables"
-GROUND_TRUTH_PATH = PROJECT_ROOT / "data" / "sample" / "ground_truth.json"
+REFERENCE_LABELS_PATH = PROJECT_ROOT / "data" / "sample" / "reference_labels.json"
 
 ROWS_PER_TABLE = 100
 SEED = 42
@@ -789,7 +789,7 @@ def main():
 
     # Generate tables
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    ground_truth = {}
+    reference_labels = {}
     total_columns = 0
     opaque_count = 0
 
@@ -811,7 +811,7 @@ def main():
             gen = _GENERATORS.get(code, lambda rng: f"value_{rng.randint(1, 9999)}")
             col_names.append(col_name)
             col_gens.append((col_name, gen))
-            ground_truth[f"{table_name}.{col_name}"] = code
+            reference_labels[f"{table_name}.{col_name}"] = code
             total_columns += 1
             if is_opaque:
                 opaque_count += 1
@@ -824,13 +824,13 @@ def main():
                 row = [gen(rng) for _, gen in col_gens]
                 writer.writerow(row)
 
-    # Write ground truth
-    with open(GROUND_TRUTH_PATH, "w") as f:
-        json.dump(ground_truth, f, indent=2, ensure_ascii=False)
+    # Write reference labels
+    with open(REFERENCE_LABELS_PATH, "w") as f:
+        json.dump(reference_labels, f, indent=2, ensure_ascii=False)
 
     print(f"Generated {len(tables)} tables with {total_columns} columns ({ROWS_PER_TABLE} rows each)")
     print(f"  Tables: {TABLES_DIR}/")
-    print(f"  Ground truth: {GROUND_TRUTH_PATH}")
+    print(f"  Reference labels: {REFERENCE_LABELS_PATH}")
     print(f"  Leaf categories: {len(leaves)}")
     print(f"  Generator coverage: {len(leaves) - len(missing_gens)}/{len(leaves)}")
     print(f"  Opaque column names: {opaque_count}/{total_columns} ({opaque_count*100//total_columns}%)")

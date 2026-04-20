@@ -126,7 +126,8 @@ def run_real_data_eval(
 
     Loads the real annotation vocabulary and sample data from CSV files,
     generates template-based synthetic training data, trains ML classifiers,
-    then classifies the real columns and evaluates against ground truth.
+    then classifies the real columns and evaluates against the curated
+    reference.
 
     Args:
         data_dir: Path to directory with annotations.csv and data CSVs.
@@ -274,15 +275,15 @@ def _run_real_bootstrap(
     cfg = load_config()
     fsm = AgentFSM()
 
-    # Build ground truth dict for mock LLM
+    # Build reference-label dict for mock LLM
     if llm_backend is None:
-        gt = {}
+        ref = {}
         for ts in real_samples:
             for col in ts.columns:
-                if col.ground_truth:
-                    gt[col.name] = col.ground_truth
+                if col.reference_code:
+                    ref[col.name] = col.reference_code
         llm_backend = RealisticMockLLMBackend(
-            ground_truth=gt,
+            reference_labels=ref,
             base_accuracy=0.80,
             revisit_correction_rate=0.70,
         )

@@ -271,9 +271,9 @@ def step_run_pipeline(context):
 
     cfg = load_config()
     samples = load_fixture_samples()
-    gt = {c.name: c.ground_truth for ts in samples for c in ts.columns if c.ground_truth}
+    reference_labels = {c.name: c.reference_code for ts in samples for c in ts.columns if c.reference_code}
     context.pipeline_result = run_pipeline(
-        cfg, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+        cfg, samples=samples, llm_backend=RealisticMockLLMBackend(reference_labels=reference_labels),
     )
 
 
@@ -291,11 +291,11 @@ def step_min_columns(context, n):
     assert count >= n, f"Only {count} classified columns, expected >= {n}"
 
 
-@then("the accuracy against ground truth should exceed {threshold:g}")
+@then("the accuracy against the curated reference should exceed {threshold:g}")
 def step_accuracy_threshold(context, threshold):
     acc = context.pipeline_result.get("accuracy")
     if acc is None:
-        assert False, "No accuracy computed (no ground truth?)"
+        assert False, "No accuracy computed (no curated reference?)"
     assert acc > float(threshold), f"Accuracy {acc} <= {threshold}"
 
 
@@ -362,19 +362,19 @@ def step_run_pipeline_custom_discounts(context):
     from atelier.classify.mock_llm import RealisticMockLLMBackend
 
     samples = load_fixture_samples()
-    gt = {c.name: c.ground_truth for ts in samples for c in ts.columns if c.ground_truth}
+    reference_labels = {c.name: c.reference_code for ts in samples for c in ts.columns if c.reference_code}
 
     # Run default first
     cfg = load_config()
     context.default_result = run_pipeline(
-        cfg, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+        cfg, samples=samples, llm_backend=RealisticMockLLMBackend(reference_labels=reference_labels),
     )
     # Run with custom discounts (override config fields)
     cfg2 = load_config()
     cfg2.classify_discount_cosine = context.custom_discounts.cosine
     cfg2.classify_discount_svm = context.custom_discounts.svm
     context.pipeline_result = run_pipeline(
-        cfg2, samples=samples, llm_backend=RealisticMockLLMBackend(ground_truth=gt),
+        cfg2, samples=samples, llm_backend=RealisticMockLLMBackend(reference_labels=reference_labels),
     )
 
 

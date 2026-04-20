@@ -2,7 +2,7 @@
 # bin/bootstrap-secrets.sh
 #
 # Materialize SOPS-encrypted artifacts so a bootable Atelier has the
-# config defaults and ground-truth CSV it expects on disk.  Called
+# config defaults and curated-reference CSV it expects on disk.  Called
 # from bin/start-app.sh (CAI deploy), justfile (ad-hoc), and
 # devenv.nix enterShell (local dev) so every entrypoint gets the
 # same state.
@@ -48,17 +48,17 @@ if [ -f .env.cai.enc ]; then
   fi
 fi
 
-# 2) Ground-truth CSV (binary shape) → build/data/ground_truth.csv
+# 2) Curated-reference CSV (binary shape) → build/data/curated_reference.csv
 #    Encrypted file lives with the BDD corpus it validates; plaintext
 #    lands under the gitignored build/ tree.
-GT_ENC="features/fixtures/ground_truth.csv.enc"
-if [ -f "$GT_ENC" ]; then
+REF_ENC="features/fixtures/curated_reference.csv.enc"
+if [ -f "$REF_ENC" ]; then
   mkdir -p build/data
   if sops --decrypt --input-type binary --output-type binary \
-        "$GT_ENC" > build/data/ground_truth.csv 2>/dev/null; then
-    echo "bootstrap-secrets: materialized build/data/ground_truth.csv"
+        "$REF_ENC" > build/data/curated_reference.csv 2>/dev/null; then
+    echo "bootstrap-secrets: materialized build/data/curated_reference.csv"
   else
-    rm -f build/data/ground_truth.csv
-    echo "bootstrap-secrets: could not decrypt $GT_ENC — is SOPS_AGE_KEY set?" >&2
+    rm -f build/data/curated_reference.csv
+    echo "bootstrap-secrets: could not decrypt $REF_ENC — is SOPS_AGE_KEY set?" >&2
   fi
 fi

@@ -3,7 +3,7 @@ Feature: Classification pipeline via gateway
   Exercise the complete data flow: start pipeline via HTTP, wait for
   convergence, then verify results appear as a dataset. The OOTB
   sample source has classifiable columns across multiple tables
-  with known ground truth — pipeline results are fully verifiable.
+  with a known curated reference — pipeline results are fully verifiable.
 
   Scenario: OOTB sample classification produces viewable dataset
     When I POST "/api/fsm/start?source_id=ootb-sample" to the gateway

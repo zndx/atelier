@@ -224,7 +224,7 @@ def _build_context_texts(
 
 def gpu_sage(
     all_features: list[ColumnFeatures],
-    ground_truth_indices: np.ndarray,
+    label_indices: np.ndarray,
     category_set,
     *,
     n_permutations: int = 512,
@@ -271,7 +271,7 @@ def gpu_sage(
         # Flat loss computation on GPU.
         flat_idx = idx_map.reshape(-1)                      # (chunk*(F+1)*N,)
         flat_emb = embeddings[flat_idx]                     # (M, dim)
-        gt_rep = np.tile(ground_truth_indices, chunk * (_F + 1))
+        gt_rep = np.tile(label_indices, chunk * (_F + 1))
         L = ctx.losses(flat_emb, gt_rep)                     # (M,)
         L = L.reshape(chunk, _F + 1, ctx.N).astype(np.float64)
 
@@ -343,8 +343,9 @@ def gpu_permutation_shap(
     t0 = time.time()
     ctx = _SharedContext(all_features, category_set)
 
-    # For per-item SHAP, ground truth = the predicted class under the
-    # full-context embedding (same convention as the upstream library).
+    # For per-item SHAP, the supervision signal = the predicted class
+    # under the full-context embedding (same convention as the upstream
+    # library).
     full_texts = [f.to_embedding_text() for f in all_features]
     full_emb = ctx.embed(full_texts)
     full_logits = full_emb @ ctx._R_np.T

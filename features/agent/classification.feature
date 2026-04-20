@@ -66,7 +66,7 @@ Feature: Dempster-Shafer classification pipeline
     When I run the classification pipeline with mock data
     Then the pipeline should reach CONVERGED state
     And the results should contain at least 40 classified columns
-    And the accuracy against ground truth should exceed 0.6
+    And the accuracy against the curated reference should exceed 0.6
     And the micro-F1 should exceed 0.55
 
   Scenario: FSM state transitions are valid

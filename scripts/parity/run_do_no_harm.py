@@ -68,21 +68,28 @@ def _compute_parity(parquet_path: Path) -> dict:
     import pandas as pd
 
     df = pd.read_parquet(parquet_path)
-    with_gt = df[df["ground_truth"].astype(str).str.len() > 0].copy()
-    if with_gt.empty:
-        return {"error": "no ground-truth columns in parquet"}
+    if "reference_code" not in df.columns:
+        return {
+            "error": (
+                "parquet missing 'reference_code' column — regenerate the run "
+                "(predates the reference_code schema — re-run the pipeline)"
+            )
+        }
+    with_ref = df[df["reference_code"].astype(str).str.len() > 0].copy()
+    if with_ref.empty:
+        return {"error": "no curated-reference columns in parquet"}
 
-    gt = with_gt["ground_truth"].astype(str).str.strip()
+    ref = with_ref["reference_code"].astype(str).str.strip()
 
     def _exact(pred_col: str) -> float:
-        pred = with_gt[pred_col].astype(str).str.strip()
-        return float((pred == gt).mean())
+        pred = with_ref[pred_col].astype(str).str.strip()
+        return float((pred == ref).mean())
 
     def _hierarchical(pred_col: str) -> float:
-        pred = with_gt[pred_col].astype(str).str.strip()
-        total = len(with_gt)
+        pred = with_ref[pred_col].astype(str).str.strip()
+        total = len(with_ref)
         hits = 0
-        for p, g in zip(pred, gt):
+        for p, g in zip(pred, ref):
             if p == g or g.startswith(p + ".") or p.startswith(g + "."):
                 hits += 1
         return hits / total if total else 0.0
@@ -92,26 +99,26 @@ def _compute_parity(parquet_path: Path) -> dict:
     arm_a_hier = _hierarchical("llm_code")
     arm_b_hier = _hierarchical("predicted_code")
 
-    mean_belief = float(with_gt["belief"].mean()) if "belief" in with_gt else None
-    mean_conflict = float(with_gt["conflict"].mean()) if "conflict" in with_gt else None
+    mean_belief = float(with_ref["belief"].mean()) if "belief" in with_ref else None
+    mean_conflict = float(with_ref["conflict"].mean()) if "conflict" in with_ref else None
 
-    llm_covered = int((with_gt["llm_code"].astype(str).str.len() > 0).sum())
-    llm_fraction = llm_covered / len(with_gt)
+    llm_covered = int((with_ref["llm_code"].astype(str).str.len() > 0).sum())
+    llm_fraction = llm_covered / len(with_ref)
 
     # Disagreement cases: where DST flipped the LLM answer.
-    flips = with_gt[
-        with_gt["llm_code"].astype(str).str.strip()
-        != with_gt["predicted_code"].astype(str).str.strip()
+    flips = with_ref[
+        with_ref["llm_code"].astype(str).str.strip()
+        != with_ref["predicted_code"].astype(str).str.strip()
     ]
-    flip_gt_match = (
-        flips["predicted_code"].astype(str).str.strip() == flips["ground_truth"].astype(str).str.strip()
+    flip_ref_match = (
+        flips["predicted_code"].astype(str).str.strip() == flips["reference_code"].astype(str).str.strip()
     ).sum() if len(flips) else 0
     flip_llm_match = (
-        flips["llm_code"].astype(str).str.strip() == flips["ground_truth"].astype(str).str.strip()
+        flips["llm_code"].astype(str).str.strip() == flips["reference_code"].astype(str).str.strip()
     ).sum() if len(flips) else 0
 
     return {
-        "total_with_gt": int(len(with_gt)),
+        "total_with_reference": int(len(with_ref)),
         "llm_covered_columns": llm_covered,
         "llm_coverage_fraction": round(llm_fraction, 4),
         "arm_a_llm_only": {
@@ -128,7 +135,7 @@ def _compute_parity(parquet_path: Path) -> dict:
         },
         "fusion_flips": {
             "count": int(len(flips)),
-            "dst_correct_vs_llm": int(flip_gt_match),
+            "dst_correct_vs_llm": int(flip_ref_match),
             "llm_correct_vs_dst": int(flip_llm_match),
         },
         "mean_belief": round(mean_belief, 4) if mean_belief is not None else None,

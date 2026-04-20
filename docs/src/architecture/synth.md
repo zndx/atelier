@@ -55,7 +55,7 @@ not just column naming conventions.
 `ml_train.py` orchestrates training for both classifiers:
 
 ```
-synth_*.csv + ground_truth.json
+synth_*.csv + reference_labels.json
         ↓
    _load_synth_data()
         ↓
@@ -165,7 +165,7 @@ preserving `build/models/svm.pkl` as the synth-trained fallback.
 1. **Generate** synthetic data from vocabulary
 2. **Train** CatBoost + SVM models
 3. **Classify** using the trained models
-4. **Evaluate** against ground truth
+4. **Evaluate** against the curated reference
 
 This runs as part of the classification pipeline when models don't
 exist yet, or can be triggered explicitly for experimentation.

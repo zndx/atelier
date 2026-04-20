@@ -11,8 +11,8 @@ Conflating them is load-bearing error, so we name each explicitly:
 
 | Term | Source | Authority level | Where it appears |
 |---|---|---|---|
-| **Published ground truth** | External, human-curated benchmarks (SOTAB, GitTables) | Gold standard — memorization-safe check | SOTAB pilot artifacts; `docs/notes/2026-04-19/…phase_gate_2.md` |
-| **Curated reference** | Generator-derived (synth pairs an answer-key "reference column" per target) + spot-checked by hand | Definitive for the synthetic corpus; not equivalent to a published GT | `build/meta-tagging-clean/curated_reference.csv` |
+| **Published benchmark** | External, human-curated labels (SOTAB, GitTables) | Gold standard — memorization-safe check | SOTAB pilot artifacts; `docs/notes/2026-04-19/…phase_gate_2.md` |
+| **Curated reference** | Generator-derived (synth pairs an answer-key "reference column" per target) + spot-checked by hand | Definitive for the synthetic corpus; not equivalent to a published benchmark | `build/meta-tagging-clean/curated_reference.csv` |
 | **LLM commitment** | A single LLM's pass-1 or pass-2 output | Classifier opinion; not a truth | parquet `llm_code`, `predicted_code` |
 | **CatBoost prior** | CatBoost fit to LLM labels, used for revisit enrichment | **Not independent evidence** — it is a compressed self-consensus of the LLM; valuable specifically for rescuing abstentions | parquet `predicted_code` via DST fusion |
 
@@ -332,9 +332,9 @@ src/atelier/classify/
 ├── fsm.py               # AgentFSM state machine
 ├── fixtures/
 │   ├── universal_vocabulary.json  # BFO-grounded universal vocabulary (16 leaves)
-│   └── fixture_tables.json        # 8 tables, 50 cols — fixture GT for unit tests
-│                                    (NOT the UAT-corpus authoritative GT; see
-│                                    build/meta-tagging-clean/ground_truth.csv)
+│   └── fixture_tables.json        # 8 tables, 50 cols — fixture reference for unit tests
+│                                    (NOT the UAT-corpus curated reference; see
+│                                    build/meta-tagging-clean/curated_reference.csv)
 data/sample/
 └── ontology.json                  # Expanded vocabulary (300 leaves, 25 internal)
 └── ontology/

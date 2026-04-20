@@ -173,11 +173,11 @@ def _build_test_state(category_set, frame, samples_by_name, column_names):
     state = BootstrapState()
     boot_cfg = BootstrapConfig()
 
-    # Set labels from ground truth (simulating LLM sweep)
+    # Set labels from curated reference (simulating LLM sweep)
     for name in column_names:
         col = samples_by_name[name]
-        if col.ground_truth:
-            state.labels[name] = col.ground_truth
+        if col.reference_code:
+            state.labels[name] = col.reference_code
             state.confidence[name] = 0.9
             state.label_source[name] = "llm"
 
@@ -263,7 +263,7 @@ def step_fixture_with_mock_llm(context):
     from atelier.classify.sampler import load_fixture_samples
 
     samples = load_fixture_samples()
-    gt = {}
+    reference_labels = {}
     samples_by_name = {}
     column_names = []
     column_table = {}
@@ -273,11 +273,11 @@ def step_fixture_with_mock_llm(context):
             samples_by_name[col.name] = col
             column_names.append(col.name)
             column_table[col.name] = col.table_name or "__flat__"
-            if col.ground_truth:
-                gt[col.name] = col.ground_truth
+            if col.reference_code:
+                reference_labels[col.name] = col.reference_code
 
     from features.agent.step_defs.bootstrap_steps import _MockLLMBackend
-    context.agent_mock_backend = _MockLLMBackend(gt)
+    context.agent_mock_backend = _MockLLMBackend(reference_labels)
     context.agent_samples = samples_by_name
     context.agent_columns = column_names
     context.agent_column_table = column_table
@@ -290,7 +290,7 @@ def step_fixture_with_realistic_mock(context):
     from atelier.classify.mock_llm import RealisticMockLLMBackend
 
     samples = load_fixture_samples()
-    gt = {}
+    reference_labels = {}
     samples_by_name = {}
     column_names = []
     column_table = {}
@@ -300,11 +300,11 @@ def step_fixture_with_realistic_mock(context):
             samples_by_name[col.name] = col
             column_names.append(col.name)
             column_table[col.name] = col.table_name or "__flat__"
-            if col.ground_truth:
-                gt[col.name] = col.ground_truth
+            if col.reference_code:
+                reference_labels[col.name] = col.reference_code
 
     context.agent_mock_backend = RealisticMockLLMBackend(
-        gt, base_accuracy=0.55, seed=42,
+        reference_labels, base_accuracy=0.55, seed=42,
     )
     context.agent_samples = samples_by_name
     context.agent_columns = column_names

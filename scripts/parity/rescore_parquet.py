@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Re-score an Atelier run's parquet against authoritative ground truth.
+"""Re-score an Atelier run's parquet against the curated reference.
 
 Reuses the scoring structure from ``score_uat_xlsx.py`` so the two
 outputs are directly comparable.
@@ -37,23 +37,23 @@ def _is_reference_col(name: str) -> bool:
 
 
 def _load_curated_reference(path: Path) -> dict[tuple[str, str], dict]:
-    gt: dict[tuple[str, str], dict] = {}
+    ref: dict[tuple[str, str], dict] = {}
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
             if row["derivation"] == "unresolved":
                 continue
-            gt[(row["table"], row["column"])] = row
-    return gt
+            ref[(row["table"], row["column"])] = row
+    return ref
 
 
 def _score_arm(arm: str, preds: dict[tuple[str, str], str],
-               gt: dict[tuple[str, str], dict]) -> dict:
+               reference: dict[tuple[str, str], dict]) -> dict:
     per_table: dict[str, dict] = {}
     n_total = n_scored = n_exact = n_hier = 0
     n_overspec = n_wrong = n_unpred = 0
-    for (table, col), row in gt.items():
+    for (table, col), row in reference.items():
         n_total += 1
-        gt_code = row["reference_code"]
+        ref_code = row["reference_code"]
         pt = per_table.setdefault(
             table,
             {"n": 0, "exact": 0, "hier": 0, "unpred": 0,
@@ -66,8 +66,8 @@ def _score_arm(arm: str, preds: dict[tuple[str, str], str],
             pt["unpred"] += 1
             continue
         n_scored += 1
-        ex = pred == gt_code
-        hi = _hier_match(pred, gt_code)
+        ex = pred == ref_code
+        hi = _hier_match(pred, ref_code)
         if ex:
             n_exact += 1; pt["exact"] += 1
         elif hi:
@@ -78,7 +78,7 @@ def _score_arm(arm: str, preds: dict[tuple[str, str], str],
             n_hier += 1; pt["hier"] += 1
     return {
         "arm": arm,
-        "total_gt_columns": n_total,
+        "total_reference_columns": n_total,
         "scored": n_scored,
         "unpredicted": n_unpred,
         "exact_accuracy": round(n_exact / n_total, 4) if n_total else 0.0,
@@ -114,13 +114,13 @@ def main() -> int:
 
     run_id = sys.argv[1] if len(sys.argv) > 1 else "323cfbbc"
     parquet = Path(f"build/results/{run_id}/atelier_embeddings.parquet")
-    gt_path = Path("build/meta-tagging-clean/curated_reference.csv")
+    ref_path = Path("build/meta-tagging-clean/curated_reference.csv")
     if not parquet.is_file():
         log.error("missing %s", parquet); return 1
-    if not gt_path.is_file():
-        log.error("missing %s", gt_path); return 1
+    if not ref_path.is_file():
+        log.error("missing %s", ref_path); return 1
 
-    gt = _load_curated_reference(gt_path)
+    reference = _load_curated_reference(ref_path)
     df = pd.read_parquet(parquet)
 
     # Collect predictions, skipping reference columns.
@@ -138,35 +138,35 @@ def main() -> int:
         if dst_code:
             dst_preds[(table, col)] = dst_code
 
-    atelier_llm = _score_arm("atelier_llm_only", llm_preds, gt)
-    atelier_dst = _score_arm("atelier_dst_fused", dst_preds, gt)
+    atelier_llm = _score_arm("atelier_llm_only", llm_preds, reference)
+    atelier_dst = _score_arm("atelier_dst_fused", dst_preds, reference)
 
     out_dir = Path("build/results/parity")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "atelier_scored.json").write_text(json.dumps({
         "run_id": run_id,
         "parquet": str(parquet),
-        "authoritative_gt_csv": str(gt_path),
+        "curated_reference_csv": str(ref_path),
         "atelier_llm_only": atelier_llm,
         "atelier_dst_fused": atelier_dst,
     }, indent=2))
 
     # Short markdown
     lines = [
-        f"# Atelier parquet `{run_id}` scored against authoritative GT",
+        f"# Atelier parquet `{run_id}` scored against curated reference",
         "",
-        f"Source: `{parquet}`   ·   GT: `{gt_path}`",
-        f"GT resolvable columns: **{len(gt)}** (reference columns excluded)",
+        f"Source: `{parquet}`   ·   reference: `{ref_path}`",
+        f"Resolvable columns: **{len(reference)}** (reference columns excluded)",
         "",
         "## Arm A — LLM-only (`llm_code`)",
         "",
-        f"- exact:        **{atelier_llm['exact_accuracy']:.2%}**  ({atelier_llm['scored']}/{atelier_llm['total_gt_columns']} scored)",
+        f"- exact:        **{atelier_llm['exact_accuracy']:.2%}**  ({atelier_llm['scored']}/{atelier_llm['total_reference_columns']} scored)",
         f"- hierarchical: **{atelier_llm['hierarchical_accuracy']:.2%}**",
         f"- over-specified: {atelier_llm['over_specified']}   wrong-class: {atelier_llm['wrong_class']}   unpredicted: {atelier_llm['unpredicted']}",
         "",
         "## Arm B — DST-fused (`predicted_code`)",
         "",
-        f"- exact:        **{atelier_dst['exact_accuracy']:.2%}**  ({atelier_dst['scored']}/{atelier_dst['total_gt_columns']} scored)",
+        f"- exact:        **{atelier_dst['exact_accuracy']:.2%}**  ({atelier_dst['scored']}/{atelier_dst['total_reference_columns']} scored)",
         f"- hierarchical: **{atelier_dst['hierarchical_accuracy']:.2%}**",
         f"- over-specified: {atelier_dst['over_specified']}   wrong-class: {atelier_dst['wrong_class']}   unpredicted: {atelier_dst['unpredicted']}",
         "",

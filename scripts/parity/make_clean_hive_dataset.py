@@ -4,11 +4,11 @@
 The UAT snapshot at ``build/meta-tagging/`` uses a paired-column
 convention: each natural-named column (``first_name``) is followed by
 a *reference column* (``attr_1_1_1_9_2_1``) whose name encodes the
-natural column's ground-truth code in its suffix.  Reference columns
+natural column's reference code in its suffix.  Reference columns
 are answer keys — not production schema — and they shouldn't appear
 in a dataset anyone runs a classifier against:
 
-  * they leak the ground truth directly into the column name;
+  * they leak the reference label directly into the column name;
   * they're trivial to "classify" (the name *is* the answer), so
     including them inflates accuracy metrics vacuously.
 
@@ -84,6 +84,288 @@ def _clean_table(src: Path, dst: Path) -> tuple[int, int]:
     return (len(keep_idx), dropped)
 
 
+def _build_predictions_parquet(out_dir: Path, *, run_id: str) -> dict[str, int]:
+    """Produce ``atelier_predictions.parquet`` next to the curated reference.
+
+    Reads the source run's parquet (``build/results/{run_id}/``), drops
+    the legacy ``ground_truth`` / ``is_correct`` columns, and attaches
+    three authoritative columns sourced from ``curated_reference.csv``:
+    ``reference_code``, ``reference_label``, ``matches_reference =
+    predicted_code == reference_code``.  Returns the accuracy counts
+    so the README can quote them verbatim from the actual artifact.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    src_parquet = Path(f"build/results/{run_id}/atelier_embeddings.parquet")
+    ref_csv = out_dir / "curated_reference.csv"
+    dst = out_dir / "atelier_predictions.parquet"
+    if not src_parquet.is_file():
+        raise FileNotFoundError(f"source parquet not found: {src_parquet}")
+    if not ref_csv.is_file():
+        raise FileNotFoundError(f"curated reference not found: {ref_csv}")
+
+    # Load curated reference; skip unresolved rows so parquet rows with
+    # no curated code get reference_code = "" + matches_reference = None.
+    ref_map: dict[tuple[str, str], tuple[str, str]] = {}
+    with open(ref_csv, newline="") as f:
+        for r in csv.DictReader(f):
+            if r["derivation"] == "unresolved":
+                continue
+            ref_map[(r["table"], r["column"])] = (
+                r["reference_code"],
+                r.get("reference_label", "") or "",
+            )
+
+    from atelier.classify.meta_tagging_source import _REFERENCE_COL_RE
+
+    t = pq.read_table(src_parquet)
+    keep = [n for n in t.column_names if n not in ("ground_truth", "is_correct")]
+    t = t.select(keep)
+
+    # Drop any reference-column rows that leaked through an older
+    # pre-invariant loader build.  The natural parquet is defined as
+    # "one row per natural-named column" — answer keys belong in
+    # atelier_predictions_all_columns.parquet, not here.  Using a mask
+    # via pyarrow so we don't round-trip through pandas on the big table.
+    leaked_mask = [
+        not bool(_REFERENCE_COL_RE.match(str(n))) for n in t["column_name"].to_pylist()
+    ]
+    if not all(leaked_mask):
+        pre_n = t.num_rows
+        t = t.filter(pa.array(leaked_mask, type=pa.bool_()))
+        log.info(
+            "  dropped %d leaked reference-column rows from source parquet "
+            "(older loader build); %d → %d natural rows",
+            pre_n - t.num_rows, pre_n, t.num_rows,
+        )
+
+    tables = t["table_name"].to_pylist()
+    cols = t["column_name"].to_pylist()
+    preds = [str(x or "").strip() for x in t["predicted_code"].to_pylist()]
+
+    ref_codes: list[str] = []
+    ref_labels: list[str] = []
+    matches: list[object] = []
+    for tn, cn, pred in zip(tables, cols, preds):
+        rc, rl = ref_map.get((tn, cn), ("", ""))
+        ref_codes.append(rc)
+        ref_labels.append(rl)
+        matches.append((pred == rc) if rc else None)
+
+    new_cols: list[str] = []
+    new_arrs: list = []
+    for name, col in zip(t.column_names, t.columns):
+        new_cols.append(name); new_arrs.append(col)
+        if name == "evidence":
+            new_cols.extend(["reference_code", "reference_label", "matches_reference"])
+            new_arrs.extend([
+                pa.array(ref_codes, type=pa.string()),
+                pa.array(ref_labels, type=pa.string()),
+                pa.array(matches, type=pa.bool_()),
+            ])
+
+    t2 = pa.table(dict(zip(new_cols, new_arrs)))
+    pq.write_table(t2, dst)
+
+    # Compute the audit counts the README quotes, reading them back
+    # from the parquet we just wrote (so the numbers and the file
+    # disagree only via a disk-level corruption).
+    df = t2.to_pandas()
+    scored = int(df["matches_reference"].notna().sum())
+    exact = int(df["matches_reference"].sum(skipna=True))
+    hier = 0
+    for _, r in df.iterrows():
+        rc = str(r["reference_code"]).strip()
+        if not rc:
+            continue
+        p = str(r["predicted_code"]).strip()
+        if p == rc or (p and rc.startswith(p + ".")) or (rc and p.startswith(rc + ".")):
+            hier += 1
+    log.info(
+        "  atelier_predictions.parquet: %d rows, %d scorable, "
+        "exact=%d/%d=%.4f, hier=%d/%d=%.4f",
+        len(df), scored, exact, scored, exact / scored if scored else 0.0,
+        hier, scored, hier / scored if scored else 0.0,
+    )
+    if scored and exact / scored < 0.945:
+        raise RuntimeError(
+            f"parquet exact accuracy {exact}/{scored} = "
+            f"{exact/scored:.4f} below the 94.5% parity floor"
+        )
+
+    # Also produce the all-columns parquet — includes every source
+    # column, synth-generator answer keys included, so UAT's row-count
+    # check-every-column scoring scripts see a complete corpus.
+    full_stats = _build_all_columns_parquet(out_dir, natural_parquet=t2)
+    return {
+        "rows": len(df), "scored": scored, "exact": exact, "hier": hier,
+        "full_rows": full_stats["rows"],
+        "full_scored": full_stats["scored"],
+        "full_exact": full_stats["exact"],
+        "full_hier": full_stats["hier"],
+    }
+
+
+def _build_all_columns_parquet(
+    out_dir: Path, *, natural_parquet,
+) -> dict[str, int]:
+    """Extend the natural-only parquet with synth reference-column rows.
+
+    The pipeline intentionally excludes reference columns (name pattern
+    ``^(attr|code|col|data|field|item|key|ref|val|var)_\\d+(_\\d+)*$``)
+    from classification because they are synth-generator answer keys —
+    the numeric suffix literally IS the code.  UAT's post-run scoring
+    script iterates the source corpus and flags any column missing
+    from the output parquet, so this helper emits a sibling parquet
+    that adds one deterministic row per reference column, preserving
+    the honest-evaluation semantics of ``atelier_predictions.parquet``
+    while letting UAT's row-count check find every source column.
+
+    Reference rows are trivially correct by construction:
+    ``predicted_code`` is decoded from the column name
+    (``attr_1_1_1_9_2_1`` → ``1.1.1.9.2.1``); ``reference_code`` is the
+    same code; ``matches_reference`` is therefore True.  The evidence
+    field documents that the row was name-decoded rather than classified.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from atelier.classify.meta_tagging_source import _REFERENCE_COL_RE
+
+    src_dir = Path("build/meta-tagging")
+    ann_csv = src_dir / "annotations.csv"
+
+    # Code → (ontology label, annotation mnemonic) from annotations.csv
+    code_to_label: dict[str, tuple[str, str]] = {}
+    with open(ann_csv, newline="") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            cid = (r.get("id") or r.get("annotations.id") or "").strip().lstrip("'")
+            if not cid:
+                continue
+            label = (r.get("ontology") or r.get("annotations.ontology") or "").strip()
+            mnem = (r.get("annotation") or r.get("annotations.annotation") or "").strip()
+            code_to_label[cid] = (label, mnem)
+
+    # Natural parquet rows we've already emitted — dedup key (table, col)
+    existing: set[tuple[str, str]] = set()
+    nat_df = natural_parquet.to_pandas()
+    for _, row in nat_df.iterrows():
+        existing.add((str(row["table_name"]).strip(),
+                      str(row["column_name"]).strip()))
+
+    # Walk source CSV headers and emit a row for every reference column
+    # not already represented in the natural parquet.
+    new_rows: list[dict] = []
+    for csv_path in sorted(src_dir.glob("*.csv")):
+        if csv_path.name == "annotations.csv":
+            continue
+        table_name = csv_path.stem
+        with open(csv_path, newline="") as f:
+            header = next(csv.reader(f), None)
+        if not header:
+            continue
+        prefix = f"{table_name}."
+        names = [h[len(prefix):] if h.startswith(prefix) else h for h in header]
+        for col_name in names:
+            m = _REFERENCE_COL_RE.match(col_name)
+            if not m:
+                continue
+            if (table_name, col_name) in existing:
+                continue
+            code = m.group(1).replace("_", ".")
+            # Normalize ``X.0`` at the root, mirrors _derive_reference_code
+            if "." in code and code.count(".") == 1 and code.endswith(".0"):
+                code = code[:-2]
+            label, mnem = code_to_label.get(code, ("", ""))
+            new_rows.append({
+                "table_name": table_name,
+                "column_name": col_name,
+                "predicted_code": code,
+                "predicted_label": label,
+                "predicted_annotation": mnem,
+                "reference_code": code,
+                "reference_label": label,
+                "matches_reference": True,
+                "confidence": 1.0,
+                "belief": 1.0,
+                "plausibility": 1.0,
+                "uncertainty": 0.0,
+                "conflict": 0.0,
+                "llm_code": "",
+                "llm_confidence": 0.0,
+                "needs_clarification": False,
+                "evidence": "synth reference column — name encodes the code directly; classified by name parse, no LLM or ML evidence used",
+                "cautious_code": code,
+                "column_type": "object",
+                "text": f"{col_name} — {label}" if label else col_name,
+                "embedding_text": "",
+                "pattern_signals": "",
+                "dst_belief_path": "[]",
+                "x": 0.0,
+                "y": 0.0,
+                "shap_top1_name": "",
+                "shap_top1_value": 0.0,
+                "shap_top2_name": "",
+                "shap_top2_value": 0.0,
+                "shap_top3_name": "",
+                "shap_top3_value": 0.0,
+            })
+
+    # Compose: keep the natural parquet's columns order, fill any new
+    # row dict into matching types.  Use the natural parquet's schema
+    # as the authority so both files have identical column layouts.
+    schema = natural_parquet.schema
+    col_names = [f.name for f in schema]
+    appended = {name: [] for name in col_names}
+    for row in new_rows:
+        for name in col_names:
+            appended[name].append(row.get(name, None))
+    # Coerce to pyarrow columns matching the natural-parquet schema.
+    arrs = []
+    for f in schema:
+        vals = appended[f.name]
+        if pa.types.is_boolean(f.type):
+            arr = pa.array(
+                [None if v is None else bool(v) for v in vals], type=pa.bool_(),
+            )
+        elif pa.types.is_floating(f.type):
+            arr = pa.array([float(v) if v is not None else 0.0 for v in vals], type=f.type)
+        elif pa.types.is_integer(f.type):
+            arr = pa.array([int(v) if v is not None else 0 for v in vals], type=f.type)
+        else:
+            arr = pa.array([("" if v is None else str(v)) for v in vals], type=f.type)
+        arrs.append(arr)
+    appended_table = pa.table(arrs, names=col_names)
+    combined = pa.concat_tables([natural_parquet, appended_table])
+
+    dst = out_dir / "atelier_predictions_all_columns.parquet"
+    pq.write_table(combined, dst)
+
+    df = combined.to_pandas()
+    scored = int(df["matches_reference"].notna().sum())
+    exact = int(df["matches_reference"].sum(skipna=True))
+    hier = 0
+    for _, r in df.iterrows():
+        rc = str(r["reference_code"]).strip()
+        if not rc:
+            continue
+        p = str(r["predicted_code"]).strip()
+        if p == rc or (p and rc.startswith(p + ".")) or (rc and p.startswith(rc + ".")):
+            hier += 1
+
+    log.info(
+        "  atelier_predictions_all_columns.parquet: %d rows "
+        "(%d appended reference cols), %d scorable, "
+        "exact=%d/%d=%.4f, hier=%d/%d=%.4f",
+        len(df), len(new_rows), scored, exact, scored,
+        exact / scored if scored else 0.0,
+        hier, scored, hier / scored if scored else 0.0,
+    )
+    return {"rows": len(df), "scored": scored, "exact": exact, "hier": hier}
+
+
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -96,32 +378,46 @@ def main() -> int:
         log.error("missing %s/annotations.csv", src_dir)
         return 1
 
-    # Preserve the authoritative ground-truth CSV (if it exists) across
-    # the rmtree + rebuild so we don't nuke it when rewriting the
-    # cleaned-data directory.  It's produced by
-    # build_curated_reference.py separately.
+    # Preserve the curated-reference CSV across the rmtree + rebuild.
+    # It's produced by build_curated_reference.py separately.  The
+    # Atelier predictions parquet is re-derived below from the source
+    # run parquet so it can't drift from the curated reference.
     out_dir = Path("build/meta-tagging-clean").resolve()
-    preserved_gt: bytes | None = None
-    preserved_gt_summary: bytes | None = None
+    preserved: dict[str, bytes] = {}
     if out_dir.exists():
-        gt_path = out_dir / "curated_reference.csv"
-        gt_summary = out_dir / "curated_reference_summary.json"
-        if gt_path.is_file():
-            preserved_gt = gt_path.read_bytes()
-        if gt_summary.is_file():
-            preserved_gt_summary = gt_summary.read_bytes()
+        for fname in ("curated_reference.csv", "curated_reference_summary.json"):
+            p = out_dir / fname
+            if p.is_file():
+                preserved[fname] = p.read_bytes()
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
-    if preserved_gt is not None:
-        (out_dir / "curated_reference.csv").write_bytes(preserved_gt)
-    if preserved_gt_summary is not None:
-        (out_dir / "curated_reference_summary.json").write_bytes(preserved_gt_summary)
+    for fname, data in preserved.items():
+        (out_dir / fname).write_bytes(data)
 
     # 1. annotations.csv — verbatim.  (The Hive export already has
     # ``annotations.<col>`` headers which Hive imports unchanged;
     # stripping the prefix here would desync from the CREATE TABLE
     # statement UAT already uses for the vocabulary table.)
     shutil.copyfile(src_dir / "annotations.csv", out_dir / "annotations.csv")
+
+    # 1b. Reconciliation doc (if present) — copy from build/results/parity/
+    # so the handoff bundle includes the apples-to-apples comparison
+    # alongside the data.  Produced by
+    # scripts/parity/reconcile_baseline_coverage.py.
+    parity_dir = Path("build/results/parity")
+    for fname in ("reconciliation.md", "reconciliation.json"):
+        src_recon = parity_dir / fname
+        if src_recon.is_file():
+            shutil.copyfile(src_recon, out_dir / fname)
+            log.info("  included %s", fname)
+
+    # 1c. Atelier predictions parquet — built from the source run parquet
+    # with reference_code / reference_label / matches_reference
+    # authoritatively sourced from curated_reference.csv.  Keeping the
+    # build here (rather than preserving a hand-written parquet across
+    # rmtrees) guarantees the parquet can't drift from the curated
+    # reference between UAT handoffs.
+    parquet_stats = _build_predictions_parquet(out_dir, run_id="323cfbbc")
 
     # 2. data CSVs — drop reference cols, strip table-name prefix.
     table_csvs = sorted(p for p in src_dir.glob("*.csv")
@@ -136,6 +432,18 @@ def main() -> int:
     # 3. README.md with provenance.
     readme_lines = [
         "# Meta-tagging UAT corpus — leak-sanitized for LLM/ML comparison",
+        "",
+        "Revision 4 (2026-04-20). Ships two Atelier prediction parquets "
+        "so UAT's scoring and row-audit flows both have the shape they "
+        "expect:\n\n"
+        "- `atelier_predictions.parquet` — the honest-evaluation "
+        "artifact: one row per natural-named column (no synth-generator "
+        "reference columns). This is the file `reconciliation.md` "
+        "summarizes.\n"
+        "- `atelier_predictions_all_columns.parquet` — every column in "
+        "the source corpus (natural + synth reference-column "
+        "answer keys). Reference-column rows are trivially correct by "
+        "name-parse; flagged via `evidence` so reviewers can spot them.",
         "",
         "Generated by ``scripts/parity/make_clean_hive_dataset.py``. Source "
         "is the UAT snapshot at ``build/meta-tagging/`` (2026-04-18). "
@@ -154,7 +462,7 @@ def main() -> int:
         "2. **Dropped reference columns** — columns whose names match the "
         "paired pattern "
         "``^(attr|code|col|data|field|item|key|ref|val|var)_\\d+(_\\d+)*$``. "
-        "These are *answer keys* that encode the ground-truth code of the "
+        "These are *answer keys* that encode the reference code of the "
         "natural-named column immediately preceding them in schema order. "
         "Reference columns are a synth-generator artifact, not production "
         "schema, and classifying them is trivial by construction — the "
@@ -183,14 +491,159 @@ def main() -> int:
         "in a paired reference-column twin, making that row's label "
         "deterministic by design); the remainder use name-index "
         "lookup with Ontology > Annotation > Common Names priority "
-        "and depth-winning tie-breaking.  Reserve the phrase "
-        "*ground truth* for external, human-curated benchmarks "
-        "(e.g. SOTAB); the file in this bundle is a **curated "
-        "reference**, not a ground truth.",
+        "and depth-winning tie-breaking.  External, human-curated "
+        "benchmarks (e.g. SOTAB's published labels) are out of scope "
+        "for this corpus; the file in this bundle is a **curated "
+        "reference**, not a human-curated benchmark.",
         "",
         "UAT's own classification outputs (e.g. "
         "``Atelier_Results_Default_DB_4-16.xlsx``) are **provisional** — "
-        "they're classifier *predictions*, not ground truth.",
+        "they're classifier *predictions*, not curated labels.",
+        "",
+        "## Reconciliation (``reconciliation.md``)",
+        "",
+        "Both pipelines are scored against the curated reference in this "
+        "bundle. The reconciliation separates three distinct questions the "
+        "first bundle did not cleanly disentangle:",
+        "",
+        "1. **Coverage** — of the 239 resolvable curated-reference columns, "
+        "177 appear in the baseline's input, 62 do not. Comparing the two "
+        "pipelines on the full 239 conflates accuracy with coverage.",
+        "2. **Shared-intersection accuracy** — on the 177-column overlap, "
+        "baseline is 88.14% exact (99.36% when it commits a tag); Atelier "
+        "is 94.35% exact with 100% coverage.",
+        "3. **Extension** — Atelier also tags 20 columns baseline saw but "
+        "left blank (65.00% exact) and 62 columns absent from baseline's "
+        "input (95.16% exact).",
+        "",
+        "See ``reconciliation.md`` for per-table breakdowns and "
+        "``reconciliation.json`` for machine-readable totals.",
+        "",
+        "## Atelier predictions (``atelier_predictions.parquet``)",
+        "",
+        f"{parquet_stats['rows']}-row parquet — one row per natural-named "
+        "column from the UAT corpus after reference-column exclusion — "
+        "with the full prediction surface the reconciliation summarizes. "
+        "Source run: ``323cfbbc``.",
+        "",
+        "### Accuracy (audited at bundle-build time)",
+        "",
+        f"- **Exact accuracy**: {parquet_stats['exact']} / "
+        f"{parquet_stats['scored']} = "
+        f"**{parquet_stats['exact']/parquet_stats['scored']:.2%}** "
+        "(``matches_reference == True`` on rows where "
+        "``reference_code`` is populated)",
+        f"- **Hierarchical accuracy**: {parquet_stats['hier']} / "
+        f"{parquet_stats['scored']} = "
+        f"**{parquet_stats['hier']/parquet_stats['scored']:.2%}** "
+        "(``predicted_code`` equals ``reference_code`` or is an "
+        "ancestor / descendant in the ICE hierarchy)",
+        "",
+        "Reproduction:",
+        "",
+        "```python",
+        "import pyarrow.parquet as pq",
+        "t = pq.read_table(\"atelier_predictions.parquet\").to_pandas()",
+        "scored = t[\"matches_reference\"].notna().sum()",
+        "exact  = t[\"matches_reference\"].sum(skipna=True)",
+        "print(f\"{exact}/{scored} = {exact/scored:.2%}\")",
+        "```",
+        "",
+        "``reference_code`` / ``reference_label`` in the parquet are "
+        "joined from ``curated_reference.csv`` at bundle-build time, "
+        "so the parquet's ``matches_reference`` flag is the same check "
+        "``reconciliation.md`` reports.",
+        "",
+        "### Schema",
+        "",
+        "| Column | Meaning |",
+        "|---|---|",
+        "| ``table_name``, ``column_name`` | identifier (join key) |",
+        "| ``column_type`` | inferred dtype |",
+        "| ``predicted_code``, ``predicted_label``, ``predicted_annotation`` | DST-fused prediction |",
+        "| ``llm_code``, ``llm_confidence`` | raw LLM sweep output (pass-1 / revisit) |",
+        "| ``confidence``, ``belief``, ``plausibility``, ``uncertainty``, ``conflict`` | DST fusion metrics |",
+        "| ``needs_clarification`` | flagged by bootstrap convergence |",
+        "| ``evidence`` | per-source mass contributions (string) |",
+        "| ``reference_code``, ``reference_label`` | value from ``curated_reference.csv`` (join key) |",
+        "| ``matches_reference`` | ``predicted_code == reference_code`` (None when no reference) |",
+        "| ``embedding_text`` | the 12-feature text used by the embedding model |",
+        "| ``pattern_signals`` | pattern-evidence hits |",
+        "| ``dst_belief_path`` | JSON belief path leaf → root |",
+        "| ``cautious_code`` | deepest code with Bel ≥ 0.7 |",
+        "| ``shap_top{1,2,3}_{name,value}`` | per-column SHAP attributions |",
+        "| ``text``, ``x``, ``y`` | atlas-compatible tooltip + UMAP projection |",
+        "",
+        "The parquet is a reproducible artifact — the same LLM batch + "
+        "CatBoost + SVM frontier install it rests on can be re-run from "
+        "this repo without retraining anything.  Every reconciliation "
+        "number in this bundle comes from joining this parquet's "
+        "``predicted_code`` against ``curated_reference.csv``.",
+        "",
+        "## Atelier predictions — all columns (``atelier_predictions_all_columns.parquet``)",
+        "",
+        f"{parquet_stats['full_rows']}-row parquet — every column in "
+        "the source corpus, including synth-generator answer-key "
+        "columns (the paired ``attr_1_1_1_9_2_1``, ``code_1_2_3``, etc. "
+        "twins dropped from the evaluation artifact).  Provided because "
+        "UAT scoring scripts iterate every source column and flag any "
+        "missing from the output.",
+        "",
+        "The 246 natural-named rows are byte-identical to "
+        "``atelier_predictions.parquet``.  The 213 reference-column "
+        "rows are appended with a deterministic name-parse "
+        "classification:",
+        "",
+        "- ``predicted_code`` is decoded from the column name "
+        "(``attr_1_1_1_9_2_1`` → ``1.1.1.9.2.1``).",
+        "- ``reference_code`` is the same code (by construction, the "
+        "name IS the answer).",
+        "- ``matches_reference`` is True for all reference rows — they "
+        "cannot be misclassified by name parse.",
+        "- ``evidence`` reads ``\"synth reference column — name encodes "
+        "the code directly; classified by name parse, no LLM or ML "
+        "evidence used\"`` so reviewers can filter these rows out of "
+        "any accuracy metric they care about.",
+        "- DST fields (``belief``, ``plausibility``, ``confidence``) "
+        "are set to 1.0 / 0.0 accordingly; SHAP / embedding / UMAP "
+        "fields are empty (these rows never passed through the "
+        "statistical pipeline).",
+        "",
+        "### Accuracy on all-columns (diagnostic, not the headline)",
+        "",
+        f"- rows: **{parquet_stats['full_rows']}** (246 natural + 213 reference)",
+        f"- scorable: **{parquet_stats['full_scored']}** (239 natural with curated code + 213 reference, by construction)",
+        f"- exact: **{parquet_stats['full_exact']} / "
+        f"{parquet_stats['full_scored']} = "
+        f"{parquet_stats['full_exact']/parquet_stats['full_scored']:.2%}**",
+        f"- hierarchical: **{parquet_stats['full_hier']} / "
+        f"{parquet_stats['full_scored']} = "
+        f"{parquet_stats['full_hier']/parquet_stats['full_scored']:.2%}**",
+        "",
+        "The 246-row ``atelier_predictions.parquet`` numbers "
+        f"(**{parquet_stats['exact']/parquet_stats['scored']:.2%}** exact) are the "
+        "fair measure of classifier quality on this corpus; the "
+        "all-columns percentages are higher simply because 213 rows "
+        "are trivially correct by construction.  Both files ship so "
+        "downstream tooling can choose which cohort it cares about.",
+        "",
+        "## Revision history",
+        "",
+        "- rev 1 (2026-04-19, 16:55 UTC) — initial cleaned corpus + "
+        "curated_reference.csv shipped.",
+        "- rev 2 (2026-04-19) — adds ``reconciliation.md`` + "
+        "``reconciliation.json``. No data changes.",
+        "- rev 3 (2026-04-20) — adds ``atelier_predictions.parquet`` "
+        "(source for the reconciliation numbers) with columns renamed "
+        "to the current ``reference_code`` / ``matches_reference`` "
+        "convention.  No changes to data CSVs, annotations, curated "
+        "reference, or reconciliation.",
+        "- rev 4 (2026-04-20, this bundle) — adds "
+        "``atelier_predictions_all_columns.parquet`` for UAT's "
+        "every-column row audit; drops 17 reference-column rows that "
+        "leaked into ``atelier_predictions.parquet`` from an older "
+        "loader build (net effect: same 226/239 exact-accuracy "
+        "numerator/denominator, cleaner 246-row shape).",
     ]
     (out_dir / "README.md").write_text("\n".join(readme_lines) + "\n")
 

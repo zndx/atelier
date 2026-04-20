@@ -16,10 +16,10 @@ def step_run_sage(context, n):
     }
 
     all_features = []
-    gt_indices = []
+    label_idx = []
     for ts in load_fixture_samples():
         for col in ts.columns:
-            if col.ground_truth and col.ground_truth in code_to_idx:
+            if col.reference_code and col.reference_code in code_to_idx:
                 features = extract_features(
                     column_name=col.name,
                     column_type=col.column_type,
@@ -30,11 +30,11 @@ def step_run_sage(context, n):
                     null_count=col.null_count,
                 )
                 all_features.append(features)
-                gt_indices.append(code_to_idx[col.ground_truth])
+                label_idx.append(code_to_idx[col.reference_code])
 
     context.sage_result = run_sage_analysis(
         all_features=all_features,
-        ground_truth_indices=np.array(gt_indices),
+        label_indices=np.array(label_idx),
         category_set=category_set,
         n_permutations=n,
         detect_convergence=False,

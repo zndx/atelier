@@ -41,7 +41,7 @@ class AttemptRecord:
     llm_coverage: float | None = None
     llm_agreement: float | None = None
     mean_gap: float | None = None
-    accuracy: float | None = None  # populated when ground truth is configured
+    accuracy: float | None = None  # populated when a curated reference is configured
     failed_columns: list[str] = field(default_factory=list)
     notes: str = ""
 
@@ -315,7 +315,7 @@ def default_summary_markdown(sess: SupervisorSession) -> str:
         if att.mean_gap is not None:
             lines.append(f"- Mean belief gap: {att.mean_gap:.3f}\n")
         if att.accuracy is not None:
-            lines.append(f"- Accuracy vs ground truth: {att.accuracy:.1%}\n")
+            lines.append(f"- Accuracy vs curated reference: {att.accuracy:.1%}\n")
         if att.failed_columns:
             lines.append(f"- Failed columns ({len(att.failed_columns)}): "
                          f"{', '.join(att.failed_columns[:5])}"

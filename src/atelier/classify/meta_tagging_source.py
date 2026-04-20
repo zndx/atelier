@@ -2,13 +2,13 @@
 
 Mounts a directory of CSV tables plus an ``annotations.csv`` vocabulary
 file.  The UAT meta-tagging snapshot is the provisional corpus we load
-here.  Published human-curated ground truth does not exist for this
+here.  A published human-curated benchmark does not exist for this
 corpus; we produce a **curated reference** at
 ``build/meta-tagging-clean/curated_reference.csv`` that is
 generator-deterministic (the synth generator encodes each code in a
 paired "reference column" twin — see below) and spot-checked by hand
-for quality.  Reserve the term "ground truth" for external,
-human-curated benchmarks (e.g. SOTAB published labels).  Directory contents are
+for quality.  Reserve phrasing like "published benchmark" for
+externally-authored labels (e.g. SOTAB).  Directory contents are
 gitignored and nothing here persists values, labels, or codes back
 into the repo.
 
@@ -23,10 +23,10 @@ Directory shape (matches the UAT reference layout)::
 The tables follow a paired-column convention: each natural-named
 column (e.g. ``personal_data.first_name``) has a *reference column*
 twin (e.g. ``personal_data.attr_1_1_1_9_2_1``) whose name *encodes*
-the paired column's ground-truth code (``1_1_1_9_2_1`` →
+the paired column's reference code (``1_1_1_9_2_1`` →
 ``1.1.1.9.2.1``).  **Reference columns are answer keys, not inputs**
 — by invariant, they never appear in the sample set returned by this
-loader.  Ground truth is derived at load time:
+loader.  The per-column reference code is derived at load time:
 
 - Natural-named column with a paired reference twin: code from the
   twin's name suffix (authoritative — the synth generator guaranteed
@@ -75,14 +75,15 @@ log = logging.getLogger(__name__)
 
 
 # Reference-column name pattern: ``<prefix>_<digit>_<digit>_...`` where
-# the digit tuple encodes the ground-truth ontology code of the
-# natural-named column immediately preceding it in schema order.
+# the digit tuple encodes the ontology code of the natural-named
+# column immediately preceding it in schema order.
 #
 # Reference columns carry no independent classification signal — they
 # are answer keys for their paired natural-named column, not data to
 # classify.  By invariant, they never appear in train / test /
 # validation / evaluation sample sets; they only contribute their
-# encoded code as authoritative GT for the paired column.
+# encoded code as the authoritative curated reference for the paired
+# column.
 #
 # The prefix list is the union of prefixes observed across
 # meta_tagging_source and real_data_loader historically, kept here as
@@ -95,6 +96,42 @@ _REFERENCE_COL_PREFIXES = (
 _REFERENCE_COL_RE = re.compile(
     r"^(?:" + "|".join(_REFERENCE_COL_PREFIXES) + r")_(\d+(?:_\d+)*)$"
 )
+
+
+def exclude_reference_columns(samples: list[TableSample]) -> list[TableSample]:
+    """Return a copy of *samples* with reference columns filtered out.
+
+    Reference columns are synth-generator answer keys — they encode a
+    paired natural-named column's reference code directly in their
+    name.  On production data the regex never matches, so this is a
+    no-op there.  On the UAT synth corpus this is the enforcement
+    point that prevents the LLM from being asked to classify answer
+    keys (and keeps them out of sibling contexts, which would leak
+    the code into other columns' embeddings).
+
+    Applied uniformly after sample load regardless of loader (Hive
+    sampler, fixture loader, meta-tagging loader).  The meta-tagging
+    loader already filters internally, so calling this again is safe
+    (idempotent).
+    """
+    cleaned: list[TableSample] = []
+    for ts in samples:
+        kept_cols = [c for c in ts.columns if not _REFERENCE_COL_RE.match(c.name)]
+        if not kept_cols:
+            continue
+        # Also strip reference-column names from siblings — otherwise a
+        # natural-named column's embedding_text would include the answer
+        # key's name as context, leaking the code through siblings.
+        clean_sibling_names = [
+            n for n in (kept_cols[0].siblings if kept_cols else [])
+            if not _REFERENCE_COL_RE.match(n)
+        ]
+        for c in kept_cols:
+            c.siblings = clean_sibling_names
+        cleaned.append(TableSample(
+            name=ts.name, database=ts.database, columns=kept_cols,
+        ))
+    return cleaned
 
 
 def _repo_mount_candidate() -> Path:
@@ -200,7 +237,7 @@ def load_meta_tagging_vocabulary(mount: Path) -> HierarchicalCategorySet:
 
 
 def _build_name_to_code_index(records: list[dict]) -> dict[str, str]:
-    """Map human-readable names → ontology code for clear-named ground truth.
+    """Map human-readable names → ontology code for clear-named reference labels.
 
     Each annotation record contributes up to three alias sources:
     ``ontology`` (the canonical label), ``annotation`` (the mnemonic),
@@ -253,16 +290,16 @@ def _normalize(name: str) -> str:
     return s
 
 
-def _derive_ground_truth(
+def _derive_reference_code(
     col_name: str, name_index: dict[str, str], fallback_code: str
 ) -> str | None:
-    """Resolve ground-truth code for a single column name.
+    """Resolve curated-reference code for a single column name.
 
     Reference names (``attr_1_1_1_9_2_1``) → decode directly.  Note:
     reference columns themselves are *not* classified — they exist to
-    encode GT for their paired natural-named column.  This helper is
-    still used to decode their embedded code when we need it as the
-    paired column's ground truth.
+    encode the reference for their paired natural-named column.  This
+    helper is still used to decode their embedded code when we need it
+    as the paired column's reference.
 
     Natural names (``first_name``) → name→code index lookup.
     ``row_id`` generic names → the non-sensitive fallback.
@@ -274,8 +311,9 @@ def _derive_ground_truth(
         code = m.group(1).replace("_", ".")
         # UAT Hive export normalized the "Not Sensitive" root code
         # ``0.0`` → ``0``.  Column names still carry the Gopala-vintage
-        # ``0_0`` suffix; strip a trailing ``.0`` at the root so GT
-        # matches the UAT vocabulary.  Safe: no sub-tier ends in ``.0``.
+        # ``0_0`` suffix; strip a trailing ``.0`` at the root so the
+        # reference code matches the UAT vocabulary.  Safe: no
+        # sub-tier ends in ``.0``.
         if "." in code and code.count(".") == 1 and code.endswith(".0"):
             code = code[:-2]
         return code
@@ -311,10 +349,10 @@ def load_meta_tagging_source(
 ) -> list[TableSample]:
     """Load every ``<table>.csv`` in the mount as a :class:`TableSample`.
 
-    Ground truth per column is derived from the column-name convention
-    described at module-level; ``ground_truth`` is set only when a
-    mapping exists so evaluation can distinguish "classifier wrong" from
-    "no reference label available".
+    Per-column reference codes are derived from the column-name
+    convention described at module-level; ``reference_code`` is set
+    only when a mapping exists so evaluation can distinguish
+    "classifier wrong" from "no reference label available".
     """
     if mount is None:
         mount = resolve_meta_tagging_mount()
@@ -351,8 +389,9 @@ def load_meta_tagging_source(
 
         # Reference-column exclusion invariant.  Reference columns
         # (``attr_1_2_3_4``, ``code_1_1``, etc.) encode the paired
-        # natural-named column's GT directly in their name.  They are
-        # answer keys, not classifiable inputs.  Two exclusion vectors:
+        # natural-named column's reference directly in their name.  They
+        # are answer keys, not classifiable inputs.  Two exclusion
+        # vectors:
         #
         #   1. Reference columns are not returned as samples.  Dropping
         #      them prevents trivial name-parse "predictions" from
@@ -379,7 +418,7 @@ def load_meta_tagging_source(
             values = all_vals[:5]
             total = len(rows)
             nulls = sum(1 for row in rows if i >= len(row) or not row[i])
-            gt = _derive_ground_truth(col_name, name_index, fallback)
+            ref_code = _derive_reference_code(col_name, name_index, fallback)
 
             columns.append(ColumnSample(
                 name=col_name,
@@ -391,7 +430,7 @@ def load_meta_tagging_source(
                 table_name=table_name,
                 database="meta-tagging",
                 siblings=clean_sibling_names,  # leak vector #2: sanitized
-                ground_truth=gt,
+                reference_code=ref_code,
                 distinct_count=len(set(row[i] for row in rows if i < len(row))),
             ))
 
@@ -403,7 +442,7 @@ def load_meta_tagging_source(
 
     total_cols = sum(len(t.columns) for t in samples)
     labeled = sum(
-        1 for t in samples for c in t.columns if c.ground_truth is not None
+        1 for t in samples for c in t.columns if c.reference_code is not None
     )
     # Reference-exclusion invariant — catch any regression that would
     # let an answer-key column back into the classifiable sample set.
@@ -417,7 +456,7 @@ def load_meta_tagging_source(
     )
     log.info(
         "meta-tagging source loaded: %d tables, %d columns "
-        "(%d with ground truth; reference columns excluded) from %s",
+        "(%d with curated reference; reference columns excluded) from %s",
         len(samples), total_cols, labeled, mount,
     )
     return samples

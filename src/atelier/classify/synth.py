@@ -1,6 +1,6 @@
 """Synthetic data generation for CatBoost/SVM classifier training.
 
-Generates synthetic columns with known ground truth labels for each leaf
+Generates synthetic columns with known reference labels for each leaf
 category in the controlled vocabulary. Each category gets both semantic
 column names (human-readable variants) and opaque names (coded/random)
 to force classifiers to learn from VALUE PATTERNS, not just names.
@@ -201,14 +201,15 @@ def generate_synth_tables(
     variants_per_category: int = 30,
     seed: int = 42,
 ) -> list[dict[str, Any]]:
-    """Generate synthetic training tables with known ground truth.
+    """Generate synthetic training tables with a known reference label per column.
 
     For each leaf category, generates semantic + opaque column name variants
-    with category-appropriate values. Outputs CSV files and ground_truth.json.
+    with category-appropriate values. Outputs CSV files and
+    reference_labels.json.
 
     Args:
         category_set: HierarchicalCategorySet with leaf categories.
-        output_dir: Directory to write CSV + ground_truth.json.
+        output_dir: Directory to write CSV + reference_labels.json.
         value_templates: Optional {code: [values...]} for template-based generators.
         registry: Optional GeneratorRegistry. When provided, uses registry's
             generators instead of the default GENERATORS dict.
@@ -219,7 +220,7 @@ def generate_synth_tables(
         seed: RNG seed for deterministic generation.
 
     Returns:
-        List of table metadata dicts with ground_truth.
+        List of table metadata dicts, each carrying its ``reference_labels`` map.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -270,7 +271,7 @@ def generate_synth_tables(
 
     # Generate columns for each category
     all_columns: dict[str, list[str]] = {}  # column_name → [values]
-    ground_truth: dict[str, str] = {}  # column_name → category_code
+    reference_labels: dict[str, str] = {}  # column_name → category_code
     seen_names: set[str] = set()
 
     semantic_count = variants_per_category // 2
@@ -297,7 +298,7 @@ def generate_synth_tables(
 
             values = [gen(rng) for _ in range(rows_per_table)]
             all_columns[name] = values
-            ground_truth[name] = code
+            reference_labels[name] = code
 
     # Write CSV files in chunks
     col_names_list = list(all_columns.keys())
@@ -320,17 +321,17 @@ def generate_synth_tables(
             "database": "synth",
             "column_count": len(chunk_names),
             "row_count": rows_per_table,
-            "ground_truth": {n: ground_truth[n] for n in chunk_names},
+            "reference_labels": {n: reference_labels[n] for n in chunk_names},
         })
 
-    # Write ground truth
-    gt_path = output_dir / "ground_truth.json"
-    with open(gt_path, "w") as f:
-        json.dump(ground_truth, f, indent=2)
+    # Write reference labels sidecar
+    ref_path = output_dir / "reference_labels.json"
+    with open(ref_path, "w") as f:
+        json.dump(reference_labels, f, indent=2)
 
     logger.info(
         "Generated %d columns across %d files for %d categories in %s",
-        len(ground_truth), file_idx, len(leaf_specs), output_dir,
+        len(reference_labels), file_idx, len(leaf_specs), output_dir,
     )
 
     return results

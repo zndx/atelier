@@ -61,7 +61,7 @@ Classification pipeline, DST evidence fusion, ML classifiers, and agent orchestr
 | Belief path | `@belief-path` | 0 | 3 | Hierarchical navigation, cautious classification |
 | SAGE importance | `@sage` | 0 | 1 | Permutation-based feature importance |
 | SHAP explanations | `@shap` | 0 | 2 | TreeSHAP + PermutationSHAP attribution |
-| Synth generation | `@synth` | 0 | 2 | Synthetic data + ground truth generation |
+| Synth generation | `@synth` | 0 | 2 | Synthetic data + reference-label generation |
 | Synth framework | `@synth-framework` | 0 | 2 | Generator registry, coverage reporting |
 | Meta-tagging | `@meta-tagging` | 0 | 2 | META_TO_ICE mappings, coverage |
 | Experimentation | `@experimentation` | 0 | 3 | Discount tuning, comparative evaluation |

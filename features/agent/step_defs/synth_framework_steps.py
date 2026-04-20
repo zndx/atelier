@@ -42,16 +42,16 @@ def step_check_csv_files(context):
     assert len(csv_files) > 0, "No CSV files created"
 
 
-@then("ground_truth.json should map every column to a valid code")
-def step_check_gt_json(context):
-    gt_path = context.gen_dir / "ground_truth.json"
-    assert gt_path.exists(), "ground_truth.json not found"
+@then("reference_labels.json should map every column to a valid code")
+def step_check_reference_json(context):
+    ref_path = context.gen_dir / "reference_labels.json"
+    assert ref_path.exists(), "reference_labels.json not found"
 
-    with open(gt_path) as f:
-        gt = json.load(f)
+    with open(ref_path) as f:
+        reference_labels = json.load(f)
 
     valid_codes = {c.code for c in context.category_set.categories}
-    for col_name, code in gt.items():
+    for col_name, code in reference_labels.items():
         assert code in valid_codes, (
             f"Column {col_name} has code {code} not in vocabulary"
         )

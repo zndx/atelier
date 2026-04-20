@@ -82,7 +82,7 @@ def _classify_seed_columns(table, columns: set[str]) -> list[str]:
             siblings=[],
             total_count=len(values),
             null_count=0,
-            ground_truth=gt_codes[i],
+            reference_code=gt_codes[i],
         )
 
         result = _classify_column(

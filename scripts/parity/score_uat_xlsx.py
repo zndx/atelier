@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""Score the UAT-produced xlsx against our authoritative ground truth.
+"""Score the UAT-produced xlsx against our curated reference.
 
 Input:
   build/Atelier_Results_Default_DB_4-16.xlsx
-  build/meta-tagging-clean/curated_reference.csv   (from build_authoritative_ground_truth.py)
+  build/meta-tagging-clean/curated_reference.csv   (from build_curated_reference.py)
 
 The xlsx contains *both* pipelines' predictions side-by-side on each
 data sheet (row 0 = section titles, row 1 = sub-headers, rows 2+ = data):
@@ -272,7 +272,7 @@ def main() -> int:
 
     # Short markdown summary
     lines = [
-        "# UAT xlsx scored against authoritative ground truth",
+        "# UAT xlsx scored against curated reference",
         "",
         f"Source: `{xlsx_path}`   ·   GT: `{gt_path}`",
         f"GT resolvable columns: **{len(gt)}**  (reference columns excluded by invariant)",

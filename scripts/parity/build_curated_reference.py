@@ -3,12 +3,12 @@
 
 Walks every natural-named column in the UAT snapshot under
 ``build/meta-tagging/`` and emits exactly one reference row per column
-with explicit derivation provenance.  The artifact is called a
-**curated reference** — not "ground truth" — because it is a
-generator-truth record (the synth generator stuffed the correct code
-into each reference-column twin) that we review and curate by hand
-as needed for quality checks.  Reserve the term "ground truth" for
-external, human-curated labels like the published SOTAB annotations.
+with explicit derivation provenance.  The artifact is deliberately
+named a **curated reference**: it is a generator-truth record (the
+synth generator stuffed the correct code into each reference-column
+twin) that we review and curate by hand as needed for quality checks.
+External, human-curated benchmarks (e.g. the published SOTAB
+annotations) are a distinct class of label and out of scope here.
 
 Reference columns (paired twins) are answer keys, not inputs; they
 never appear as reference rows themselves — their encoded code

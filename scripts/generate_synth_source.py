@@ -8,8 +8,8 @@ with different column name variants — same value generators, different
 surface-level naming to produce a realistic, large-scale data source.
 
 Mirrors the pattern of generate_sample_source.py but at ~10x scale:
-  - data/synth/tables/*.csv       — ~100 tables, 100 rows each
-  - data/synth/ground_truth.json  — table.column -> category mapping
+  - data/synth/tables/*.csv          — ~100 tables, 100 rows each
+  - data/synth/reference_labels.json — table.column -> category mapping
 
 Usage:
     uv run python scripts/generate_synth_source.py [--tables 100] [--center 100] [--seed 7]
@@ -45,7 +45,7 @@ build_generators = _mod.build_generators
 ONTOLOGY_PATH = PROJECT_ROOT / "data" / "sample" / "ontology.json"
 SYNTH_DIR = PROJECT_ROOT / "data" / "synth"
 TABLES_DIR = SYNTH_DIR / "tables"
-GROUND_TRUTH_PATH = SYNTH_DIR / "ground_truth.json"
+REFERENCE_LABELS_PATH = SYNTH_DIR / "reference_labels.json"
 
 ROWS_PER_TABLE = 100
 
@@ -519,7 +519,7 @@ def generate_synth_database(
     # Track category variant indices (how many times each code has been named)
     variant_counter: dict[str, int] = {}
 
-    ground_truth: dict[str, str] = {}
+    reference_labels: dict[str, str] = {}
     total_columns = 0
     opaque_count = 0
 
@@ -568,15 +568,15 @@ def generate_synth_database(
                     row.append(gen(rng))
                 writer.writerow(row)
 
-        # Record ground truth
+        # Record reference labels
         for col_name, code in col_entries:
-            gt_key = f"{table_name}.{col_name}"
-            ground_truth[gt_key] = code
+            ref_key = f"{table_name}.{col_name}"
+            reference_labels[ref_key] = code
             total_columns += 1
 
-    # Write ground truth
-    with open(GROUND_TRUTH_PATH, "w") as f:
-        json.dump(ground_truth, f, indent=2, ensure_ascii=False)
+    # Write reference labels
+    with open(REFERENCE_LABELS_PATH, "w") as f:
+        json.dump(reference_labels, f, indent=2, ensure_ascii=False)
 
     # ── Summary ────────────────────────────────────────────────────
     col_counts = [len(codes) for _, codes in tables]
@@ -592,7 +592,7 @@ def generate_synth_database(
 
     print(f"\nGenerated {len(tables)} tables with {total_columns} total columns")
     print(f"  Output:       {TABLES_DIR}/")
-    print(f"  Ground truth: {GROUND_TRUTH_PATH}")
+    print(f"  Reference labels: {REFERENCE_LABELS_PATH}")
     print(f"  Rows/table:   {rows_per_table}")
     print(f"  Column distribution: mean={mean_cols:.1f}, std={std_cols:.1f}, "
           f"min={min_cols}, max={max_cols}")

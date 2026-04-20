@@ -51,13 +51,13 @@ class RealisticMockLLMBackend:
 
     def __init__(
         self,
-        ground_truth: dict[str, str],
+        reference_labels: dict[str, str],
         *,
         base_accuracy: float = 0.80,
         revisit_correction_rate: float = 0.70,
         seed: int = 42,
     ):
-        self._gt = ground_truth
+        self._ref = reference_labels
         self._base_accuracy = base_accuracy
         self._revisit_correction_rate = revisit_correction_rate
         self._rng = random.Random(seed)
@@ -73,13 +73,13 @@ class RealisticMockLLMBackend:
     ) -> LLMResponse:
         classifications = []
         for sample in samples:
-            true_code = self._gt.get(sample.name)
+            true_code = self._ref.get(sample.name)
             if not true_code:
                 classifications.append(ColumnClassification(
                     column_name=sample.name,
                     category_code=None,
                     confidence=0.0,
-                    evidence="no ground truth available",
+                    evidence="no reference label available",
                     alternatives=[],
                 ))
                 continue

@@ -30,7 +30,7 @@ def _make_dir_mount(base: Path, table_count: int) -> Path:
     """Build an uncompressed synth dir under ``base``. Returns mount path."""
     tables = base / "tables"
     tables.mkdir(parents=True, exist_ok=True)
-    gt: dict[str, str] = {}
+    reference_labels: dict[str, str] = {}
     for i in range(table_count):
         tname = f"table_{i}"
         header = ["id", "email", "note"]
@@ -39,16 +39,16 @@ def _make_dir_mount(base: Path, table_count: int) -> Path:
             for j in range(3)
         ]
         _write_csv(tables / f"{tname}.csv", header, rows)
-        gt[f"{tname}.email"] = "ICE.SENSITIVE.PID.EMAIL"
-        gt[f"{tname}.id"] = "ICE.NONSENSITIVE.DESIGNATIVE.IDENTIFIER"
-    (base / "ground_truth.json").write_text(json.dumps(gt))
+        reference_labels[f"{tname}.email"] = "ICE.SENSITIVE.PID.EMAIL"
+        reference_labels[f"{tname}.id"] = "ICE.NONSENSITIVE.DESIGNATIVE.IDENTIFIER"
+    (base / "reference_labels.json").write_text(json.dumps(reference_labels))
     return base
 
 
 def _make_zip_mount(zip_path: Path, table_count: int) -> Path:
     """Build a synth zip at ``zip_path``. Returns the zip path."""
     zip_path.parent.mkdir(parents=True, exist_ok=True)
-    gt: dict[str, str] = {}
+    reference_labels: dict[str, str] = {}
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for i in range(table_count):
             tname = f"ztable_{i}"
@@ -62,9 +62,9 @@ def _make_zip_mount(zip_path: Path, table_count: int) -> Path:
             w.writerow(header)
             w.writerows(rows)
             zf.writestr(f"data/synth/tables/{tname}.csv", buf.getvalue())
-            gt[f"{tname}.ssn"] = "ICE.SENSITIVE.PID.IDENTITY.SSN"
-            gt[f"{tname}.id"] = "ICE.NONSENSITIVE.DESIGNATIVE.IDENTIFIER"
-        zf.writestr("data/synth/ground_truth.json", json.dumps(gt))
+            reference_labels[f"{tname}.ssn"] = "ICE.SENSITIVE.PID.IDENTITY.SSN"
+            reference_labels[f"{tname}.id"] = "ICE.NONSENSITIVE.DESIGNATIVE.IDENTIFIER"
+        zf.writestr("data/synth/reference_labels.json", json.dumps(reference_labels))
     return zip_path
 
 
@@ -190,12 +190,12 @@ def step_n_tables(context, n):
     )
 
 
-@then("each column has its ground truth attached")
-def step_gt_attached(context):
+@then("each column has its curated reference attached")
+def step_reference_attached(context):
     hits = sum(
-        1 for t in context.samples for c in t.columns if c.ground_truth
+        1 for t in context.samples for c in t.columns if c.reference_code
     )
-    assert hits > 0, "no columns had ground truth mapped"
+    assert hits > 0, "no columns had curated reference mapped"
 
 
 @then("every column belongs to its parent table")

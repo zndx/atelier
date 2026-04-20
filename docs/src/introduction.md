@@ -182,7 +182,7 @@ A fresh deployment auto-seeds on first boot:
 1. **316-leaf BFO-grounded vocabulary** (351 categories total) covering the
    CCO Information Content Entity trichotomy: Designative (names, IDs, codes),
    Descriptive (measurements, dates, amounts), Prescriptive (software, specs)
-2. **25 sample tables** with 316 columns and committed ground truth
+2. **25 sample tables** with 316 columns and a committed curated reference
 3. One-click classification via the Status page
 4. Interactive Embeddings visualization (UMAP/t-SNE via embedding-atlas)
 

@@ -12,9 +12,10 @@ with *enriched* prompts that include:
     pass-1 labels (majority vote informs the enrichment).
 
 The point: is LLM accuracy one-shot, or does structured evidence
-fusion allow the LLM to converge to ground truth iteratively?  This
-script answers by measuring improvement / regression / unchanged on
-the revisit subset and on the corpus overall.
+fusion allow the LLM to converge to the published benchmark
+iteratively?  This script answers by measuring improvement /
+regression / unchanged on the revisit subset and on the corpus
+overall.
 
 Usage::
 
@@ -466,7 +467,7 @@ def main() -> int:
     abstention_resolved_wrong = 0
     abstention_still_unresolved = 0
     abstention_resolved_uncertain = 0
-    published_gt = [s.ground_truth for s in samples]
+    published_gt = [s.reference_code for s in samples]
     for i in revisit_idx:
         p1 = pass1_labels[i]
         p2 = pass2_labels.get(i, "")
@@ -548,7 +549,7 @@ def main() -> int:
         rows.append({
             "table": s.table_name,
             "column_id": s.name,
-            "published_gt": s.ground_truth,
+            "published_gt": s.reference_code,
             "pass1_label": pass1_labels[i],
             "in_revisit_subset": i in pass2_labels,
             "pass2_label": pass2_labels.get(i, ""),

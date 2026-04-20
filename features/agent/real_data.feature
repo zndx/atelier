@@ -6,10 +6,10 @@ Feature: Real data classification baseline
   Background:
     Given the real data directory is available
 
-  Scenario: Parse real CSVs and extract ground truth
+  Scenario: Parse real CSVs and extract the curated reference
     When I parse real CSVs from the data directory
     Then at least 200 target columns should be extracted
-    And every ground truth code should exist in the vocabulary
+    And every curated reference code should exist in the vocabulary
 
   Scenario: Template-based synthetic data covers real vocabulary
     When I generate template-based synthetic training data

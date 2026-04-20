@@ -1,7 +1,7 @@
 """Remediation invariants — Bedrock-only classifier, tunable scaffolding.
 
 Overwatch is allowed to adapt the scaffolding around classification
-(sampling, batching, discounts, ground truth, GPU knobs) but it must
+(sampling, batching, discounts, curated reference, GPU knobs) but it must
 NOT change which provider actually performs the classification
 operations.  That invariant is hard: even the autonomous tier cannot
 flip the classifier onto a direct-Anthropic backend or a third-party
@@ -108,7 +108,7 @@ def enforce_bedrock_only(overlay: Any) -> None:
             "Bedrock-only invariant violated: overlay touches classifier "
             f"provider routing ({', '.join(violations)}). Overwatch may "
             "adapt scaffolding (sampling, batching, discounts, GPU knobs, "
-            "ground-truth) but classification must continue to route "
+            "curated reference) but classification must continue to route "
             "through the Bedrock Claude endpoint configured at deploy time."
         )
 

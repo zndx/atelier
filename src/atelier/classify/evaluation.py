@@ -53,7 +53,7 @@ class EvaluationReport:
     run_id: str
     timestamp: str
     total_columns: int
-    columns_with_gt: int
+    columns_with_reference: int
     exact_accuracy: float
     micro_f1: float
     macro_f1: float
@@ -71,7 +71,7 @@ class EvaluationReport:
             "run_id": self.run_id,
             "timestamp": self.timestamp,
             "total_columns": self.total_columns,
-            "columns_with_gt": self.columns_with_gt,
+            "columns_with_reference": self.columns_with_reference,
             "exact_accuracy": round(self.exact_accuracy, 4),
             "micro_f1": round(self.micro_f1, 4),
             "macro_f1": round(self.macro_f1, 4),
@@ -93,7 +93,7 @@ class EvaluationReport:
     def summary(self) -> str:
         lines = [
             f"Evaluation Report ({self.run_id})",
-            f"  {self.columns_with_gt}/{self.total_columns} columns with ground truth",
+            f"  {self.columns_with_reference}/{self.total_columns} columns with curated reference",
             f"  Exact accuracy:        {self.exact_accuracy:.4f}",
             f"  Micro F1:              {self.micro_f1:.4f}",
             f"  Macro F1:              {self.macro_f1:.4f}",
@@ -125,7 +125,7 @@ def evaluate_classifications(
     ----------
     classifications:
         List of dicts as returned by ``_classify_column()`` in pipeline.py.
-        Each dict must have at minimum: predicted_code, ground_truth, confidence,
+        Each dict must have at minimum: predicted_code, reference_code, confidence,
         belief, plausibility, uncertainty, conflict, evidence_sources.
     category_set:
         Optional HierarchicalCategorySet for hierarchical accuracy and labels.
@@ -134,25 +134,25 @@ def evaluate_classifications(
     if total == 0:
         return _empty_report()
 
-    # Split into those with ground truth
-    with_gt = [
+    # Split into those with curated reference
+    with_ref = [
         c for c in classifications
-        if c.get("ground_truth") and c.get("predicted_code")
+        if c.get("reference_code") and c.get("predicted_code")
     ]
-    gt_count = len(with_gt)
+    ref_count = len(with_ref)
 
     # Exact accuracy
-    if gt_count > 0:
-        y_true = [c["ground_truth"] for c in with_gt]
-        y_pred = [c["predicted_code"] for c in with_gt]
+    if ref_count > 0:
+        y_true = [c["reference_code"] for c in with_ref]
+        y_pred = [c["predicted_code"] for c in with_ref]
         correct = sum(1 for t, p in zip(y_true, y_pred) if t == p)
-        exact_accuracy = correct / gt_count
+        exact_accuracy = correct / ref_count
     else:
         y_true, y_pred = [], []
         exact_accuracy = 0.0
 
     # F1 scores
-    if gt_count >= 2:
+    if ref_count >= 2:
         try:
             from sklearn.metrics import f1_score
             micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
@@ -171,7 +171,7 @@ def evaluate_classifications(
     confusion = _confusion_matrix(y_true, y_pred)
 
     # Hierarchical accuracy
-    if category_set is not None and gt_count > 0:
+    if category_set is not None and ref_count > 0:
         hier_acc = compute_hierarchical_accuracy(y_true, y_pred, category_set)
     else:
         hier_acc = exact_accuracy
@@ -195,7 +195,7 @@ def evaluate_classifications(
         run_id=run_id,
         timestamp=datetime.now(timezone.utc).isoformat(),
         total_columns=total,
-        columns_with_gt=gt_count,
+        columns_with_reference=ref_count,
         exact_accuracy=exact_accuracy,
         micro_f1=micro_f1,
         macro_f1=macro_f1,
@@ -256,11 +256,11 @@ def epistemic_evaluation(
       belief_convergence: fraction of columns where leaf Bel > 0.7
     """
     TAU = 0.7
-    with_gt = [
+    with_ref = [
         c for c in classifications
-        if c.get("ground_truth") and c.get("predicted_code")
+        if c.get("reference_code") and c.get("predicted_code")
     ]
-    if not with_gt:
+    if not with_ref:
         return {
             "per_depth": {},
             "cautious_accuracy": 0.0,
@@ -278,9 +278,9 @@ def epistemic_evaluation(
     commitment_depths: list[int] = []
     leaf_converged = 0
 
-    for c in with_gt:
+    for c in with_ref:
         bp = c.get("belief_path", [])
-        gt = c["ground_truth"]
+        ref = c["reference_code"]
 
         if bp:
             # Leaf is first entry
@@ -304,11 +304,11 @@ def epistemic_evaluation(
 
             if cautious is not None:
                 cautious_total += 1
-                # Correct if cautious code is the ground truth or an ancestor of it
-                if cautious == gt:
+                # Correct if cautious code is the reference or an ancestor of it
+                if cautious == ref:
                     cautious_correct += 1
                 elif category_set is not None:
-                    ancestors = category_set.ancestors(gt)
+                    ancestors = category_set.ancestors(ref)
                     if cautious in ancestors:
                         cautious_correct += 1
 
@@ -335,7 +335,7 @@ def epistemic_evaluation(
             round(sum(commitment_depths) / len(commitment_depths), 2)
             if commitment_depths else 0.0
         ),
-        "belief_convergence": round(leaf_converged / len(with_gt), 4),
+        "belief_convergence": round(leaf_converged / len(with_ref), 4),
     }
 
 
@@ -425,7 +425,7 @@ def _empty_report() -> EvaluationReport:
         run_id="empty",
         timestamp=datetime.now(timezone.utc).isoformat(),
         total_columns=0,
-        columns_with_gt=0,
+        columns_with_reference=0,
         exact_accuracy=0.0,
         micro_f1=0.0,
         macro_f1=0.0,

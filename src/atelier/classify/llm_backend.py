@@ -109,10 +109,24 @@ class LLMResponse:
     reasoning_text: str = ""
     reasoning_tokens: int = 0
 
+    # Whether fewer classifications came back than were requested, even
+    # when the backend reported a clean stop.  This happens when a
+    # model — particularly Bedrock-hosted Claude with its tighter output
+    # ceiling — produces an abbreviated response that parses cleanly as
+    # JSON but simply omits some requested columns.  The pipeline treats
+    # this as truncation so halving retry engages on the missing rows
+    # rather than silently dropping them.
+    partial: bool = False
+
     @property
     def truncated(self) -> bool:
-        """Whether response was truncated due to max_tokens limit."""
-        return self.finish_reason in ("length", "max_tokens")
+        """Whether the response must be retried for coverage.
+
+        Triggers on (a) explicit finish_reason == length/max_tokens, or
+        (b) a partial parse where the backend returned a clean stop but
+        produced fewer classifications than expected columns.
+        """
+        return self.finish_reason in ("length", "max_tokens") or self.partial
 
 
 # ── Configuration ────────────────────────────────────────────────
@@ -189,6 +203,43 @@ class LLMBackendConfig:
     aws_secret_access_key: str | None = None
     aws_region: str | None = None
     aws_session_token: str | None = None
+
+
+# Bedrock's output-token ceiling is model-specific and silently
+# enforced by the runtime — a request with maxTokens=65536 against
+# claude-3-5-sonnet gets clamped to 4096 with no warning in the
+# response, which is how CAI's LLM-sweep was silently dropping ~25%
+# of columns per batch.  This table pins a safe upper bound per model
+# family so the batch sizer can be honest about how many columns will
+# actually fit in one call.  Keys are substring-matched against the
+# model ID or inference-profile ARN.  The floor of 4096 is the legacy
+# Bedrock default; anything not matched falls back to that.
+_BEDROCK_MODEL_OUTPUT_CEILING: tuple[tuple[str, int], ...] = (
+    ("claude-opus-4",            32000),
+    ("claude-sonnet-4",          64000),
+    ("claude-haiku-4",           64000),
+    ("claude-3-7-sonnet",         64000),
+    ("claude-3-5-haiku",           8192),
+    ("claude-3-5-sonnet",          8192),
+    ("claude-3-opus",              4096),
+    ("claude-3-sonnet",            4096),
+    ("claude-3-haiku",             4096),
+)
+
+
+def bedrock_max_output_tokens(model_id: str) -> int:
+    """Return the effective output-token ceiling for a Bedrock model.
+
+    Model IDs and inference-profile ARNs are both accepted; the lookup
+    scans the known-model table by substring.  Unrecognized models
+    fall back to 4096 — conservative, matches Bedrock's legacy default,
+    and keeps a downstream adaptive batch sizer honest.
+    """
+    mid = (model_id or "").lower()
+    for token, ceiling in _BEDROCK_MODEL_OUTPUT_CEILING:
+        if token in mid:
+            return ceiling
+    return 4096
 
 
 def config_from_atelier(cfg) -> LLMBackendConfig:
@@ -501,11 +552,24 @@ class AnthropicBackend(LLMBackend):
         text = (text_block.text if text_block else "").strip()
         classifications = _parse_classifications(text, expected_names)
 
+        finish_reason = getattr(response, "stop_reason", "end_turn") or "end_turn"
+        returned_names = {c.column_name for c in classifications if c.column_name}
+        missing = [n for n in expected_names if n not in returned_names]
+        is_partial = bool(missing) and finish_reason not in ("length", "max_tokens")
+        if is_partial:
+            logger.warning(
+                "Anthropic response PARTIAL: got %d/%d items, stop=%s; missing=%s",
+                len(classifications), len(expected_names), finish_reason,
+                ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""),
+            )
+
         return LLMResponse(
             classifications=classifications,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             model=self._config.model,
+            finish_reason=finish_reason,
+            partial=is_partial,
         )
 
     def health_check(self) -> bool:
@@ -605,11 +669,25 @@ class AnthropicStructuredBackend(LLMBackend):
         elif cache_write:
             logger.debug("Prompt cache miss: %d tokens written to cache", cache_write)
 
+        finish_reason = getattr(response, "stop_reason", "end_turn") or "end_turn"
+        returned_names = {c.column_name for c in classifications if c.column_name}
+        missing = [n for n in expected_names if n not in returned_names]
+        is_partial = bool(missing) and finish_reason not in ("length", "max_tokens")
+        if is_partial:
+            logger.warning(
+                "Anthropic structured response PARTIAL: got %d/%d items, "
+                "stop=%s; missing=%s",
+                len(classifications), len(expected_names), finish_reason,
+                ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""),
+            )
+
         return LLMResponse(
             classifications=classifications,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             model=self._config.model,
+            finish_reason=finish_reason,
+            partial=is_partial,
         )
 
     def health_check(self) -> bool:
@@ -779,12 +857,23 @@ class OpenAICompatibleBackend(LLMBackend):
 
         classifications = _parse_classifications(text, expected_names)
 
+        returned_names = {c.column_name for c in classifications if c.column_name}
+        missing = [n for n in expected_names if n not in returned_names]
+        is_partial = bool(missing) and finish_reason not in ("length", "max_tokens")
+        if is_partial:
+            logger.warning(
+                "LLM response PARTIAL: got %d/%d items, finish=%s; missing=%s",
+                len(classifications), len(expected_names), finish_reason,
+                ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""),
+            )
+
         return LLMResponse(
             classifications=classifications,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=self._config.model,
             finish_reason=finish_reason,
+            partial=is_partial,
             reasoning_text=reasoning_text,
             reasoning_tokens=reasoning_tokens,
         )
@@ -805,7 +894,25 @@ class OpenAICompatibleBackend(LLMBackend):
 # ── Bedrock backend ─────────────────────────────────────────────
 
 
-class BedrockBackend(LLMBackend):
+class _BedrockMixin:
+    """Shared max-token awareness for Bedrock backends.
+
+    The configured ``max_tokens`` is what the pipeline *asks* for; the
+    actual ceiling Bedrock enforces is model-dependent.  Exposing the
+    effective ceiling lets the bootstrap batch sizer scale down front-
+    of-pipeline instead of eating a halving round-trip per batch.
+    """
+
+    _config: "LLMBackendConfig"
+
+    def effective_max_tokens(self) -> int:
+        return min(
+            self._config.max_tokens,
+            bedrock_max_output_tokens(self._config.model),
+        )
+
+
+class BedrockBackend(_BedrockMixin, LLMBackend):
     """Backend using AWS Bedrock Converse API."""
 
     def __init__(self, config: LLMBackendConfig) -> None:
@@ -854,6 +961,14 @@ class BedrockBackend(LLMBackend):
         user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
         expected_names = [s.name for s in samples]
 
+        # Clamp to the model's actual output ceiling.  Bedrock enforces
+        # the model's native limit silently, so asking for 65536 against
+        # claude-3-5-sonnet (cap 8192) just truncates with no warning.
+        effective_max = min(
+            self._config.max_tokens,
+            bedrock_max_output_tokens(self._config.model),
+        )
+
         response = client.converse(
             modelId=self._config.model,
             system=[{"text": system_prompt}],
@@ -862,7 +977,7 @@ class BedrockBackend(LLMBackend):
                 "content": [{"text": user_prompt}],
             }],
             inferenceConfig={
-                "maxTokens": self._config.max_tokens,
+                "maxTokens": effective_max,
                 "temperature": self._config.temperature,
             },
         )
@@ -875,10 +990,23 @@ class BedrockBackend(LLMBackend):
         input_tokens = usage.get("inputTokens", 0)
         output_tokens = usage.get("outputTokens", 0)
 
+        # Partial-response detection: clean stop but missing columns.
+        returned_names = {c.column_name for c in classifications if c.column_name}
+        missing = [n for n in expected_names if n not in returned_names]
+        is_partial = bool(missing) and finish_reason not in ("length", "max_tokens")
+
         if finish_reason == "max_tokens":
             logger.warning(
                 "Bedrock response TRUNCATED: %d chars, in=%d, out=%d, max_tokens=%d",
-                len(text), input_tokens, output_tokens, self._config.max_tokens,
+                len(text), input_tokens, output_tokens, effective_max,
+            )
+        elif is_partial:
+            logger.warning(
+                "Bedrock response PARTIAL: got %d/%d classifications, "
+                "finish=%s, max_tokens=%d; missing=%s",
+                len(classifications), len(expected_names),
+                finish_reason, effective_max,
+                ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""),
             )
         else:
             logger.info(
@@ -892,6 +1020,7 @@ class BedrockBackend(LLMBackend):
             output_tokens=output_tokens,
             model=self._config.model,
             finish_reason=finish_reason,
+            partial=is_partial,
         )
 
     def health_check(self) -> bool:
@@ -913,7 +1042,7 @@ class BedrockBackend(LLMBackend):
 # ── Bedrock structured output backend ────────────────────────────
 
 
-class BedrockStructuredBackend(LLMBackend):
+class BedrockStructuredBackend(_BedrockMixin, LLMBackend):
     """Backend using Bedrock invoke_model with tool-use for structured output.
 
     Uses ``invoke_model`` with the raw Anthropic Messages format.  Structured
@@ -982,9 +1111,16 @@ class BedrockStructuredBackend(LLMBackend):
             self._config.reasoning_budget and not self._config.disable_reasoning
         )
 
+        # Clamp to the model's actual output ceiling — see note on
+        # BedrockBackend.classify_batch for why this matters.
+        effective_max = min(
+            self._config.max_tokens,
+            bedrock_max_output_tokens(self._config.model),
+        )
+
         request_body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": self._config.max_tokens,
+            "max_tokens": effective_max,
             "temperature": self._config.temperature,
             "system": [{
                 "type": "text",
@@ -1080,10 +1216,24 @@ class BedrockStructuredBackend(LLMBackend):
         elif cache_write:
             logger.debug("Bedrock prompt cache miss: %d tokens written", cache_write)
 
+        returned_names = {c.column_name for c in classifications if c.column_name}
+        missing = [n for n in expected_names if n not in returned_names]
+        is_partial = bool(missing) and stop_reason not in ("length", "max_tokens")
+
         if stop_reason == "max_tokens":
             logger.warning(
-                "Bedrock structured response TRUNCATED: %d items, in=%d, out=%d",
-                len(classifications), input_tokens, output_tokens,
+                "Bedrock structured response TRUNCATED: %d/%d items, "
+                "in=%d, out=%d, max_tokens=%d",
+                len(classifications), len(expected_names),
+                input_tokens, output_tokens, effective_max,
+            )
+        elif is_partial:
+            logger.warning(
+                "Bedrock structured response PARTIAL: got %d/%d items, "
+                "stop=%s, max_tokens=%d; missing=%s",
+                len(classifications), len(expected_names),
+                stop_reason, effective_max,
+                ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""),
             )
         else:
             logger.info(
@@ -1099,6 +1249,7 @@ class BedrockStructuredBackend(LLMBackend):
             output_tokens=output_tokens,
             model=self._config.model,
             finish_reason=stop_reason,
+            partial=is_partial,
         )
 
     def health_check(self) -> bool:

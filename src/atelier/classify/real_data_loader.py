@@ -9,22 +9,21 @@ Ontology/Annotation mappings.
 
 Column-pair convention: the UAT synth generator emits each natural-
 named column immediately followed by a *reference column* whose name
-encodes the natural column's ground-truth code in its suffix.
+encodes the natural column's reference code in its suffix.
 
   tablename.first_name             ← natural-named (the data column)
   tablename.attr_1_1_1_9_2_1       ← reference column (answer key)
 
 Reference columns are answer keys, not inputs — this loader returns
 only the natural-named targets, using each reference column purely as
-the ground-truth source for its paired neighbor.  The reference-column
+the reference source for its paired neighbor.  The reference-column
 pattern ``^(attr|code|col|data|field|item|key|ref|val|var)_\\d+(_\\d+)*$``
 is defined canonically in ``meta_tagging_source._REFERENCE_COL_RE``;
 this module re-imports that regex so both loaders stay in sync.
 
-UAT provides the provisional corpus loaded here.  The authoritative
-ground-truth reference — built from reference-column evidence plus
-close-inspection corrections — lives at
-``build/meta-tagging-clean/ground_truth.csv``.
+UAT provides the provisional corpus loaded here.  The curated
+reference — built from reference-column evidence plus close-inspection
+corrections — lives at ``build/meta-tagging-clean/curated_reference.csv``.
 """
 
 from __future__ import annotations
@@ -145,9 +144,9 @@ def parse_real_csv(
     *,
     sample_size: int = 50,
 ) -> list[tuple[str, str, list[str]]]:
-    """Parse a single real data CSV, extracting target/ground-truth pairs.
+    """Parse a single real data CSV, extracting target/reference pairs.
 
-    Returns list of (column_name, ground_truth_code, sample_values).
+    Returns list of (column_name, reference_code, sample_values).
     Column names have the table prefix stripped (e.g., personal_data.email → email).
     """
     results: list[tuple[str, str, list[str]]] = []
@@ -175,7 +174,7 @@ def parse_real_csv(
         # UAT's Hive export normalized the "Not Sensitive" root code
         # from ``0.0`` to ``0``.  Column names in the data CSVs still
         # encode the Gopala-vintage ``0_0`` suffix; strip a trailing
-        # ``.0`` from the root so the extracted ground truth matches
+        # ``.0`` from the root so the extracted reference code matches
         # the UAT vocabulary.  Safe under the current tree: no
         # non-root code ends in ``.0`` (all sub-tiers start at ``.1``).
         if "." in code and code.count(".") == 1 and code.endswith(".0"):
@@ -213,7 +212,7 @@ def load_real_samples(
     """Load all real CSVs from data_dir as TableSample objects.
 
     Each CSV becomes one TableSample. Target columns become ColumnSample
-    objects with ground_truth set. The annotations.csv file is skipped.
+    objects with reference_code set. The annotations.csv file is skipped.
     """
     data_dir = Path(data_dir)
     samples: list[TableSample] = []
@@ -232,7 +231,7 @@ def load_real_samples(
 
         target_names = [name for name, _, _ in parsed]
         columns: list[ColumnSample] = []
-        for col_name, gt_code, values in parsed:
+        for col_name, ref_code, values in parsed:
             columns.append(ColumnSample(
                 name=col_name,
                 column_type=_infer_type(values),
@@ -242,7 +241,7 @@ def load_real_samples(
                 table_name=table_name,
                 database="real_data",
                 siblings=target_names,
-                ground_truth=gt_code,
+                reference_code=ref_code,
             ))
 
         samples.append(TableSample(
@@ -264,7 +263,7 @@ def extract_value_templates(
     *,
     max_per_code: int = 200,
 ) -> dict[str, list[str]]:
-    """Collect real data values grouped by ground truth code.
+    """Collect real data values grouped by reference code.
 
     Returns {code: [value1, value2, ...]} with at most max_per_code
     values per code. Used as templates for synthetic data generation.
@@ -280,8 +279,8 @@ def extract_value_templates(
     for csv_path in csv_files:
         # Read all data with full sample size for template extraction
         parsed = parse_real_csv(csv_path, sample_size=max_per_code)
-        for _, gt_code, values in parsed:
-            existing = templates[gt_code]
+        for _, ref_code, values in parsed:
+            existing = templates[ref_code]
             remaining = max_per_code - len(existing)
             if remaining > 0:
                 existing.extend(values[:remaining])

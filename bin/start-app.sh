@@ -162,7 +162,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # bin/bootstrap-secrets.sh is the shared entry point (CAI here,
 # devenv enterShell locally, `just bootstrap-secrets` on demand).
 # It handles .env.cai.enc → .env.cai AND
-# features/fixtures/ground_truth.csv.enc → build/data/ground_truth.csv.
+# features/fixtures/curated_reference.csv.enc → build/data/curated_reference.csv.
 # Idempotent + no-op on missing ciphertext, so a clean checkout
 # without encrypted defaults still boots.
 if [ -f bin/bootstrap-secrets.sh ]; then
@@ -174,11 +174,12 @@ if [ -f .env.cai ]; then
   source .env.cai
   set +a
 fi
-# Point the pipeline at the materialized ground-truth CSV unless the
-# operator overrode ATELIER_GROUND_TRUTH_URI directly (env-var wins).
-if [ -z "${ATELIER_GROUND_TRUTH_URI:-}" ] && [ -f build/data/ground_truth.csv ]; then
-  export ATELIER_GROUND_TRUTH_URI=build/data/ground_truth.csv
-  echo "ground truth: $ATELIER_GROUND_TRUTH_URI"
+# Point the pipeline at the materialized curated-reference CSV unless
+# the operator overrode ATELIER_CLASSIFY_REFERENCE_URI directly (env-var
+# wins).
+if [ -z "${ATELIER_CLASSIFY_REFERENCE_URI:-}" ] && [ -f build/data/curated_reference.csv ]; then
+  export ATELIER_CLASSIFY_REFERENCE_URI=build/data/curated_reference.csv
+  echo "curated reference: $ATELIER_CLASSIFY_REFERENCE_URI"
 fi
 
 # Load nvm so node/npm are available (needed by PGlite below)

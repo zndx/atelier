@@ -5,8 +5,8 @@ Feature: Meta-tagging blended overlay validation
   the concepts that matter in production.
 
   Scenario: Code mapping translates known meta-tagging codes
-    Given a ground truth dict with meta-tagging codes
-    When I translate ground truth to ICE codes
+    Given a curated reference dict with meta-tagging codes
+    When I translate the curated reference to ICE codes
     Then every translated code should be a valid ICE code
     And the translation should cover all provided codes
 

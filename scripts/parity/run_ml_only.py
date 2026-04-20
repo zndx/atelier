@@ -13,8 +13,8 @@ Then compares each column's prediction to the Dempster-fused prediction
 in build/results/2bb1431b/atelier_embeddings.parquet:
 
   * Agreement rate:  ML-only's top-1 vs the LLM-involved fusion's top-1
-  * ML-only accuracy vs ground truth (exact + hierarchical)
-  * Ground-truth-level comparison — when they disagree, who was right?
+  * ML-only accuracy vs curated reference (exact + hierarchical)
+  * Reference-level comparison — when they disagree, who was right?
 
 Usage::
 
@@ -90,16 +90,24 @@ def main() -> int:
 
     ml_pred  = ml_sub["predicted_code"].astype(str).str.strip()
     dst_pred = dst_sub["predicted_code"].astype(str).str.strip()
-    gt       = dst_sub["ground_truth"].astype(str).str.strip()
-    has_gt   = gt.str.len() > 0
+    ref_col = "reference_code" if "reference_code" in dst_sub.columns else None
+    if ref_col is None:
+        print(
+            "Reference parquet missing 'reference_code' column — "
+            "regenerate (pre-rename artifact).",
+            file=sys.stderr,
+        )
+        return 5
+    ref_codes = dst_sub[ref_col].astype(str).str.strip()
+    has_ref   = ref_codes.str.len() > 0
 
     def exact(pred):
-        return float((pred[has_gt] == gt[has_gt]).mean())
+        return float((pred[has_ref] == ref_codes[has_ref]).mean())
 
     def hier(pred):
         hits = 0
-        total = int(has_gt.sum())
-        for p, g in zip(pred[has_gt], gt[has_gt]):
+        total = int(has_ref.sum())
+        for p, g in zip(pred[has_ref], ref_codes[has_ref]):
             if p == g or (p and g.startswith(p + ".")) or (g and p.startswith(g + ".")):
                 hits += 1
         return hits / total if total else 0.0
@@ -107,17 +115,17 @@ def main() -> int:
     agreement = float((ml_pred == dst_pred).mean())
 
     # Disagreement breakdown
-    disagree_mask = (ml_pred != dst_pred) & has_gt
+    disagree_mask = (ml_pred != dst_pred) & has_ref
     disagree_n = int(disagree_mask.sum())
-    ml_right  = int(((ml_pred == gt) & disagree_mask).sum())
-    dst_right = int(((dst_pred == gt) & disagree_mask).sum())
+    ml_right  = int(((ml_pred == ref_codes) & disagree_mask).sum())
+    dst_right = int(((dst_pred == ref_codes) & disagree_mask).sum())
     both_wrong = disagree_n - ml_right - dst_right
 
     report = {
         "reference_run": "2bb1431b",
         "ml_only_parquet": str(ml_parquet),
         "shared_columns": int(len(shared)),
-        "columns_with_gt": int(has_gt.sum()),
+        "columns_with_reference": int(has_ref.sum()),
         "agreement_rate": round(agreement, 4),
         "ml_only_accuracy": {
             "exact": round(exact(ml_pred), 4),

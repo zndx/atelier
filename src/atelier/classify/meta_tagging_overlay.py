@@ -198,15 +198,15 @@ META_TO_ICE: dict[str, str] = {
 }
 
 
-def translate_ground_truth(
-    ground_truth: dict[str, str],
+def translate_reference_labels(
+    reference_labels: dict[str, str],
     *,
     code_map: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Translate numeric meta-tagging codes to ICE.* codes.
 
     Returns:
-        (translated_gt, unmapped) where unmapped maps column→original_code
+        (translated, unmapped) where unmapped maps column→original_code
         for any codes not in the mapping.
     """
     if code_map is None:
@@ -215,7 +215,7 @@ def translate_ground_truth(
     translated: dict[str, str] = {}
     unmapped: dict[str, str] = {}
 
-    for col_name, meta_code in ground_truth.items():
+    for col_name, meta_code in reference_labels.items():
         ice_code = code_map.get(meta_code)
         if ice_code:
             translated[col_name] = ice_code
@@ -225,12 +225,12 @@ def translate_ground_truth(
     if unmapped:
         unique = set(unmapped.values())
         logger.info(
-            "Translated %d/%d ground truth codes (%d unmapped codes: %s)",
-            len(translated), len(ground_truth), len(unique),
+            "Translated %d/%d reference codes (%d unmapped codes: %s)",
+            len(translated), len(reference_labels), len(unique),
             ", ".join(sorted(unique)[:10]),
         )
     else:
-        logger.info("Translated all %d ground truth codes", len(translated))
+        logger.info("Translated all %d reference codes", len(translated))
 
     return translated, unmapped
 
@@ -281,7 +281,7 @@ def build_blended_vocabulary(
 
     # The base vocabulary already contains all the target ICE codes,
     # so we return it unchanged. The mapping is used at classification
-    # time via translate_ground_truth().
+    # time via translate_reference_labels().
     return base_category_set
 
 
@@ -319,7 +319,7 @@ def mapping_coverage_report(
     file_coverage: dict[str, dict] = {}
     for table in samples:
         total = len(table.columns)
-        mapped = sum(1 for c in table.columns if c.ground_truth in code_map)
+        mapped = sum(1 for c in table.columns if c.reference_code in code_map)
         file_coverage[table.name] = {
             "total_cols": total,
             "mapped_cols": mapped,

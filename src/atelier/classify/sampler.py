@@ -28,7 +28,7 @@ class ColumnSample:
     table_name: str = ""
     database: str = ""
     siblings: list[str] = field(default_factory=list)
-    ground_truth: str | None = None  # Known annotation code (for validation)
+    reference_code: str | None = None  # Curated reference label (for validation)
     distinct_count: int | None = None  # True COUNT(DISTINCT) bounded by column_sample_limit
 
     def to_dict(self) -> dict[str, Any]:
@@ -41,7 +41,7 @@ class ColumnSample:
             "table_name": self.table_name,
             "database": self.database,
             "siblings": self.siblings,
-            "ground_truth": self.ground_truth,
+            "reference_code": self.reference_code,
         }
         if self.distinct_count is not None:
             d["distinct_count"] = self.distinct_count
@@ -70,13 +70,19 @@ def discover_tables(
     cfg,
     connection_name: str | None = None,
     database: str = "default",
-    limit: int = 100,
+    limit: int | None = None,
 ) -> list[str]:
     """List tables from a hive database via CAI Data Platform.
 
-    Raises RuntimeError when cml.data_v1 is unavailable.
-    For dev/test, inject samples= into the pipeline instead.
+    When ``limit`` is None, falls back to ``cfg.classify_tables_limit``
+    — the HOCON / env-configured value — rather than a hard-coded
+    function default.  Raises RuntimeError when cml.data_v1 is
+    unavailable.  For dev/test, inject samples= into the pipeline
+    instead.
     """
+    if limit is None:
+        limit = cfg.classify_tables_limit
+
     try:
         import cml.data_v1 as cmldata
     except ImportError:
@@ -93,6 +99,13 @@ def discover_tables(
     conn = cmldata.get_connection(connection_name)
     df = conn.get_pandas_dataframe(f"SHOW TABLES IN {database}")
     tables = df.iloc[:, 0].tolist()[:limit]
+    if len(df) > limit:
+        log.warning(
+            "discover_tables: database %s has %d tables, truncated to %d "
+            "(classify.tables_limit). Increase ATELIER_CLASSIFY_TABLES_LIMIT "
+            "to classify all tables.",
+            database, len(df), limit,
+        )
     return [str(t) for t in tables]
 
 
@@ -101,14 +114,25 @@ def sample_table_metadata(
     table_name: str,
     connection_name: str | None = None,
     database: str = "default",
-    sample_size: int = 50,
-    column_sample_limit: int = 1000,
+    sample_size: int | None = None,
+    column_sample_limit: int | None = None,
 ) -> TableSample:
     """Sample column metadata from a hive table.
 
     Raises RuntimeError when cml.data_v1 is unavailable.
     For dev/test, inject samples= into the pipeline instead.
+
+    When ``sample_size`` or ``column_sample_limit`` is None, the values
+    fall through to ``cfg.classify_sample_size`` and
+    ``cfg.classify_column_sample_limit`` respectively — the operator-
+    configured HOCON / env values — rather than silently clamping to a
+    hard-coded function default.
     """
+    if sample_size is None:
+        sample_size = cfg.classify_sample_size
+    if column_sample_limit is None:
+        column_sample_limit = cfg.classify_column_sample_limit
+
     try:
         import cml.data_v1 as cmldata
     except ImportError:
@@ -231,7 +255,7 @@ def _fixture_table_sample(table_name: str) -> TableSample:
                     table_name=table_name,
                     database=t.get("database", "default"),
                     siblings=col_names,
-                    ground_truth=c.get("ground_truth"),
+                    reference_code=c.get("reference_code"),
                     distinct_count=c.get("distinct_count"),
                 )
                 for c in t["columns"]
@@ -273,25 +297,25 @@ def load_sample_source(
 ) -> list[TableSample]:
     """Load OOTB sample tables from data/sample/tables/*.csv.
 
-    Reads all CSVs in the sample tables directory and the ground truth
-    mapping. Returns TableSample objects with ground_truth labels attached
-    to each column — ready to inject into the classification pipeline.
+    Reads all CSVs in the sample tables directory and the curated-reference
+    mapping. Returns TableSample objects with reference_code labels
+    attached to each column — ready to inject into the classification
+    pipeline.
     """
     import csv as csv_mod
 
     base = Path(sample_dir) if sample_dir else _SAMPLE_DIR
     tables_dir = base / "tables"
-    gt_path = base / "ground_truth.json"
+    ref_path = base / "reference_labels.json"
 
     if not tables_dir.is_dir():
         log.warning("Sample tables directory not found: %s", tables_dir)
         return []
 
-    # Load ground truth if available
-    ground_truth: dict[str, str] = {}
-    if gt_path.exists():
-        with open(gt_path) as f:
-            ground_truth = json.load(f)
+    reference_labels: dict[str, str] = {}
+    if ref_path.exists():
+        with open(ref_path) as f:
+            reference_labels = json.load(f)
 
     samples: list[TableSample] = []
     for csv_path in sorted(tables_dir.glob("*.csv")):
@@ -323,7 +347,7 @@ def load_sample_source(
                 table_name=table_name,
                 database="sample",
                 siblings=col_names,
-                ground_truth=ground_truth.get(gt_key),
+                reference_code=reference_labels.get(gt_key),
                 distinct_count=len(set(row[i] for row in rows if i < len(row))),
             ))
 
@@ -346,12 +370,12 @@ def sample_source_stats(sample_dir: str | Path | None = None) -> dict:
     """Return summary stats for the sample source without loading all data."""
     base = Path(sample_dir) if sample_dir else _SAMPLE_DIR
     tables_dir = base / "tables"
-    gt_path = base / "ground_truth.json"
+    ref_path = base / "reference_labels.json"
 
     table_count = len(list(tables_dir.glob("*.csv"))) if tables_dir.is_dir() else 0
     column_count = 0
-    if gt_path.exists():
-        with open(gt_path) as f:
+    if ref_path.exists():
+        with open(ref_path) as f:
             column_count = len(json.load(f))
 
     return {
@@ -365,8 +389,9 @@ def sample_source_stats(sample_dir: str | Path | None = None) -> dict:
 #
 # The synth corpus can be mounted either uncompressed at build/data/synth/
 # or directly from the zip at build/atelier-synth-db.zip.  Both layouts
-# share the same internal structure (data/synth/tables/*.csv + ground_truth.json);
-# the zip uses that same prefix as its top-level entries.
+# share the same internal structure (data/synth/tables/*.csv +
+# reference_labels.json); the zip uses that same prefix as its top-level
+# entries.
 #
 # resolve_synth_mount() picks the faster option (directory) when present,
 # falling back to the zip so operators can drop the artifact in and go.
@@ -435,20 +460,23 @@ def _iter_synth_csvs(mount: Path):
     raise ValueError(f"Unsupported synth mount: {mount}")
 
 
-def _read_synth_ground_truth(mount: Path) -> dict[str, str]:
-    """Read the ground_truth.json sidecar from either a dir or zip mount."""
+def _read_synth_reference_labels(mount: Path) -> dict[str, str]:
+    """Read the reference_labels.json sidecar from either a dir or zip mount."""
     import zipfile
 
     if mount.is_dir():
-        gt_path = mount / "ground_truth.json"
-        if gt_path.exists():
-            with open(gt_path) as f:
+        ref_path = mount / "reference_labels.json"
+        if ref_path.exists():
+            with open(ref_path) as f:
                 return json.load(f)
         return {}
 
     if mount.suffix == ".zip":
         with zipfile.ZipFile(mount) as zf:
-            for name in ("data/synth/ground_truth.json", "ground_truth.json"):
+            for name in (
+                "data/synth/reference_labels.json",
+                "reference_labels.json",
+            ):
                 if name in zf.namelist():
                     with zf.open(name) as f:
                         return json.loads(f.read().decode("utf-8"))
@@ -474,7 +502,7 @@ def load_synth_source(
         )
         return []
 
-    ground_truth = _read_synth_ground_truth(mount)
+    reference_labels = _read_synth_reference_labels(mount)
 
     samples: list[TableSample] = []
     for table_name, header, rows in _iter_synth_csvs(mount):
@@ -485,7 +513,7 @@ def load_synth_source(
             values = all_vals[:5]
             total_count = len(rows)
             null_count = sum(1 for row in rows if i >= len(row) or not row[i])
-            gt_key = f"{table_name}.{col_name}"
+            ref_key = f"{table_name}.{col_name}"
 
             columns.append(ColumnSample(
                 name=col_name,
@@ -497,7 +525,7 @@ def load_synth_source(
                 table_name=table_name,
                 database="synth",
                 siblings=col_names,
-                ground_truth=ground_truth.get(gt_key),
+                reference_code=reference_labels.get(ref_key),
                 distinct_count=len(set(row[i] for row in rows if i < len(row))),
             ))
 
@@ -538,10 +566,10 @@ def synth_source_stats(synth_mount: str | Path | None = None) -> dict:
     else:
         return {"table_count": 0, "column_count": 0, "has_data": False, "mount": None}
 
-    ground_truth = _read_synth_ground_truth(mount)
+    reference_labels = _read_synth_reference_labels(mount)
     return {
         "table_count": table_count,
-        "column_count": len(ground_truth),
+        "column_count": len(reference_labels),
         "has_data": table_count > 0,
         "mount": str(mount),
         "mount_kind": mount_kind,

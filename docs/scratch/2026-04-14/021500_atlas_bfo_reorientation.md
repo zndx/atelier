@@ -153,7 +153,7 @@ of SKOS, which is the correct standard.
    individual, corp with scale 1-3), and term structure. Generic labels
    (Email Address, SSN) but hierarchy reveals classification framework.
 
-2. **`mock_tables.json`** — `ground_truth` fields use real hierarchy codes.
+2. **`mock_tables.json`** — reference-code fields use real hierarchy codes.
    Combined with mock_annotations, someone can reconstruct the taxonomy tree.
 
 3. **`real_data_loader.py` `_HEADER_MAP`** — exposes exact column names from

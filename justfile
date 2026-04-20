@@ -151,24 +151,24 @@ encrypt-secrets:
     sops --encrypt --input-type dotenv --output-type dotenv .env.cai > .env.cai.enc
     @echo "Encrypted .env.cai.enc"
 
-# Decrypt the ground-truth CSV from BDD fixtures into build/data/
+# Decrypt the curated-reference CSV from BDD fixtures into build/data/
 # for local inspection. Safe to re-run; plaintext is gitignored.
-decrypt-gt:
+decrypt-reference:
     mkdir -p build/data
-    sops --decrypt features/fixtures/ground_truth.csv.enc > build/data/ground_truth.csv
-    @echo "Decrypted build/data/ground_truth.csv ($(wc -l < build/data/ground_truth.csv) lines)"
+    sops --decrypt features/fixtures/curated_reference.csv.enc > build/data/curated_reference.csv
+    @echo "Decrypted build/data/curated_reference.csv ($(wc -l < build/data/curated_reference.csv) lines)"
 
-# Encrypt the ground-truth CSV at build/data/ground_truth.csv back
-# into features/fixtures/ for commit. Maintainer runs this after
+# Encrypt the curated-reference CSV at build/data/curated_reference.csv
+# back into features/fixtures/ for commit. Maintainer runs this after
 # updating the answer key. --filename-override lets SOPS resolve
 # creation_rules against the intended destination path without
 # staging plaintext under features/fixtures/.
-encrypt-gt:
+encrypt-reference:
     mkdir -p features/fixtures
     sops --encrypt --input-type binary --output-type binary \
-        --filename-override features/fixtures/ground_truth.csv \
-        build/data/ground_truth.csv > features/fixtures/ground_truth.csv.enc
-    @echo "Encrypted features/fixtures/ground_truth.csv.enc"
+        --filename-override features/fixtures/curated_reference.csv \
+        build/data/curated_reference.csv > features/fixtures/curated_reference.csv.enc
+    @echo "Encrypted features/fixtures/curated_reference.csv.enc"
 
 # ── Versioning ────────────────────────────────────────────────────
 

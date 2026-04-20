@@ -147,7 +147,7 @@ class FeatureMaskModel:
 
 def run_sage_analysis(
     all_features: list[ColumnFeatures],
-    ground_truth_indices: np.ndarray,
+    label_indices: np.ndarray,
     category_set,
     *,
     n_permutations: int = 512,
@@ -163,7 +163,7 @@ def run_sage_analysis(
 
     Args:
         all_features: ColumnFeatures for each sample.
-        ground_truth_indices: (N,) integer class indices.
+        label_indices: (N,) integer class indices.
         category_set: For reference embeddings.
         n_permutations: Max permutations (may stop earlier if converged).
         detect_convergence: Auto-stop when SAGE values stabilize.
@@ -177,7 +177,7 @@ def run_sage_analysis(
         if preflight_gpu().available:
             from atelier.classify.gpu_importance import gpu_sage
             return gpu_sage(
-                all_features, ground_truth_indices, category_set,
+                all_features, label_indices, category_set,
                 n_permutations=n_permutations,
                 detect_convergence=detect_convergence,
             )
@@ -192,7 +192,7 @@ def run_sage_analysis(
 
     # Build feature index matrix: X[i, j] = i (each sample starts with own values)
     X = np.tile(np.arange(N).reshape(-1, 1), (1, n_feat))
-    Y = ground_truth_indices.astype(int)
+    Y = label_indices.astype(int)
 
     # Wrap classifier for SAGE
     model_fn = FeatureMaskModel(all_features, category_set)

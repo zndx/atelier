@@ -3,9 +3,9 @@
 from behave import given, when, then
 
 
-@given("a ground truth dict with meta-tagging codes")
-def step_mock_gt(context):
-    context.meta_gt = {
+@given("a curated reference dict with meta-tagging codes")
+def step_mock_reference(context):
+    context.meta_reference = {
         "col_pan": "1.1.1.1.1.1.1",
         "col_cvv": "1.1.1.1.1.1.2",
         "col_email": "1.1.1.9.3.1",
@@ -16,10 +16,10 @@ def step_mock_gt(context):
     }
 
 
-@when("I translate ground truth to ICE codes")
+@when("I translate the curated reference to ICE codes")
 def step_translate(context):
-    from atelier.classify.meta_tagging_overlay import translate_ground_truth
-    context.translated, context.unmapped = translate_ground_truth(context.meta_gt)
+    from atelier.classify.meta_tagging_overlay import translate_reference_labels
+    context.translated, context.unmapped = translate_reference_labels(context.meta_reference)
 
 
 @then("every translated code should be a valid ICE code")
@@ -35,8 +35,8 @@ def step_check_full_coverage(context):
     assert len(context.unmapped) == 0, (
         f"Unmapped codes: {context.unmapped}"
     )
-    assert len(context.translated) == len(context.meta_gt), (
-        f"Translated {len(context.translated)}, expected {len(context.meta_gt)}"
+    assert len(context.translated) == len(context.meta_reference), (
+        f"Translated {len(context.translated)}, expected {len(context.meta_reference)}"
     )
 
 

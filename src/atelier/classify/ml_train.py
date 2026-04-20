@@ -1,6 +1,6 @@
 """Training orchestrator for CatBoost and SVM classifiers.
 
-Loads synthetic data from CSV + ground_truth.json, extracts features,
+Loads synthetic data from CSV + reference_labels.json, extracts features,
 and trains both classifiers. Output: model files in build/models/.
 """
 
@@ -16,18 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 def _load_synth_data(synth_dir: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
-    """Load synthetic columns and ground truth from a synth directory.
+    """Load synthetic columns and reference labels from a synth directory.
 
     Returns:
-        (columns, ground_truth) where columns = {name: [values]}
-        and ground_truth = {name: category_code}.
+        (columns, reference_labels) where columns = {name: [values]}
+        and reference_labels = {name: category_code}.
     """
-    gt_path = synth_dir / "ground_truth.json"
-    if not gt_path.exists():
-        raise FileNotFoundError(f"No ground_truth.json in {synth_dir}")
+    ref_path = synth_dir / "reference_labels.json"
+    if not ref_path.exists():
+        raise FileNotFoundError(f"No reference_labels.json in {synth_dir}")
 
-    with open(gt_path) as f:
-        ground_truth: dict[str, str] = json.load(f)
+    with open(ref_path) as f:
+        reference_labels: dict[str, str] = json.load(f)
 
     columns: dict[str, list[str]] = {}
     for csv_path in sorted(synth_dir.glob("synth_*.csv")):
@@ -41,7 +41,7 @@ def _load_synth_data(synth_dir: Path) -> tuple[dict[str, list[str]], dict[str, s
             columns.update(col_data)
 
     logger.info("Loaded %d columns from %s", len(columns), synth_dir)
-    return columns, ground_truth
+    return columns, reference_labels
 
 
 def train_svm(
@@ -51,7 +51,7 @@ def train_svm(
     """Train SVM classifier on synthetic data.
 
     Args:
-        synth_dir: Directory with synth CSVs + ground_truth.json.
+        synth_dir: Directory with synth CSVs + reference_labels.json.
         output_path: Where to save the .pkl model file.
 
     Returns:
@@ -59,12 +59,12 @@ def train_svm(
     """
     from atelier.classify.svm_classifier import SVMClassifier, build_svm_text
 
-    columns, ground_truth = _load_synth_data(synth_dir)
+    columns, reference_labels = _load_synth_data(synth_dir)
 
     texts: list[str] = []
     labels: list[str] = []
     for col_name, values in columns.items():
-        code = ground_truth.get(col_name)
+        code = reference_labels.get(col_name)
         if not code:
             continue
         text = build_svm_text(col_name, sample_values=values[:5])
@@ -147,9 +147,9 @@ def train_svm_on_frontier_labels(
     synth_labels: list[str] = []
     if synth_dir and synth_dir.exists():
         try:
-            columns, ground_truth = _load_synth_data(synth_dir)
+            columns, reference_labels = _load_synth_data(synth_dir)
             for col_name, values in columns.items():
-                code = ground_truth.get(col_name)
+                code = reference_labels.get(col_name)
                 if not code:
                     continue
                 text = build_svm_text(col_name, sample_values=values[:5])
@@ -189,7 +189,7 @@ def train_catboost(
     """Train CatBoost classifier on sentence-transformer embeddings.
 
     Args:
-        synth_dir: Directory with synth CSVs + ground_truth.json.
+        synth_dir: Directory with synth CSVs + reference_labels.json.
         category_set: Used for building embedding text context.
         output_path: Where to save the .cbm model file.
         embedding_model: Sentence-transformer model name.
@@ -205,13 +205,13 @@ def train_catboost(
     from atelier.classify.features import extract_features
 
     set_model_name(embedding_model)
-    columns, ground_truth = _load_synth_data(synth_dir)
+    columns, reference_labels = _load_synth_data(synth_dir)
 
     # Build embedding texts using the 12-feature extraction
     embedding_texts: list[str] = []
     labels: list[str] = []
     for col_name, values in columns.items():
-        code = ground_truth.get(col_name)
+        code = reference_labels.get(col_name)
         if not code:
             continue
         features = extract_features(

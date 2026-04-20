@@ -3,7 +3,7 @@
 The supervisor overwatch is granted the Read/Grep/Glob/Bash tools so
 it can investigate a failing run (inspect classifications.json, grep
 source, read ``state.batch_audit``) and invoke its four controlled
-CLIs (``write_proposal``, ``ingest_ground_truth``, ``apply_and_rerun``,
+CLIs (``write_proposal``, ``ingest_reference``, ``apply_and_rerun``,
 ``kill_run``).  Without a sandbox the Bash tool would also let it
 ``rm -rf``, ``git reset --hard``, or exfiltrate data.
 
@@ -72,7 +72,7 @@ def _is_in_sandbox(path: Path) -> bool:
 # else is either a read-only inspection command or rejected.
 _ALLOWED_CLI_MODULES = frozenset({
     "atelier.overwatch.write_proposal",
-    "atelier.overwatch.ingest_ground_truth",
+    "atelier.overwatch.ingest_reference",
     "atelier.overwatch.apply_and_rerun",
     "atelier.overwatch.kill_run",
 })
@@ -172,7 +172,7 @@ def classify_bash_command(cmd: str) -> tuple[bool, str]:
         return False, (
             f"clause {clause!r} is not on the supervisor allowlist. "
             "Permitted: uv run python -m atelier.overwatch.{write_proposal,"
-            "ingest_ground_truth,apply_and_rerun,kill_run}, plus read-only "
+            "ingest_reference,apply_and_rerun,kill_run}, plus read-only "
             "shell / git inspection commands."
         )
     return True, "ok"

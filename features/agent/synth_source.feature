@@ -20,11 +20,11 @@ Feature: OOTB synth data source — zip and directory mounts
     When I resolve the synth mount
     Then the resolver returns None
 
-  Scenario: Load from zip streams columns and ground truth
+  Scenario: Load from zip streams columns and curated reference
     Given only a synth zip mount with 3 tables
     When I load the synth source from that mount
     Then I get 3 tables
-    And each column has its ground truth attached
+    And each column has its curated reference attached
 
   Scenario: Load from directory yields the same samples as zip
     Given a synth directory mount with 2 tables

@@ -1,14 +1,13 @@
-"""Ground-truth CSV ingest for UAT-style evaluation.
+"""Curated-reference CSV ingest for UAT-style evaluation.
 
-The Hive-backed pipeline doesn't surface ground-truth codes per
-column.  When an operator has expected labels from an external
-source (e.g. a UAT reviewer's xlsx → CSV export), loading them
-here lets the pipeline populate ``col.ground_truth`` on every
-classified column and produce real accuracy metrics in
-``evaluation_report.json`` / overwatch.
+The Hive-backed pipeline doesn't surface reference codes per column.
+When an operator has expected labels from an external source (e.g. a
+reviewer's xlsx → CSV export), loading them here lets the pipeline
+populate ``col.reference_code`` on every classified column and produce
+real accuracy metrics in ``evaluation_report.json`` / overwatch.
 
-Activation: set ``classify.ground_truth_uri`` in HOCON (or
-``ATELIER_GROUND_TRUTH_URI`` in the env) to a CSV path.  Relative
+Activation: set ``classify.reference_uri`` in HOCON (or
+``ATELIER_CLASSIFY_REFERENCE_URI`` in the env) to a CSV path.  Relative
 paths resolve against the repo root.  ``file://`` scheme is also
 accepted for parity with ``vocab_uri``.
 
@@ -26,16 +25,16 @@ Or a pre-qualified single column (``annotation`` optional)::
     column_name,code,annotation
     personal_data.payment_card_number,1.1.1.1.1.1.1,PAN
 
-Or mnemonic-only — shape emitted by ``ingest_ground_truth`` when
-reading a reviewer xlsx where each row has only ``(column_name,
-MNEMONIC)`` and the vocabulary code has to be resolved by looking
-the mnemonic up in the loaded taxonomy::
+Or mnemonic-only — shape emitted by ``ingest_reference`` when reading
+a reviewer xlsx where each row has only ``(column_name, MNEMONIC)``
+and the vocabulary code has to be resolved by looking the mnemonic up
+in the loaded taxonomy::
 
     column_name,annotation
     personal_data.payment_card_number,PAN
     personal_data.attr_1_1_1_1_1_1_1,PAN
 
-In the mnemonic-only case, ``load_ground_truth_csv`` needs a
+In the mnemonic-only case, ``load_reference_csv`` needs a
 ``category_set`` to resolve ``PAN → 1.1.1.1.1.1.1`` via
 ``category_set.by_abbrev``.  Without a category_set, mnemonic-only
 rows are skipped with a warning — they can't be matched against
@@ -78,7 +77,7 @@ def _resolve_uri(uri: str, project_root: Path) -> Path | None:
 def _build_abbrev_index(category_set: "CategorySet | None") -> dict[str, str]:
     """Case-insensitive mnemonic → code lookup from a category set.
 
-    The xlsx → CSV ingest path (``ingest_ground_truth`` CLI) emits
+    The xlsx → CSV ingest path (``ingest_reference`` CLI) emits
     reviewer mnemonics in the ``annotation`` column; this index is
     what turns those mnemonics into the codes the pipeline compares
     against ``predicted_code``.  Returns an empty dict when no
@@ -103,7 +102,7 @@ def _build_abbrev_index(category_set: "CategorySet | None") -> dict[str, str]:
     return idx
 
 
-def load_ground_truth_csv(
+def load_reference_csv(
     uri: str,
     project_root: Path,
     category_set: "CategorySet | None" = None,
@@ -124,12 +123,12 @@ def load_ground_truth_csv(
     When a row carries no ``code`` column but does carry an
     ``annotation`` mnemonic AND a ``category_set`` is provided, the
     mnemonic is resolved to a code via ``category_set.by_abbrev``.
-    This is the shape emitted by ``ingest_ground_truth`` from a
-    reviewer xlsx.
+    This is the shape emitted by ``ingest_reference`` from a reviewer
+    xlsx.
     """
     path = _resolve_uri(uri, project_root)
     if path is None:
-        log.info("No ground-truth CSV resolvable from uri=%r", uri)
+        log.info("No reference CSV resolvable from uri=%r", uri)
         return {}
 
     abbrev_index = _build_abbrev_index(category_set)
@@ -144,7 +143,12 @@ def load_ground_truth_csv(
         reader = csv.DictReader(f)
         for row in reader:
             rows_total += 1
-            code = (row.get("code") or row.get("predicted_code") or "").strip()
+            code = (
+                row.get("reference_code")
+                or row.get("code")
+                or row.get("predicted_code")
+                or ""
+            ).strip()
             if not code:
                 annotation = (row.get("annotation") or "").strip()
                 if annotation and abbrev_index:
@@ -157,29 +161,26 @@ def load_ground_truth_csv(
                     rows_no_match += 1
                     continue
 
-            table = (row.get("table_name") or "").strip()
-            col = (row.get("column_name") or "").strip()
+            table = (row.get("table_name") or row.get("table") or "").strip()
+            col = (row.get("column_name") or row.get("column") or "").strip()
             if not col:
                 continue
-            # If column_name already carries the table qualifier, both
-            # keys collapse to the same string — that's fine, dict upsert.
             mapping[col] = code
             if table and not col.startswith(f"{table}."):
                 mapping[f"{table}.{col}"] = code
-            # Also index a stripped form when column_name IS qualified.
             if "." in col:
                 bare = col.split(".", 1)[1]
                 mapping.setdefault(bare, code)
 
     log.info(
-        "Loaded %d ground-truth entries (%d unique codes) from %s "
+        "Loaded %d reference entries (%d unique codes) from %s "
         "[%d rows total; %d resolved via annotation mnemonic; %d unresolved]",
         len(mapping), len({v for v in mapping.values()}), path,
         rows_total, rows_via_annotation, rows_no_match,
     )
     if unresolved_mnemonics:
         log.warning(
-            "Ground-truth CSV had %d mnemonic(s) missing from the vocabulary: %s",
+            "Reference CSV had %d mnemonic(s) missing from the vocabulary: %s",
             len(unresolved_mnemonics),
             ", ".join(sorted(unresolved_mnemonics)[:10])
             + ("…" if len(unresolved_mnemonics) > 10 else ""),
@@ -187,19 +188,19 @@ def load_ground_truth_csv(
     return mapping
 
 
-def apply_ground_truth(
+def apply_reference(
     samples: Iterable,
     mapping: dict[str, str],
 ) -> int:
-    """Populate ``ColumnSample.ground_truth`` on every match.
+    """Populate ``ColumnSample.reference_code`` on every match.
 
     Tries the column's bare name first, then the ``{table}.{column}``
     qualified form, then (when the name already contains a dot) the
-    stripped-prefix form.  Overwrites any pre-existing ``ground_truth``
+    stripped-prefix form.  Overwrites any pre-existing reference
     value because CSV-sourced labels are the intended reference.
 
-    Returns the count of columns that got a ground-truth label —
-    useful for logging / sanity checks.
+    Returns the count of columns that got a reference label — useful
+    for logging / sanity checks.
     """
     if not mapping:
         return 0
@@ -217,6 +218,6 @@ def apply_ground_truth(
                 or (mapping.get(key_stripped) if key_stripped else None)
             )
             if code:
-                col.ground_truth = code
+                col.reference_code = code
                 hits += 1
     return hits

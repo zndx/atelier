@@ -1,24 +1,24 @@
-"""CLI: ingest a Gopala-style xlsx and emit a ground-truth CSV.
+"""CLI: ingest a reviewer xlsx and emit a curated-reference CSV.
 
 Usage::
 
-    uv run python -m atelier.overwatch.ingest_ground_truth <path.xlsx> \\
-        [--out build/data/ground_truth.csv] [--sheet <name>...]
+    uv run python -m atelier.overwatch.ingest_reference <path.xlsx> \\
+        [--out build/data/curated_reference.csv] [--sheet <name>...]
 
-The xlsx is expected to carry one row per ground-truth column.  The
-loader scans every row for a short uppercase mnemonic (2–15 chars,
-alnum + ``_``/``-``) and pairs it with the column name in the first
-field.  Multiple sheets may be ingested in one pass.
+The xlsx is expected to carry one row per reference-labelled column.
+The loader scans every row for a short uppercase mnemonic (2–15
+chars, alnum + ``_``/``-``) and pairs it with the column name in the
+first field.  Multiple sheets may be ingested in one pass.
 
 The emitted CSV has the two-column ``column_name,annotation`` shape.
 The mnemonic in the ``annotation`` column (e.g. ``PAN``, ``SSN``,
 ``EMAIL``) is resolved to a vocabulary code at load time by
-:func:`atelier.classify.ground_truth.load_ground_truth_csv`, which
-consults ``category_set.by_abbrev`` for the lookup.  Mnemonics
-outside the loaded vocabulary are logged as unresolved and skipped.
+:func:`atelier.classify.reference.load_reference_csv`, which consults
+``category_set.by_abbrev`` for the lookup.  Mnemonics outside the
+loaded vocabulary are logged as unresolved and skipped.
 
-Subsequent pipeline runs that set ``classify_ground_truth_uri`` to
-this path will populate ``evaluation_report.json`` with real accuracy
+Subsequent pipeline runs that set ``classify_reference_uri`` to this
+path will populate ``evaluation_report.json`` with real accuracy
 numbers for every column whose mnemonic resolves.
 """
 
@@ -38,7 +38,7 @@ _DEFAULT_SHEETS = (
 
 
 def _is_mnemonic(value: object) -> bool:
-    """Short uppercase token — Gopala's annotation column shape."""
+    """Short uppercase token — reviewer annotation column shape."""
     if not isinstance(value, str):
         return False
     s = value.strip()
@@ -75,18 +75,18 @@ def _extract_rows(wb, sheet_names: list[str]) -> list[dict[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="atelier.overwatch.ingest_ground_truth",
-        description="Convert a Gopala-style xlsx into atelier's ground-truth CSV.",
+        prog="atelier.overwatch.ingest_reference",
+        description="Convert a reviewer xlsx into atelier's curated-reference CSV.",
     )
     ap.add_argument("xlsx", help="Path to the source .xlsx")
     ap.add_argument(
         "--out",
-        default="build/data/ground_truth.csv",
-        help="Destination CSV path (default build/data/ground_truth.csv)",
+        default="build/data/curated_reference.csv",
+        help="Destination CSV path (default build/data/curated_reference.csv)",
     )
     ap.add_argument(
         "--sheet", action="append", default=None,
-        help="Sheet name to ingest — repeatable; default covers Gopala's 8 sheets.",
+        help="Sheet name to ingest — repeatable; default covers the 8 reviewer sheets.",
     )
     args = ap.parse_args(argv)
 

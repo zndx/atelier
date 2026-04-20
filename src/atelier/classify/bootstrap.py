@@ -417,13 +417,28 @@ def _llm_sweep(
     reporting false convergence.
     """
     # Adaptive batch sizing: reduce batch for large vocabularies
-    safe_batch = _estimate_safe_batch_size(category_count) if category_count else cfg.columns_per_call
+    # AND for backends whose effective output-token ceiling is lower
+    # than the configured max_tokens (Bedrock, which silently clamps to
+    # the model's native limit).
+    effective_fn = getattr(backend, "effective_max_tokens", None)
+    backend_ceiling: int = 65536
+    if callable(effective_fn):
+        try:
+            backend_ceiling = int(effective_fn())
+        except Exception:
+            backend_ceiling = 65536
+    safe_batch = (
+        _estimate_safe_batch_size(category_count, max_output_tokens=backend_ceiling)
+        if category_count else cfg.columns_per_call
+    )
     effective_batch = min(cfg.columns_per_call, safe_batch)
     state.effective_batch_size = effective_batch
     if effective_batch < cfg.columns_per_call:
         logger.info(
-            "Adaptive batch: %d columns (reduced from %d for %d categories)",
+            "Adaptive batch: %d columns (reduced from %d for %d "
+            "categories, backend ceiling=%d)",
             effective_batch, cfg.columns_per_call, category_count,
+            backend_ceiling,
         )
 
     by_table: dict[str, list[str]] = {}
@@ -494,6 +509,72 @@ def _llm_sweep(
             f"Last error: {last.error_class}: {last.error_message!r}. "
             f"Check LLM backend config (region, credentials, model ID)."
         )
+
+    # Coverage-gap retry — targeted sweep over any columns that came
+    # out with no label.  Two root causes we've seen:
+    #   1. Bedrock silently capping maxTokens so a single batch
+    #      returned fewer classifications than columns requested
+    #      (finish_reason == end_turn despite truncation).
+    #   2. A parse recovered N items for a batch of N+k columns;
+    #      halving didn't trigger because the response looked clean.
+    # The halving retry now engages on response.partial, so this
+    # coverage sweep is belt-and-suspenders: it guarantees every column
+    # has been *offered* to the LLM before the pipeline declares a
+    # labelled corpus.  Retried in per-column batches (min_batch=1) so
+    # even the pathological "LLM keeps dropping column X" case at least
+    # produces a failed_columns audit entry with the column name.
+    missing_after_sweep = [n for n in column_names if n not in state.labels]
+    if missing_after_sweep and state.llm_calls_total < cfg.max_total_llm_calls:
+        logger.warning(
+            "LLM sweep left %d/%d columns without labels — running "
+            "targeted coverage retry at min_batch=%d",
+            len(missing_after_sweep), len(column_names),
+            cfg.min_columns_per_call,
+        )
+        # Preserve table grouping for retry so prompts still carry
+        # sibling context from the actual neighbor set.
+        by_table_missing: dict[str, list[str]] = {}
+        for name in missing_after_sweep:
+            t = column_table.get(name, "__flat__")
+            by_table_missing.setdefault(t, []).append(name)
+        for table_name, names in by_table_missing.items():
+            if state.llm_calls_total >= cfg.max_total_llm_calls:
+                break
+            if state.cancelled:
+                break
+            # Use the effective batch so retries respect backend ceiling;
+            # if that's still too big, halving will drive toward min.
+            retry_batch = max(cfg.min_columns_per_call, effective_batch // 2)
+            for i in range(0, len(names), retry_batch):
+                if state.llm_calls_total >= cfg.max_total_llm_calls:
+                    break
+                chunk = names[i: i + retry_batch]
+                chunk_samples = [samples[n] for n in chunk]
+                tname = table_name if table_name != "__flat__" else None
+                try:
+                    classifications = _classify_batch_with_retry(
+                        backend, chunk_samples, system_prompt, state,
+                        table_name=tname,
+                        min_batch=cfg.min_columns_per_call,
+                    )
+                except FatalLLMError:
+                    raise
+                for c in classifications:
+                    if c.category_code and c.confidence > 0:
+                        state.labels[c.column_name] = c.category_code
+                        state.confidence[c.column_name] = c.confidence
+                        state.label_source[c.column_name] = "llm"
+
+        final_missing = [n for n in column_names if n not in state.labels]
+        if final_missing:
+            logger.warning(
+                "LLM coverage retry still left %d columns unlabeled: %s",
+                len(final_missing),
+                ", ".join(final_missing[:10]) + ("…" if len(final_missing) > 10 else ""),
+            )
+            for name in final_missing:
+                if name not in state.failed_columns:
+                    state.failed_columns.append(name)
 
 
 def _run_ml_validation(

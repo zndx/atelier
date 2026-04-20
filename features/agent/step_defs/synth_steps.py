@@ -21,14 +21,14 @@ def step_generate_synth(context, n):
 def step_check_leaf_coverage(context, n):
     from atelier.classify.synth_generators import GENERATORS
 
-    # Collect all ground truth
-    all_gt = {}
+    # Collect all curated reference labels
+    all_reference = {}
     for table in context.synth_result:
-        all_gt.update(table.get("ground_truth", {}))
+        all_reference.update(table.get("reference_labels", {}))
 
     # Count per category
     counts: dict[str, int] = {}
-    for code in all_gt.values():
+    for code in all_reference.values():
         counts[code] = counts.get(code, 0) + 1
 
     # Check every generator-supported leaf has at least n columns
@@ -42,16 +42,16 @@ def step_check_leaf_coverage(context, n):
             )
 
 
-@then("the ground truth should map each column to a valid category code")
-def step_check_ground_truth_valid(context):
-    gt_path = context.synth_dir / "ground_truth.json"
-    assert gt_path.exists(), "ground_truth.json not found"
+@then("the curated reference should map each column to a valid category code")
+def step_check_curated_reference_valid(context):
+    ref_path = context.synth_dir / "reference_labels.json"
+    assert ref_path.exists(), "reference_labels.json not found"
 
-    with open(gt_path) as f:
-        gt = json.load(f)
+    with open(ref_path) as f:
+        reference_labels = json.load(f)
 
     valid_codes = {c.code for c in context.category_set.categories}
-    for col_name, code in gt.items():
+    for col_name, code in reference_labels.items():
         assert code in valid_codes, (
             f"Column {col_name} has invalid code {code}"
         )
@@ -67,13 +67,13 @@ def step_generate_with_seed(context, seed):
         variants_per_category=5, seed=seed,
     )
 
-    gt_path = outdir / "ground_truth.json"
-    with open(gt_path) as f:
-        gt = json.load(f)
+    ref_path = outdir / "reference_labels.json"
+    with open(ref_path) as f:
+        reference_labels = json.load(f)
 
     if not hasattr(context, "synth_runs"):
         context.synth_runs = []
-    context.synth_runs.append(gt)
+    context.synth_runs.append(reference_labels)
 
 
 @when("I generate synthetic data again with seed {seed:d}")
@@ -84,5 +84,5 @@ def step_generate_again_with_seed(context, seed):
 @then("both outputs should be identical")
 def step_check_deterministic(context):
     assert len(context.synth_runs) == 2, "Expected 2 synth runs"
-    gt1, gt2 = context.synth_runs
-    assert gt1 == gt2, "Outputs differ between runs with same seed"
+    ref1, ref2 = context.synth_runs
+    assert ref1 == ref2, "Outputs differ between runs with same seed"

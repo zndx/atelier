@@ -108,7 +108,7 @@ def step_mock_classifications_with_paths(context):
         bp = hc.belief_path()
         context.eval_classifications.append({
             "predicted_code": code,
-            "ground_truth": code,
+            "reference_code": code,
             "confidence": hc.confidence,
             "belief": hc.belief_at(code),
             "plausibility": hc.plausibility_at(code),

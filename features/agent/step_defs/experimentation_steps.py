@@ -221,19 +221,19 @@ def step_run_pipeline_composed(context):
 
     samples = load_fixture_samples()
 
-    # Build ground truth from fixtures
-    gt = {}
+    # Build curated reference labels from fixtures
+    reference_labels = {}
     for ts in samples:
         for col in ts.columns:
-            if col.ground_truth:
-                gt[col.name] = col.ground_truth
+            if col.reference_code:
+                reference_labels[col.name] = col.reference_code
 
     cfg = load_config()
     fsm = AgentFSM()
 
-    # Use the mock LLM that returns ground truth labels
+    # Use the mock LLM that returns curated reference labels
     from features.agent.step_defs.bootstrap_steps import _MockLLMBackend
-    mock_backend = _MockLLMBackend(gt)
+    mock_backend = _MockLLMBackend(reference_labels)
 
     context.pipeline_result = run_classification_pipeline(
         cfg, fsm,

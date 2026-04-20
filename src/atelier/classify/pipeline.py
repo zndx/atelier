@@ -255,8 +255,8 @@ def run_classification_pipeline(
     source_id: str | None = None,
     connection_name: str | None = None,
     database: str = "default",
-    sample_size: int = 50,
-    tables_limit: int = 100,
+    sample_size: int | None = None,
+    tables_limit: int | None = None,
     samples: list[TableSample] | None = None,
     category_set: HierarchicalCategorySet | None = None,
     llm_backend=None,
@@ -298,10 +298,21 @@ def run_classification_pipeline(
     from atelier.config_overlay import apply_to_config
     cfg = apply_to_config(cfg)
 
+    # ── Respect HOCON-configured discovery limits ─────────────
+    # When callers (gateway, service) don't pass these explicitly,
+    # fall back to the configured values instead of the hard-coded
+    # function defaults.  Prevents the function-default from silently
+    # overriding operator-configured env vars (ATELIER_CLASSIFY_TABLES_LIMIT,
+    # ATELIER_CLASSIFY_SAMPLE_SIZE).
+    if sample_size is None:
+        sample_size = cfg.classify_sample_size
+    if tables_limit is None:
+        tables_limit = cfg.classify_tables_limit
+
     # ── Source-based auto-resolution ──────────────────────────
     # When source_id is provided, auto-load samples and vocabulary.
     # The OOTB sample and the local Synthetic corpus both pair with
-    # the expanded 316-leaf ICE ontology — their ground_truth codes
+    # the expanded 316-leaf ICE ontology — their reference codes
     # share that vocabulary, so the LLM prompts and fusion frame are
     # identical.  Synthetic is local-dev only and never shipped OOTB.
     if source_id == "ootb-sample" and samples is None:
@@ -438,41 +449,64 @@ def run_classification_pipeline(
         # not data; classifying it pollutes the accuracy signal.
         all_samples = _filter_classifiable_tables(all_samples, vocab_uri)
 
-        # Apply ground-truth CSV (when configured) so evaluation_report
-        # gets real accuracy numbers.  Hive-backed runs don't carry GT
-        # through sample_table_metadata, but an operator with an
-        # external reference (UAT reviewer's xlsx → CSV) can point the
-        # pipeline at it via cfg.classify_ground_truth_uri.
-        gt_uri = getattr(cfg, "classify_ground_truth_uri", "") or ""
-        if gt_uri:
+        # Apply curated-reference CSV (when configured) so evaluation_report
+        # gets real accuracy numbers.  Hive-backed runs don't carry a
+        # reference through sample_table_metadata, but an operator with an
+        # external reference (reviewer xlsx → CSV) can point the pipeline
+        # at it via cfg.classify_reference_uri.
+        ref_uri = getattr(cfg, "classify_reference_uri", "") or ""
+        if ref_uri:
             try:
-                from atelier.classify.ground_truth import (
-                    apply_ground_truth,
-                    load_ground_truth_csv,
+                from atelier.classify.reference import (
+                    apply_reference,
+                    load_reference_csv,
                 )
                 # Pass category_set so rows with only a mnemonic
-                # (shape emitted by ingest_ground_truth when the
+                # (shape emitted by ingest_reference when the
                 # reviewer xlsx has no explicit code column) resolve
                 # via the vocabulary rather than being silently dropped.
-                gt_map = load_ground_truth_csv(
-                    gt_uri, _PROJECT_ROOT, category_set=category_set,
+                ref_map = load_reference_csv(
+                    ref_uri, _PROJECT_ROOT, category_set=category_set,
                 )
-                hits = apply_ground_truth(all_samples, gt_map)
+                hits = apply_reference(all_samples, ref_map)
                 if hits:
                     logger.info(
-                        "Ground-truth applied to %d/%d columns from %s",
+                        "Curated reference applied to %d/%d columns from %s",
                         hits,
                         sum(len(t.columns) for t in all_samples),
-                        gt_uri,
+                        ref_uri,
                     )
                 else:
                     logger.warning(
-                        "Ground-truth URI %s resolved but matched zero columns — "
+                        "Reference URI %s resolved but matched zero columns — "
                         "check column_name qualifier convention",
-                        gt_uri,
+                        ref_uri,
                     )
             except Exception as exc:
-                logger.warning("Ground-truth injection failed (non-fatal): %s", exc)
+                logger.warning("Reference injection failed (non-fatal): %s", exc)
+
+        # Reference-column invariant.  Synth-generator answer-key
+        # columns (name pattern ``^(attr|code|col|data|field|item|key|
+        # ref|val|var)_\d+(_\d+)*$``) encode the paired natural-named
+        # column's reference code directly in their name; they must
+        # never be classified (trivial by name parse) or appear in
+        # sibling contexts (would leak answers into other columns'
+        # embeddings).  The meta-tagging loader filters internally;
+        # the Hive sampler does not.  Applying the filter here means
+        # every loader path ends up with reference columns excluded,
+        # with zero behavior change on production data (pattern doesn't
+        # match production column names).
+        from atelier.classify.meta_tagging_source import exclude_reference_columns
+        pre_filter_cols = sum(len(t.columns) for t in all_samples)
+        all_samples = exclude_reference_columns(all_samples)
+        post_filter_cols = sum(len(t.columns) for t in all_samples)
+        if pre_filter_cols != post_filter_cols:
+            logger.info(
+                "Reference-column exclusion: %d → %d columns "
+                "(%d answer-key columns dropped from %d tables)",
+                pre_filter_cols, post_filter_cols,
+                pre_filter_cols - post_filter_cols, len(all_samples),
+            )
 
         # Flatten to column list with table mapping
         all_columns: list[ColumnSample] = []
@@ -1359,19 +1393,19 @@ def _classify_column(
         "belief_path": belief_path,
         "cautious_code": hc.cautious_code(0.7),
         # Curated reference (per-column answer key for accuracy checks)
-        # attached at sample-load time by the source loader.  Name
-        # reflects that it is a reference for accuracy checking, not
-        # an external ground truth.  ``reference_label`` is resolved
+        # attached at sample-load time by the source loader.  The code
+        # is a reference for accuracy checking, not a published
+        # human-curated benchmark.  ``reference_label`` is resolved
         # via the category_set to humanize the code for display.
-        "ground_truth": col.ground_truth,
-        "ground_truth_label": (
-            getattr(category_set.all_by_code.get(col.ground_truth), "label", "")
-            if col.ground_truth and hasattr(category_set, "all_by_code")
+        "reference_code": col.reference_code,
+        "reference_label": (
+            getattr(category_set.all_by_code.get(col.reference_code), "label", "")
+            if col.reference_code and hasattr(category_set, "all_by_code")
             else ""
         ),
-        "is_correct": (
-            col.ground_truth == best_code
-            if col.ground_truth and best_code
+        "matches_reference": (
+            col.reference_code == best_code
+            if col.reference_code and best_code
             else None
         ),
         # Raw LLM vote preserved alongside the fused label so operators
@@ -1405,9 +1439,9 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "evidence_sources": {},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
-        "ground_truth": col.ground_truth,
-        "ground_truth_label": "",
-        "is_correct": None,
+        "reference_code": col.reference_code,
+        "reference_label": "",
+        "matches_reference": None,
     }
 
 
@@ -1440,7 +1474,7 @@ def _run_feature_analysis(
 
     Both are gated by config (classify_shap_enabled, classify_sage_enabled).
     SAGE uses predicted class indices as supervision — it measures feature
-    contribution to the model's own decisions, not external ground truth.
+    contribution to the model's own decisions, not a curated reference.
 
     When MC is active and ``classify_background_analysis`` is true, SHAP runs
     in a background daemon thread. SAGE runs on the frontier sample only
@@ -1514,13 +1548,13 @@ def _run_feature_analysis(
             from atelier.classify.sage import run_sage_analysis
 
             code_to_idx = {cat.code: i for i, cat in enumerate(category_set.categories)}
-            gt_indices = np.array([
+            label_idx = np.array([
                 code_to_idx.get(c["predicted_code"], 0)
                 for c in sage_classifications
             ])
 
             sage_result = run_sage_analysis(
-                sage_features, gt_indices, category_set,
+                sage_features, label_idx, category_set,
                 n_permutations=cfg.classify_sage_permutations,
                 detect_convergence=True,
             )
@@ -1554,8 +1588,8 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
         return {"total_columns": 0}
 
     classified = sum(1 for c in classifications if c["predicted_code"])
-    with_truth = [c for c in classifications if c["is_correct"] is not None]
-    correct = sum(1 for c in with_truth if c["is_correct"])
+    with_reference = [c for c in classifications if c["matches_reference"] is not None]
+    correct = sum(1 for c in with_reference if c["matches_reference"])
 
     avg_confidence = sum(c["confidence"] for c in classifications) / total
     avg_conflict = sum(c["conflict"] for c in classifications) / total
@@ -1582,9 +1616,9 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
         "llm_agreement": (
             round(llm_matches / len(llm_covered), 4) if llm_covered else None
         ),
-        "with_ground_truth": len(with_truth),
+        "with_reference": len(with_reference),
         "correct": correct,
-        "accuracy": round(correct / len(with_truth), 4) if with_truth else None,
+        "accuracy": round(correct / len(with_reference), 4) if with_reference else None,
         "avg_confidence": round(avg_confidence, 4),
         "avg_conflict": round(avg_conflict, 4),
         "avg_uncertainty": round(avg_uncertainty, 4),
@@ -1652,17 +1686,14 @@ def _write_parquet(
             "evidence": c.get("evidence", ""),
             # Curated reference (per-column answer key from the
             # generator-derived + spot-checked ``curated_reference.csv``).
-            # This is distinct from an external ground truth — name
-            # reflects that the code is a reference for accuracy
-            # checking, not a published human-curated label.
-            "reference_code": c.get("ground_truth") or "",
-            "reference_label": c.get("ground_truth_label") or "",
+            # The name reflects that this code is a reference for
+            # accuracy checking, not a published human-curated label.
+            "reference_code": c.get("reference_code") or "",
+            "reference_label": c.get("reference_label") or "",
             # True/False when a reference is available and comparable to
             # the pipeline's prediction; None when no reference exists
-            # for this column.  Renamed from ``is_correct`` for
-            # unambiguous framing: the check is against the reference,
-            # not an external oracle.
-            "matches_reference": c["is_correct"],
+            # for this column.
+            "matches_reference": c.get("matches_reference"),
             "embedding_text": c.get("embedding_text", ""),
             "pattern_signals": ", ".join(c.get("pattern_signals", {})),
             "dst_belief_path": json.dumps(c.get("belief_path", [])),

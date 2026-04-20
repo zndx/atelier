@@ -108,7 +108,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.default_source": ("classify_default_source", str),
     "classify.subagent_model": ("classify_subagent_model", str),
     "classify.meta_tagging_dir": ("classify_meta_tagging_dir", str),
-    "classify.ground_truth_uri": ("classify_ground_truth_uri", str),
+    "classify.reference_uri": ("classify_reference_uri", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm_model_path": ("classify_svm_model_path", str),
@@ -301,10 +301,10 @@ class AtelierConfig:
     # ATELIER_META_TAGGING_DIR env var → <repo>/build/meta-tagging/ (UAT
     # snapshot, gitignored) → ~/local/tmp/meta-tagging/ (legacy default).
     classify_meta_tagging_dir: str = ""
-    # Optional ground-truth CSV — per-column expected codes used by
-    # evaluation_report + overwatch.  Set to a path or file:// URI.
+    # Optional curated-reference CSV — per-column expected codes used
+    # by evaluation_report + overwatch.  Set to a path or file:// URI.
     # Contents never checked in; deployments point at their own CSV.
-    classify_ground_truth_uri: str = ""
+    classify_reference_uri: str = ""
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"

@@ -14,4 +14,4 @@ Feature: Onboarding synth framework
   Scenario: Vocabulary-driven generation produces valid output
     When I run generate_for_vocabulary with 5 variants per category
     Then CSV files should be created with columns for each leaf
-    And ground_truth.json should map every column to a valid code
+    And reference_labels.json should map every column to a valid code

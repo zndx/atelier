@@ -17,7 +17,7 @@ same real UAT columns with leak-sanitized siblings):
   D. E-rbf                          (RBF-kernel SVC on MiniLM embedding)
 
 For each arm we report:
-  * standalone exact + hierarchical accuracy vs ground truth
+  * standalone exact + hierarchical accuracy vs curated reference
   * pairwise prediction agreement across arms + against CatBoost
   * which GT codes each arm wins/loses on the other
 
@@ -60,15 +60,15 @@ def _extract_feature_text(sample) -> str:
 
 
 def _load_synth_columns(synth_dir: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
-    """Load synth CSVs + ground_truth.json — mirrors ml_train._load_synth_data."""
+    """Load synth CSVs + reference_labels.json — mirrors ml_train._load_synth_data."""
     import csv
     import json
 
-    ground_truth_path = synth_dir / "ground_truth.json"
-    if not ground_truth_path.is_file():
-        raise FileNotFoundError(f"missing {ground_truth_path}")
-    with open(ground_truth_path) as f:
-        ground_truth = json.load(f)
+    ref_path = synth_dir / "reference_labels.json"
+    if not ref_path.is_file():
+        raise FileNotFoundError(f"missing {ref_path}")
+    with open(ref_path) as f:
+        reference_labels = json.load(f)
 
     columns: dict[str, list[str]] = {}
     for csv_path in synth_dir.glob("*.csv"):
@@ -81,7 +81,7 @@ def _load_synth_columns(synth_dir: Path) -> tuple[dict[str, list[str]], dict[str
         for j, col_name in enumerate(header):
             vals = [r[j] for r in rows if j < len(r) and r[j]]
             columns[col_name] = vals
-    return columns, ground_truth
+    return columns, reference_labels
 
 
 def _build_svm_short(name: str, values: list[str]) -> str:
@@ -277,10 +277,10 @@ def main() -> int:
     for t in samples:
         for c in t.columns:
             real_cols.append((t.name, c))
-    real_with_gt = [(tn, c) for tn, c in real_cols if c.ground_truth]
+    real_with_ref = [(tn, c) for tn, c in real_cols if c.reference_code]
     log.info(
         "real corpus: %d total cols, %d with GT (leak-sanitized)",
-        len(real_cols), len(real_with_gt),
+        len(real_cols), len(real_with_ref),
     )
 
     # ── 2.  Generate synth training data once (reused across arms) ─
@@ -308,10 +308,10 @@ def main() -> int:
     def _arm_result(name, train_fn, predict_fn):
         log.info("arm %s: training", name)
         train_fn()
-        log.info("arm %s: predicting on %d real GT cols", name, len(real_with_gt))
-        preds = predict_fn([c for _, c in real_with_gt])
-        gts   = [c.ground_truth for _, c in real_with_gt]
-        ex, hi = _score(preds, gts)
+        log.info("arm %s: predicting on %d real GT cols", name, len(real_with_ref))
+        preds = predict_fn([c for _, c in real_with_ref])
+        refs  = [c.reference_code for _, c in real_with_ref]
+        ex, hi = _score(preds, refs)
         log.info("arm %s: exact=%.4f hier=%.4f", name, ex, hi)
         return preds, ex, hi
 
@@ -412,7 +412,7 @@ def main() -> int:
     # Arm J — Arm A's exact setup (S-short + TF-IDF + OvR), but trained
     # on the full 296-class vocabulary including internal-node codes
     # (220 leaves + 76 internals).  The 232 eval columns include 8 whose
-    # ground truth is an internal node (``City``, ``Country``,
+    # reference code is an internal node (``City``, ``Country``,
     # ``Phone Number``, etc.) — with leaf-only training, the classifier
     # literally cannot exact-match those rows because the target code
     # isn't in its output space.
@@ -509,11 +509,11 @@ def main() -> int:
     # ── 5.  Per-column parquet for forensic digging ─────────────
     import pandas as pd
     rows = []
-    gts = [c.ground_truth for _, c in real_with_gt]
-    for idx, (tn, c) in enumerate(real_with_gt):
+    refs = [c.reference_code for _, c in real_with_ref]
+    for idx, (tn, c) in enumerate(real_with_ref):
         row = {
             "table": tn, "column": c.name,
-            "ground_truth": c.ground_truth,
+            "reference_code": c.reference_code,
         }
         for k in arm_keys:
             row[k] = arm_preds[k][idx]
@@ -524,7 +524,7 @@ def main() -> int:
     per_col_df.to_parquet(per_col_path)
 
     summary = {
-        "real_gt_columns": len(real_with_gt),
+        "real_gt_columns": len(real_with_ref),
         "synth_training_columns": len(train_names),
         "arm_accuracy": results,
         "pairwise_agreement": agreement,

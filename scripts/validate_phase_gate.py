@@ -78,21 +78,21 @@ def main() -> int:
     classifications = json.loads(classifications_path.read_text())
     log.info("Classifications: %d", len(classifications))
 
-    # Per-table accuracy on columns with ground truth
+    # Per-table accuracy on columns with a curated reference
     per_table: dict[str, list[bool]] = defaultdict(list)
     per_table_llm_only: dict[str, list[bool]] = defaultdict(list)
     for c in classifications:
-        gt = c.get("ground_truth_code") or c.get("ground_truth")
-        if not gt:
+        ref_code = c.get("reference_code")
+        if not ref_code:
             continue
         table = c.get("table_name", "?")
-        per_table[table].append(bool(c.get("is_correct")))
+        per_table[table].append(bool(c.get("matches_reference")))
         # Raw LLM vote is the top code in evidence_sources.llm
         srcs = c.get("evidence_sources") or {}
         llm_map = srcs.get("llm") or {}
         if llm_map:
             llm_top = max(llm_map.items(), key=lambda kv: kv[1])[0]
-            per_table_llm_only[table].append(llm_top == gt)
+            per_table_llm_only[table].append(llm_top == ref_code)
         else:
             per_table_llm_only[table].append(False)
 

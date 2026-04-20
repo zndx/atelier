@@ -21,7 +21,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Train ML classifiers on synthetic data")
     parser.add_argument(
         "--synth-dir", type=Path, default=Path("build/data/synth"),
-        help="Directory containing synth CSVs + ground_truth.json",
+        help="Directory containing synth CSVs + reference_labels.json",
     )
     parser.add_argument(
         "--models-dir", type=Path, default=Path("build/models"),
@@ -34,7 +34,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Generate synth data if needed
-    if args.generate or not (args.synth_dir / "ground_truth.json").exists():
+    if args.generate or not (args.synth_dir / "reference_labels.json").exists():
         logger.info("Generating synthetic data in %s", args.synth_dir)
         from atelier.classify.synth import generate_synth_tables
         from atelier.classify.taxonomy import HierarchicalCategorySet, load_universal_vocabulary
@@ -44,8 +44,8 @@ def main() -> int:
         total_cols = sum(t["column_count"] for t in result)
         logger.info("Generated %d columns in %d files", total_cols, len(result))
 
-    if not (args.synth_dir / "ground_truth.json").exists():
-        logger.error("No ground_truth.json found in %s", args.synth_dir)
+    if not (args.synth_dir / "reference_labels.json").exists():
+        logger.error("No reference_labels.json found in %s", args.synth_dir)
         return 1
 
     from atelier.classify.taxonomy import HierarchicalCategorySet, load_universal_vocabulary

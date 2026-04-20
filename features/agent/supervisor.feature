@@ -139,7 +139,7 @@ Feature: Supervisor overwatch — Bedrock invariant, halving retry, nautilus
     Examples:
       | command                                                                    |
       | uv run python -m atelier.overwatch.write_proposal abc --json {}            |
-      | uv run python -m atelier.overwatch.ingest_ground_truth build/x.xlsx        |
+      | uv run python -m atelier.overwatch.ingest_reference build/x.xlsx           |
       | uv run python -m atelier.overwatch.apply_and_rerun abc                     |
       | uv run python -m atelier.overwatch.kill_run abc --reason stall             |
       | cat build/results/abc/classifications.json \| head -100                    |

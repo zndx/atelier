@@ -11,7 +11,7 @@ Two entry points live here:
    authorized to investigate (Read/Grep/Glob/Bash), propose an overlay,
    and — in autonomous mode — apply the overlay and trigger a rerun.
    All side-effecting operations go through the four controlled CLIs
-   (``write_proposal``, ``ingest_ground_truth``, ``apply_and_rerun``,
+   (``write_proposal``, ``ingest_reference``, ``apply_and_rerun``,
    ``kill_run``); the agent has no direct ``Write`` tool.
 
 Both entry points require a direct Anthropic API key (``has_overwatch``).
@@ -161,15 +161,15 @@ def _build_analysis_prompt(
         "## Instructions\n\n"
         "Write a markdown report with these sections:\n"
         "1. **Summary** — one paragraph assessment anchored on LLM "
-        "Coverage + LLM Agreement (plus accuracy when ground truth "
-        "is available).\n"
+        "Coverage + LLM Agreement (plus accuracy when a curated "
+        "reference is available).\n"
         "2. **Coverage gaps** — which tables / columns the LLM "
         "didn't reach, and why CatBoost's generalization may or may "
         "not have carried them correctly.\n"
         "3. **LLM-CatBoost divergence** — columns where LLM and "
         "CatBoost disagreed after fine-tuning (the real diagnostic).\n"
-        "4. **Mispredictions vs ground truth** — only when "
-        "``columns_with_gt > 0``.  Reference column names and codes "
+        "4. **Mispredictions vs curated reference** — only when "
+        "``columns_with_reference > 0``.  Reference column names and codes "
         "directly; group by likely root cause (truncation, vocab "
         "seam, taxonomy ambiguity).\n"
         "5. **Recommendations** — specific, actionable next steps. "
@@ -320,7 +320,7 @@ def _supervisor_system_prompt(cfg, autonomy: str) -> str:
                 if autonomy == "propose"
                 else
                 "- **autonomous** — you may call any of the four CLIs: "
-                "`write_proposal`, `ingest_ground_truth`, `apply_and_rerun`, "
+                "`write_proposal`, `ingest_reference`, `apply_and_rerun`, "
                 "`kill_run`.  Bounded by `overwatch.max_retries` per session.\n"
             )
         )

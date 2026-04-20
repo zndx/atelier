@@ -48,16 +48,16 @@ def step_min_columns(context, n):
     )
 
 
-@then("every ground truth code should exist in the vocabulary")
-def step_gt_codes_in_vocab(context):
+@then("every curated reference code should exist in the vocabulary")
+def step_reference_codes_in_vocab(context):
     all_codes = set(context.real_vocab.all_by_code.keys())
     missing = []
     for ts in context.real_samples:
         for col in ts.columns:
-            if col.ground_truth and col.ground_truth not in all_codes:
-                missing.append(col.ground_truth)
+            if col.reference_code and col.reference_code not in all_codes:
+                missing.append(col.reference_code)
     assert not missing, (
-        f"{len(missing)} ground truth codes not in vocabulary: {missing[:10]}"
+        f"{len(missing)} curated reference codes not in vocabulary: {missing[:10]}"
     )
 
 
@@ -82,13 +82,13 @@ def step_generate_template_synth(context):
         seed=42,
     )
 
-    # Count distinct categories from ground_truth.json
+    # Count distinct categories from reference_labels.json
     import json
-    gt_path = out_dir / "ground_truth.json"
-    assert gt_path.exists(), f"ground_truth.json not found in {out_dir}"
-    with open(gt_path) as f:
-        gt = json.load(f)
-    context.synth_categories = set(gt.values())
+    ref_path = out_dir / "reference_labels.json"
+    assert ref_path.exists(), f"reference_labels.json not found in {out_dir}"
+    with open(ref_path) as f:
+        reference_labels = json.load(f)
+    context.synth_categories = set(reference_labels.values())
 
 
 @then("at least {n:d} categories should have synthetic columns")
