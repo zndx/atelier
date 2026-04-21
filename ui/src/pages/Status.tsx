@@ -79,6 +79,7 @@ interface ProviderResult {
   valid: boolean;
   model?: string;
   error?: string;
+  failure_kind?: "auth" | "permission" | "network" | "api" | "unknown";
 }
 
 interface CredentialResult {
@@ -437,11 +438,22 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             {String(progress.categories_loaded)}
           </Descriptions.Item>
         )}
-        {progress.tables_discovered != null && (
+        {progress.tables_classifiable != null ? (
+          <Descriptions.Item label="Tables">
+            {String(progress.tables_classifiable)}
+            {progress.tables_discovered_raw != null &&
+              progress.tables_discovered_raw !== progress.tables_classifiable && (
+                <Text type="secondary" style={{ marginLeft: 8 }}>
+                  ({String(progress.tables_filtered)} filtered,{" "}
+                  {String(progress.tables_discovered_raw)} discovered)
+                </Text>
+              )}
+          </Descriptions.Item>
+        ) : progress.tables_discovered != null ? (
           <Descriptions.Item label="Tables">
             {String(progress.tables_discovered)}
           </Descriptions.Item>
-        )}
+        ) : null}
         {progress.columns_sampled != null && (
           <Descriptions.Item label="Columns Sampled">
             {String(progress.columns_sampled)}
@@ -1185,23 +1197,40 @@ export default function Status() {
                 <Text type="danger">{credentials.error}</Text>
               ) : (
                 <Descriptions column={1} size="small" bordered>
-                  {Object.entries(credentials.providers).map(([name, p]) => (
-                    <Descriptions.Item key={name} label={name}>
-                      <Tag color={p.valid ? "green" : "red"}>
-                        {p.valid ? "Valid" : "Invalid"}
-                      </Tag>
-                      {p.model && (
-                        <Text type="secondary" style={{ marginLeft: 8 }}>
-                          {p.model}
-                        </Text>
-                      )}
-                      {p.error && (
-                        <Text type="danger" style={{ marginLeft: 8 }}>
-                          {p.error}
-                        </Text>
-                      )}
-                    </Descriptions.Item>
-                  ))}
+                  {Object.entries(credentials.providers).map(([name, p]) => {
+                    const tagColor = p.valid
+                      ? "green"
+                      : p.failure_kind === "network"
+                        ? "orange"  // network unreachable — actionable via config
+                        : "red";    // auth/permission/unknown — actionable via creds
+                    const tagText = p.valid
+                      ? "Valid"
+                      : p.failure_kind === "network"
+                        ? "Unreachable"
+                        : p.failure_kind === "auth"
+                          ? "Auth failed"
+                          : p.failure_kind === "permission"
+                            ? "Permission denied"
+                            : "Invalid";
+                    return (
+                      <Descriptions.Item key={name} label={name}>
+                        <Tag color={tagColor}>{tagText}</Tag>
+                        {p.model && (
+                          <Text type="secondary" style={{ marginLeft: 8 }}>
+                            {p.model}
+                          </Text>
+                        )}
+                        {p.error && (
+                          <Paragraph
+                            type={p.failure_kind === "network" ? "warning" : "danger"}
+                            style={{ marginTop: 8, marginBottom: 0, whiteSpace: "pre-wrap" }}
+                          >
+                            {p.error}
+                          </Paragraph>
+                        )}
+                      </Descriptions.Item>
+                    );
+                  })}
                 </Descriptions>
               )
             ) : (

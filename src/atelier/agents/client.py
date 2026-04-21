@@ -68,7 +68,14 @@ def _anthropic_test_model(cfg: AtelierConfig) -> str:
 
 
 def _validate_single(client, model: str, provider: str) -> dict:
-    """Validate a single provider with a minimal messages call."""
+    """Validate a single provider with a minimal messages call.
+
+    Separates authentication failures from network failures explicitly.
+    A bad API key and a blocked egress to api.anthropic.com both fail
+    the validation, but the remediation paths are entirely different
+    (rotate the key vs. adjust CAI network policy), so we return a
+    distinct ``failure_kind`` the UI can surface differently.
+    """
     import anthropic
 
     try:
@@ -89,11 +96,46 @@ def _validate_single(client, model: str, provider: str) -> dict:
             "reply": text.strip(),
         }
     except anthropic.AuthenticationError as e:
-        return {"provider": provider, "valid": False, "error": f"Authentication failed: {e}"}
+        return {
+            "provider": provider, "valid": False,
+            "failure_kind": "auth",
+            "error": f"Authentication failed — check {provider} API key: {e}",
+        }
+    except anthropic.PermissionDeniedError as e:
+        return {
+            "provider": provider, "valid": False,
+            "failure_kind": "permission",
+            "error": f"Permission denied — key is valid but not allowed for this model/region: {e}",
+        }
+    except anthropic.APIConnectionError as e:
+        # "Connection error." on its own is uninformative for operators;
+        # the underlying cause (DNS, TLS, proxy, firewall) lives in e.__cause__.
+        cause = getattr(e, "__cause__", None)
+        cause_msg = f" ({type(cause).__name__}: {cause})" if cause else ""
+        hint = (
+            " — Atelier could not reach the provider over HTTPS. On CAI, "
+            "check the workspace egress network policy allows the provider "
+            "endpoint (api.anthropic.com for direct Anthropic, "
+            "bedrock-runtime.<region>.amazonaws.com for Bedrock).  Also "
+            "check for HTTPS_PROXY / HTTP_PROXY env vars in the AMP form."
+        )
+        return {
+            "provider": provider, "valid": False,
+            "failure_kind": "network",
+            "error": f"Connection error{cause_msg}{hint}",
+        }
     except anthropic.APIError as e:
-        return {"provider": provider, "valid": False, "error": f"API error: {e}"}
+        return {
+            "provider": provider, "valid": False,
+            "failure_kind": "api",
+            "error": f"API error: {e}",
+        }
     except Exception as e:
-        return {"provider": provider, "valid": False, "error": str(e)}
+        return {
+            "provider": provider, "valid": False,
+            "failure_kind": "unknown",
+            "error": f"{type(e).__name__}: {e}",
+        }
 
 
 def validate_credentials(cfg: AtelierConfig) -> dict:

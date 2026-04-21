@@ -361,6 +361,19 @@ def _seed_meta_tagging_source() -> None:
         _log.warning("Meta-tagging source seeding failed: %s", exc)
 
 
+def _classify_source_id(connection: str, database: str) -> str:
+    """Return the canonical data-source id for a Hive (conn, db) pair.
+
+    Single source of truth shared by env-seeded and discovery paths so
+    the Data Platform panel shows exactly one row per Hive endpoint.
+    Matches the discovery format (``{connection}/{database}``) — which
+    is what ``fsm_start`` already splits on "/" — so whichever seed
+    function runs first, the other is a no-op via
+    ``get_or_create_data_source``.
+    """
+    return f"{connection}/{database}"
+
+
 def _seed_classify_data_source() -> None:
     """Seed a ``data_source`` row from ATELIER_CLASSIFY_CONNECTION
     + ATELIER_CLASSIFY_DATABASE env vars so the env-driven default
@@ -369,14 +382,11 @@ def _seed_classify_data_source() -> None:
     Makes the env vars behave like *defaults* — visible via
     ``/api/data-sources``, selectable as ``activeSourceId``, and
     overridable from the UI (vocab_uri edits, archival, etc).
-    Without this, env vars only affected pipeline resolution, the
-    UI had nothing to show, and operators couldn't diverge from the
-    env defaults without restarting with different env vars.
 
-    Idempotent via ``get_or_create_data_source`` keyed on a stable
-    ``source_id`` shape (``classify-{connection}-{database}``).  If
-    the row already exists (operator edited vocab_uri, for example),
-    this is a no-op.
+    Idempotent via ``get_or_create_data_source`` keyed on
+    ``_classify_source_id`` — unified with ``_discover_and_register_
+    hive_sources`` so a connection named in both the env-seed path
+    and the discovery path produces exactly one row.
     """
     try:
         from atelier.config import load_config
@@ -390,13 +400,9 @@ def _seed_classify_data_source() -> None:
     if not connection or not database:
         return
 
-    # Stable id lets operator edits persist across restarts.  The
-    # source_uri matches what fsm_start already splits on "/"
-    # (gateway.py:1785), so the env-seeded row is directly consumable
-    # by the pipeline when selected as activeSourceId in the UI.
-    source_id = f"classify-{connection}-{database}"
-    source_uri = f"{connection}/{database}"
-    display_name = f"{connection} · {database}"
+    source_id = _classify_source_id(connection, database)
+    source_uri = source_id  # identical shape; fsm_start splits on "/"
+    display_name = f"Hive: {connection}/{database}"
 
     try:
         dao = AtelierDao()
@@ -449,7 +455,7 @@ def _maybe_auto_start_classify() -> None:
             "classify_auto_start=true but CONNECTION/DATABASE unset; skipping"
         )
         return
-    source_id = f"classify-{connection}-{database}"
+    source_id = _classify_source_id(connection, database)
     result = fsm_start(source_id=source_id)
     _log.info("Classify auto-start dispatched: %s → %s", source_id, result)
 

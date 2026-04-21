@@ -245,7 +245,12 @@ class TerminalSession:
         has_creds = self._check_creds()
         model = self._get_model_name() if has_sdk else ""
 
-        lines = ["\r\n"]
+        # Clear the screen + home cursor so a re-attach after a
+        # terminal-model change doesn't overlay the new banner on top
+        # of a stale one (observed: a new 'claude-opus-4-7' banner
+        # rendered over an older Bedrock-ARN banner, leaving the tail
+        # of the ARN visible as garble).
+        lines = ["\x1b[2J\x1b[H"]
         lines.append(f"  {_BOLD}{_WHITE}Atelier Terminal{_RESET}\r\n")
         lines.append(f"  {_DIM}Claude Agent SDK \u2022 Interactive session{_RESET}\r\n")
         lines.append(f"  {_DIM}\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500{_RESET}\r\n")

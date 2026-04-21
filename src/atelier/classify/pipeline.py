@@ -447,7 +447,20 @@ def run_classification_pipeline(
         # Strip tables that shouldn't be classified (vocabulary tables,
         # internal test leftovers).  The annotations table IS the vocab,
         # not data; classifying it pollutes the accuracy signal.
+        tables_before_filter = len(all_samples)
         all_samples = _filter_classifiable_tables(all_samples, vocab_uri)
+        tables_after_filter = len(all_samples)
+        # Advance the FSM with the post-filter count so the UI shows
+        # tables that will ACTUALLY be classified, not the raw Hive
+        # discovery count.  Also report the pre-filter count as
+        # ``tables_discovered_raw`` for operators who want to see the
+        # full enumeration.
+        if tables_before_filter != tables_after_filter:
+            fsm.advance(run_id, FSMState.SAMPLING, progress={
+                "tables_discovered_raw": tables_before_filter,
+                "tables_classifiable": tables_after_filter,
+                "tables_filtered": tables_before_filter - tables_after_filter,
+            })
 
         # Apply curated-reference CSV (when configured) so evaluation_report
         # gets real accuracy numbers.  Hive-backed runs don't carry a
