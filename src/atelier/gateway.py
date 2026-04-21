@@ -1908,11 +1908,39 @@ def fsm_start(source_id: str | None = None):
             nonlocal nautilus_watcher
             # Pipeline owns run creation via fsm.start_run() — don't
             # create a run here (avoids double-run bug).
+            #
+            # Outer BaseException catch (not just Exception) so even
+            # thread-level escape hatches — KeyboardInterrupt, a signal
+            # handler that raises, SystemExit from a misbehaving lib —
+            # still end with an FSM.ERROR transition rather than the
+            # observed silent-death failure mode where the thread
+            # vanishes and the FSM stays pinned to LLM_SWEEP forever.
+            result = None
             try:
                 result = run_classification_pipeline(
                     cfg, fsm, source_id=source_id, vocab_uri=vocab_uri,
                     connection_name=connection_name, database=database,
                 )
+            except BaseException as exc:
+                logger.exception("Pipeline background thread died: %s", exc)
+                try:
+                    from atelier.classify.fsm import FSMState
+                    current = fsm.get_status()
+                    if current and current.state.value not in (
+                        "IDLE", "CONVERGED", "ERROR",
+                    ):
+                        fsm.advance(
+                            current.id, FSMState.ERROR,
+                            error=(
+                                f"thread died: {type(exc).__name__}: {exc}"
+                                if not isinstance(exc, SystemExit)
+                                else "thread exited (SystemExit)"
+                            ),
+                        )
+                except Exception:
+                    logger.debug("FSM error-transition failed", exc_info=True)
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
             finally:
                 # Start the nautilus watcher as soon as the pipeline
                 # has a run_id attached to the FSM.  We do this here
@@ -1985,13 +2013,22 @@ def fsm_runs():
 
 @app.post("/api/fsm/cancel")
 def fsm_cancel(payload: dict | None = None):
-    """Request cooperative cancellation of the in-flight classification run.
+    """Request cancellation of the in-flight classification run.
 
-    Sets ``state.cancelled = True`` on the live BootstrapState via the
-    nautilus registry; the pipeline polls the flag between LLM batches
-    and exits cleanly after the current batch finishes.  A SIGKILL
-    would corrupt persistent artifacts and leave a partial DB row; the
-    cooperative flag protects the operator from that.
+    Two layers of effect, both applied on every call:
+
+    1. **Cooperative cancel** — sets ``state.cancelled = True`` on the
+       live BootstrapState via the nautilus registry, so the pipeline
+       polls the flag between LLM batches and exits cleanly after the
+       current batch finishes.
+
+    2. **FSM force-reset** — transitions the FSM to ``ERROR`` with a
+       clear cancellation reason, unconditionally.  This recovers the
+       operator when the pipeline thread died silently (native
+       segfault, hung TCP connection with no timeout, etc.) and the
+       nautilus state was never registered or the cooperative flag
+       has no reader.  Without this, a stuck run would require a
+       gateway restart to clear.
 
     Operator-initiated only — the autonomy gating on
     ``atelier.overwatch.kill_run`` protects supervisor-initiated
@@ -1999,6 +2036,7 @@ def fsm_cancel(payload: dict | None = None):
     """
     try:
         from atelier.classify import get_fsm
+        from atelier.classify.fsm import FSMState
         from atelier.overwatch.nautilus import get_state, get_active_watcher
 
         fsm = get_fsm()
@@ -2017,32 +2055,57 @@ def fsm_cancel(payload: dict | None = None):
         if isinstance(payload, dict):
             reason = str(payload.get("reason") or reason)[:500]
 
+        # Layer 1 — cooperative cancel via nautilus (best-effort).
         state = get_state(current.id)
-        if state is None:
-            # Run is advancing but not yet registered with nautilus
-            # (happens in the narrow window between fsm.start_run and
-            # nautilus register).  Record the intent so if / when the
-            # state appears, the cancel still takes effect.
-            return _error_envelope(
-                "run has not yet registered with nautilus — "
-                "try again in a few seconds"
-            )
+        cooperative = False
+        if state is not None:
+            state.cancelled = True
+            state.cancellation_reason = reason
+            cooperative = True
 
-        state.cancelled = True
-        state.cancellation_reason = reason
-
+        # Stop any nautilus watcher regardless of whether the state was
+        # registered — watchers can outlive their state registration
+        # window if the pipeline thread has already died silently.
         watcher = get_active_watcher(current.id)
+        watcher_stopped = False
         if watcher is not None:
             try:
                 watcher.stop()
+                watcher_stopped = True
             except Exception:
                 pass
+
+        # Layer 2 — unconditional FSM force-reset.  Even when the
+        # cooperative path succeeded we also set ERROR so the UI can
+        # redraw the Start button immediately; the next ``fsm_start``
+        # will observe a clean terminal state rather than waiting for
+        # the in-flight batch to finish + exit the sweep loop.  If the
+        # thread is still alive and processing, its own finally block
+        # will no-op on the already-ERROR state via the ValueError
+        # guard in advance().
+        try:
+            fsm.advance(
+                current.id, FSMState.ERROR,
+                error=f"cancelled by operator: {reason}",
+            )
+        except ValueError:
+            pass  # state already terminal
 
         return {
             "cancelled": True,
             "run_id": current.id,
-            "state": current.state.value,
+            "state": "ERROR",
             "reason": reason,
+            "cooperative_cancel_registered": cooperative,
+            "watcher_stopped": watcher_stopped,
+            "note": (
+                None if cooperative else
+                "Cooperative cancel could not be registered "
+                "(no live nautilus state — thread likely died silently "
+                "or hadn't registered yet).  FSM was force-reset to "
+                "ERROR; if an in-flight LLM call is hung it will be "
+                "abandoned when the gateway next restarts."
+            ),
         }
     except Exception as exc:
         return _error_envelope(f"FSM cancel failed: {exc}")

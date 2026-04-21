@@ -408,6 +408,7 @@ def _llm_sweep(
     samples: dict[str, ColumnSample],
     column_table: dict[str, str],
     category_count: int = 0,
+    progress_callback=None,
 ) -> None:
     """Phase 1: Send all columns to LLM in table-aware batches.
 
@@ -415,7 +416,30 @@ def _llm_sweep(
     configuration errors (wrong region, bad credentials, unsupported API
     parameters) early instead of silently proceeding with zero labels and
     reporting false convergence.
+
+    ``progress_callback`` is invoked after every top-level batch (and
+    the coverage-gap retry) with a ``dict`` the caller can forward to
+    the FSM / UI.  Wiring this is how we stop a silent thread death
+    inside the sweep from leaving the FSM frozen at
+    ``progress.step = "loading_vocab"`` with no heartbeat — the
+    updated_at stamp moves every batch, so a stalled run is
+    immediately visible to operators and any watchdog.
     """
+    def _heartbeat(phase: str) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback({
+                "phase": phase,
+                "columns_total": len(column_names),
+                "columns_labeled": len(state.labels),
+                "llm_calls_total": state.llm_calls_total,
+                "truncation_count": state.truncation_count,
+                "failed_columns": len(state.failed_columns),
+                "batches_attempted": len(state.batch_audit),
+            })
+        except Exception as exc:
+            logger.debug("progress_callback failed (non-fatal): %s", exc)
     # Adaptive batch sizing: reduce batch for large vocabularies
     # AND for backends whose effective output-token ceiling is lower
     # than the configured max_tokens (Bedrock, which silently clamps to
@@ -450,6 +474,10 @@ def _llm_sweep(
     audit_start = len(state.batch_audit)
     fatal_error: FatalLLMError | None = None
 
+    # Initial heartbeat — stamps FSM updated_at the moment the sweep
+    # starts so "no progress" watchdogs have a baseline.
+    _heartbeat("sweep_started")
+
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
             if state.llm_calls_total >= cfg.max_total_llm_calls:
@@ -462,6 +490,7 @@ def _llm_sweep(
                     "LLM sweep aborting — cancellation requested: %s",
                     state.cancellation_reason or "(no reason given)",
                 )
+                _heartbeat("sweep_cancelled")
                 return
 
             chunk = table_cols[i: i + effective_batch]
@@ -487,6 +516,11 @@ def _llm_sweep(
                     state.labels[c.column_name] = c.category_code
                     state.confidence[c.column_name] = c.confidence
                     state.label_source[c.column_name] = "llm"
+
+            # Per-batch heartbeat — advances FSM.updated_at so operators
+            # and watchdogs can tell a running sweep from a stalled one
+            # even without per-sub-batch granularity in the audit log.
+            _heartbeat("sweep_batch_completed")
 
         if fatal_error is not None:
             break

@@ -652,10 +652,26 @@ def run_classification_pipeline(
         except Exception as exc:
             logger.debug("nautilus registration skipped: %s", exc)
 
+        # Heartbeat: every batch completion advances FSM.updated_at so
+        # operators and watchdogs can distinguish a running sweep from
+        # one whose thread has died silently (observed in the wild:
+        # Bedrock TCP connection hung with no timeout, gateway thread
+        # entered LLM_SWEEP and never emitted another progress update).
+        def _sweep_progress(p: dict) -> None:
+            try:
+                fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
+                    "columns_total": total_columns,
+                    "mc_frontier": len(sweep_columns),
+                    **p,
+                })
+            except Exception:
+                pass  # never let progress reporting abort the sweep
+
         _llm_sweep(
             state, boot_cfg, llm_backend, system_prompt,
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
+            progress_callback=_sweep_progress,
         )
 
         # ── Label Propagation ──────────────────────────────────────
