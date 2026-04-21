@@ -40,10 +40,10 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     "classify_bootstrap_max_iterations": {
         "hocon_path": "classify.bootstrap.max_iterations",
         "label": "Max Iterations",
-        "description": "Upper bound on bootstrap revisit iterations",
+        "description": "Upper bound on bootstrap revisit iterations. Floor of 2 enforced by project directive — a single-iteration run skips the revisit pass and is not the pipeline we publish accuracy numbers for.",
         "group": "convergence",
         "type": "int",
-        "min": 1,
+        "min": 2,
         "max": 15,
         "step": 1,
         "default": 5,
@@ -499,18 +499,12 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 0.10,
         "caption_template": "Shrink each round's contribution by {value} — lower = smoother fit, pair with higher iterations.",
     },
-    "classify_catboost_fit_to_llm": {
-        "hocon_path": "classify.catboost.fit_to_llm",
-        "label": "Fit CatBoost to LLM",
-        "description": "Train CatBoost in-memory on (embedding_text, llm_predicted_code) pairs after the LLM sweep — turns CatBoost into the explainability surface for the LLM's decisions",
-        "group": "training",
-        "type": "switch",
-        "default": True,
-        "captions": {
-            True: "CatBoost trained on this run's LLM labels — SHAP/SAGE explain why the LLM chose each code via the 12 embedding features.",
-            False: "CatBoost loaded from pre-trained model path — attribution reflects the pre-trained model, which may not agree with the current LLM.",
-        },
-    },
+    # classify_catboost_fit_to_llm intentionally not user-tunable —
+    # it is a project design directive (must be True).  Enforced at
+    # pipeline entry in run_classification_pipeline.  See project memory
+    # feedback_pipeline_invariants.md.  The companion knob
+    # classify_catboost_fit_to_llm_min_labels tunes *when* fit-to-LLM
+    # kicks in and is kept tunable below.
     "classify_catboost_fit_to_llm_min_labels": {
         "hocon_path": "classify.catboost.fit_to_llm_min_labels",
         "label": "Fit-to-LLM Min Labels",

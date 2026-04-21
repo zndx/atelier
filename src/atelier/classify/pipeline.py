@@ -298,6 +298,37 @@ def run_classification_pipeline(
     from atelier.config_overlay import apply_to_config
     cfg = apply_to_config(cfg)
 
+    # ── Design invariants (non-negotiable) ────────────────────
+    # These floors exist because the values below them produce output
+    # that *looks like* a classification run but isn't the pipeline we
+    # publish accuracy numbers for.  Project directive — see
+    # docs/src/architecture/classification.md and project memory
+    # ``feedback_pipeline_invariants.md``.  Do not widen or remove
+    # without an explicit sign-off from the user; they have been
+    # suggested as memory-pressure mitigations in the past and are
+    # not acceptable.
+    min_iterations = 2
+    if cfg.classify_bootstrap_max_iterations < min_iterations:
+        raise ValueError(
+            f"classify.bootstrap.max_iterations = "
+            f"{cfg.classify_bootstrap_max_iterations} violates the project "
+            f"design directive (minimum {min_iterations}).  The bootstrap "
+            f"loop's revisit pass is part of the published-accuracy "
+            f"pipeline; setting max_iterations=1 skips it and produces a "
+            f"different algorithm.  If you're hitting resource pressure, "
+            f"fix the resource budget — do not shrink the pipeline."
+        )
+    if not cfg.classify_catboost_fit_to_llm:
+        raise ValueError(
+            "classify.catboost.fit_to_llm = false violates the project "
+            "design directive.  Fit-to-LLM is the training regime under "
+            "which the published accuracy numbers were obtained; "
+            "disabling it swaps in a pre-trained CatBoost whose "
+            "attributions do not agree with the current LLM's decisions.  "
+            "If you're hitting resource pressure, fix the resource budget "
+            "— do not change the training regime."
+        )
+
     # ── Respect HOCON-configured discovery limits ─────────────
     # When callers (gateway, service) don't pass these explicitly,
     # fall back to the configured values instead of the hard-coded
