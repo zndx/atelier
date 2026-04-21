@@ -307,16 +307,34 @@ def run_classification_pipeline(
     # without an explicit sign-off from the user; they have been
     # suggested as memory-pressure mitigations in the past and are
     # not acceptable.
-    min_iterations = 2
-    if cfg.classify_bootstrap_max_iterations < min_iterations:
+    min_iterations_floor = 2
+    if cfg.classify_bootstrap_max_iterations < min_iterations_floor:
         raise ValueError(
             f"classify.bootstrap.max_iterations = "
             f"{cfg.classify_bootstrap_max_iterations} violates the project "
-            f"design directive (minimum {min_iterations}).  The bootstrap "
-            f"loop's revisit pass is part of the published-accuracy "
-            f"pipeline; setting max_iterations=1 skips it and produces a "
-            f"different algorithm.  If you're hitting resource pressure, "
-            f"fix the resource budget — do not shrink the pipeline."
+            f"design directive (minimum {min_iterations_floor}).  The "
+            f"bootstrap loop's revisit pass is part of the published-"
+            f"accuracy pipeline; setting max_iterations=1 skips it and "
+            f"produces a different algorithm.  If you're hitting resource "
+            f"pressure, fix the resource budget — do not shrink the pipeline."
+        )
+    if cfg.classify_bootstrap_min_iterations < min_iterations_floor:
+        raise ValueError(
+            f"classify.bootstrap.min_iterations = "
+            f"{cfg.classify_bootstrap_min_iterations} violates the project "
+            f"design directive (minimum {min_iterations_floor}).  Without "
+            f"a min_iterations floor the loop can exit on iteration 1 "
+            f"when the initial disagreement set happens to be empty — "
+            f"the iterative DST-fusion component never runs and the "
+            f"'CONVERGED' state is silently misleading.  See "
+            f"feedback_pipeline_invariants.md."
+        )
+    if cfg.classify_bootstrap_min_iterations > cfg.classify_bootstrap_max_iterations:
+        raise ValueError(
+            f"classify.bootstrap.min_iterations "
+            f"({cfg.classify_bootstrap_min_iterations}) must not exceed "
+            f"classify.bootstrap.max_iterations "
+            f"({cfg.classify_bootstrap_max_iterations})."
         )
     if not cfg.classify_catboost_fit_to_llm:
         raise ValueError(
@@ -586,6 +604,7 @@ def run_classification_pipeline(
             bootstrap_config_from_cfg,
             _coverage,
             _identify_disagreements,
+            _identify_uncertain_columns,
             _llm_revisit,
             _llm_sweep,
             _mean_k,
@@ -771,6 +790,12 @@ def run_classification_pipeline(
         # Record iteration-0 metrics from initial ML validation
         record_iteration_metrics(state, column_names, len(disagreements))
 
+        # Convergence reason carried through both loop flavours and into
+        # the final run summary.  Surfaces "how" the run ended to the UI
+        # and to overwatch analysis — a green CONVERGED chip that hides
+        # "no_revisit_candidates at iteration 1" is a silent failure.
+        convergence_reason: str | None = None
+
         # Agent-driven convergence (when configured and credentials available)
         if cfg.classify_agent_enabled and (cfg.has_anthropic or cfg.has_bedrock):
             from atelier.classify.agent_loop import run_agent_loop
@@ -785,28 +810,70 @@ def run_classification_pipeline(
                 column_names, samples_by_name, column_table,
                 category_set, frame, has_embeddings, discounts,
             )
+            convergence_reason = (
+                state.agent_converged_reason or "agent_convergence"
+            )
         else:
-            # Programmatic convergence loop (default)
+            # Programmatic convergence loop (default).
+            #
+            # The revisit candidate set is the UNION of two criteria:
+            #  (a) K-based disagreements — LLM and ML emit different codes
+            #      with enough source conflict to flag.
+            #  (b) belief-gap uncertainty — even when LLM and ML coincide,
+            #      a column with ``bel < bel_floor`` or ``gap > threshold``
+            #      is a weakly-supported prediction that deserves a
+            #      second look with enriched context.
+            #
+            # Pre-``min_iterations`` iterations cannot exit on the empty-
+            # revisit-set branch: the algorithm's published accuracy
+            # numbers rely on at least one revisit pass actually running.
+            # Mirrors the ``max_iterations >= 2`` directive in 0c0170f.
             for iteration in range(1, boot_cfg.max_iterations + 1):
-                if not disagreements:
-                    logger.info("No disagreements — converged")
+                revisit_candidates = list(disagreements)
+                uncertain = _identify_uncertain_columns(state, column_names, boot_cfg)
+                # Dedupe while preserving disagreement ordering (highest K first).
+                seen = set(revisit_candidates)
+                for name in uncertain:
+                    if name not in seen:
+                        revisit_candidates.append(name)
+                        seen.add(name)
+
+                if not revisit_candidates and iteration > boot_cfg.min_iterations:
+                    convergence_reason = "no_revisit_candidates"
+                    logger.info(
+                        "No revisit candidates after min_iterations — converged",
+                    )
                     break
 
                 if state.llm_calls_total >= boot_cfg.max_total_llm_calls:
+                    convergence_reason = "budget_exhausted"
                     logger.info("Budget exhausted (%d calls)", state.llm_calls_total)
                     break
 
-                if mean_k < boot_cfg.k_threshold:
+                if (
+                    mean_k < boot_cfg.k_threshold
+                    and iteration > boot_cfg.min_iterations
+                ):
+                    convergence_reason = "k_threshold_met"
                     logger.info("Mean K=%.3f < threshold — converged", mean_k)
                     break
 
-                # Early termination: K no longer decreasing
-                if should_stop_early(state):
+                # Early termination: K no longer decreasing (plateau).
+                # Still honored AFTER the min_iterations floor so a truly
+                # plateaued run stops, but an iter-1 coincidence can't
+                # trigger it.
+                if should_stop_early(state) and iteration > boot_cfg.min_iterations:
+                    convergence_reason = "plateau"
                     logger.info(
                         "K not decreasing for 2 iterations — early stop (mean_K=%.3f)",
                         mean_k,
                     )
                     break
+
+                # Use the broadened set for the revisit, but preserve the
+                # narrow ``disagreements`` variable for existing call sites
+                # (Row MC rotation, telemetry, etc.).
+                disagreements = revisit_candidates
 
                 state.iteration = iteration
 
@@ -895,10 +962,24 @@ def run_classification_pipeline(
 
                 record_iteration_metrics(state, column_names, len(disagreements))
 
+            # Loop exited without hitting one of the named break paths —
+            # we ran the full max_iterations budget.  Flag that honestly
+            # so the UI can show it rather than claiming belief-gap
+            # convergence we didn't actually achieve.
+            if convergence_reason is None:
+                convergence_reason = "max_iterations_reached"
+
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         coverage = _coverage(state, column_names)
         mean_k = _mean_k(state, column_names)
         converged = coverage >= boot_cfg.coverage_target and mean_k < boot_cfg.k_threshold
+        # If the loop path never assigned a reason but the run "converged"
+        # by the coverage+K criteria above, flag it explicitly rather than
+        # letting the absence be interpreted as legitimate convergence.
+        if convergence_reason is None:
+            convergence_reason = (
+                "coverage_and_k_met" if converged else "unknown"
+            )
 
         # ── Frontier SVM retrain #3: final (only if not converged)
         if boot_cfg.frontier_svm_retrain and not converged:
@@ -949,6 +1030,7 @@ def run_classification_pipeline(
         from atelier.classify.evaluation import epistemic_evaluation
         epistemic = epistemic_evaluation(classifications, category_set)
         summary["converged"] = converged
+        summary["convergence_reason"] = convergence_reason
         summary["epistemic_evaluation"] = epistemic
         from atelier.classify.bootstrap import k_convergence_rate
         summary["bootstrap_iterations"] = state.iteration

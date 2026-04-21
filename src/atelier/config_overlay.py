@@ -49,6 +49,18 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 5,
         "caption_template": "Stop the bootstrap loop after {value} revisit iterations even if not converged.",
     },
+    "classify_bootstrap_min_iterations": {
+        "hocon_path": "classify.bootstrap.min_iterations",
+        "label": "Min Iterations",
+        "description": "Floor on bootstrap iterations — forces at least this many revisit passes even when the initial disagreement set is empty. Floor of 2 enforced by project directive so the iterative DST-fusion component always runs.",
+        "group": "convergence",
+        "type": "int",
+        "min": 2,
+        "max": 10,
+        "step": 1,
+        "default": 2,
+        "caption_template": "Run at least {value} revisit iterations before the loop is allowed to declare convergence — prevents iter-1 early-exit when LLM and ML coincidentally agree.",
+    },
     "classify_bootstrap_k_threshold": {
         "hocon_path": "classify.bootstrap.k_threshold",
         "label": "Conflict Threshold (K)",

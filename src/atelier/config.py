@@ -130,6 +130,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.fusion_strategy": ("classify_fusion_strategy", str),
     # Bootstrap convergence
     "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
+    "classify.bootstrap.min_iterations": ("classify_bootstrap_min_iterations", int),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -342,6 +343,7 @@ class AtelierConfig:
 
     # Bootstrap convergence
     classify_bootstrap_max_iterations: int = 5
+    classify_bootstrap_min_iterations: int = 2
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000

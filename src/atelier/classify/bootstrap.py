@@ -126,6 +126,16 @@ class BootstrapConfig:
     """Bootstrap convergence configuration."""
 
     max_iterations: int = 5
+    # Floor — forces at least this many iterations even when the loop's
+    # disagreement criterion returns an empty set on the first pass.
+    # Project directive: iteration is part of the algorithm.  An
+    # early-exit without any revisit on iteration 1 produces output the
+    # same size as the algorithm-as-designed but with fundamentally
+    # different semantics — we haven't actually exercised the iterative
+    # DST-fusion component.  The invariant ``min_iterations >= 2`` is
+    # enforced at pipeline entry, mirroring the ``max_iterations >= 2``
+    # rule codified in 0c0170f.
+    min_iterations: int = 2
     k_threshold: float = 0.2
     coverage_target: float = 1.0
     confidence_floor: float = 0.5
@@ -152,7 +162,13 @@ class BootstrapConfig:
     # Belief-gap convergence (primary convergence criteria)
     gap_threshold: float = 0.15
     clarity_target: float = 0.10
-    bel_floor: float = 0.50
+    # Minimum belief mass for a prediction to be considered "settled".
+    # 0.50 (coin-flip) is too permissive — it treats barely-one-option-
+    # is-leading as adequate evidence for a terminal classification.
+    # 0.80 means the winning code must hold the majority of the mass
+    # function before the loop stops revisiting it.  Tuned upward
+    # alongside min_iterations to make the revisit pass substantive.
+    bel_floor: float = 0.80
     # Wall-clock deadline for the LLM sweep (seconds).
     # 0 = disabled (the default).  Healthy sweeps on large corpora
     # routinely exceed 30 minutes — a 9782-column synth run at a
@@ -180,6 +196,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
     max_calls = cfg.classify_bootstrap_max_total_llm_calls
     return BootstrapConfig(
         max_iterations=cfg.classify_bootstrap_max_iterations,
+        min_iterations=getattr(cfg, "classify_bootstrap_min_iterations", 2),
         k_threshold=cfg.classify_bootstrap_k_threshold,
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,

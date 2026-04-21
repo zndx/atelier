@@ -151,6 +151,35 @@ interface TerminalModelsResponse {
   override_set: boolean;
 }
 
+// Convergence-reason taxonomy.  Surfaces HOW a run ended alongside the
+// CONVERGED state chip so an iter-1 early-exit cannot masquerade as
+// legitimate belief-gap convergence.  Project directive — the pipeline
+// is iterative by design; reasons marked suspect indicate that design
+// wasn't exercised and the result deserves extra scrutiny.
+const CONVERGENCE_REASON_DESCRIPTIONS: Record<string, string> = {
+  no_revisit_candidates:
+    "Revisit candidate set was empty at loop exit — legitimate only AFTER min_iterations.",
+  k_threshold_met:
+    "Mean DST conflict K fell below threshold (honoring min_iterations floor).",
+  plateau:
+    "Belief gap stopped decreasing for 2+ iterations — converged by plateau detection.",
+  budget_exhausted:
+    "LLM call budget hit before convergence criteria were met.",
+  max_iterations_reached:
+    "Ran the full max_iterations without meeting belief-gap criteria.",
+  coverage_and_k_met:
+    "Coverage target reached with mean K below threshold (fallback path).",
+  agent_convergence:
+    "Agent-driven loop declared convergence.",
+  unknown:
+    "Reason not explicitly set — pipeline exited without a named path.",
+};
+const CONVERGENCE_REASON_IS_SUSPECT = new Set<string>([
+  "unknown",
+  "max_iterations_reached",
+  "budget_exhausted",
+]);
+
 const FSM_STATE_COLORS: Record<string, string> = {
   IDLE: "default",
   LOADING_VOCAB: "processing",
@@ -457,6 +486,25 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
       <Descriptions column={2} size="small" bordered>
         <Descriptions.Item label="State">
           <Tag color={FSM_STATE_COLORS[state] ?? "default"}>{state}</Tag>
+          {state === "CONVERGED" && progress.convergence_reason != null && (
+            <Tag
+              color={
+                CONVERGENCE_REASON_IS_SUSPECT.has(
+                  String(progress.convergence_reason),
+                )
+                  ? "orange"
+                  : "blue"
+              }
+              style={{ marginLeft: 8 }}
+              title={String(
+                CONVERGENCE_REASON_DESCRIPTIONS[
+                  String(progress.convergence_reason)
+                ] ?? progress.convergence_reason,
+              )}
+            >
+              {String(progress.convergence_reason)}
+            </Tag>
+          )}
         </Descriptions.Item>
         <Descriptions.Item label="LLM Backend">
           <Tag color={hasClassifyLlm ? "green" : "orange"}>
