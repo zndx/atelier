@@ -18,19 +18,28 @@ if TYPE_CHECKING:
     from atelier.config import AtelierConfig
 
 
-def _build_anthropic_client(cfg: AtelierConfig):
-    """Build direct Anthropic API client."""
+def _build_anthropic_client(cfg: AtelierConfig, *, timeout: float = 30.0):
+    """Build direct Anthropic API client.
+
+    Default 30s total timeout is short enough that validation probes
+    fail fast during cold-boot egress-policy propagation on CAI (key
+    path for the auto-start connectivity gate) without being so short
+    that legitimate cross-region API calls under load would false-fail.
+    """
     import anthropic
-    return anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    return anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=timeout)
 
 
-def _build_bedrock_client(cfg: AtelierConfig):
+def _build_bedrock_client(cfg: AtelierConfig, *, timeout: float = 30.0):
     """Build AWS Bedrock client.
 
     Uses the region embedded in the model ARN when present, falling back
     to ``cfg.aws_region``.  Cross-region inference profiles encode their
     target region in the ARN; without this the client connects to the
     default region and gets ``ResourceNotFoundException``.
+
+    Default 30s total timeout — same rationale as
+    :func:`_build_anthropic_client`.
     """
     import anthropic
     from atelier.config import region_from_arn
@@ -41,6 +50,7 @@ def _build_bedrock_client(cfg: AtelierConfig):
         aws_secret_key=cfg.aws_secret_access_key,
         aws_region=region,
         aws_session_token=cfg.aws_session_token,
+        timeout=timeout,
     )
 
 

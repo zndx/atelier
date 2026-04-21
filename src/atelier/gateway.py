@@ -6,6 +6,7 @@ requests to the co-located gRPC server.
 """
 
 import asyncio
+import time
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -56,7 +57,7 @@ async def _lifespan(app: FastAPI):
         except Exception as exc:
             _log.warning("Classify data source seeding skipped: %s", exc)
         try:
-            _maybe_auto_start_classify()
+            await _maybe_auto_start_classify()
         except Exception as exc:
             _log.warning("Classify auto-start skipped: %s", exc)
 
@@ -427,19 +428,31 @@ def _seed_classify_data_source() -> None:
         _log.warning("Classify data source seed failed: %s", exc)
 
 
-def _maybe_auto_start_classify() -> None:
+async def _maybe_auto_start_classify() -> None:
     """Kick off a classification run on boot when configured.
 
     Gated by ``ATELIER_CLASSIFY_AUTO_START`` (HOCON: ``classify.auto_start``).
-    Uses the same stable source_id shape as ``_seed_classify_data_source``
-    (``classify-{connection}-{database}``) so the run targets the
-    env-seeded row — operator edits to vocab_uri still apply, because
-    the DAO row wins over the raw env in the fsm_start precedence ladder.
+    Before dispatching, validates Bedrock / Anthropic connectivity with
+    retry — cold-boot egress-policy propagation on CAI can blackhole
+    outbound traffic for tens of seconds after pod start, and dispatching
+    the pipeline into that window resulted in a multi-minute hang on
+    the first Bedrock ``converse()`` call (observed in production).
 
-    Runs inside the lifespan seed task, but ``fsm_start`` dispatches the
-    pipeline to its own worker thread, so this call returns quickly.
-    The existing in-flight guard in ``fsm_start`` (IDLE/CONVERGED/ERROR)
-    prevents a double-launch if the lifespan replays on reload.
+    The validation probe uses a short timeout (30s) so failures surface
+    fast.  Retries back off up to 30s per attempt with a 5-minute total
+    deadline; if connectivity never appears we skip auto-start and log
+    a clear warning — the operator can start manually from the UI once
+    their environment is ready.
+
+    Async because it needs ``asyncio.sleep`` between retries to yield
+    the event loop to request serving.  The actual connectivity probe
+    runs in a thread executor so the 30s timeout doesn't block the
+    loop on a hung HTTP call.
+
+    Once validation passes, ``fsm_start`` dispatches the pipeline to
+    its own daemon thread and returns quickly.  The existing in-flight
+    guard in ``fsm_start`` (IDLE/CONVERGED/ERROR) prevents double-
+    launch if the lifespan replays on reload.
     """
     try:
         from atelier.config import load_config
@@ -455,6 +468,63 @@ def _maybe_auto_start_classify() -> None:
             "classify_auto_start=true but CONNECTION/DATABASE unset; skipping"
         )
         return
+
+    # Connectivity gate — retry with exponential backoff until the
+    # configured provider validates or the deadline expires.  This
+    # prevents the "pipeline enters LLM_SWEEP and hangs 30 minutes on
+    # the first API call" failure mode observed when auto-start fired
+    # into a cold-boot egress blackhole.
+    loop = asyncio.get_event_loop()
+    deadline = time.monotonic() + 300.0  # 5 minutes total
+    attempt = 0
+    while time.monotonic() < deadline:
+        attempt += 1
+        try:
+            from atelier.agents import validate_credentials
+            result = await loop.run_in_executor(
+                None, validate_credentials, cfg,
+            )
+            providers = (result or {}).get("providers", {}) or {}
+            configured = list(providers.keys())
+            valid = [p for p, r in providers.items() if r.get("valid")]
+            # Require at least one configured provider to validate
+            # cleanly.  Missing credentials means no auto-start would
+            # be useful; no valid providers means the pipeline would
+            # fail immediately anyway.
+            if configured and valid:
+                _log.info(
+                    "Auto-start connectivity gate passed after %d attempt(s): "
+                    "valid=%s",
+                    attempt, valid,
+                )
+                break
+            # Describe what failed so the CAI log is self-explanatory.
+            for name, r in providers.items():
+                if not r.get("valid"):
+                    _log.warning(
+                        "Auto-start gate attempt %d: %s %s — %s",
+                        attempt, name,
+                        r.get("failure_kind", "invalid"),
+                        (r.get("error") or "").splitlines()[0][:200],
+                    )
+        except Exception as exc:
+            _log.warning(
+                "Auto-start gate attempt %d: validation raised %s: %s",
+                attempt, type(exc).__name__, exc,
+            )
+        # Exponential backoff capped at 30s.  Yields to the event loop
+        # so the gateway keeps serving /api/status etc. while we wait.
+        backoff = min(30.0, 2.0 * (2 ** (attempt - 1)))
+        await asyncio.sleep(backoff)
+    else:
+        _log.warning(
+            "Auto-start skipped: no configured LLM provider validated "
+            "within 300s.  Start manually from the Status panel once "
+            "the environment is ready (check CAI egress policy + "
+            "AWS/Anthropic credentials).",
+        )
+        return
+
     source_id = _classify_source_id(connection, database)
     result = fsm_start(source_id=source_id)
     _log.info("Classify auto-start dispatched: %s → %s", source_id, result)

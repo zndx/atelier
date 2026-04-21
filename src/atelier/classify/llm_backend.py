@@ -937,17 +937,31 @@ class BedrockBackend(_BedrockMixin, LLMBackend):
             )
 
         from atelier.config import region_from_arn
+        from botocore.config import Config
 
         arn_region = region_from_arn(self._config.model)
         effective_region = arn_region or self._config.aws_region or "us-east-1"
 
+        # Explicit timeouts because the default boto3 connect-timeout
+        # is generous and a cold-boot CAI pod waiting for egress policy
+        # propagation can blackhole SYN packets for minutes.  With these
+        # values, a hung connect fails fast (15s) and a hung response
+        # fails reasonably (180s), both surfacing as exceptions the
+        # halving/retry loop can act on instead of an unbounded stall.
+        # max_attempts=0 disables boto3's implicit retry so our own
+        # halving retry stays in control of the retry budget.
+        bcfg = Config(
+            connect_timeout=15,
+            read_timeout=180,
+            retries={"max_attempts": 0},
+        )
         session = boto3.Session(
             aws_access_key_id=self._config.aws_access_key_id,
             aws_secret_access_key=self._config.aws_secret_access_key,
             aws_session_token=self._config.aws_session_token,
             region_name=effective_region,
         )
-        self._client = session.client("bedrock-runtime")
+        self._client = session.client("bedrock-runtime", config=bcfg)
         return self._client
 
     def classify_batch(
@@ -1083,17 +1097,31 @@ class BedrockStructuredBackend(_BedrockMixin, LLMBackend):
             )
 
         from atelier.config import region_from_arn
+        from botocore.config import Config
 
         arn_region = region_from_arn(self._config.model)
         effective_region = arn_region or self._config.aws_region or "us-east-1"
 
+        # Explicit timeouts because the default boto3 connect-timeout
+        # is generous and a cold-boot CAI pod waiting for egress policy
+        # propagation can blackhole SYN packets for minutes.  With these
+        # values, a hung connect fails fast (15s) and a hung response
+        # fails reasonably (180s), both surfacing as exceptions the
+        # halving/retry loop can act on instead of an unbounded stall.
+        # max_attempts=0 disables boto3's implicit retry so our own
+        # halving retry stays in control of the retry budget.
+        bcfg = Config(
+            connect_timeout=15,
+            read_timeout=180,
+            retries={"max_attempts": 0},
+        )
         session = boto3.Session(
             aws_access_key_id=self._config.aws_access_key_id,
             aws_secret_access_key=self._config.aws_secret_access_key,
             aws_session_token=self._config.aws_session_token,
             region_name=effective_region,
         )
-        self._client = session.client("bedrock-runtime")
+        self._client = session.client("bedrock-runtime", config=bcfg)
         return self._client
 
     def classify_batch(
