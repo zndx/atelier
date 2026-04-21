@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -130,6 +131,16 @@ class BootstrapConfig:
     gap_threshold: float = 0.15
     clarity_target: float = 0.10
     bel_floor: float = 0.50
+    # Wall-clock deadline for the LLM sweep.  A blackholed endpoint with
+    # a 15s connect-timeout can chew through a pathological halving tree
+    # for hours; this bounds the damage at 30 minutes and surfaces the
+    # hang as a FatalLLMError rather than letting the FSM look frozen.
+    sweep_deadline_s: float = 1800.0
+    # Stop halving after this many consecutive recoverable failures in
+    # a row — at that point the endpoint is effectively dead and each
+    # further retry just compounds the outage.  Counts failures at any
+    # depth (a halved_on_error at depth 3 increments; a success resets).
+    max_consecutive_halve_failures: int = 8
 
 
 def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
@@ -205,6 +216,19 @@ class BootstrapState:
     ml_belief: dict[str, float] = field(default_factory=dict)
     ml_plausibility: dict[str, float] = field(default_factory=dict)
     llm_calls_total: int = 0
+    # Every entry into ``_classify_batch_with_retry`` increments this —
+    # success, halve, or failed-at-min.  ``llm_calls_total`` only moves on
+    # a successful backend response, so the old budget gate couldn't cap
+    # a retry storm.  Attempts is what we actually want to bound.
+    llm_attempts_total: int = 0
+    # Wall-clock start of the current LLM sweep (seconds since epoch).
+    # Zeroed between sweeps; ``_classify_batch_with_retry`` reads this to
+    # enforce ``BootstrapConfig.sweep_deadline_s``.
+    sweep_started_at: float = 0.0
+    # Running count of consecutive recoverable failures.  Reset on any
+    # success; LS-4 circuit breaker raises FatalLLMError when it reaches
+    # ``cfg.max_consecutive_halve_failures``.
+    consecutive_halve_failures: int = 0
     tokens_input: int = 0
     tokens_output: int = 0
     iteration_metrics: list[IterationMetrics] = field(default_factory=list)
@@ -278,6 +302,8 @@ def _classify_batch_with_retry(
     _depth: int = 0,
     _batch_index: int | None = None,
     _parent_index: int | None = None,
+    heartbeat: Callable[[str], None] | None = None,
+    cfg: BootstrapConfig | None = None,
 ) -> list:
     """Classify a batch; on truncation OR recoverable failure, halve and recurse.
 
@@ -293,10 +319,31 @@ def _classify_batch_with_retry(
     nautilus watcher (Pillar 2) and the post-mortem overwatch (Pillar 3)
     can reconstruct exactly which columns were attempted and what the
     outcome was.
+
+    Three hang-avoidance mechanisms engage here:
+
+    * ``heartbeat`` fires before each backend call and after each
+      ``_record``, so FSM.updated_at advances even during a deep halving
+      tree — a multi-minute sub-batch looks distinguishable from a dead
+      thread.
+    * ``cfg.sweep_deadline_s`` bounds total sweep wall-clock (default
+      30 min); a blackholed endpoint raises FatalLLMError instead of
+      recursing indefinitely.
+    * ``cfg.max_consecutive_halve_failures`` trips when the endpoint is
+      effectively dead — converts a ~15min-per-batch retry storm into a
+      ~2min fail-fast.
     """
     n = len(chunk_samples)
     batch_index = len(state.batch_audit) if _batch_index is None else _batch_index
     col_names = [s.name for s in chunk_samples]
+
+    def _beat(phase: str) -> None:
+        if heartbeat is None:
+            return
+        try:
+            heartbeat(phase)
+        except Exception:
+            pass  # heartbeat is observability; never let it fail the sweep
 
     def _record(status: str, error: Exception | None = None) -> None:
         state.batch_audit.append(BatchAttempt(
@@ -311,6 +358,48 @@ def _classify_batch_with_retry(
             ts=time.time(),
         ))
 
+    # LS-7 — cancel short-circuit before spending more budget.  The outer
+    # loop checks this too; the inner check stops a halving tree from
+    # burning through every sub-branch after operator cancel.
+    if state.cancelled:
+        return []
+
+    # LS-3 — wall-clock deadline.  Bounded so a blackholed endpoint with
+    # a 15s connect-timeout can't recurse through ~1 hour of retries.
+    if cfg is not None and state.sweep_started_at > 0:
+        elapsed = time.time() - state.sweep_started_at
+        if elapsed > cfg.sweep_deadline_s:
+            _record("fatal")
+            _beat("sweep_deadline_exceeded")
+            raise FatalLLMError(
+                f"Sweep wall-clock deadline exceeded "
+                f"({elapsed:.0f}s > {cfg.sweep_deadline_s:.0f}s) — "
+                f"aborting rather than continuing to halve."
+            )
+
+    # LS-4 — consecutive recoverable failures; endpoint appears dead.
+    if (
+        cfg is not None
+        and state.consecutive_halve_failures >= cfg.max_consecutive_halve_failures
+    ):
+        _record("fatal")
+        _beat("sweep_consecutive_failure_breaker")
+        raise FatalLLMError(
+            f"{state.consecutive_halve_failures} consecutive recoverable "
+            f"LLM failures — endpoint appears dead; aborting sweep."
+        )
+
+    # LS-2 — count every attempt.  Gates in _llm_sweep / _llm_revisit
+    # use this counter so a retry storm actually hits the budget ceiling
+    # (llm_calls_total only increments on successful responses).
+    state.llm_attempts_total += 1
+
+    # LS-1 — heartbeat before the (possibly hanging) backend call so
+    # FSM.updated_at moves during a multi-minute halving tree.  Without
+    # this, a sub-batch burning through its connect-timeout budget looks
+    # identical to a silently-dead thread.
+    _beat(f"sweep_call_start_d{_depth}")
+
     try:
         response = backend.classify_batch(
             chunk_samples, system_prompt,
@@ -321,6 +410,7 @@ def _classify_batch_with_retry(
         kind = _classify_error(exc)
         if kind == "fatal":
             _record("fatal", exc)
+            _beat("sweep_fatal")
             raise FatalLLMError(
                 f"LLM backend reported unrecoverable error ({type(exc).__name__}): {exc}"
             ) from exc
@@ -328,6 +418,8 @@ def _classify_batch_with_retry(
         # Recoverable: halve if possible, else record per-column failure.
         if n <= min_batch:
             _record("failed", exc)
+            state.consecutive_halve_failures += 1
+            _beat("sweep_failed_at_min")
             for name in col_names:
                 if name not in state.failed_columns:
                     state.failed_columns.append(name)
@@ -338,6 +430,8 @@ def _classify_batch_with_retry(
             return []
 
         _record("halved_on_error", exc)
+        state.consecutive_halve_failures += 1
+        _beat(f"sweep_halve_d{_depth}")
         mid = n // 2
         logger.warning(
             "Recoverable LLM error on batch of %d — halving to 2x%d (%s)",
@@ -345,6 +439,9 @@ def _classify_batch_with_retry(
         )
         results: list = []
         for sub in (chunk_samples[:mid], chunk_samples[mid:]):
+            # LS-7 — stop halving immediately on cancel.
+            if state.cancelled:
+                break
             sub_context = None
             if revisit_context:
                 sub_names = [s.name for s in sub]
@@ -356,11 +453,14 @@ def _classify_batch_with_retry(
                 min_batch=min_batch,
                 _depth=_depth + 1,
                 _parent_index=batch_index,
+                heartbeat=heartbeat,
+                cfg=cfg,
             ))
         return results
 
-    # Call returned — record token usage.
+    # Call returned successfully — reset the consecutive-failure streak.
     state.llm_calls_total += 1
+    state.consecutive_halve_failures = 0
     state.tokens_input += response.input_tokens
     state.tokens_output += response.output_tokens
 
@@ -368,22 +468,27 @@ def _classify_batch_with_retry(
         if response.truncated:
             state.truncation_count += 1
             _record("truncated_at_min")
+            _beat("sweep_truncated_at_min")
             logger.warning(
                 "Truncated response at minimum batch size (%d columns)", n,
             )
         else:
             _record("success")
+            _beat(f"sweep_success_d{_depth}")
         return list(response.classifications)
 
     # Truncation detected — halve and retry.
     state.truncation_count += 1
     _record("truncated")
+    _beat(f"sweep_halve_truncation_d{_depth}")
     mid = n // 2
     logger.warning(
         "Truncated response for %d columns — retrying as 2x%d", n, mid,
     )
     results = []
     for sub in (chunk_samples[:mid], chunk_samples[mid:]):
+        if state.cancelled:
+            break
         sub_context = None
         if revisit_context:
             sub_names = [s.name for s in sub]
@@ -395,6 +500,8 @@ def _classify_batch_with_retry(
             min_batch=min_batch,
             _depth=_depth + 1,
             _parent_index=batch_index,
+            heartbeat=heartbeat,
+            cfg=cfg,
         ))
     return results
 
@@ -474,13 +581,22 @@ def _llm_sweep(
     audit_start = len(state.batch_audit)
     fatal_error: FatalLLMError | None = None
 
+    # Anchor the wall-clock deadline (LS-3).  Only overwrite if unset so
+    # downstream phases reuse the same baseline rather than resetting
+    # the budget every time they call into _classify_batch_with_retry.
+    if state.sweep_started_at == 0.0:
+        state.sweep_started_at = time.time()
+
     # Initial heartbeat — stamps FSM updated_at the moment the sweep
     # starts so "no progress" watchdogs have a baseline.
     _heartbeat("sweep_started")
 
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
-            if state.llm_calls_total >= cfg.max_total_llm_calls:
+            # Gate on attempts rather than calls (LS-2) — otherwise a
+            # retry storm against a dead endpoint has no ceiling because
+            # llm_calls_total only advances on success.
+            if state.llm_attempts_total >= cfg.max_total_llm_calls:
                 break
             # Cooperative cancellation — nautilus (or an operator via the
             # gateway) sets this flag between batches; exit cleanly here
@@ -503,11 +619,16 @@ def _llm_sweep(
                     backend, chunk_samples, system_prompt, state,
                     table_name=tname,
                     min_batch=cfg.min_columns_per_call,
+                    heartbeat=_heartbeat,
+                    cfg=cfg,
                 )
             except FatalLLMError as exc:
-                # Halving can't fix auth/permission/invariant failures.
-                # Abort immediately with a clear diagnostic rather than
-                # continuing with partial coverage that looks like success.
+                # Halving can't fix auth/permission/invariant failures —
+                # nor the LS-3 wall-clock deadline or LS-4 consecutive-
+                # failure breaker, which also surface as FatalLLMError.
+                # Abort immediately so the FSM lands on ERROR with a
+                # clear diagnostic rather than continuing with partial
+                # coverage that looks like success.
                 fatal_error = exc
                 break
 
@@ -558,7 +679,7 @@ def _llm_sweep(
     # even the pathological "LLM keeps dropping column X" case at least
     # produces a failed_columns audit entry with the column name.
     missing_after_sweep = [n for n in column_names if n not in state.labels]
-    if missing_after_sweep and state.llm_calls_total < cfg.max_total_llm_calls:
+    if missing_after_sweep and state.llm_attempts_total < cfg.max_total_llm_calls:
         logger.warning(
             "LLM sweep left %d/%d columns without labels — running "
             "targeted coverage retry at min_batch=%d",
@@ -572,7 +693,7 @@ def _llm_sweep(
             t = column_table.get(name, "__flat__")
             by_table_missing.setdefault(t, []).append(name)
         for table_name, names in by_table_missing.items():
-            if state.llm_calls_total >= cfg.max_total_llm_calls:
+            if state.llm_attempts_total >= cfg.max_total_llm_calls:
                 break
             if state.cancelled:
                 break
@@ -580,7 +701,7 @@ def _llm_sweep(
             # if that's still too big, halving will drive toward min.
             retry_batch = max(cfg.min_columns_per_call, effective_batch // 2)
             for i in range(0, len(names), retry_batch):
-                if state.llm_calls_total >= cfg.max_total_llm_calls:
+                if state.llm_attempts_total >= cfg.max_total_llm_calls:
                     break
                 chunk = names[i: i + retry_batch]
                 chunk_samples = [samples[n] for n in chunk]
@@ -590,6 +711,8 @@ def _llm_sweep(
                         backend, chunk_samples, system_prompt, state,
                         table_name=tname,
                         min_batch=cfg.min_columns_per_call,
+                        heartbeat=_heartbeat,
+                        cfg=cfg,
                     )
                 except FatalLLMError:
                     raise
@@ -737,7 +860,9 @@ def _llm_revisit(
 
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
-            if state.llm_calls_total >= cfg.max_total_llm_calls:
+            if state.llm_attempts_total >= cfg.max_total_llm_calls:
+                return
+            if state.cancelled:
                 return
 
             chunk = table_cols[i: i + effective_batch]
@@ -751,6 +876,7 @@ def _llm_revisit(
                     revisit_context=chunk_context,
                     table_name=tname,
                     min_batch=cfg.min_columns_per_call,
+                    cfg=cfg,
                 )
             except FatalLLMError as exc:
                 logger.error(
