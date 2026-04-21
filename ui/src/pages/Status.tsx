@@ -1242,11 +1242,11 @@ export default function Status() {
             <Paragraph type="secondary" style={{ marginBottom: 12 }}>
               Full Claude Agent SDK round-trip. Costs ~$0.02.
               {smokeTest &&
-                Date.now() - smokeTest.lastRunAt > 10 * 60 * 1000 && (
+                Date.now() - smokeTest.lastRunAt > 24 * 60 * 60 * 1000 && (
                   <>
                     {" · "}
                     <Text type="warning">
-                      Result is over 10 minutes old — consider re-running.
+                      Result is over 24 hours old — consider re-running.
                     </Text>
                   </>
                 )}
