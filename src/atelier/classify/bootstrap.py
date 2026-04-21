@@ -106,6 +106,18 @@ class FatalLLMError(RuntimeError):
     """
 
 
+class SweepDeadlineError(FatalLLMError):
+    """Raised when the wall-clock sweep deadline is exceeded.
+
+    Inherits from ``FatalLLMError`` so existing ``except FatalLLMError``
+    handlers in ``_llm_sweep`` and callers route it through the same
+    abort-with-ERROR path — the subclass exists for log-readability
+    (operators can distinguish "hit the 30-min wall" from "auth
+    rejected the key") and for any watchdog that wants to branch on
+    type rather than parse the error string.
+    """
+
+
 # ── State types ──────────────────────────────────────────────────
 
 
@@ -123,7 +135,17 @@ class BootstrapConfig:
     # no column is silently dropped.  Bump only when the backend cannot
     # tolerate single-column calls.
     min_columns_per_call: int = 1
+    # Cap on *successful* LLM responses (preserved semantics — existing
+    # users tune this to limit the cost of a healthy sweep).  A failing
+    # endpoint never increments this so it is not a retry-storm brake;
+    # see ``max_total_llm_attempts`` for that role.
     max_total_llm_calls: int = 5000
+    # Cap on every entry into ``_classify_batch_with_retry`` — success,
+    # failure, halved retry, truncated.  Defaults to 2× calls so a
+    # healthy sweep (where attempts ≈ calls) never trips it; on a
+    # blackholed endpoint where attempts pile up without calls, this is
+    # the gate that stops the retry storm.
+    max_total_llm_attempts: int = 10000
     llm_discount: float = 0.10
     frontier_svm_retrain: bool = True
     frontier_svm_min_labels: int = 20
@@ -145,13 +167,23 @@ class BootstrapConfig:
 
 def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
     """Build BootstrapConfig from an AtelierConfig."""
+    max_calls = cfg.classify_bootstrap_max_total_llm_calls
     return BootstrapConfig(
         max_iterations=cfg.classify_bootstrap_max_iterations,
         k_threshold=cfg.classify_bootstrap_k_threshold,
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,
         min_columns_per_call=getattr(cfg, "classify_llm_min_columns_per_call", 1),
-        max_total_llm_calls=cfg.classify_bootstrap_max_total_llm_calls,
+        max_total_llm_calls=max_calls,
+        max_total_llm_attempts=getattr(
+            cfg, "classify_bootstrap_max_total_llm_attempts", 2 * max_calls,
+        ),
+        sweep_deadline_s=getattr(
+            cfg, "classify_bootstrap_sweep_deadline_s", 1800.0,
+        ),
+        max_consecutive_halve_failures=getattr(
+            cfg, "classify_bootstrap_max_consecutive_halve_failures", 8,
+        ),
         llm_discount=cfg.classify_llm_discount,
         frontier_svm_retrain=cfg.classify_bootstrap_frontier_svm_retrain,
         frontier_svm_min_labels=cfg.classify_bootstrap_frontier_svm_min_labels,
@@ -369,15 +401,32 @@ def _classify_batch_with_retry(
     if cfg is not None and state.sweep_started_at > 0:
         elapsed = time.time() - state.sweep_started_at
         if elapsed > cfg.sweep_deadline_s:
-            _record("fatal")
+            _record("deadline_exceeded")
             _beat("sweep_deadline_exceeded")
-            raise FatalLLMError(
+            raise SweepDeadlineError(
                 f"Sweep wall-clock deadline exceeded "
                 f"({elapsed:.0f}s > {cfg.sweep_deadline_s:.0f}s) — "
-                f"aborting rather than continuing to halve."
+                f"attempts={state.llm_attempts_total}, "
+                f"successful_calls={state.llm_calls_total}, "
+                f"labels={len(state.labels)}"
             )
 
+    # Attempts ceiling — independent of success count.  A failing endpoint
+    # never increments llm_calls_total, so the existing max_total_llm_calls
+    # cap has no brake on a retry storm; this is the gate that catches it.
+    if cfg is not None and state.llm_attempts_total >= cfg.max_total_llm_attempts:
+        _record("attempt_cap_exceeded")
+        _beat("sweep_attempt_cap_exceeded")
+        raise FatalLLMError(
+            f"LLM sweep exceeded max_total_llm_attempts "
+            f"({cfg.max_total_llm_attempts}) — endpoint likely unhealthy "
+            f"(successful_calls={state.llm_calls_total})"
+        )
+
     # LS-4 — consecutive recoverable failures; endpoint appears dead.
+    # Tighter than the attempts cap on a blackholed endpoint: fires in
+    # ~2 min (8 × 15s connect-timeout) vs ~40 min for the attempts cap,
+    # so it's the primary fast-fail and the attempts cap is the backstop.
     if (
         cfg is not None
         and state.consecutive_halve_failures >= cfg.max_consecutive_halve_failures
@@ -593,10 +642,14 @@ def _llm_sweep(
 
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
-            # Gate on attempts rather than calls (LS-2) — otherwise a
-            # retry storm against a dead endpoint has no ceiling because
-            # llm_calls_total only advances on success.
-            if state.llm_attempts_total >= cfg.max_total_llm_calls:
+            # Two budget gates: success-count (preserves the original
+            # max_total_llm_calls semantics — tune to cap cost on a
+            # healthy sweep) and attempts (LS-2; catches the retry storm
+            # that the calls-count gate can't see because a failing
+            # endpoint never increments it).
+            if state.llm_calls_total >= cfg.max_total_llm_calls:
+                break
+            if state.llm_attempts_total >= cfg.max_total_llm_attempts:
                 break
             # Cooperative cancellation — nautilus (or an operator via the
             # gateway) sets this flag between batches; exit cleanly here
@@ -679,7 +732,11 @@ def _llm_sweep(
     # even the pathological "LLM keeps dropping column X" case at least
     # produces a failed_columns audit entry with the column name.
     missing_after_sweep = [n for n in column_names if n not in state.labels]
-    if missing_after_sweep and state.llm_attempts_total < cfg.max_total_llm_calls:
+    if (
+        missing_after_sweep
+        and state.llm_calls_total < cfg.max_total_llm_calls
+        and state.llm_attempts_total < cfg.max_total_llm_attempts
+    ):
         logger.warning(
             "LLM sweep left %d/%d columns without labels — running "
             "targeted coverage retry at min_batch=%d",
@@ -693,7 +750,9 @@ def _llm_sweep(
             t = column_table.get(name, "__flat__")
             by_table_missing.setdefault(t, []).append(name)
         for table_name, names in by_table_missing.items():
-            if state.llm_attempts_total >= cfg.max_total_llm_calls:
+            if state.llm_calls_total >= cfg.max_total_llm_calls:
+                break
+            if state.llm_attempts_total >= cfg.max_total_llm_attempts:
                 break
             if state.cancelled:
                 break
@@ -701,7 +760,9 @@ def _llm_sweep(
             # if that's still too big, halving will drive toward min.
             retry_batch = max(cfg.min_columns_per_call, effective_batch // 2)
             for i in range(0, len(names), retry_batch):
-                if state.llm_attempts_total >= cfg.max_total_llm_calls:
+                if state.llm_calls_total >= cfg.max_total_llm_calls:
+                    break
+                if state.llm_attempts_total >= cfg.max_total_llm_attempts:
                     break
                 chunk = names[i: i + retry_batch]
                 chunk_samples = [samples[n] for n in chunk]
@@ -860,7 +921,9 @@ def _llm_revisit(
 
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
-            if state.llm_attempts_total >= cfg.max_total_llm_calls:
+            if state.llm_calls_total >= cfg.max_total_llm_calls:
+                return
+            if state.llm_attempts_total >= cfg.max_total_llm_attempts:
                 return
             if state.cancelled:
                 return
