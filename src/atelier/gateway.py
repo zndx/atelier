@@ -148,12 +148,23 @@ def _error_envelope(detail: str, *, status: int = 503) -> "JSONResponse":
 
 
 def _seed_sample_source() -> None:
-    """Register OOTB sample data as version 1 if no datasets exist yet.
+    """Register OOTB sample data as version 1 with the bundled reference parquet.
 
-    Called once at gateway startup. Checks the database for existing
-    datasets under the 'ootb-sample' source. If none exist and sample
-    CSVs are available, creates a dataset record so the landing page
-    shows stats immediately.
+    Called once at gateway startup.  Uses a stable dataset_id
+    ``ootb-sample-v1`` so that (a) fresh installs get the bundled
+    pre-classified parquet auto-registered, and (b) existing deployments
+    whose v1 row still has ``parquet_path=""`` (pre-bundling) are
+    converged on the bundled artifact without trampling any
+    user-generated v2+ runs.
+
+    The bundled parquet lives at ``data/sample/atelier_embeddings.parquet``
+    and is produced from a reference pipeline run against the same
+    ``data/sample/tables/*.csv`` that OOTB classification uses.  Ships
+    with the repo so first-time users can explore the Embeddings page
+    before their first real run completes.  If the file is missing
+    (e.g. source checkout without the bundle), we fall back to
+    registering v1 with an empty parquet path — same behaviour as
+    pre-bundling.
     """
     try:
         from atelier.db.dao import AtelierDao
@@ -163,37 +174,57 @@ def _seed_sample_source() -> None:
 
     try:
         dao = AtelierDao()
-        # Always converge the source row to the current scheme'd URI +
-        # source_type='filesystem' (replacing any legacy 'sample' rows).
         from atelier.classify.sampler import _SAMPLE_DIR  # type: ignore[attr-defined]
+        sample_dir = Path(_SAMPLE_DIR).resolve()
         dao.force_upsert_data_source(
             source_id="ootb-sample",
             source_type="filesystem",
             display_name="Sample",
-            source_uri=f"file://{Path(_SAMPLE_DIR).resolve()}",
+            source_uri=f"file://{sample_dir}",
             vocabulary_mode="universal",
         )
-
-        versions = dao.list_dataset_versions("ootb-sample")
-        if versions:
-            return  # Dataset already seeded; source row refreshed above
 
         stats = sample_source_stats()
         if not stats["has_data"]:
             return  # No sample data to seed
 
-        # Register as version 1
-        import uuid
-        dataset_id = str(uuid.uuid4())[:8]
+        # Stable ID lets us idempotently converge v1 onto the bundled
+        # parquet path across restarts and upgrades.  Distinct from the
+        # uuid-based IDs that user-generated runs (v2+) create.
+        stable_v1_id = "ootb-sample-v1"
+        bundled_parquet = sample_dir / "atelier_embeddings.parquet"
+        bundled_path_str = str(bundled_parquet) if bundled_parquet.exists() else ""
+
+        versions = dao.list_dataset_versions("ootb-sample")
+        existing_v1 = next((v for v in versions if v.get("id") == stable_v1_id), None)
+        user_versions = [v for v in versions if v.get("id") != stable_v1_id]
+
+        if (
+            existing_v1
+            and existing_v1.get("parquet_path") == bundled_path_str
+        ):
+            return  # Already correctly seeded; nothing to do
+
+        # Only claim is_active when no user-generated run already owns
+        # it — otherwise we'd silently demote the user's latest run on
+        # every gateway restart.
+        any_user_active = any(v.get("is_active") for v in user_versions)
+        row_count = stats["column_count"]
+        description = (
+            f"{stats['table_count']} tables, {stats['column_count']} columns "
+            f"from expanded ontology"
+        )
+        if bundled_path_str:
+            description += " (pre-classified reference bundle)"
         dao.upsert_dataset(
-            dataset_id=dataset_id,
+            dataset_id=stable_v1_id,
             name="Sample v1",
-            parquet_path="",
-            description=f"{stats['table_count']} tables, {stats['column_count']} columns from expanded ontology",
-            row_count=stats["column_count"],
+            parquet_path=bundled_path_str,
+            description=description,
+            row_count=row_count,
             source_id="ootb-sample",
             version_number=1,
-            is_active=True,
+            is_active=not any_user_active,
             summary=f"{stats['table_count']} tables, {stats['column_count']} columns",
         )
 
@@ -203,11 +234,12 @@ def _seed_sample_source() -> None:
             dao.update_data_source_metadata("ootb-sample", json.dumps({
                 "table_count": stats["table_count"],
                 "column_count": stats["column_count"],
+                "bundled_parquet": bool(bundled_path_str),
             }))
 
         _log.info(
-            "Seeded OOTB sample: %d tables, %d columns as version 1",
-            stats["table_count"], stats["column_count"],
+            "Seeded OOTB sample v1: %d tables, %d columns, bundled_parquet=%s",
+            stats["table_count"], stats["column_count"], bool(bundled_path_str),
         )
     except Exception as exc:
         _log.warning("Sample source seeding failed: %s", exc)
