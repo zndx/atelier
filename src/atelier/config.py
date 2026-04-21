@@ -346,7 +346,7 @@ class AtelierConfig:
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
     classify_bootstrap_max_total_llm_attempts: int = 10000
-    classify_bootstrap_sweep_deadline_s: float = 1800.0
+    classify_bootstrap_sweep_deadline_s: float = 0.0
     classify_bootstrap_max_consecutive_halve_failures: int = 8
     classify_bootstrap_frontier_svm_retrain: bool = True
     classify_bootstrap_frontier_svm_min_labels: int = 20

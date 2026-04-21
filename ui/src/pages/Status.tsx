@@ -7,6 +7,7 @@ import {
   Col,
   Descriptions,
   message,
+  Progress,
   Row,
   Select,
   Space,
@@ -576,7 +577,65 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             {String(progress.llm_calls)}
           </Descriptions.Item>
         )}
+        {progress.sweep_batches != null && (
+          <Descriptions.Item label="Batches">
+            {String(progress.sweep_batches)}
+          </Descriptions.Item>
+        )}
+        {progress.sweep_batch_size != null && (
+          <Descriptions.Item label="Batch Size">
+            {String(progress.sweep_batch_size)}
+          </Descriptions.Item>
+        )}
+        {progress.sweep_elapsed_s != null && (
+          <Descriptions.Item label="Sweep Elapsed">
+            {(() => {
+              const s = Number(progress.sweep_elapsed_s);
+              const m = Math.floor(s / 60);
+              const sec = Math.floor(s % 60);
+              return `${m}m ${sec.toString().padStart(2, "0")}s`;
+            })()}
+          </Descriptions.Item>
+        )}
+        {progress.sweep_phase != null && (
+          <Descriptions.Item label="Sub-phase">
+            <Tag>{String(progress.sweep_phase)}</Tag>
+          </Descriptions.Item>
+        )}
+        {progress.sweep_truncations != null &&
+          Number(progress.sweep_truncations) > 0 && (
+            <Descriptions.Item label="Truncations">
+              <Tag color="orange">{String(progress.sweep_truncations)}</Tag>
+            </Descriptions.Item>
+          )}
+        {progress.sweep_failed != null &&
+          Number(progress.sweep_failed) > 0 && (
+            <Descriptions.Item label="Failed Columns">
+              <Tag color="red">{String(progress.sweep_failed)}</Tag>
+            </Descriptions.Item>
+          )}
       </Descriptions>
+      {state === "LLM_SWEEP" &&
+        progress.columns_total != null &&
+        progress.llm_labeled != null && (
+          <div style={{ marginTop: 12 }}>
+            <Progress
+              percent={
+                Number(progress.columns_total) > 0
+                  ? Math.round(
+                      (Number(progress.llm_labeled) /
+                        Number(progress.columns_total)) *
+                        100,
+                    )
+                  : 0
+              }
+              format={() =>
+                `${progress.llm_labeled} / ${progress.columns_total} columns`
+              }
+              status="active"
+            />
+          </div>
+        )}
       {fsm?.error && (
         <div style={{ marginTop: 12 }}>
           <Text type="danger">{fsm.error}</Text>

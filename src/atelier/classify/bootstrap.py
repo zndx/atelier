@@ -153,11 +153,13 @@ class BootstrapConfig:
     gap_threshold: float = 0.15
     clarity_target: float = 0.10
     bel_floor: float = 0.50
-    # Wall-clock deadline for the LLM sweep.  A blackholed endpoint with
-    # a 15s connect-timeout can chew through a pathological halving tree
-    # for hours; this bounds the damage at 30 minutes and surfaces the
-    # hang as a FatalLLMError rather than letting the FSM look frozen.
-    sweep_deadline_s: float = 1800.0
+    # Wall-clock deadline for the LLM sweep.  ``0`` (default) disables
+    # the brake — the attempts cap and consecutive-failure breaker cover
+    # the dead-endpoint case, and a healthy-but-slow sweep (large vocab
+    # + Bedrock latency) should not be guillotined by a fixed clock.
+    # Set a positive value in HOCON / Settings to re-enable as a hard
+    # ceiling; a ``SweepDeadlineError`` is raised on overrun.
+    sweep_deadline_s: float = 0.0
     # Stop halving after this many consecutive recoverable failures in
     # a row — at that point the endpoint is effectively dead and each
     # further retry just compounds the outage.  Counts failures at any
@@ -179,7 +181,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
             cfg, "classify_bootstrap_max_total_llm_attempts", 2 * max_calls,
         ),
         sweep_deadline_s=getattr(
-            cfg, "classify_bootstrap_sweep_deadline_s", 1800.0,
+            cfg, "classify_bootstrap_sweep_deadline_s", 0.0,
         ),
         max_consecutive_halve_failures=getattr(
             cfg, "classify_bootstrap_max_consecutive_halve_failures", 8,
@@ -398,7 +400,11 @@ def _classify_batch_with_retry(
 
     # LS-3 — wall-clock deadline.  Bounded so a blackholed endpoint with
     # a 15s connect-timeout can't recurse through ~1 hour of retries.
-    if cfg is not None and state.sweep_started_at > 0:
+    # ``sweep_deadline_s <= 0`` disables the wall-clock brake; the
+    # attempts cap (LS-2) and consecutive-failure breaker (LS-4) remain
+    # as the fast brakes on a truly dead endpoint.  Disabled is the
+    # default so a slow-but-healthy Bedrock sweep isn't guillotined.
+    if cfg is not None and cfg.sweep_deadline_s > 0 and state.sweep_started_at > 0:
         elapsed = time.time() - state.sweep_started_at
         if elapsed > cfg.sweep_deadline_s:
             _record("deadline_exceeded")
