@@ -559,13 +559,16 @@ def _coerce(val: Any, target_type: type) -> Any:
         if isinstance(val, bool):
             return val
         if isinstance(val, str):
-            return val.lower() in ("true", "1", "yes")
+            return val.strip().lower() in ("true", "1", "yes")
         return bool(val)
     if target_type is int:
         return int(val)
     if target_type is float:
         return float(val)
-    return str(val)
+    # Strings get whitespace trimmed — AMP env forms and shell dotenv
+    # round-trips can introduce leading/trailing whitespace that becomes
+    # an illegal HTTP header when e.g. an API key reaches httpx.
+    return str(val).strip()
 
 
 def _hocon_to_dict(conf) -> dict[str, Any]:
