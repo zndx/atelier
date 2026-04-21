@@ -153,15 +153,25 @@ class BootstrapConfig:
     gap_threshold: float = 0.15
     clarity_target: float = 0.10
     bel_floor: float = 0.50
-    # Wall-clock deadline for the LLM sweep.  A blackholed endpoint with
-    # a 15s connect-timeout can chew through a pathological halving tree
-    # for hours; this bounds the damage at 30 minutes and surfaces the
-    # hang as a FatalLLMError rather than letting the FSM look frozen.
-    sweep_deadline_s: float = 1800.0
+    # Wall-clock deadline for the LLM sweep (seconds).
+    # 0 = disabled (the default).  Healthy sweeps on large corpora
+    # routinely exceed 30 minutes — a 9782-column synth run at a
+    # legitimate ~33s/batch Bedrock latency takes ~2 hours — so a
+    # wall-clock cap is not a good default brake.  The fast-fail
+    # protection against a blackholed endpoint comes from
+    # ``max_consecutive_halve_failures`` (LS-4, ~2 min trip time) and
+    # the ``max_total_llm_attempts`` backstop; the deadline is kept as
+    # an opt-in ceiling for operators who have a known corpus size
+    # and want a hard wall.  Set to a positive number of seconds
+    # (HOCON: ``classify.bootstrap.sweep_deadline_s``, env:
+    # ``ATELIER_BOOTSTRAP_SWEEP_DEADLINE_S``) to enable.
+    sweep_deadline_s: float = 0.0
     # Stop halving after this many consecutive recoverable failures in
     # a row — at that point the endpoint is effectively dead and each
     # further retry just compounds the outage.  Counts failures at any
     # depth (a halved_on_error at depth 3 increments; a success resets).
+    # This is the primary fast-fail for a blackholed endpoint (~2 min
+    # on a 15s connect-timeout), independent of sweep_deadline_s.
     max_consecutive_halve_failures: int = 8
 
 
@@ -396,9 +406,16 @@ def _classify_batch_with_retry(
     if state.cancelled:
         return []
 
-    # LS-3 — wall-clock deadline.  Bounded so a blackholed endpoint with
-    # a 15s connect-timeout can't recurse through ~1 hour of retries.
-    if cfg is not None and state.sweep_started_at > 0:
+    # LS-3 — wall-clock deadline.  Only enforced when the operator has
+    # set a positive sweep_deadline_s.  Default is 0 (disabled) because
+    # LS-4 (consecutive-failure breaker) already catches the blackhole
+    # scenario in ~2 min without requiring a wall-clock guess at the
+    # right corpus size.
+    if (
+        cfg is not None
+        and cfg.sweep_deadline_s > 0
+        and state.sweep_started_at > 0
+    ):
         elapsed = time.time() - state.sweep_started_at
         if elapsed > cfg.sweep_deadline_s:
             _record("deadline_exceeded")
