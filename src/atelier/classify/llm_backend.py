@@ -510,6 +510,7 @@ class AnthropicBackend(LLMBackend):
 
         try:
             import anthropic
+            import httpx
         except ImportError:
             raise ImportError(
                 "anthropic package required. Install with: uv add anthropic"
@@ -518,7 +519,10 @@ class AnthropicBackend(LLMBackend):
         if not self._config.api_key:
             raise ValueError("Anthropic API key required. Set ATELIER_LLM_API_KEY.")
 
-        self._client = anthropic.Anthropic(api_key=self._config.api_key)
+        self._client = anthropic.Anthropic(
+            api_key=self._config.api_key,
+            timeout=httpx.Timeout(connect=15.0, read=180.0, write=10.0, pool=5.0),
+        )
         return self._client
 
     def classify_batch(
@@ -610,6 +614,7 @@ class AnthropicStructuredBackend(LLMBackend):
 
         try:
             import anthropic
+            import httpx
         except ImportError:
             raise ImportError(
                 "anthropic package required. Install with: uv add anthropic"
@@ -618,7 +623,10 @@ class AnthropicStructuredBackend(LLMBackend):
         if not self._config.api_key:
             raise ValueError("Anthropic API key required.")
 
-        self._client = anthropic.Anthropic(api_key=self._config.api_key)
+        self._client = anthropic.Anthropic(
+            api_key=self._config.api_key,
+            timeout=httpx.Timeout(connect=15.0, read=180.0, write=10.0, pool=5.0),
+        )
         return self._client
 
     def classify_batch(

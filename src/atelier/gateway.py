@@ -29,9 +29,13 @@ async def _lifespan(app: FastAPI):
     # Seed + discover with retry — the database may still be starting
     # (PGlite takes a few seconds after the shell probe passes).
     async def _seed_with_retry() -> None:
+        # Every seed step that touches the DB, Hive JDBC, or ``fsm_start``
+        # runs via ``asyncio.to_thread`` — otherwise a slow Hive probe or
+        # the nautilus attach spin-loop blocks the event loop and the
+        # HTTP gateway becomes unresponsive before it finishes booting.
         for attempt in range(5):
             try:
-                _seed_sample_source()
+                await asyncio.to_thread(_seed_sample_source)
                 _log.info("OOTB sample seed: OK")
                 break
             except Exception as exc:
@@ -41,23 +45,23 @@ async def _lifespan(app: FastAPI):
                 else:
                     _log.warning("Sample source seeding skipped after 5 attempts: %s", exc)
         try:
-            _seed_synth_source()
+            await asyncio.to_thread(_seed_synth_source)
         except Exception as exc:
             _log.warning("Synth source seeding skipped: %s", exc)
         try:
-            _seed_meta_tagging_source()
+            await asyncio.to_thread(_seed_meta_tagging_source)
         except Exception as exc:
             _log.warning("Meta-tagging source seeding skipped: %s", exc)
         try:
-            _discover_and_register_hive_sources()
+            await asyncio.to_thread(_discover_and_register_hive_sources)
         except Exception as exc:
             _log.warning("Hive source discovery skipped: %s", exc)
         try:
-            _seed_classify_data_source()
+            await asyncio.to_thread(_seed_classify_data_source)
         except Exception as exc:
             _log.warning("Classify data source seeding skipped: %s", exc)
         try:
-            _maybe_auto_start_classify()
+            await asyncio.to_thread(_maybe_auto_start_classify)
         except Exception as exc:
             _log.warning("Classify auto-start skipped: %s", exc)
 
@@ -1981,11 +1985,23 @@ def fsm_start(source_id: str | None = None):
             )
             ncfg = nautilus_config_from_cfg(cfg)
             if ncfg.enabled:
+                def _auto_cancel_on_stall(rec):
+                    """Request cooperative cancel when nautilus detects a stall.
+                    Each trigger type only fires once per watcher (fired_triggers
+                    dedup), so this doesn't storm. ``_dispatch`` hands the
+                    decision to ``_request_cancel`` which flips
+                    ``state.cancelled`` and lets ``fsm_cancel`` follow up.
+                    """
+                    return {
+                        "decision": "cancelled",
+                        "reason": f"auto-cancel on {rec.trigger}: {rec.trigger_detail}",
+                    }
                 for _ in range(20):  # up to ~1s — pipeline registers quickly
                     curr = fsm.get_status()
                     if curr and curr.id:
                         nautilus_watcher = NautilusWatcher(
                             run_id=curr.id, fsm=fsm, cfg=ncfg,
+                            intervene_callback=_auto_cancel_on_stall,
                         )
                         set_active_watcher(curr.id, nautilus_watcher)
                         nautilus_watcher.start()
