@@ -188,6 +188,15 @@ subprocess.run(
 )
 print("Node.js dependencies installed and UI built")
 
+# Install SOPS binary — required for bin/bootstrap-secrets.sh to
+# decrypt .env.cai.enc at startup.  Without this, the AMP deployment
+# defaults (model ARNs, data-connection names, autonomy tier, etc.)
+# never reach the gateway and the operator is forced to re-enter
+# everything through the AMP env form.
+print("\n--- Installing sops ---")
+subprocess.run(["bash", "scripts/install_sops.sh"], check=True)
+print("sops installed")
+
 # Install Qdrant binary
 print("\n--- Installing Qdrant ---")
 subprocess.run(["bash", "scripts/install_qdrant.sh"], check=True)

@@ -24,13 +24,30 @@ set -euo pipefail
 # script works from any CWD.
 cd "$(dirname "$0")/.."
 
+# Look for sops on PATH *and* in the user-local bin that
+# scripts/install_sops.sh writes to.  On CAI the deploy hook installs
+# sops to $HOME/.local/bin before start-app.sh runs; a fresh shell
+# that hasn't re-sourced .profile / .bashrc won't have that dir on
+# PATH yet, so prepend it defensively.
+export PATH="$HOME/.local/bin:$PATH"
+
 have_sops=0
 if command -v sops >/dev/null 2>&1; then
   have_sops=1
 fi
 
 if [ "$have_sops" -eq 0 ]; then
-  echo "bootstrap-secrets: sops not on PATH; skipping decrypts" >&2
+  # Only noisy when encrypted defaults exist but sops to decrypt
+  # them does not — that's a misconfigured deploy, not a clean
+  # no-secrets checkout.
+  if [ -f .env.cai.enc ] || [ -f features/fixtures/curated_reference.csv.enc ]; then
+    echo "bootstrap-secrets: ERROR — sops is required to decrypt shipped deployment defaults but is not on PATH." >&2
+    echo "bootstrap-secrets:   CAI: scripts/install_sops.sh should have installed it at \$HOME/.local/bin/sops — check the AMP install job output." >&2
+    echo "bootstrap-secrets:   Local: install sops via devenv shell, 'brew install sops', or 'apt install sops'." >&2
+    echo "bootstrap-secrets:   Continuing without the encrypted defaults — you'll need to set every ATELIER_* env var manually." >&2
+  else
+    echo "bootstrap-secrets: sops not on PATH and no encrypted artifacts present; nothing to do."
+  fi
   exit 0
 fi
 

@@ -173,6 +173,36 @@ if [ -f .env.cai ]; then
   set -a
   source .env.cai
   set +a
+  # Post-source audit: print which high-signal defaults actually
+  # reached the environment.  Helps operators tell "the encrypted
+  # defaults loaded cleanly" apart from "bootstrap-secrets ran but
+  # sops / age-key failed and the file is empty".
+  _report() {
+    local name="$1" val="${!1:-}"
+    if [ -n "$val" ]; then
+      # ARNs and URLs get truncated so the log stays readable;
+      # short values print whole.
+      local disp="$val"
+      [ "${#disp}" -gt 60 ] && disp="${disp:0:57}..."
+      echo "  ✓ ${name}=${disp}"
+    else
+      echo "  ✗ ${name} not set"
+    fi
+  }
+  _report ATELIER_AGENT_MODEL
+  _report ATELIER_CLASSIFY_MODEL
+  _report ATELIER_DATA_CONNECTIONS
+  _report ATELIER_CLASSIFY_CONNECTION
+  _report ATELIER_CLASSIFY_AUTO_START
+  _report ATELIER_OVERWATCH_MODEL
+  _report AWS_REGION
+  unset -f _report
+else
+  echo "WARNING: .env.cai not present after bootstrap-secrets — encrypted"
+  echo "WARNING: deployment defaults did NOT decrypt.  You'll need every"
+  echo "WARNING: ATELIER_* value set via the AMP env form.  Check the"
+  echo "WARNING: install-deps job output for scripts/install_sops.sh and"
+  echo "WARNING: confirm SOPS_AGE_KEY reached the application environment."
 fi
 # Point the pipeline at the materialized curated-reference CSV unless
 # the operator overrode ATELIER_CLASSIFY_REFERENCE_URI directly (env-var
