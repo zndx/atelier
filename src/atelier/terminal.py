@@ -616,10 +616,16 @@ class TerminalSession:
             await self._send(_PROMPT)
             return
 
-        # Aliases for common skills — expand before SDK dispatch
-        _SKILL_ALIASES = {"chk": "/health-check"}
-        if cmd in _SKILL_ALIASES:
-            line = _SKILL_ALIASES[cmd]
+        # Discovery sitrep runs locally — probes the gateway + config
+        # directly.  The SDK-dispatched ``/health-check`` slash command
+        # was unreliable on Bedrock (the bundled CLI resolved it
+        # client-side with zero assistant output); running the probes
+        # in-process makes ``chk`` deterministic and independent of
+        # model + SDK + CLI interactions.
+        if cmd in ("chk", "health-check"):
+            await self._health_check()
+            await self._send(_PROMPT)
+            return
 
         # Everything else goes to the SDK as a background task.
         self._current_task = asyncio.create_task(self._run_query_task(line))
@@ -679,6 +685,150 @@ class TerminalSession:
             lines.append(f"  \u2022 Context     {_DIM}active (conversation continues across prompts){_RESET}\r\n")
         else:
             lines.append(f"  \u2022 Context     {_DIM}fresh (first query will start a new conversation){_RESET}\r\n")
+        await self._send("".join(lines))
+
+    # ── Discovery sitrep ─────────────────────────────────────────
+
+    async def _health_check(self) -> None:
+        """Run probes directly and render a sitrep — no SDK involved.
+
+        Mirrors the probes in ``.claude/commands/health-check.md`` so
+        the slash-command and the in-process command stay in sync on
+        intent.  The in-process path is the reliable one: SDK dispatch
+        of ``/health-check`` was returning 0-turn / 0-duration silent
+        completions on Bedrock 4.6 because the bundled CLI resolved
+        the command client-side without hitting the API.
+        """
+        import asyncio as _asyncio
+        import json as _json
+        from urllib.request import urlopen
+
+        gateway = "http://localhost:8090"
+
+        def _probe_json(path: str, timeout: float = 5.0) -> dict | None:
+            try:
+                return _json.loads(urlopen(f"{gateway}{path}", timeout=timeout).read())
+            except Exception:
+                return None
+
+        # Fan out probes in the thread pool — urllib is blocking and
+        # we don't want the terminal to hang while they run.
+        status_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/status"))
+        sources_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/data-sources"))
+        vocab_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/vocabulary/stats"))
+        fsm_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/fsm/status"))
+        runs_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/fsm/runs"))
+        overwatch_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/overwatch/status"))
+        gov_task = _asyncio.create_task(_asyncio.to_thread(_probe_json, "/api/governance/status", 10.0))
+
+        status = await status_task
+        sources = await sources_task
+        vocab = await vocab_task
+        fsm_state = await fsm_task
+        runs = await runs_task
+        overwatch = await overwatch_task
+        governance = await gov_task
+
+        try:
+            from atelier.config import load_config
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        try:
+            from atelier import __version__
+            version = __version__
+        except Exception:
+            version = "unknown"
+
+        def _tick(ok: bool | None) -> str:
+            if ok is True:
+                return f"{_GREEN}\u2713{_RESET}"
+            if ok is False:
+                return f"{_RED}\u2717{_RESET}"
+            return f"{_DIM}?{_RESET}"
+
+        lines: list[str] = []
+        lines.append(f"\r\n  {_BOLD}{_WHITE}Sitrep — Atelier v{version}{_RESET}\r\n")
+        lines.append(f"  {_DIM}" + "\u2500" * 38 + f"{_RESET}\r\n\r\n")
+
+        # Core services
+        lines.append(f"  {_BOLD}Core services{_RESET}\r\n")
+        if status:
+            for svc, key in (("gRPC", "grpc"), ("PostgreSQL", "postgres"), ("Qdrant", "qdrant")):
+                ok = status.get(key, {}).get("ok")
+                lines.append(f"    {_tick(ok)} {svc:<12}{_RESET}\r\n")
+        else:
+            lines.append(f"    {_RED}\u2717{_RESET} gateway {_DIM}(unreachable at {gateway}){_RESET}\r\n")
+
+        # Credentials
+        lines.append(f"\r\n  {_BOLD}Credentials{_RESET}\r\n")
+        if cfg is not None:
+            lines.append(f"    {_tick(bool(cfg.has_anthropic))} Anthropic   {_DIM}{'configured' if cfg.has_anthropic else 'not configured'}{_RESET}\r\n")
+            lines.append(f"    {_tick(bool(cfg.has_bedrock))} Bedrock     {_DIM}{'configured' if cfg.has_bedrock else 'not configured'}{_RESET}\r\n")
+            lines.append(f"    \u2022 Agent model {_DIM}{cfg.agent_model}{_RESET}\r\n")
+            lines.append(f"    {_tick(bool(cfg.has_classify_llm))} Classify LLM {_DIM}{'configured' if cfg.has_classify_llm else 'not configured'}{_RESET}\r\n")
+        else:
+            lines.append(f"    {_RED}\u2717{_RESET} config load failed\r\n")
+
+        # Data sources + vocabulary
+        lines.append(f"\r\n  {_BOLD}Data{_RESET}\r\n")
+        if sources and isinstance(sources.get("sources"), list):
+            src_list = sources["sources"]
+            lines.append(f"    \u2022 Sources     {_DIM}{len(src_list)} registered{_RESET}\r\n")
+            for s in src_list[:5]:
+                sid = s.get("id", "?")
+                stype = s.get("source_type", "?")
+                lines.append(f"        - {sid} {_DIM}({stype}){_RESET}\r\n")
+        else:
+            lines.append(f"    {_DIM}\u2022 Sources     unavailable{_RESET}\r\n")
+        if vocab:
+            lines.append(f"    \u2022 Terms       {_DIM}{vocab.get('terms', 0)}{_RESET}\r\n")
+
+        # Pipeline
+        lines.append(f"\r\n  {_BOLD}Pipeline{_RESET}\r\n")
+        if fsm_state:
+            state = fsm_state.get("state", "UNKNOWN")
+            rid = fsm_state.get("id", "")
+            progress = fsm_state.get("progress") or {}
+            lines.append(f"    \u2022 State       {_DIM}{state}{_RESET}\r\n")
+            if rid:
+                lines.append(f"    \u2022 Run ID      {_DIM}{rid[:8]}\u2026{_RESET}\r\n")
+            acc = progress.get("accuracy")
+            if acc is not None:
+                lines.append(f"    \u2022 Accuracy    {_DIM}{acc}{_RESET}\r\n")
+            cov = progress.get("bootstrap_coverage")
+            if cov is not None:
+                lines.append(f"    \u2022 Coverage    {_DIM}{cov}{_RESET}\r\n")
+        else:
+            lines.append(f"    {_DIM}\u2022 State       unavailable{_RESET}\r\n")
+        if runs and isinstance(runs.get("runs"), list):
+            lines.append(f"    \u2022 Recent runs {_DIM}{len(runs['runs'])}{_RESET}\r\n")
+
+        # Overwatch
+        lines.append(f"\r\n  {_BOLD}Overwatch{_RESET}\r\n")
+        if overwatch:
+            enabled = overwatch.get("enabled")
+            lines.append(f"    {_tick(bool(enabled))} Enabled     {_DIM}{enabled}{_RESET}\r\n")
+            autonomy = overwatch.get("autonomy")
+            if autonomy:
+                lines.append(f"    \u2022 Autonomy    {_DIM}{autonomy}{_RESET}\r\n")
+            ow_model = overwatch.get("model")
+            if ow_model:
+                lines.append(f"    \u2022 Model       {_DIM}{ow_model}{_RESET}\r\n")
+        else:
+            lines.append(f"    {_DIM}\u2022 status      unavailable{_RESET}\r\n")
+
+        # Governance
+        lines.append(f"\r\n  {_BOLD}Governance{_RESET}\r\n")
+        if governance and "error" not in governance:
+            atlas = governance.get("atlas") or {}
+            ranger = governance.get("ranger") or {}
+            lines.append(f"    {_tick(bool(atlas.get('reachable')))} Atlas       {_DIM}{atlas.get('url', 'not configured')}{_RESET}\r\n")
+            lines.append(f"    {_tick(bool(ranger.get('reachable')))} Ranger      {_DIM}{ranger.get('url', 'not configured')}{_RESET}\r\n")
+        else:
+            lines.append(f"    {_DIM}\u2022 status      unavailable{_RESET}\r\n")
+
+        lines.append("\r\n")
         await self._send("".join(lines))
 
     # ── Spinner ───────────────────────────────────────────────────
