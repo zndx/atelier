@@ -356,6 +356,7 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const [fsm, setFsm] = useState<FSMStatus | null>(null);
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const { activeSourceId, refreshDatasets } = useDataset();
 
   const fetchFSM = () => {
@@ -385,6 +386,28 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
       .finally(() => setStarting(false));
   };
 
+  const cancelPipeline = () => {
+    setCancelling(true);
+    fetch("/api/fsm/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "operator cancelled from Status panel" }),
+    })
+      .then((r) => r.json())
+      .then((body) => {
+        if (body?.error) {
+          message.warning(body.error);
+        } else if (body?.cancelled) {
+          message.info(
+            "Cancellation requested — pipeline will exit cleanly after the current batch.",
+          );
+        }
+        setTimeout(fetchFSM, 500);
+      })
+      .catch(() => {})
+      .finally(() => setCancelling(false));
+  };
+
   const state = fsm?.state ?? "IDLE";
   const isRunning = !["IDLE", "CONVERGED", "ERROR"].includes(state);
   const progress = fsm?.progress ?? {};
@@ -409,15 +432,25 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
           >
             Refresh
           </Button>
-          <Button
-            type="primary"
-            onClick={startPipeline}
-            loading={starting}
-            disabled={isRunning}
-            size="small"
-          >
-            {isRunning ? "Running..." : "Start Classification"}
-          </Button>
+          {isRunning ? (
+            <Button
+              danger
+              onClick={cancelPipeline}
+              loading={cancelling}
+              size="small"
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              onClick={startPipeline}
+              loading={starting}
+              size="small"
+            >
+              Start Classification
+            </Button>
+          )}
         </Space>
       }
     >
@@ -585,7 +618,7 @@ function DataSourceCard() {
         <Space>
           <Select
             value={activeSourceId ?? undefined}
-            onChange={(v) => setActiveSourceId(v ?? null)}
+            onChange={(v) => setActiveSourceId(v ?? null, { userPicked: true })}
             style={{ minWidth: 240 }}
             placeholder="No source selected"
             options={sources.map((s) => ({

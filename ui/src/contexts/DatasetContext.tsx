@@ -49,7 +49,7 @@ export interface SmokeTestState {
 interface DatasetContextValue {
   sources: DataSourceInfo[];
   activeSourceId: string | null;
-  setActiveSourceId: (id: string | null) => void;
+  setActiveSourceId: (id: string | null, opts?: { userPicked?: boolean }) => void;
   datasets: DatasetInfo[];
   activeDatasetId: string | null;
   setActiveDatasetId: (id: string | null) => void;
@@ -65,6 +65,7 @@ interface DatasetContextValue {
 const DatasetContext = createContext<DatasetContextValue | null>(null);
 
 const SOURCE_KEY = "atelier:activeSourceId";
+const SOURCE_USER_PICKED_KEY = "atelier:activeSourceIdUserPicked";
 const DATASET_KEY = "atelier:activeDatasetId";
 const STATUS_PLATFORM_KEY = "atelier:statusPlatformId";
 const SMOKE_KEY = "atelier:smokeTest";
@@ -99,6 +100,15 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
   const [activeSourceId, setActiveSourceRaw] = useState<string | null>(
     () => localStorage.getItem(SOURCE_KEY),
   );
+  // Persist whether the activeSourceId was set by an explicit operator
+  // click vs. an auto-pick on first load.  Without this distinction,
+  // an early auto-pick of `ootb-sample` (the first source to seed)
+  // gets written to localStorage and then blocks the later-arriving
+  // env-seeded `hive-poc/default` from taking precedence when the
+  // hive discovery seed completes.
+  const [sourceUserPicked, setSourceUserPicked] = useState<boolean>(
+    () => localStorage.getItem(SOURCE_USER_PICKED_KEY) === "1",
+  );
   const [activeDatasetId, setActiveDatasetRaw] = useState<string | null>(
     () => localStorage.getItem(DATASET_KEY),
   );
@@ -109,12 +119,20 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
     () => readSmokeTest(),
   );
 
-  const setActiveSourceId = useCallback((id: string | null) => {
+  const setActiveSourceId = useCallback((id: string | null, opts?: { userPicked?: boolean }) => {
     setActiveSourceRaw(id);
     if (id) {
       localStorage.setItem(SOURCE_KEY, id);
     } else {
       localStorage.removeItem(SOURCE_KEY);
+    }
+    // Mark operator-initiated selections so the env-seeded
+    // preference cannot hijack an explicit choice on subsequent
+    // sources polls (see the auto-select effect below for the race
+    // this guards against).
+    if (opts?.userPicked) {
+      setSourceUserPicked(true);
+      localStorage.setItem(SOURCE_USER_PICKED_KEY, "1");
     }
     // Clear stale dataset selection — refreshDatasets will auto-select
     setActiveDatasetRaw(null);
@@ -181,19 +199,37 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
     refreshDatasets();
   }, [refreshDatasets]);
 
-  // Auto-select first source if none active.  Env-seeded rows (from
-  // ATELIER_CLASSIFY_CONNECTION + ATELIER_CLASSIFY_DATABASE via the
-  // startup seeder) win over the default `sources[0]` so fresh CAI
-  // deploys land on the operator-intended classification target
-  // without a click.  Operator selections persist in localStorage and
-  // short-circuit this path on subsequent loads.
+  // Auto-select source.  Env-seeded rows win over the default
+  // `sources[0]` so fresh CAI deploys land on the operator-intended
+  // classification target without a click.  Explicit operator picks
+  // (``setActiveSourceId(id, { userPicked: true })``) are sticky and
+  // short-circuit this path on subsequent polls.
+  //
+  // Timing hazard this guards against: on a fresh CAI deploy the
+  // OOTB sample source seeds first (local fixtures, succeeds
+  // immediately), while the env-seeded ``hive-poc/default`` row
+  // requires the Hive discovery round-trip and only appears a few
+  // seconds later.  Without the re-evaluation below, the UI auto-
+  // picks ootb-sample on first poll, writes it to localStorage, and
+  // the later-arriving env-seeded row never takes precedence.
   useEffect(() => {
     if (sources.length === 0) return;
-    if (activeSourceId == null || !sources.some((s) => s.id === activeSourceId)) {
-      const seeded = sources.find(isEnvSeeded);
+    const current = sources.find((s) => s.id === activeSourceId) ?? null;
+    const seeded = sources.find(isEnvSeeded) ?? null;
+
+    // No active source OR the current selection has been removed
+    // from the source list → pick the best available.
+    if (current == null) {
       setActiveSourceId((seeded ?? sources[0]).id);
+      return;
     }
-  }, [activeSourceId, sources, setActiveSourceId]);
+    // Promote to env-seeded when one exists AND the operator hasn't
+    // made an explicit sticky choice.  Protects against the seed-
+    // race without overriding deliberate selections.
+    if (!sourceUserPicked && !isEnvSeeded(current) && seeded != null && seeded.id !== current.id) {
+      setActiveSourceId(seeded.id);
+    }
+  }, [activeSourceId, sources, sourceUserPicked, setActiveSourceId]);
 
   // Auto-select active dataset version (or most recent)
   useEffect(() => {

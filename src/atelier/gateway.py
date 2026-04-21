@@ -1983,6 +1983,71 @@ def fsm_runs():
         return _error_envelope(f"FSM runs failed: {exc}")
 
 
+@app.post("/api/fsm/cancel")
+def fsm_cancel(payload: dict | None = None):
+    """Request cooperative cancellation of the in-flight classification run.
+
+    Sets ``state.cancelled = True`` on the live BootstrapState via the
+    nautilus registry; the pipeline polls the flag between LLM batches
+    and exits cleanly after the current batch finishes.  A SIGKILL
+    would corrupt persistent artifacts and leave a partial DB row; the
+    cooperative flag protects the operator from that.
+
+    Operator-initiated only — the autonomy gating on
+    ``atelier.overwatch.kill_run`` protects supervisor-initiated
+    cancels, this endpoint is the UI's direct path.
+    """
+    try:
+        from atelier.classify import get_fsm
+        from atelier.overwatch.nautilus import get_state, get_active_watcher
+
+        fsm = get_fsm()
+        current = fsm.get_status()
+        if current is None:
+            return _error_envelope("no run registered")
+        if current.state.value in ("IDLE", "CONVERGED", "ERROR"):
+            return {
+                "cancelled": False,
+                "run_id": current.id,
+                "state": current.state.value,
+                "error": f"run is not in-flight (state={current.state.value})",
+            }
+
+        reason = "operator cancelled via Status panel"
+        if isinstance(payload, dict):
+            reason = str(payload.get("reason") or reason)[:500]
+
+        state = get_state(current.id)
+        if state is None:
+            # Run is advancing but not yet registered with nautilus
+            # (happens in the narrow window between fsm.start_run and
+            # nautilus register).  Record the intent so if / when the
+            # state appears, the cancel still takes effect.
+            return _error_envelope(
+                "run has not yet registered with nautilus — "
+                "try again in a few seconds"
+            )
+
+        state.cancelled = True
+        state.cancellation_reason = reason
+
+        watcher = get_active_watcher(current.id)
+        if watcher is not None:
+            try:
+                watcher.stop()
+            except Exception:
+                pass
+
+        return {
+            "cancelled": True,
+            "run_id": current.id,
+            "state": current.state.value,
+            "reason": reason,
+        }
+    except Exception as exc:
+        return _error_envelope(f"FSM cancel failed: {exc}")
+
+
 # ── Nautilus (mid-run overwatch watcher) ──────────────────────────
 
 
