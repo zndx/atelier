@@ -118,6 +118,7 @@ class EvaluationReport:
 def evaluate_classifications(
     classifications: list[dict[str, Any]],
     category_set=None,
+    run_id: str | None = None,
 ) -> EvaluationReport:
     """Build a structured EvaluationReport from classification dicts.
 
@@ -129,6 +130,13 @@ def evaluate_classifications(
         belief, plausibility, uncertainty, conflict, evidence_sources.
     category_set:
         Optional HierarchicalCategorySet for hierarchical accuracy and labels.
+    run_id:
+        Explicit run identifier stamped into the report.  When None,
+        falls back to a fresh uuid — but callers that know the outer
+        pipeline run_id (``pipeline.run_classification_pipeline``)
+        should pass it so the evaluation report's run_id matches the
+        FSM/artifact run_id.  Prevents the "evaluation_report.run_id
+        does not match outer run_id" integrity issue overwatch flagged.
     """
     total = len(classifications)
     if total == 0:
@@ -189,10 +197,10 @@ def evaluate_classifications(
         if isinstance(es, dict):
             sources.update(es.keys())
 
-    run_id = str(uuid.uuid4())[:8]
+    report_run_id = run_id if run_id else str(uuid.uuid4())[:8]
 
     return EvaluationReport(
-        run_id=run_id,
+        run_id=report_run_id,
         timestamp=datetime.now(timezone.utc).isoformat(),
         total_columns=total,
         columns_with_reference=ref_count,

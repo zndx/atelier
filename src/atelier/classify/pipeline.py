@@ -972,13 +972,26 @@ def run_classification_pipeline(
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         coverage = _coverage(state, column_names)
         mean_k = _mean_k(state, column_names)
-        converged = coverage >= boot_cfg.coverage_target and mean_k < boot_cfg.k_threshold
-        # If the loop path never assigned a reason but the run "converged"
-        # by the coverage+K criteria above, flag it explicitly rather than
-        # letting the absence be interpreted as legitimate convergence.
+        # Convergence uses the belief-gap criterion (primary convergence
+        # measure per docs + BootstrapConfig comments).  The previous
+        # ``mean_k < k_threshold`` check was Yager-oriented — under the
+        # default Dempster fusion, K is normalized out so mean_k stays
+        # high (~0.85 in live runs), making the flag permanently false.
+        # Overwatch correctly flagged the resulting contradiction
+        # between summary.converged=false and FSM state CONVERGED.
+        from atelier.classify.bootstrap import _mean_gap
+        mean_gap = _mean_gap(state, column_names)
+        converged = (
+            coverage >= boot_cfg.coverage_target
+            and mean_gap < boot_cfg.gap_threshold
+        )
+        # If the loop path never assigned a reason but the run converged
+        # by the coverage+gap criteria above, flag it explicitly rather
+        # than letting the absence be interpreted as legitimate
+        # convergence.
         if convergence_reason is None:
             convergence_reason = (
-                "coverage_and_k_met" if converged else "unknown"
+                "coverage_and_gap_met" if converged else "unknown"
             )
 
         # ── Frontier SVM retrain #3: final (only if not converged)
@@ -1026,7 +1039,9 @@ def run_classification_pipeline(
         })
 
         summary = _evaluate_results(classifications)
-        eval_report = evaluate_classifications(classifications, category_set)
+        eval_report = evaluate_classifications(
+            classifications, category_set, run_id=run_id,
+        )
         from atelier.classify.evaluation import epistemic_evaluation
         epistemic = epistemic_evaluation(classifications, category_set)
         summary["converged"] = converged

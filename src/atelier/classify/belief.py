@@ -389,8 +389,29 @@ class HierarchicalClassification:
 
     @property
     def needs_clarification(self) -> bool:
-        """True when uncertainty gap > 0.3 or conflict > 0.2."""
-        return self.uncertainty_gap > 0.3 or self.conflict > 0.2
+        """True when the prediction's support is weak.
+
+        Uses belief-gap criteria (belief mass on the winner + spread of
+        the belief interval) rather than Dempster's conflict K.  Under
+        Dempster's rule K is normalized out, so ``conflict > 0.2``
+        evaluates true for essentially every column — it's a bias-
+        locked flag that carries no information.  The gap-based
+        criterion is fusion-strategy-invariant: a wide [Bel, Pl]
+        interval or a low-belief winner deserves clarification
+        regardless of whether the fusion was Dempster or Yager.
+
+        Thresholds (0.80 bel floor, 0.20 gap ceiling) match the
+        bootstrap ``bel_floor`` / ``gap_threshold`` defaults so this
+        flag and the revisit-candidate criterion tell the same story.
+        """
+        if self.belief_assignment is None or self._frame is None:
+            return False
+        code = self.category.code if self.category else None
+        if not code:
+            return True  # no prediction at all — trivially needs clarification
+        bel = self.belief_at(code)
+        pl = self.plausibility_at(code)
+        return bel < 0.80 or (pl - bel) > 0.20
 
     def belief_path(self) -> list[dict]:
         """Trace [Bel, Pl] from predicted leaf to root.

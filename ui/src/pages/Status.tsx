@@ -167,8 +167,8 @@ const CONVERGENCE_REASON_DESCRIPTIONS: Record<string, string> = {
     "LLM call budget hit before convergence criteria were met.",
   max_iterations_reached:
     "Ran the full max_iterations without meeting belief-gap criteria.",
-  coverage_and_k_met:
-    "Coverage target reached with mean K below threshold (fallback path).",
+  coverage_and_gap_met:
+    "Coverage target reached with mean belief gap below threshold (fallback path).",
   agent_convergence:
     "Agent-driven loop declared convergence.",
   unknown:
