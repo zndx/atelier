@@ -814,19 +814,6 @@ function ReferenceColumnHandlingCard() {
           ^(attr|code|col|data|field|item|key|ref|val|var)_\d+(_\d+)*$
         </Text>
       </Paragraph>
-      <Paragraph style={{ marginBottom: 8 }} type="secondary">
-        <Text strong>Note for production paired-column naming.</Text>{" "}
-        Some business groups intentionally ship paired pre-coded
-        columns (<Text code>product_id</Text> /{" "}
-        <Text code>product_id_classified</Text>, etc.) as a manual
-        classification-audit workflow. Those pairs drift from the
-        real values over time — that drift is exactly what Atelier
-        catches. This filter matches only the synth answer-key shape
-        (numeric-suffix prefixes, case-sensitive); production paired
-        columns keep flowing through the classifier and get reclassified
-        from values so any drift surfaces as a disagreement, not as
-        trusted ground truth.
-      </Paragraph>
       <Alert
         type={enabled ? "info" : "warning"}
         showIcon
