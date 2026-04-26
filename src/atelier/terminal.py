@@ -708,7 +708,8 @@ class TerminalSession:
         import json as _json
         from urllib.request import urlopen
 
-        gateway = "http://localhost:8090"
+        import os as _os
+        gateway = f"http://localhost:{_os.environ.get('CDSW_APP_PORT', '8090')}"
 
         def _probe_json(path: str, timeout: float = 5.0) -> dict | None:
             try:

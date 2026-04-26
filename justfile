@@ -59,7 +59,7 @@ ui:
 # Run HTTP gateway (serves built React + proxies to gRPC)
 gateway:
     env -i $(cat build/config/atelier.env 2>/dev/null | xargs) PATH="$$PATH" \
-        uv run uvicorn atelier.gateway:app --reload --host 0.0.0.0 --port 8090
+        uv run uvicorn atelier.gateway:app --reload --host 0.0.0.0 --port ${CDSW_APP_PORT:-8090}
 
 # ── Database ─────────────────────────────────────────────────────
 

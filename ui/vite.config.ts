@@ -7,6 +7,8 @@ const silenceProxyError = (err: Error, _req: unknown, _res: unknown) => {
   console.error("[vite] proxy error:", err.message);
 };
 
+const gatewayPort = process.env.CDSW_APP_PORT || "8090";
+
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
@@ -18,12 +20,12 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://localhost:8090",
+        target: `http://localhost:${gatewayPort}`,
         changeOrigin: true,
         configure: (proxy) => { proxy.on("error", silenceProxyError); },
       },
       "/ws": {
-        target: "ws://localhost:8090",
+        target: `ws://localhost:${gatewayPort}`,
         ws: true,
         configure: (proxy) => { proxy.on("error", silenceProxyError); },
       },

@@ -70,7 +70,7 @@ function Landing() {
 
   return (
     <>
-      <Title level={2}>Welcome to Atelier</Title>
+      <Title level={2}>Context Clarity</Title>
       <Paragraph type="secondary">
         Agentic classification workbench powered by the Claude Agent SDK with
         interactive embedding visualization and adaptive keystone-agent
