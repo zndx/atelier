@@ -84,7 +84,10 @@ CREATE TABLE public.datasets (
     summary text,
     fsm_run_id text,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    is_archived boolean DEFAULT false NOT NULL
+    is_archived boolean DEFAULT false NOT NULL,
+    artifact_set_id text,
+    parent_dataset_id text,
+    run_kind text DEFAULT 'classify'::text NOT NULL
 );
 
 
@@ -102,6 +105,34 @@ CREATE TABLE public.fsm_runs (
     error text,
     result_path text,
     source_id text
+);
+
+
+--
+-- Name: ml_artifact_sets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ml_artifact_sets (
+    id text NOT NULL,
+    source_id text,
+    fsm_run_id text,
+    parent_artifact_set_id text,
+    catboost_path text NOT NULL,
+    catboost_classes_path text NOT NULL,
+    svm_path text,
+    svm_classes_path text,
+    umap_path text,
+    classes text NOT NULL,
+    feature_groups text,
+    vocab_signature text NOT NULL,
+    embedding_model text NOT NULL,
+    embedding_dim integer NOT NULL,
+    display_name text,
+    summary text,
+    is_active boolean DEFAULT false NOT NULL,
+    is_archived boolean DEFAULT false NOT NULL,
+    facets text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
 
 
@@ -168,6 +199,14 @@ ALTER TABLE ONLY public.fsm_runs
 
 
 --
+-- Name: ml_artifact_sets ml_artifact_sets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ml_artifact_sets
+    ADD CONSTRAINT ml_artifact_sets_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -191,6 +230,13 @@ CREATE INDEX idx_data_sources_not_archived ON public.data_sources USING btree (i
 
 
 --
+-- Name: idx_datasets_artifact_set; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_datasets_artifact_set ON public.datasets USING btree (artifact_set_id);
+
+
+--
 -- Name: idx_datasets_not_archived; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -205,11 +251,48 @@ CREATE INDEX idx_datasets_source_version ON public.datasets USING btree (source_
 
 
 --
+-- Name: idx_ml_artifact_sets_not_archived; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ml_artifact_sets_not_archived ON public.ml_artifact_sets USING btree (is_archived) WHERE (is_archived = false);
+
+
+--
+-- Name: idx_ml_artifact_sets_one_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_ml_artifact_sets_one_active ON public.ml_artifact_sets USING btree (is_active) WHERE (is_active = true);
+
+
+--
+-- Name: idx_ml_artifact_sets_source; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ml_artifact_sets_source ON public.ml_artifact_sets USING btree (source_id, created_at DESC);
+
+
+--
 -- Name: classification_runs classification_runs_fsm_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.classification_runs
     ADD CONSTRAINT classification_runs_fsm_run_id_fkey FOREIGN KEY (fsm_run_id) REFERENCES public.fsm_runs(id);
+
+
+--
+-- Name: datasets datasets_artifact_set_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.datasets
+    ADD CONSTRAINT datasets_artifact_set_id_fkey FOREIGN KEY (artifact_set_id) REFERENCES public.ml_artifact_sets(id);
+
+
+--
+-- Name: datasets datasets_parent_dataset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.datasets
+    ADD CONSTRAINT datasets_parent_dataset_id_fkey FOREIGN KEY (parent_dataset_id) REFERENCES public.datasets(id);
 
 
 --
@@ -226,6 +309,30 @@ ALTER TABLE ONLY public.datasets
 
 ALTER TABLE ONLY public.fsm_runs
     ADD CONSTRAINT fsm_runs_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.data_sources(id);
+
+
+--
+-- Name: ml_artifact_sets ml_artifact_sets_fsm_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ml_artifact_sets
+    ADD CONSTRAINT ml_artifact_sets_fsm_run_id_fkey FOREIGN KEY (fsm_run_id) REFERENCES public.fsm_runs(id);
+
+
+--
+-- Name: ml_artifact_sets ml_artifact_sets_parent_artifact_set_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ml_artifact_sets
+    ADD CONSTRAINT ml_artifact_sets_parent_artifact_set_id_fkey FOREIGN KEY (parent_artifact_set_id) REFERENCES public.ml_artifact_sets(id);
+
+
+--
+-- Name: ml_artifact_sets ml_artifact_sets_source_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ml_artifact_sets
+    ADD CONSTRAINT ml_artifact_sets_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.data_sources(id);
 
 
 --
@@ -254,4 +361,6 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260416100000_vocab_uri'),
     ('20260417000000'),
     ('20260417000000_rename_ootb_sample_display'),
-    ('20260417190000');
+    ('20260417190000'),
+    ('20260417190000_migrate_sample_to_filesystem'),
+    ('20260427000000');

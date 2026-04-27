@@ -1346,11 +1346,35 @@ def run_classification_pipeline(
                     is_active=True,
                     summary=f"{len(all_samples)} tables, {len(classifications)} columns",
                     fsm_run_id=run_id,
+                    artifact_set_id=run_id,    # this run produced its own artifact set
+                    parent_dataset_id=None,    # classify runs have no parent
+                    run_kind="classify",
                 )
                 if source_id:
                     dao.set_active_version(source_id, run_id)
             except Exception as e:
                 logger.warning("Failed to register dataset: %s", e)
+
+        # Register the ML artifact set so an Extend Classification run
+        # can replay the trained models on new data.  Non-fatal — a
+        # failure here just means Extend is unavailable for this run
+        # until backfilled (see dao.backfill in M4).
+        try:
+            from atelier.classify.artifact_set import build_artifact_set_record
+            from atelier.db.dao import AtelierDao
+            spec = build_artifact_set_record(
+                run_id=run_id,
+                results_dir=results_dir,
+                cfg=cfg,
+                n_columns=len(classifications),
+                source_id=source_id,
+                fsm_run_id=run_id,
+            )
+            if spec is not None:
+                AtelierDao().register_artifact_set(**spec)
+                logger.info("Registered ML artifact set: %s", run_id)
+        except Exception as e:
+            logger.warning("Failed to register ML artifact set: %s", e)
 
         # ── Governance sync (Atlas) ──────────────────────────────────
         # When auto_sync is enabled and Atlas is configured, push the
@@ -2066,8 +2090,11 @@ def _write_parquet(
         else:
             texts.append(c["predicted_code"] or "unknown")
 
-    # Compute 2D projection
-    x_vals, y_vals = _compute_projection(classifications, texts)
+    # Compute 2D projection.  ``umap_reducer`` is the fitted CPU-side
+    # UMAP suitable for pickling (None when cuml or PCA fallback fired);
+    # the caller persists it to umap.pkl so Extend runs can land in the
+    # same coordinate space.
+    x_vals, y_vals, umap_reducer = _compute_projection(classifications, texts)
 
     rows = []
     for i, c in enumerate(classifications):
@@ -2124,17 +2151,43 @@ def _write_parquet(
     })
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, str(output_path))
+
+    # Persist the fitted CPU-side UMAP reducer alongside the parquet so
+    # an Extend Classification run can call ``reducer.transform()`` on
+    # new column embeddings and land in the same 2D coordinate space.
+    # When ``umap_reducer`` is None (cuml-GPU path or PCA fallback) we
+    # skip the save; Extend handles the absence by re-fitting on its
+    # own embeddings with a logged warning.
+    if umap_reducer is not None:
+        try:
+            import joblib
+            from atelier.classify.artifact_set import UMAP_FILENAME
+            umap_path = output_path.parent / UMAP_FILENAME
+            joblib.dump(umap_reducer, umap_path)
+            logger.info("UMAP reducer saved to %s", umap_path)
+        except Exception as e:
+            logger.warning("Failed to save UMAP reducer (Extend will re-fit): %s", e)
+
     return output_path
 
 
 def _compute_projection(
     classifications: list[dict],
     texts: list[str],
-) -> tuple[list[float], list[float]]:
+) -> tuple[list[float], list[float], object | None]:
     """Compute 2D x/y coordinates for embedding-atlas.
 
     Tries UMAP on sentence-transformer embeddings first (best quality).
     Falls back to PCA on DST numeric features (always available).
+
+    Returns ``(x, y, reducer)`` where ``reducer`` is the fitted
+    umap-learn ``UMAP`` instance when one was used (suitable for
+    pickling via joblib so an Extend Classification run can call
+    ``reducer.transform(new_embeddings)`` to land in the same 2D
+    coordinate space).  Returns ``None`` for the third element when
+    the cuml GPU path was used (cuml.UMAP doesn't round-trip well
+    across CPU/GPU pickle boundaries) or when the PCA fallback
+    fired — Extend handles the None case by re-fitting with a warning.
     """
     # Try UMAP + sentence-transformers for high-quality projection.
     # When the optional [gpu] extra is installed and a GPU is available,
@@ -2149,6 +2202,7 @@ def _compute_projection(
         n_neighbors = min(15, max(2, len(texts) - 1))
 
         projection = None
+        cpu_reducer = None
         try:
             from atelier.classify.gpu import preflight_gpu
             if preflight_gpu().available:
@@ -2159,21 +2213,27 @@ def _compute_projection(
                 )
                 projection = reducer.fit_transform(embeddings)
                 logger.info("UMAP projection: cuml.UMAP (GPU)")
+                # cuml.UMAP doesn't pickle reliably across CPU/GPU
+                # boundaries, so we don't bundle it for Extend.
         except ImportError:
             logger.debug("cuml not installed; falling back to umap-learn (CPU)")
 
         if projection is None:
             import umap
-            reducer = umap.UMAP(
+            cpu_reducer = umap.UMAP(
                 n_components=2, n_neighbors=n_neighbors,
                 min_dist=0.1, metric="cosine", random_state=42,
             )
-            projection = reducer.fit_transform(embeddings)
+            projection = cpu_reducer.fit_transform(embeddings)
 
         if hasattr(projection, "values"):
             projection = projection.values
         projection = np.asarray(projection)
-        return projection[:, 0].tolist(), projection[:, 1].tolist()
+        return (
+            projection[:, 0].tolist(),
+            projection[:, 1].tolist(),
+            cpu_reducer,
+        )
     except Exception as e:
         logger.debug("UMAP projection unavailable (%s), using DST feature projection", e)
 
@@ -2195,4 +2255,4 @@ def _compute_projection(
         # Degenerate case — use confidence vs belief directly
         proj = features[:, :2]
 
-    return proj[:, 0].tolist(), proj[:, 1].tolist()
+    return proj[:, 0].tolist(), proj[:, 1].tolist(), None

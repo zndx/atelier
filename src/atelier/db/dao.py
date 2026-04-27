@@ -226,8 +226,17 @@ class AtelierDao:
                        row_count: int = 0, source_id: str | None = None,
                        version_number: int = 1, is_active: bool = True,
                        summary: str | None = None,
-                       fsm_run_id: str | None = None):
-        """Insert or update a dataset record."""
+                       fsm_run_id: str | None = None,
+                       artifact_set_id: str | None = None,
+                       parent_dataset_id: str | None = None,
+                       run_kind: str = "classify"):
+        """Insert or update a dataset record.
+
+        ``artifact_set_id`` / ``parent_dataset_id`` / ``run_kind`` were
+        added in 20260427 to record the lineage of Extend runs.  Classify
+        runs leave parent_dataset_id NULL and set run_kind="classify";
+        Extend runs set both.
+        """
         from atelier.db.model import Dataset
         with self.get_session() as session:
             ds = session.query(Dataset).filter_by(id=dataset_id).first()
@@ -238,6 +247,9 @@ class AtelierDao:
                     source_id=source_id, version_number=version_number,
                     is_active=is_active, summary=summary,
                     fsm_run_id=fsm_run_id,
+                    artifact_set_id=artifact_set_id,
+                    parent_dataset_id=parent_dataset_id,
+                    run_kind=run_kind,
                 )
                 session.add(ds)
             else:
@@ -251,6 +263,11 @@ class AtelierDao:
                 ds.is_active = is_active
                 ds.summary = summary
                 ds.fsm_run_id = fsm_run_id
+                if artifact_set_id is not None:
+                    ds.artifact_set_id = artifact_set_id
+                if parent_dataset_id is not None:
+                    ds.parent_dataset_id = parent_dataset_id
+                ds.run_kind = run_kind
 
     def list_dataset_versions(self, source_id: str,
                               include_archived: bool = False) -> list[dict]:
@@ -307,6 +324,9 @@ class AtelierDao:
             "fsm_run_id": r.fsm_run_id,
             "created_at": str(r.created_at or ""),
             "is_archived": r.is_archived,
+            "artifact_set_id": getattr(r, "artifact_set_id", None),
+            "parent_dataset_id": getattr(r, "parent_dataset_id", None),
+            "run_kind": getattr(r, "run_kind", "classify"),
         }
 
     # ── Archive operations ─────────────────────────────────────────
@@ -449,3 +469,167 @@ class AtelierDao:
                  "source_id": r.source_id}
                 for r in rows
             ]
+
+    # ── ML Artifact Set operations ────────────────────────────────
+
+    def register_artifact_set(self, *, artifact_set_id: str,
+                              source_id: str | None,
+                              fsm_run_id: str | None,
+                              catboost_path: str,
+                              catboost_classes_path: str,
+                              svm_path: str | None,
+                              svm_classes_path: str | None,
+                              umap_path: str | None,
+                              classes: str,
+                              feature_groups: str | None,
+                              vocab_signature: str,
+                              embedding_model: str,
+                              embedding_dim: int,
+                              display_name: str | None = None,
+                              summary: str | None = None,
+                              parent_artifact_set_id: str | None = None,
+                              facets: str | None = None,
+                              activate_if_first: bool = True) -> dict:
+        """Insert an ML artifact set row.  Returns the created dict.
+
+        ``classes``, ``feature_groups`` and ``facets`` are pre-encoded
+        JSON strings (caller is responsible for ``json.dumps``) — DAO
+        layer stays JSON-agnostic to match the existing dataset/source
+        patterns.
+
+        ``activate_if_first`` (default True): when no other artifact
+        set is currently active globally, mark this row as active in
+        the same transaction.  Subsequent activations go through
+        :meth:`set_active_artifact_set`.
+        """
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            row = MLArtifactSet(
+                id=artifact_set_id, source_id=source_id,
+                fsm_run_id=fsm_run_id,
+                parent_artifact_set_id=parent_artifact_set_id,
+                catboost_path=catboost_path,
+                catboost_classes_path=catboost_classes_path,
+                svm_path=svm_path, svm_classes_path=svm_classes_path,
+                umap_path=umap_path,
+                classes=classes, feature_groups=feature_groups,
+                vocab_signature=vocab_signature,
+                embedding_model=embedding_model,
+                embedding_dim=embedding_dim,
+                display_name=display_name, summary=summary,
+                is_active=False, is_archived=False,
+                facets=facets,
+            )
+            session.add(row)
+            session.flush()
+            if activate_if_first:
+                # Promote to active iff nothing else holds the slot.
+                # Partial unique index enforces only-one-active globally.
+                any_active = (session.query(MLArtifactSet)
+                              .filter_by(is_active=True)
+                              .first())
+                if any_active is None:
+                    row.is_active = True
+            return self._artifact_set_to_dict(row)
+
+    def list_artifact_sets(self, source_id: str | None = None,
+                           include_archived: bool = False) -> list[dict]:
+        """Return artifact sets, newest first.  Excludes archived by default."""
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            q = session.query(MLArtifactSet)
+            if source_id is not None:
+                q = q.filter_by(source_id=source_id)
+            if not include_archived:
+                q = q.filter_by(is_archived=False)
+            rows = q.order_by(MLArtifactSet.created_at.desc()).all()
+            return [self._artifact_set_to_dict(r) for r in rows]
+
+    def get_artifact_set(self, artifact_set_id: str) -> dict | None:
+        """Return an artifact set by id, or None."""
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            r = (session.query(MLArtifactSet)
+                 .filter_by(id=artifact_set_id).first())
+            if r is None:
+                return None
+            return self._artifact_set_to_dict(r)
+
+    def get_active_artifact_set(self) -> dict | None:
+        """Return the globally-active artifact set, or None."""
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            r = (session.query(MLArtifactSet)
+                 .filter_by(is_active=True, is_archived=False)
+                 .first())
+            if r is None:
+                return None
+            return self._artifact_set_to_dict(r)
+
+    def set_active_artifact_set(self, artifact_set_id: str) -> bool:
+        """Promote one artifact set to active, demoting all others.
+
+        Honors the partial unique index ``idx_ml_artifact_sets_one_active``
+        — the demote-then-promote happens in a single transaction so the
+        index never sees two TRUE rows.  Returns True when the row was
+        found and promoted.
+        """
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            target = (session.query(MLArtifactSet)
+                      .filter_by(id=artifact_set_id).first())
+            if target is None:
+                return False
+            session.query(MLArtifactSet).update({"is_active": False})
+            session.flush()
+            target.is_active = True
+            return True
+
+    def archive_artifact_set(self, artifact_set_id: str) -> bool:
+        """Soft-delete an artifact set.  If active, also clears active.
+
+        Returns True when the row was found.  Files on disk are
+        untouched — archive is a UI hide, not a destructive op.
+        """
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            r = (session.query(MLArtifactSet)
+                 .filter_by(id=artifact_set_id).first())
+            if r is None:
+                return False
+            r.is_archived = True
+            r.is_active = False
+            return True
+
+    def unarchive_artifact_set(self, artifact_set_id: str) -> bool:
+        """Reverse :meth:`archive_artifact_set`.  Does NOT promote to active."""
+        from atelier.db.model import MLArtifactSet
+        with self.get_session() as session:
+            count = (session.query(MLArtifactSet)
+                     .filter_by(id=artifact_set_id)
+                     .update({"is_archived": False}))
+            return count > 0
+
+    @staticmethod
+    def _artifact_set_to_dict(r) -> dict:
+        return {
+            "id": r.id, "source_id": r.source_id,
+            "fsm_run_id": r.fsm_run_id,
+            "parent_artifact_set_id": r.parent_artifact_set_id,
+            "catboost_path": r.catboost_path,
+            "catboost_classes_path": r.catboost_classes_path,
+            "svm_path": r.svm_path,
+            "svm_classes_path": r.svm_classes_path,
+            "umap_path": r.umap_path,
+            "classes": r.classes,
+            "feature_groups": r.feature_groups,
+            "vocab_signature": r.vocab_signature,
+            "embedding_model": r.embedding_model,
+            "embedding_dim": r.embedding_dim,
+            "display_name": r.display_name,
+            "summary": r.summary,
+            "is_active": r.is_active,
+            "is_archived": r.is_archived,
+            "facets": r.facets,
+            "created_at": str(r.created_at or ""),
+        }

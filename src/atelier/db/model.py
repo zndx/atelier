@@ -60,6 +60,51 @@ class Dataset(Base):
     fsm_run_id = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     is_archived = Column(Boolean, nullable=False, default=False)
+    # Artifact-set lineage (added 20260427).  classify runs set
+    # artifact_set_id to the row they produced; extend runs set it to
+    # the row they consumed AND parent_dataset_id to the source dataset.
+    artifact_set_id = Column(String, nullable=True)    # FK → ml_artifact_sets.id
+    parent_dataset_id = Column(String, nullable=True)  # FK → datasets.id
+    run_kind = Column(String, nullable=False, default="classify")  # 'classify'|'extend'
+
+
+class MLArtifactSet(Base):
+    """Bundle of trained-model artifacts produced by an FSM run.
+
+    Indexes the on-disk paths of CatBoost / SVM / UMAP + sidecars so an
+    Extend Classification run can replay them on new data without
+    re-running the full training pipeline.  Lineage shape borrows from
+    OpenLineage: this row links the producing Run (``fsm_run_id``) to
+    any downstream Run that consumes it via ``Dataset.artifact_set_id``.
+    """
+
+    __tablename__ = "ml_artifact_sets"
+
+    id = Column(String, primary_key=True, nullable=False)
+    source_id = Column(String, nullable=True)          # FK → data_sources.id
+    fsm_run_id = Column(String, nullable=True)         # FK → fsm_runs.id
+    parent_artifact_set_id = Column(String, nullable=True)  # self-FK
+
+    catboost_path = Column(Text, nullable=False)
+    catboost_classes_path = Column(Text, nullable=False)
+    svm_path = Column(Text, nullable=True)
+    svm_classes_path = Column(Text, nullable=True)
+    umap_path = Column(Text, nullable=True)
+
+    classes = Column(Text, nullable=False)             # JSON array
+    feature_groups = Column(Text, nullable=True)       # JSON array
+    vocab_signature = Column(String, nullable=False)   # sha256(sorted(classes))
+    embedding_model = Column(String, nullable=False)
+    embedding_dim = Column(Integer, nullable=False)
+
+    display_name = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=False)
+    is_archived = Column(Boolean, nullable=False, default=False)
+
+    facets = Column(Text, nullable=True)               # JSON: OpenLineage projection
+
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class FSMRun(Base):
