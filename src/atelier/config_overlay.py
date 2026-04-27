@@ -599,6 +599,16 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
             False: "Skip SHAP — faster, but loses per-column attribution.",
         },
     },
+    "classify_shap_method": {
+        "hocon_path": "classify.shap.method",
+        "label": "SHAP Method",
+        "description": "Which SHAP variant to run.  ``auto`` prefers GPU PermutationSHAP over the 12 named features (interpretable + fast on GPU; skips on CPU).  ``permutation`` forces PermutationSHAP regardless of hardware.  ``treeshap`` opts into CatBoost TreeSHAP — fast but attributes to the aggregate 'embedding' feature group, not the 12 source features.",
+        "group": "training",
+        "type": "choice",
+        "choices": ["auto", "permutation", "treeshap"],
+        "default": "auto",
+        "caption_template": "SHAP method: {value}.",
+    },
     "classify_shap_top_k": {
         "hocon_path": "classify.shap.top_k",
         "label": "SHAP Top-K",

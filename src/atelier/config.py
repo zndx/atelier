@@ -168,6 +168,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # SHAP explanations
     "classify.shap.enabled": ("classify_shap_enabled", bool),
     "classify.shap.top_k": ("classify_shap_top_k", int),
+    "classify.shap.method": ("classify_shap_method", str),
     # SAGE feature importance
     "classify.sage.enabled": ("classify_sage_enabled", bool),
     "classify.sage.permutations": ("classify_sage_permutations", int),
@@ -395,6 +396,7 @@ class AtelierConfig:
     # SHAP explanations
     classify_shap_enabled: bool = True
     classify_shap_top_k: int = 3
+    classify_shap_method: str = "auto"
 
     # SAGE feature importance
     classify_sage_enabled: bool = False

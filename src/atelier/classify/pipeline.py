@@ -1794,7 +1794,8 @@ def _run_shap(cfg, all_features, category_set, classifications, results_dir):
     """Run SHAP analysis synchronously."""
     try:
         from atelier.classify.shap_explanations import run_shap_analysis
-        shap_result = run_shap_analysis(all_features, category_set)
+        shap_method = getattr(cfg, "classify_shap_method", "auto") or "auto"
+        shap_result = run_shap_analysis(all_features, category_set, method=shap_method)
         if shap_result:
             shap_records = shap_result.to_records(k=cfg.classify_shap_top_k)
             for cls_dict, shap_row in zip(classifications, shap_records):
