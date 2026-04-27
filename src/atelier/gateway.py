@@ -939,6 +939,7 @@ def status():
     except Exception:
         pass
     checks["config"] = {
+        "app_display_name": cfg.app_display_name,
         "has_anthropic": cfg.has_anthropic,
         "has_bedrock": cfg.has_bedrock,
         "has_classify_llm": cfg.has_classify_llm,

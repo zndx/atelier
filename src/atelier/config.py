@@ -129,6 +129,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # DST fusion strategy
     "classify.fusion_strategy": ("classify_fusion_strategy", str),
     # Bootstrap convergence
+    "app.display_name": ("app_display_name", str),
     "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
     "classify.bootstrap.min_iterations": ("classify_bootstrap_min_iterations", int),
     "classify.cautious_review.enabled": ("classify_cautious_review_enabled", bool),
@@ -238,6 +239,11 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
 @dataclass
 class AtelierConfig:
     """Resolved application configuration."""
+
+    # Application identity (surfaced to UI as a lightweight rebrand
+    # knob; defaults to "Atelier" upstream, override via SOPS dotenv
+    # ``ATELIER_APP_DISPLAY_NAME`` for deployment-specific naming).
+    app_display_name: str = "Atelier"
 
     # gRPC
     grpc_host: str = "0.0.0.0"

@@ -26,6 +26,7 @@ interface StatusSummary {
   qdrant: { ok: boolean };
   connected: boolean;
   degraded?: boolean;
+  config?: { app_display_name?: string };
 }
 
 function Landing() {
@@ -68,9 +69,15 @@ function Landing() {
     [datasets],
   );
 
+  // Operator-overridable display name (defaults to "Atelier" upstream;
+  // CAI deployments can rebrand via ATELIER_APP_DISPLAY_NAME in the
+  // SOPS-encrypted dotenv).  Falls back if /api/status hasn't returned
+  // yet so the page never flashes blank.
+  const appName = status?.config?.app_display_name ?? "Atelier";
+
   return (
     <>
-      <Title level={2}>Welcome to Atelier</Title>
+      <Title level={2}>Welcome to {appName}</Title>
       <Paragraph type="secondary">
         Agentic classification workbench powered by the Claude Agent SDK with
         interactive embedding visualization and adaptive keystone-agent
