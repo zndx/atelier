@@ -446,13 +446,38 @@ def run_classification_pipeline(
         logger.warning("settings_snapshot.json write failed (non-fatal): %s", e)
 
     try:
+        # Pre-LLM phase observability — proof-of-progress paradigm.
+        # Heavy Hive reads (annotations load, table discovery, per-
+        # table sampling) have no native timeout via cml.data_v1;
+        # phase_heartbeat ensures FSM.updated_at advances every 5s
+        # while the work runs so nautilus's stall detector can
+        # distinguish "actively waiting on Hive" from "thread died."
+        # See atelier.classify.phase_heartbeat for the design.
+        from atelier.classify.phase_heartbeat import phase_heartbeat
+        from atelier.classify.sampler import probe_connection
+
         # ── LOADING_VOCAB ────────────────────────────────────────
         fsm.advance(run_id, FSMState.LOADING_VOCAB, progress={"step": "loading_vocab"})
-        if category_set is None:
-            category_set = _load_vocabulary(
-                cfg, build_dir, connection_name,
-                vocab_uri=vocab_uri, database=database,
-            )
+
+        # Lightweight liveness probe — fails fast (5s budget) on a
+        # dead Hive connection BEFORE we invest in the heavy
+        # annotations-load query.  Logs and continues on probe
+        # failure; the heavy query can still proceed but operators
+        # have a clear signal in the log.
+        hive_uri_present = bool(connection_name) or bool(getattr(cfg, "cml_data_connection_names", []))
+        if hive_uri_present and category_set is None:
+            probe_connection(cfg, connection_name)
+
+        with phase_heartbeat(
+            fsm, run_id, FSMState.LOADING_VOCAB,
+            interval_s=float(getattr(cfg, "classify_phase_heartbeat_interval_s", 5.0)),
+            label="loading_vocab",
+        ):
+            if category_set is None:
+                category_set = _load_vocabulary(
+                    cfg, build_dir, connection_name,
+                    vocab_uri=vocab_uri, database=database,
+                )
         logger.info("Loaded %d leaf categories", len(category_set.categories))
 
         if not isinstance(category_set, HierarchicalCategorySet):
@@ -496,6 +521,7 @@ def run_classification_pipeline(
         })
 
         # ── DISCOVERING + SAMPLING ────────────────────────────────
+        heartbeat_interval = float(getattr(cfg, "classify_phase_heartbeat_interval_s", 5.0))
         if samples is not None:
             all_samples = samples
             fsm.advance(run_id, FSMState.SAMPLING, progress={
@@ -503,9 +529,13 @@ def run_classification_pipeline(
                 "injected": True,
             })
         else:
-            table_names = discover_tables(
-                cfg, connection_name, database, limit=tables_limit
-            )
+            with phase_heartbeat(
+                fsm, run_id, FSMState.DISCOVERING,
+                interval_s=heartbeat_interval, label="discovering",
+            ):
+                table_names = discover_tables(
+                    cfg, connection_name, database, limit=tables_limit
+                )
             logger.info("Discovered %d tables", len(table_names))
 
             fsm.advance(run_id, FSMState.SAMPLING, progress={
@@ -513,14 +543,21 @@ def run_classification_pipeline(
             })
 
             all_samples: list[TableSample] = []
-            for tname in table_names:
-                try:
-                    ts = sample_table_metadata(
-                        cfg, tname, connection_name, database, sample_size
-                    )
-                    all_samples.append(ts)
-                except Exception as exc:
-                    logger.warning("Failed to sample %s: %s", tname, exc)
+            with phase_heartbeat(
+                fsm, run_id, FSMState.SAMPLING,
+                interval_s=heartbeat_interval, label="sampling",
+            ) as sampling_ctx:
+                for i, tname in enumerate(table_names):
+                    sampling_ctx["tables_sampled"] = i
+                    sampling_ctx["current_table"] = tname
+                    try:
+                        ts = sample_table_metadata(
+                            cfg, tname, connection_name, database, sample_size
+                        )
+                        all_samples.append(ts)
+                    except Exception as exc:
+                        logger.warning("Failed to sample %s: %s", tname, exc)
+                sampling_ctx["tables_sampled"] = len(table_names)
 
         # Strip tables that shouldn't be classified (vocabulary tables,
         # internal test leftovers).  The annotations table IS the vocab,

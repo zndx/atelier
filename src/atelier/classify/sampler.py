@@ -66,6 +66,156 @@ class TableSample:
         }
 
 
+def _run_with_timeout(callable_, *args, timeout_s: float, **kwargs):
+    """Execute a blocking callable on a side thread with a timeout.
+
+    ``cml.data_v1.Connection.get_pandas_dataframe`` doesn't accept a
+    timeout parameter, so we wrap the call in
+    ``concurrent.futures.ThreadPoolExecutor.submit().result(timeout=...)``.
+    Used for the lightweight liveness and metadata probes (short fixed
+    timeouts, fail-fast on broken connections); the heavy queries
+    themselves are NOT timeout-wrapped — proof-of-progress paradigm
+    means heavy queries run unbounded but observable via
+    :func:`atelier.classify.phase_heartbeat.phase_heartbeat`.
+
+    Raises ``TimeoutError`` (Python's builtin) on timeout — caller
+    decides whether to log+continue or abort.
+    """
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="hive-probe",
+    ) as pool:
+        future = pool.submit(callable_, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(
+                f"Hive probe exceeded {timeout_s:.1f}s timeout"
+            ) from exc
+
+
+def probe_connection(
+    cfg,
+    connection_name: str | None = None,
+    *,
+    timeout_s: float | None = None,
+) -> bool:
+    """Lightweight liveness probe — confirms the Hive connection responds.
+
+    Runs ``SELECT 1`` with a short timeout (default 5s) before any
+    expensive query.  Catches dead connections, expired credentials,
+    or completely-blackholed endpoints fast — well before they manifest
+    as a long pre-LLM stall.
+
+    Returns True when the connection is live, False otherwise.  Logs
+    the failure reason but does not raise — callers decide whether
+    to abort the run or proceed (some pipelines may want to attempt
+    the heavier query anyway, since liveness probes can be flaky).
+
+    The 5s default is a true fail-fast budget; legitimate Hive
+    connections respond in milliseconds.
+    """
+    if timeout_s is None:
+        timeout_s = float(getattr(cfg, "classify_liveness_probe_timeout_s", 5.0))
+
+    try:
+        import cml.data_v1 as cmldata
+    except ImportError:
+        log.warning("cml.data_v1 not available; skipping liveness probe")
+        return False
+
+    if connection_name is None:
+        names = cfg.cml_data_connection_names
+        if not names:
+            log.warning("No data connections configured; skipping liveness probe")
+            return False
+        connection_name = names[0]
+
+    try:
+        conn = cmldata.get_connection(connection_name)
+        _run_with_timeout(
+            conn.get_pandas_dataframe, "SELECT 1",
+            timeout_s=timeout_s,
+        )
+        return True
+    except TimeoutError as exc:
+        log.warning(
+            "Hive liveness probe TIMED OUT (%s) for %s — connection appears "
+            "dead.  The pipeline will still attempt the heavy query, but "
+            "operators should expect a longer-than-usual stall.",
+            exc, connection_name,
+        )
+        return False
+    except Exception as exc:
+        log.warning(
+            "Hive liveness probe FAILED for %s: %s — connection may be "
+            "misconfigured or credentials may have expired.",
+            connection_name, exc,
+        )
+        return False
+
+
+def probe_table_shape(
+    cfg,
+    table_name: str,
+    connection_name: str | None = None,
+    database: str = "default",
+    *,
+    timeout_s: float | None = None,
+) -> dict[str, Any] | None:
+    """Cheap metadata probe — column count + types via DESCRIBE.
+
+    ``DESCRIBE {db}.{table}`` returns column metadata only; the Hive
+    metastore answers from cached schema, not from a data scan.  Use
+    this BEFORE ``SELECT * FROM {table} LIMIT N`` to gauge cardinality
+    and catch missing-table errors faster than the heavy query would.
+
+    Returns ``{"columns": [...], "n_columns": int}`` on success, or
+    ``None`` on timeout/failure (logged, non-fatal — the heavy query
+    can still proceed; the probe is informational).
+
+    Default timeout 10s — generous for a metadata call but strict
+    enough to fail fast on a broken metastore.
+    """
+    if timeout_s is None:
+        timeout_s = float(getattr(cfg, "classify_metadata_probe_timeout_s", 10.0))
+
+    try:
+        import cml.data_v1 as cmldata
+    except ImportError:
+        return None
+
+    if connection_name is None:
+        names = cfg.cml_data_connection_names
+        if not names:
+            return None
+        connection_name = names[0]
+
+    try:
+        conn = cmldata.get_connection(connection_name)
+        df = _run_with_timeout(
+            conn.get_pandas_dataframe,
+            f"DESCRIBE {database}.{table_name}",
+            timeout_s=timeout_s,
+        )
+        # DESCRIBE schema is roughly (col_name, data_type, comment).
+        cols = df.iloc[:, 0].tolist() if not df.empty else []
+        return {"columns": [str(c) for c in cols], "n_columns": len(cols)}
+    except TimeoutError as exc:
+        log.warning(
+            "Hive metadata probe (DESCRIBE %s.%s) timed out: %s",
+            database, table_name, exc,
+        )
+        return None
+    except Exception as exc:
+        log.debug(
+            "Hive metadata probe (DESCRIBE %s.%s) failed (non-fatal): %s",
+            database, table_name, exc,
+        )
+        return None
+
+
 def discover_tables(
     cfg,
     connection_name: str | None = None,

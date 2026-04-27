@@ -170,6 +170,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.shap.top_k": ("classify_shap_top_k", int),
     "classify.shap.method": ("classify_shap_method", str),
     "classify.taxonomy.strict_validation": ("classify_taxonomy_strict_validation", bool),
+    "classify.liveness_probe_timeout_s": ("classify_liveness_probe_timeout_s", float),
+    "classify.metadata_probe_timeout_s": ("classify_metadata_probe_timeout_s", float),
+    "classify.phase_heartbeat_interval_s": ("classify_phase_heartbeat_interval_s", float),
     # SAGE feature importance
     "classify.sage.enabled": ("classify_sage_enabled", bool),
     "classify.sage.permutations": ("classify_sage_permutations", int),
@@ -399,6 +402,13 @@ class AtelierConfig:
     classify_shap_top_k: int = 3
     classify_shap_method: str = "auto"
     classify_taxonomy_strict_validation: bool = False
+    # Pre-LLM phase observability — proof-of-progress paradigm.
+    # Liveness / metadata probes have short hard timeouts (fail-fast
+    # on dead connections); heavy queries themselves run unbounded
+    # but observable via phase_heartbeat advancing FSM.updated_at.
+    classify_liveness_probe_timeout_s: float = 5.0
+    classify_metadata_probe_timeout_s: float = 10.0
+    classify_phase_heartbeat_interval_s: float = 5.0
 
     # SAGE feature importance
     classify_sage_enabled: bool = False
