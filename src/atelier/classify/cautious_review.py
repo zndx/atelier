@@ -19,12 +19,6 @@ code with belief above ``tau``; ``epistemic_evaluation`` reports
 loop: when belief at the predicted depth is weak, ask whether to emit
 the cautious code instead.
 
-History: motivated by an overwatch finding on run ``a0f80287`` that
-clustered 12 errors on the curator-provides-parent /
-pipeline-predicts-child split (``city → Shipping City``, ``country →
-Shipping Country``, etc.).  The mechanism applies more broadly than
-that one cluster.
-
 Project directive — on by default.  Iteration is part of the
 algorithm, and this is one of its iterations.  Toggle off only for
 ablation windows (compare-with-and-without).
