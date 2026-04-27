@@ -458,6 +458,35 @@ def run_classification_pipeline(
         if not isinstance(category_set, HierarchicalCategorySet):
             raise RuntimeError("Expected HierarchicalCategorySet")
 
+        # Vocabulary quality check — flags label collisions like
+        # "Web Browser" / "WebBrowser" that cause non-deterministic
+        # name-match resolution.  Warn-only by default; gated to
+        # raise via classify.taxonomy.strict_validation = true.
+        from atelier.classify.taxonomy import validate_taxonomy
+        taxonomy_findings = validate_taxonomy(category_set)
+        if taxonomy_findings:
+            errors = [f for f in taxonomy_findings if f.severity == "error"]
+            warnings = [f for f in taxonomy_findings if f.severity == "warning"]
+            for f in taxonomy_findings:
+                logger.warning(
+                    "Taxonomy %s [%s]: %s",
+                    f.severity, f.kind, f.detail,
+                )
+            strict = bool(getattr(cfg, "classify_taxonomy_strict_validation", False))
+            if strict and (errors or warnings):
+                raise RuntimeError(
+                    f"Taxonomy validation failed under strict mode: "
+                    f"{len(errors)} error(s) + {len(warnings)} warning(s).  "
+                    f"Disable strict_validation or fix the source vocabulary."
+                )
+            if errors and not strict:
+                # Errors (e.g. duplicate codes) always raise — they
+                # break category-set invariants the rest of the
+                # pipeline assumes.
+                raise RuntimeError(
+                    f"Taxonomy has {len(errors)} structural error(s); first: {errors[0].detail}"
+                )
+
         frame = FrameOfDiscernment(
             category_set,
             confusable_pairs=_build_confusable_pairs(category_set),

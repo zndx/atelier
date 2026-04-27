@@ -628,6 +628,190 @@ def save_annotations_json(
     return output_path
 
 
+# ── Vocabulary validation ───────────────────────────────────────────
+#
+# Detects post-normalization label collisions and other vocabulary-data
+# quality issues that classifier-side logic cannot work around.  Common
+# example: two distinct codes whose labels differ only by whitespace
+# ("Web Browser" vs "WebBrowser") both normalize to ``web_browser`` and
+# match the same column-name lookups, so the name-match evidence picks
+# one arbitrarily based on iteration order.  ``validate_taxonomy`` is
+# the load-time check that surfaces the issue with a structured
+# finding rather than letting it manifest as inscrutable
+# misclassifications downstream.
+
+
+@dataclass(frozen=True)
+class TaxonomyFinding:
+    """A single validation finding from ``validate_taxonomy``.
+
+    Attributes:
+        kind: One of ``"label_collision"``, ``"duplicate_code"``,
+            ``"orphaned_alias"``.
+        severity: ``"warning"`` or ``"error"``.  All findings are
+            warnings under default settings; operators who want to
+            fail-fast on any finding can flip
+            ``classify.taxonomy.strict_validation = true``.
+        codes: The category codes involved in the finding.
+        detail: Human-readable explanation suitable for log lines.
+    """
+
+    kind: str
+    severity: str
+    codes: tuple[str, ...]
+    detail: str
+
+
+def _normalize_label(label: str) -> str:
+    """Match the column-name normalization used elsewhere in the package.
+
+    Mirrors ``meta_tagging_source._normalize`` so the validator detects
+    the same collisions the runtime name-match path would conflate.
+    Preserves underscores as separators (so ``Web Browser`` →
+    ``web_browser``).
+    """
+    s = re.sub(r"[^a-z0-9_]", "_", label.lower().strip())
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
+
+def _canonical_label(label: str) -> str:
+    """Aggressive canonicalization: strip ALL non-alphanumerics including
+    underscores.  Catches the visual-collision class where labels look
+    like alternative renderings of the same term (e.g. ``Web Browser``
+    vs ``WebBrowser`` both collapse to ``webbrowser``) — these confuse
+    LLMs that don't know the canonical form when emitting predictions,
+    even if the strict column-name normalization keeps them distinct.
+    """
+    return re.sub(r"[^a-z0-9]", "", label.lower().strip())
+
+
+def validate_taxonomy(category_set: CategorySet) -> list[TaxonomyFinding]:
+    """Return a list of vocabulary-quality findings (empty when clean).
+
+    Detects:
+
+    - **label_collision** — two or more categories whose labels
+      normalize to the same string (e.g. "Web Browser" / "WebBrowser"
+      → both ``web_browser``).  These trigger non-deterministic name-
+      match resolution and should be reconciled in the source data.
+    - **duplicate_code** — two categories sharing the same ``code``
+      (should never occur; defensive check).
+    - **orphaned_alias** — a label or alias that, after normalization,
+      collides with another category's normalized label even though
+      the source labels were distinct.  Subset of ``label_collision``;
+      reported separately for clarity.
+
+    Returns a list (possibly empty) rather than raising.  Callers
+    decide whether to log warnings, raise on findings, or aggregate
+    for a vocabulary-cleanup report.
+
+    The validator is read-only — it does not mutate the input.
+    """
+    findings: list[TaxonomyFinding] = []
+
+    cats = list(category_set.categories)
+    # On a HierarchicalCategorySet, prefer ``all_categories`` so internal
+    # nodes (which can also collide) are checked.
+    all_attr = getattr(category_set, "all_categories", None)
+    if all_attr is not None:
+        cats = list(all_attr)
+
+    # Duplicate codes
+    by_code: dict[str, list[ReferenceCategory]] = {}
+    for c in cats:
+        by_code.setdefault(c.code, []).append(c)
+    for code, group in by_code.items():
+        if len(group) > 1:
+            findings.append(TaxonomyFinding(
+                kind="duplicate_code",
+                severity="error",
+                codes=tuple(c.code for c in group),
+                detail=(
+                    f"code {code!r} appears {len(group)} times in the "
+                    f"category set; codes must be unique"
+                ),
+            ))
+
+    # Label collisions — detect under both normalizations.
+    # Strict (with underscores): catches column-name lookup collisions
+    # like the runtime name-match path would conflate.
+    # Canonical (alphanumeric-only): catches visual collisions like
+    # "Web Browser" / "WebBrowser" that confuse LLM predictions even
+    # when strict normalization keeps them distinct.
+    seen_collisions: set[tuple[str, ...]] = set()
+    for normalizer, kind_label in (
+        (_normalize_label, "strict"),
+        (_canonical_label, "canonical"),
+    ):
+        by_norm: dict[str, list[ReferenceCategory]] = {}
+        for c in cats:
+            if not c.label:
+                continue
+            key = normalizer(c.label)
+            if not key:
+                continue
+            by_norm.setdefault(key, []).append(c)
+        for norm_label, group in by_norm.items():
+            if len(group) <= 1:
+                continue
+            distinct_labels = {c.label for c in group}
+            if len(distinct_labels) <= 1:
+                continue
+            sorted_codes = tuple(sorted(c.code for c in group))
+            # Don't double-report when the strict pass already caught it
+            # under the same code-set.
+            if sorted_codes in seen_collisions:
+                continue
+            seen_collisions.add(sorted_codes)
+            findings.append(TaxonomyFinding(
+                kind="label_collision",
+                severity="warning",
+                codes=sorted_codes,
+                detail=(
+                    f"labels {sorted(distinct_labels)!r} all collapse to "
+                    f"{norm_label!r} under {kind_label} normalization; "
+                    f"column-name matching cannot reliably disambiguate "
+                    f"between codes {list(sorted_codes)!r}"
+                ),
+            ))
+
+    # Orphaned aliases — any common_names or abbrev that, after
+    # normalization, collides with a different category's normalized
+    # label.  Surfaces "alias X is shadowed by category Y" cases where
+    # a lookup for X would never reach the category that declares it.
+    label_keys: dict[str, ReferenceCategory] = {}
+    for c in cats:
+        if c.label:
+            label_keys[_normalize_label(c.label)] = c
+    for c in cats:
+        aliases = []
+        if c.abbrev:
+            aliases.append(c.abbrev)
+        if c.common_names:
+            aliases.extend(
+                a.strip() for a in re.split(r"[,|]", c.common_names) if a.strip()
+            )
+        for alias in aliases:
+            key = _normalize_label(alias)
+            if not key:
+                continue
+            other = label_keys.get(key)
+            if other is not None and other.code != c.code:
+                findings.append(TaxonomyFinding(
+                    kind="orphaned_alias",
+                    severity="warning",
+                    codes=(c.code, other.code),
+                    detail=(
+                        f"alias {alias!r} on {c.code} normalizes to {key!r}, "
+                        f"which is also the normalized label of {other.code} "
+                        f"({other.label!r}) — alias lookup will be shadowed"
+                    ),
+                ))
+
+    return findings
+
+
 # ── Universal vocabulary ────────────────────────────────────────────
 
 
