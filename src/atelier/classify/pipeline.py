@@ -729,6 +729,7 @@ def run_classification_pipeline(
                     "sweep_batches": p.get("batches_attempted", 0),
                     "sweep_truncations": p.get("truncation_count", 0),
                     "sweep_failed": p.get("failed_columns", 0),
+                    "sweep_throttled": state.throttle_count,
                     "sweep_elapsed_s": elapsed_s,
                     "sweep_batch_size": state.effective_batch_size,
                 })

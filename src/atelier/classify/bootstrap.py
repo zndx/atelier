@@ -26,6 +26,7 @@ FSM, HOCON config, and classification pipeline.
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -77,23 +78,69 @@ _FATAL_MSG_SUBSTRINGS: tuple[str, ...] = (
 )
 
 
-def _classify_error(exc: Exception) -> str:
-    """Return ``"fatal"`` or ``"recoverable"`` for an LLM call exception.
+_THROTTLE_CLASS_NAMES: frozenset[str] = frozenset({
+    # llm_backend.ThrottledError — Bedrock + OpenAI-compat backends raise
+    # this when their inner backoff loop exhausts on a throttling code.
+    "ThrottledError",
+    # anthropic SDK rate-limit class (Anthropic backends don't manually
+    # exhaust retries; the SDK does, then raises this).
+    "RateLimitError",
+    # boto-level direct surfacing (defensive — usually wrapped before
+    # reaching here, but if a backend raises raw, classify it).
+    "ThrottlingException",
+    "TooManyRequestsException",
+})
 
-    Fatal errors abort the sweep immediately — halving a batch cannot
-    repair auth problems or a wrong model ID, and silently retrying
-    would waste compute budget while producing a false "partial
-    coverage" result.  Everything else (timeouts, 5xx, JSON parse
-    issues, rate limits, connection resets) halves and retries down
-    to the configured ``min_columns_per_call`` (default 1).
+_THROTTLE_MSG_SUBSTRINGS: tuple[str, ...] = (
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "throttling",
+    "throttled",
+    "too many requests",
+    "tps quota",
+    "tpm quota",
+)
+
+# Per-call-site cap on throttle-and-retry-at-same-size attempts before
+# falling through to halving.  5 × exponential-with-jitter (capped at
+# 60s per sleep) gives the backend up to a few minutes of recovery
+# window per call without burning the budget on a permanently-degraded
+# endpoint.
+_THROTTLE_MAX_ATTEMPTS: int = 5
+
+
+def _classify_error(exc: Exception) -> str:
+    """Return ``"fatal"`` | ``"throttle"`` | ``"recoverable"`` for an LLM error.
+
+    - **Fatal**: auth, permission, invariant violations.  Halving cannot
+      repair these; the sweep aborts immediately.
+    - **Throttle**: rate-limit signals (HTTP 429, ``ThrottledError``,
+      ``RateLimitError``, ``ThrottlingException``).  The outer halving
+      loop **sleeps with jitter at the same batch size** instead of
+      halving — halving under throttling multiplies concurrent calls at
+      smaller sizes, making throttling worse.
+    - **Recoverable**: everything else (timeouts, 5xx other than 503,
+      JSON parse issues, connection resets).  Halve and retry down to
+      ``min_columns_per_call``.
+
+    The classification is checked class-name-first (cheap, deterministic)
+    before falling through to message-substring detection (covers cases
+    where exception types are wrapped or messages carry the signal but
+    the type is generic).
     """
     cls_name = type(exc).__name__
     if cls_name in _FATAL_CLASS_NAMES:
         return "fatal"
+    if cls_name in _THROTTLE_CLASS_NAMES:
+        return "throttle"
     msg = str(exc).lower()
     for marker in _FATAL_MSG_SUBSTRINGS:
         if marker in msg:
             return "fatal"
+    for marker in _THROTTLE_MSG_SUBSTRINGS:
+        if marker in msg:
+            return "throttle"
     return "recoverable"
 
 
@@ -288,6 +335,12 @@ class BootstrapState:
     # success; LS-4 circuit breaker raises FatalLLMError when it reaches
     # ``cfg.max_consecutive_halve_failures``.
     consecutive_halve_failures: int = 0
+    # Throttle telemetry — incremented every time a backend raises
+    # ``ThrottledError`` (or equivalent) and the outer retry loop
+    # sleeps-at-same-size rather than halving.  Surfaced to the FSM
+    # progress dict and the Status UI so operators can see when the
+    # backend is rate-limiting them rather than failing.
+    throttle_count: int = 0
     tokens_input: int = 0
     tokens_output: int = 0
     iteration_metrics: list[IterationMetrics] = field(default_factory=list)
@@ -497,6 +550,55 @@ def _classify_batch_with_retry(
             raise FatalLLMError(
                 f"LLM backend reported unrecoverable error ({type(exc).__name__}): {exc}"
             ) from exc
+
+        # Throttle — sleep with jitter and retry at SAME batch size.
+        # Halving under throttling makes throttling worse (more concurrent
+        # calls at smaller sizes); the right move is to give the backend
+        # time to drain its rate-limit window and try again unchanged.
+        # Capped at ``_THROTTLE_MAX_ATTEMPTS`` per call site to prevent
+        # unbounded sleep loops on a permanently-degraded endpoint.
+        if kind == "throttle":
+            state.throttle_count += 1
+            _record("throttled", exc)
+            attempts_so_far = sum(
+                1 for ba in state.batch_audit
+                if ba.batch_index == batch_index and ba.status == "throttled"
+            )
+            if attempts_so_far <= _THROTTLE_MAX_ATTEMPTS:
+                # Honor backend retry-after hint when present; otherwise
+                # exponential with jitter capped at 60s.
+                hint = getattr(exc, "retry_after_s", None)
+                if hint and hint > 0:
+                    sleep_s = min(60.0, float(hint))
+                else:
+                    base = min(60.0, 2.0 ** attempts_so_far)
+                    sleep_s = base + random.uniform(0.0, base * 0.5)
+                _beat(f"sweep_throttled_d{_depth}")
+                logger.warning(
+                    "LLM throttled (attempt %d/%d) — sleeping %.1fs and "
+                    "retrying at SAME batch size (n=%d): %s",
+                    attempts_so_far, _THROTTLE_MAX_ATTEMPTS, sleep_s, n, exc,
+                )
+                time.sleep(sleep_s)
+                # Recurse at same size (not halved); _depth unchanged.
+                return _classify_batch_with_retry(
+                    backend, chunk_samples, system_prompt, state,
+                    revisit_context=revisit_context,
+                    table_name=table_name,
+                    min_batch=min_batch,
+                    _depth=_depth,
+                    _parent_index=batch_index,
+                    heartbeat=heartbeat,
+                    cfg=cfg,
+                )
+            # Exhausted throttle attempts — fall through to recoverable
+            # halving so the request can still complete with degraded
+            # throughput rather than fail outright.
+            logger.warning(
+                "LLM throttle attempts exhausted (%d) — falling back to "
+                "halving retry (n=%d): %s",
+                _THROTTLE_MAX_ATTEMPTS, n, exc,
+            )
 
         # Recoverable: halve if possible, else record per-column failure.
         if n <= min_batch:

@@ -662,6 +662,14 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
               <Tag color="red">{String(progress.sweep_failed)}</Tag>
             </Descriptions.Item>
           )}
+        {progress.sweep_throttled != null &&
+          Number(progress.sweep_throttled) > 0 && (
+            <Descriptions.Item label="Throttled">
+              <Tag color="orange">
+                {String(progress.sweep_throttled)} retried at same size
+              </Tag>
+            </Descriptions.Item>
+          )}
       </Descriptions>
       {state === "LLM_SWEEP" &&
         progress.columns_total != null &&

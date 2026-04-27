@@ -178,6 +178,36 @@ def _apply_thinking(kwargs: dict, model: str, budget: int) -> None:
     kwargs["temperature"] = 1
 
 
+class ThrottledError(Exception):
+    """Backend rate-limited the request after exhausting internal retries.
+
+    Raised by ``BedrockStructuredBackend`` and ``OpenAICompatibleBackend``
+    when their inner backoff loop runs out of attempts on a throttling
+    code (HTTP 429, AWS ``ThrottlingException`` /
+    ``TooManyRequestsException`` / ``ServiceUnavailableException``,
+    HTTP 503/529).  The bootstrap halving-retry loop catches this
+    distinctly from other recoverable errors and **sleeps with jitter at
+    the same batch size** instead of halving — halving under throttling
+    multiplies concurrent calls at smaller sizes, making throttling
+    worse.
+
+    Carries the underlying exception (``cause``) and the suggested
+    retry-after seconds (``retry_after_s``, optional) so the outer
+    retry loop can honor the backend's pacing hint when present.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        cause: Exception | None = None,
+        retry_after_s: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.cause = cause
+        self.retry_after_s = retry_after_s
+
+
 @dataclass
 class LLMBackendConfig:
     """Configuration for LLM backend."""
@@ -796,6 +826,7 @@ class OpenAICompatibleBackend(LLMBackend):
 
         # Retry with exponential backoff for transient errors
         last_error: Exception | None = None
+        last_was_throttle = False
         for attempt in range(self._config.max_retries):
             try:
                 response = client.chat.completions.create(**api_params)
@@ -803,7 +834,15 @@ class OpenAICompatibleBackend(LLMBackend):
             except Exception as e:
                 last_error = e
                 err_str = str(e)
-                retryable = any(code in err_str for code in ("429", "502", "503", "504"))
+                # 429 = rate limit (throttle); 503 = service unavailable
+                # (often capacity-driven, semantically a throttle).
+                # 502 / 504 = gateway timeouts (network-side, not
+                # throttling — halve-on-retry as today).
+                throttle = any(code in err_str for code in ("429", "503"))
+                retryable = throttle or any(
+                    code in err_str for code in ("502", "504")
+                )
+                last_was_throttle = throttle
                 # Backend doesn't understand extra_body reasoning keys —
                 # drop them, mark the session, and retry once without delay.
                 unsupported = (
@@ -828,6 +867,12 @@ class OpenAICompatibleBackend(LLMBackend):
                     continue
                 raise
         else:
+            if last_was_throttle:
+                raise ThrottledError(
+                    f"OpenAI-compatible throttling — {self._config.max_retries} "
+                    f"backoff attempts exhausted: {last_error}",
+                    cause=last_error,
+                )
             raise last_error  # type: ignore[misc]
 
         msg = response.choices[0].message
@@ -1189,6 +1234,7 @@ class BedrockStructuredBackend(_BedrockMixin, LLMBackend):
             }
 
         last_error: Exception | None = None
+        last_was_throttle = False
         for attempt in range(self._config.max_retries):
             try:
                 response = client.invoke_model(
@@ -1201,11 +1247,17 @@ class BedrockStructuredBackend(_BedrockMixin, LLMBackend):
             except Exception as e:
                 last_error = e
                 err_str = str(e)
-                retryable = any(code in err_str for code in (
+                throttle = any(code in err_str for code in (
                     "ThrottlingException", "TooManyRequestsException",
-                    "ServiceUnavailableException", "ModelTimeoutException",
+                    "ServiceUnavailableException",
                     "429", "503", "529",
                 ))
+                # ``ModelTimeoutException`` is a recoverable timeout but
+                # not a throttle — keep it in the retryable set without
+                # tagging it as throttle (so the outer halving loop can
+                # halve as today rather than sleep-at-same-size).
+                retryable = throttle or "ModelTimeoutException" in err_str
+                last_was_throttle = throttle
                 if retryable and attempt < self._config.max_retries - 1:
                     delay = self._config.retry_delay * (2 ** attempt)
                     logger.warning(
@@ -1216,6 +1268,16 @@ class BedrockStructuredBackend(_BedrockMixin, LLMBackend):
                     continue
                 raise
         else:
+            # Inner-retry exhaustion.  When the last failure was a
+            # throttle, raise ``ThrottledError`` so the bootstrap halving
+            # loop sleeps-at-same-size instead of halving and amplifying
+            # concurrent pressure on a rate-limited endpoint.
+            if last_was_throttle:
+                raise ThrottledError(
+                    f"Bedrock throttling — {self._config.max_retries} "
+                    f"backoff attempts exhausted: {last_error}",
+                    cause=last_error,
+                )
             raise last_error  # type: ignore[misc]
 
         body = json.loads(response["body"].read())
