@@ -707,12 +707,30 @@ def run_classification_pipeline(
         # one whose thread has died silently (observed in the wild:
         # Bedrock TCP connection hung with no timeout, gateway thread
         # entered LLM_SWEEP and never emitted another progress update).
+        # The raw heartbeat dict from bootstrap._llm_sweep uses
+        # ``columns_labeled`` / ``llm_calls_total``; the Status UI
+        # expects ``llm_labeled`` / ``llm_calls``.  Remap here so the
+        # card's existing fields update during the sweep instead of
+        # freezing on the pre-sweep values.  ``sweep_*`` fields surface
+        # sub-phase detail (batches, elapsed, batch size, truncations,
+        # failures) the operator needs to tell a running sweep apart
+        # from a stalled one.
+        import time as _stime
         def _sweep_progress(p: dict) -> None:
             try:
+                sweep_started = state.sweep_started_at or _stime.time()
+                elapsed_s = round(_stime.time() - sweep_started, 1)
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "columns_total": total_columns,
                     "mc_frontier": len(sweep_columns),
-                    **p,
+                    "llm_labeled": p.get("columns_labeled", 0),
+                    "llm_calls": p.get("llm_calls_total", 0),
+                    "sweep_phase": p.get("phase"),
+                    "sweep_batches": p.get("batches_attempted", 0),
+                    "sweep_truncations": p.get("truncation_count", 0),
+                    "sweep_failed": p.get("failed_columns", 0),
+                    "sweep_elapsed_s": elapsed_s,
+                    "sweep_batch_size": state.effective_batch_size,
                 })
             except Exception:
                 pass  # never let progress reporting abort the sweep
