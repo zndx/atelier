@@ -185,3 +185,25 @@ docs-build:
 # Serve mdbook docs with live reload
 docs-serve:
     mdbook serve docs/
+
+# ── Release tooling ───────────────────────────────────────────────
+
+# Stamp Cloudera proprietary header on every shippable source + doc.
+# RUN ON A RELEASE BRANCH ONLY — trunk stays unmarked in the dev tree.
+stamp-headers:
+    uv run python scripts/apply_cloudera_header.py
+
+# Preview what would be stamped without writing anything.
+stamp-headers-dry:
+    uv run python scripts/apply_cloudera_header.py --dry-run --verbose
+
+# CI gate — exit 1 if any tracked file is missing the Cloudera header.
+stamp-headers-check:
+    uv run python scripts/apply_cloudera_header.py --check
+
+# Build a self-contained source archive (atelier-{version}.tar.gz) for
+# offline CAI deployments — main repo + embedding-atlas submodule, no
+# hermes-agent.  Run on a release branch so the archive carries the
+# stamped headers and the bumped version.
+build-archive:
+    bash scripts/build_source_archive.sh
