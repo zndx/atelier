@@ -48,6 +48,7 @@ from features.agent.step_defs.gpu_sage_parity_steps import *  # noqa: F401,F403
 from features.agent.step_defs.supervisor_steps import *  # noqa: F401,F403
 from features.agent.step_defs.coverage_guarantees_steps import *  # noqa: F401,F403
 from features.agent.step_defs.artifact_set_steps import *  # noqa: F401,F403
+from features.agent.step_defs.extend_pipeline_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.terminal_models_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_layering_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.auto_start_steps import *  # noqa: F401,F403
