@@ -77,7 +77,7 @@ function Landing() {
 
   return (
     <>
-      <Title level={2}>Welcome to {appName}</Title>
+      <Title level={2}>{appName}</Title>
       <Paragraph type="secondary">
         Agentic classification workbench powered by the Claude Agent SDK with
         interactive embedding visualization and adaptive keystone-agent
