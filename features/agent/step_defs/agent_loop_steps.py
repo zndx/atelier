@@ -102,7 +102,10 @@ def _client_inspect_then_converge():
                 _MockContentBlock("text", text="Metrics look good, declaring converged."),
                 _make_tool_use_block(
                     "declare_converged",
-                    {"reason": "Mean K below threshold after inspection"},
+                    {
+                        "convergence_kind": "k_threshold_met",
+                        "reason": "Mean K below threshold after inspection",
+                    },
                     "t1_converge",
                 ),
             ],
@@ -150,7 +153,10 @@ def _client_revisit_then_converge(high_k_columns):
                 _MockContentBlock("text", text="K improved, declaring converged."),
                 _make_tool_use_block(
                     "declare_converged",
-                    {"reason": "K decreased after targeted revisit"},
+                    {
+                        "convergence_kind": "iterative_convergence",
+                        "reason": "K decreased after targeted revisit",
+                    },
                     "t3_converge",
                 ),
             ],
