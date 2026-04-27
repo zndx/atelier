@@ -295,6 +295,33 @@ if not result.ok:
     sys.exit(1)
 "
 
+# ── Embedding model warmup + offline-mode lock ────────────────────
+# Load the SentenceTransformer once and probe-encode it before
+# starting the server.  On a healthy CAI deploy the model is already
+# in the HF cache (pre-downloaded by scripts/install_deps.py) — this
+# is a fast confirmation.  On a broken deploy it fails LOUDLY with a
+# clear remediation path, rather than letting the pipeline stall on
+# the first cosine-evidence call hours into a run.
+#
+# After warmup confirms the cache is populated, we export
+# HF_HUB_OFFLINE=1 + TRANSFORMERS_OFFLINE=1 so that any subsequent
+# load attempt CANNOT silently re-download — a missing-cache failure
+# becomes loud instead of silent.
+echo "Warming up embedding model..."
+if python -c "from atelier.classify.embedding import warmup; warmup()"; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    echo "Embedding model ready; HF_HUB_OFFLINE=1 + TRANSFORMERS_OFFLINE=1 locked in"
+else
+    echo "Embedding model warmup FAILED — refusing to start gateway." >&2
+    echo "Remediation:" >&2
+    echo "  - On CAI: re-run the install job to populate the HF cache" >&2
+    echo "    (scripts/install_deps.py downloads all-MiniLM-L6-v2)." >&2
+    echo "  - Locally: ensure HF_HUB_OFFLINE is unset on first run so" >&2
+    echo "    the model can download." >&2
+    exit 1
+fi
+
 # Run database migrations + seed keystone agents (shared with devenv)
 echo "Running database bootstrap..."
 echo "  DB URL: ${ATELIER_DB_URL:-<not set>}"

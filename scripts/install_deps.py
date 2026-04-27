@@ -65,6 +65,30 @@ subprocess.run(
     check=True,
 )
 
+# Pre-download the SentenceTransformer embedding model into the local
+# HF cache while we have outbound egress (CAI install runs with
+# unrestricted network; the runtime application may have HF_HUB_OFFLINE=1
+# set to surface cache failures loudly).  Non-fatal — incremental dev
+# installs without network can still proceed; only fresh CAI deploys
+# benefit, and start-app.sh's warmup will fail-fast if the cache
+# isn't populated then.
+print("\n--- Pre-downloading embedding model into HF cache ---")
+try:
+    subprocess.run(
+        [
+            sys.executable, "-c",
+            "from atelier.classify.embedding import warmup; warmup()",
+        ],
+        check=True,
+    )
+    print("Embedding model cached and probe-encoded")
+except subprocess.CalledProcessError as exc:
+    print(
+        f"WARNING: embedding model warmup failed at install time: {exc}.  "
+        f"start-app.sh will retry; ensure HF_HUB_OFFLINE is NOT set "
+        f"until the cache is populated."
+    )
+
 # Install Node.js via nvm (RAG Studio pattern)
 print("\n--- Installing Node.js ---")
 subprocess.run(["bash", "scripts/install_node.sh"], check=True)

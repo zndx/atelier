@@ -240,6 +240,65 @@ def set_model_name(name: str) -> None:
         _model = None
 
 
+def warmup() -> None:
+    """Eagerly load the embedding model and validate via a probe encode.
+
+    Defense against silent first-run model downloads on restricted-egress
+    deployments (e.g. CAI):
+
+    - Triggers the SentenceTransformer download into the local HF cache
+      if it isn't already there.
+    - Performs a one-token probe encode to confirm the model is
+      genuinely loadable, not just present-on-disk-but-corrupt.
+    - Raises a clear ``RuntimeError`` on failure rather than letting
+      a half-loaded model silently fail at first cosine-evidence call
+      hours into a pipeline run.
+
+    Idempotent — subsequent calls hit the same singleton via
+    ``_get_model()`` without retrying the download.
+
+    Operators should call this from install scripts (post-pip, to
+    pre-populate the HF cache during build) and from start-app.sh
+    (post-preflight, to fail-fast on a missing or corrupt cache before
+    the FastAPI server starts accepting requests).
+    """
+    try:
+        model = _get_model()
+    except Exception as exc:
+        raise RuntimeError(
+            f"Embedding model {_model_name!r} unavailable — check HF cache "
+            f"or network egress.  On CAI deployments, ensure the model "
+            f"was pre-downloaded during install (scripts/install_deps.py) "
+            f"and that HF_HUB_OFFLINE=1 is exported only AFTER the cache "
+            f"is populated.  Original error: {exc}"
+        ) from exc
+    try:
+        probe = model.encode(
+            ["warmup"], normalize_embeddings=True, batch_size=1,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Embedding model {_model_name!r} loaded but probe encode "
+            f"failed — model artifact may be corrupt or incompatible "
+            f"with the installed sentence-transformers.  Original error: "
+            f"{exc}"
+        ) from exc
+    # Defensive: confirm we got a non-trivial embedding back.
+    try:
+        n_dims = len(probe[0])
+    except Exception:
+        n_dims = -1
+    if n_dims <= 0:
+        raise RuntimeError(
+            f"Embedding probe returned an unexpected shape (n_dims={n_dims}) "
+            f"for model {_model_name!r}; treating as load failure."
+        )
+    logger.info(
+        "Embedding model warmup complete: %s (%d dims, devices=%s)",
+        _model_name, n_dims, _devices,
+    )
+
+
 def get_batch_size() -> int:
     """Return the resolved batch size (for use by external callers like SAGE)."""
     return _batch_size
