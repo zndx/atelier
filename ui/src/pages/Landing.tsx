@@ -2,6 +2,7 @@ import { Card, Col, Row, Spin, Statistic, Tag, Typography } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  SyncOutlined,
   WarningOutlined,
   BookOutlined,
   ClusterOutlined,
@@ -11,7 +12,15 @@ import {
   ExperimentOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import type { AgentInfo } from "../types/canvas";
 import { useDataset } from "../contexts/DatasetContext";
@@ -29,8 +38,28 @@ interface StatusSummary {
   config?: { app_display_name?: string };
 }
 
+// State machine for the Service Status indicator.
+//
+//   mount → connecting (yellow, no value yet)
+//   poll succeeds → connected (green) / degraded (yellow)
+//   connected/degraded → disconnected (red) on first failed poll
+//   disconnected for >= DISCONNECTED_ALARM_MS → connecting (yellow,
+//                                              soften to "still trying")
+//   subsequent failures while connecting → stay connecting
+//
+// The 10-second alarm window lets a brief gateway hiccup register as
+// a loud red signal, while a longer outage softens to the "we are
+// polling, the system is trying to reach the engine" state.  Avoids
+// the thrashing UX of flipping between Disconnected and Connecting on
+// every poll cycle while the gateway is genuinely unreachable.
+type ConnectionState = "connecting" | "connected" | "degraded" | "disconnected";
+const DISCONNECTED_ALARM_MS = 10_000;
+
 function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("connecting");
+  const disconnectedSinceRef = useRef<number | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [termCount, setTermCount] = useState<number | null>(null);
   const { activeDatasetId, activeSourceId, datasets, sources } = useDataset();
@@ -40,12 +69,36 @@ function Landing() {
     // (Vite up before the gateway, gRPC slow to bind, etc.) recovers
     // automatically without the operator hitting refresh.  The Status
     // page already polls /api/fsm/status on a 5s cadence; the Landing
-    // page's Service Status indicator now matches that pattern.
+    // page's Service Status indicator matches that pattern and drives
+    // the ConnectionState machine described above.
     const fetchStatus = () =>
       fetch("/api/status")
         .then((r) => r.json())
-        .then(setStatus)
-        .catch(() => setStatus(null));
+        .then((data: StatusSummary) => {
+          setStatus(data);
+          disconnectedSinceRef.current = null;
+          setConnectionState(data.degraded ? "degraded" : "connected");
+        })
+        .catch(() => {
+          setStatus(null);
+          setConnectionState((prev) => {
+            const now = Date.now();
+            if (prev === "connected" || prev === "degraded") {
+              // First failure after a healthy poll — fire the alarm.
+              disconnectedSinceRef.current = now;
+              return "disconnected";
+            }
+            if (prev === "disconnected") {
+              const since = disconnectedSinceRef.current ?? now;
+              return now - since >= DISCONNECTED_ALARM_MS
+                ? "connecting"
+                : "disconnected";
+            }
+            // Already 'connecting' (initial mount or aged-out outage).
+            // Stay there — no thrashing back to Disconnected.
+            return "connecting";
+          });
+        });
     fetchStatus();
     const statusInterval = setInterval(fetchStatus, 5000);
 
@@ -64,6 +117,33 @@ function Landing() {
 
     return () => clearInterval(statusInterval);
   }, [activeSourceId]);
+
+  const connectionDisplay: Record<
+    ConnectionState,
+    { label: string; color: string; icon: ReactNode }
+  > = {
+    connecting: {
+      label: "Connecting",
+      color: "#faad14",
+      icon: <SyncOutlined spin />,
+    },
+    connected: {
+      label: "Connected",
+      color: "#52c41a",
+      icon: <CheckCircleOutlined />,
+    },
+    degraded: {
+      label: "Degraded",
+      color: "#faad14",
+      icon: <WarningOutlined />,
+    },
+    disconnected: {
+      label: "Disconnected",
+      color: "#ff4d4f",
+      icon: <CloseCircleOutlined />,
+    },
+  };
+  const conn = connectionDisplay[connectionState];
 
   const skillCount = useMemo(
     () => agents.reduce((n, a) => n + (a.tool_ids?.length || 0), 0),
@@ -100,31 +180,9 @@ function Landing() {
             <Card hoverable>
               <Statistic
                 title="Service Status"
-                value={
-                  status?.connected
-                    ? status.degraded
-                      ? "Degraded"
-                      : "Connected"
-                    : "Disconnected"
-                }
-                prefix={
-                  status?.connected ? (
-                    status.degraded ? (
-                      <WarningOutlined />
-                    ) : (
-                      <CheckCircleOutlined />
-                    )
-                  ) : (
-                    <CloseCircleOutlined />
-                  )
-                }
-                valueStyle={{
-                  color: status?.connected
-                    ? status.degraded
-                      ? "#faad14"
-                      : "#52c41a"
-                    : "#ff4d4f",
-                }}
+                value={conn.label}
+                prefix={conn.icon}
+                valueStyle={{ color: conn.color }}
               />
               {status?.grpc?.version && (
                 <Tag color="blue" style={{ marginTop: 8 }}>
