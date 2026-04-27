@@ -11,13 +11,17 @@ Three phases:
 
   Phase 2 — ML validation:
     Run the full 6-source DST pipeline with the LLM result included.
-    DST conflict K identifies columns where ML evidence disagrees with
-    the LLM label.
+    Belief-gap (Pl − Bel) measures how tightly evidence supports the
+    predicted code; DST conflict K is a diagnostic for source
+    disagreement (high K = sources disagree on the leaf category).
 
   Phase 3 — Targeted revisit:
-    Re-send only high-K disagreement columns to the LLM with enriched ML
-    context (prediction, belief interval, confusable pair).  Iterate on this
-    shrinking set until K converges or budget is exhausted.
+    Re-send disagreement and high-gap columns to the LLM with enriched
+    ML context (prediction, belief interval, confusable pair).  Iterate
+    on this shrinking set until the mean belief gap drops below
+    ``gap_threshold`` (primary criterion), the gap plateaus, or budget
+    is exhausted.  K is tracked alongside as a diagnostic, not as the
+    convergence signal.
 
 Ported from signals/src/sigint/bootstrap_agent.py, adapted for atelier's
 FSM, HOCON config, and classification pipeline.
@@ -361,7 +365,7 @@ class BootstrapState:
     agent_converged_reason: str | None = None
     # Structured tag corresponding to one of the convergence_reason
     # enum values (iterative_convergence, no_revisit_candidates,
-    # k_threshold_met, plateau, budget_exhausted, agent_convergence).
+    # gap_threshold_met, plateau, budget_exhausted, agent_convergence).
     # Populated by the declare_converged tool's convergence_kind
     # parameter so the structured tag and the prose reason stay
     # decoupled — Status UI keys on the tag, full prose lands in

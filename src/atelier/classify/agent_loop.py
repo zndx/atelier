@@ -118,7 +118,7 @@ TOOLS = [
                     "enum": [
                         "iterative_convergence",
                         "no_revisit_candidates",
-                        "k_threshold_met",
+                        "gap_threshold_met",
                         "plateau",
                         "budget_exhausted",
                         "agent_convergence",
@@ -131,11 +131,13 @@ TOOLS = [
                         "when revisits have settled the predictions; "
                         "'no_revisit_candidates' when no columns remain "
                         "above the bel_floor / gap_threshold; "
-                        "'k_threshold_met' when mean_k < boot_cfg.k_threshold; "
-                        "'plateau' when belief gap stopped decreasing; "
-                        "'budget_exhausted' when LLM call budget is the "
-                        "constraint; 'agent_convergence' as a default "
-                        "when none of the above fit cleanly."
+                        "'gap_threshold_met' when mean(Pl − Bel) < "
+                        "boot_cfg.gap_threshold (the primary belief-gap "
+                        "convergence criterion — K is diagnostic, not "
+                        "load-bearing); 'plateau' when belief gap stopped "
+                        "decreasing; 'budget_exhausted' when LLM call "
+                        "budget is the constraint; 'agent_convergence' as "
+                        "a default when none of the above fit cleanly."
                     ),
                 },
                 "reason": {
@@ -144,8 +146,8 @@ TOOLS = [
                         "Free-form prose explaining the decision in 1-3 "
                         "sentences with specific metric references.  This "
                         "is the audit trail; surface the actual numbers "
-                        "you observed (mean_gap, mean_k, disagreements, "
-                        "etc.)."
+                        "you observed (mean_gap is primary; mean_k, "
+                        "disagreements, coverage are diagnostic)."
                     ),
                 },
             },
@@ -173,30 +175,45 @@ AGENT_SYSTEM_PROMPT = """\
 You are the Atelier classification agent. Your goal is to classify data columns
 with high confidence using Dempster-Shafer Theory (DST) evidence fusion.
 
-You have already completed an initial classification pass. Now you are in the
-convergence loop: examining columns where evidence sources disagree (high
-conflict K), investigating why, and requesting targeted re-classification
-with enriched context.
+You have already completed an initial classification pass. Now you are in
+the convergence loop: examining weakly-supported predictions (high belief
+gap, low Bel) and source disagreements, investigating why, and requesting
+targeted re-classification with enriched context.
+
+## Convergence signal (read carefully)
+The pipeline's primary convergence criterion is the **mean belief gap**
+``mean(Pl − Bel)``.  A small gap means evidence tightly supports the
+predicted code; a large gap means the prediction is plausible but not
+confident.  DST conflict K is a useful **diagnostic** for spotting source
+disagreement, but it is not the convergence criterion — under default
+Dempster fusion, K stays high because the loop normalizes conflict out,
+so gating convergence on K would be vestigial.  Reason about the gap.
 
 ## Your Tools
-- get_conflict_report: See which columns have high K (source disagreement)
+- get_conflict_report: Surface columns where evidence sources disagree
+  (high K).  Useful diagnostic for finding investigation targets.
 - get_column_detail: Deep-dive into a specific column's evidence breakdown
+  (Bel, Pl, gap, per-source masses).
 - revisit_columns: Re-classify selected columns with enriched context
-- check_convergence: See overall metrics (coverage, mean K, trend)
+- check_convergence: See overall metrics (coverage, mean_gap, mean_k, trend)
 - declare_converged: Stop when further iteration won't help
 - retrain_svm: Retrain the SVM on accumulated frontier labels (blended with
   synth data). Call after revisiting several batches to let the SVM learn
   from the latest classifications.
 
 ## Strategy
-1. Start by checking the conflict report — which columns need attention?
-2. For high-K columns, examine the evidence detail — do sources agree on the
-   category family but disagree on the specific leaf? That's a confusable pair.
-3. Prioritize revisiting columns where pattern evidence or name matching
+1. Check overall metrics — what is mean_gap?  Is it above gap_threshold?
+2. Pull the conflict report and column details to find columns with high
+   gap or low Bel — those are the predictions that deserve a revisit.
+3. For source-disagreement columns (high K), examine the evidence — do
+   sources agree on the category family but disagree on the specific
+   leaf?  That's a confusable pair worth re-classifying with context.
+4. Prioritize revisiting columns where pattern evidence or name matching
    provides strong signal that the LLM may have missed.
-4. After each revisit batch, check convergence — is mean K decreasing?
-5. Declare converged when: mean_K < threshold, or K has plateaued, or
-   remaining disagreements are confusable pairs (expected ambiguity).
+5. After each revisit batch, check convergence — is mean_gap decreasing?
+6. Declare converged when: mean_gap < gap_threshold, or the gap has
+   plateaued, or remaining disagreements are confusable pairs (expected
+   ambiguity).
 
 ## Project directive — minimum iterations
 The pipeline targets ``boot_cfg.min_iterations`` (default 2) revisit
@@ -214,8 +231,10 @@ because you can pick the candidate set and enrich the revisit context
 more thoughtfully than the programmatic fallback can.
 
 ## Key Insight
-High conflict K is SIGNAL, not error. When cosine similarity says "EMAIL" but
-the LLM says "USERNAME", that's a column worth investigating — not discarding.
+High conflict K and high belief gap are SIGNAL, not error.  When cosine
+similarity says "EMAIL" but the LLM says "USERNAME", or when the predicted
+code has Bel = 0.4 and Pl = 0.9, those are columns worth investigating —
+not discarding.
 """
 
 
@@ -565,6 +584,7 @@ def _format_initial_state(
     """Summarize current state for the agent's first turn."""
     from atelier.classify.bootstrap import (
         _coverage,
+        _mean_gap,
         _mean_k,
         _max_k,
         _identify_disagreements,
@@ -572,6 +592,7 @@ def _format_initial_state(
 
     disagreements = _identify_disagreements(state, column_names, boot_cfg)
     coverage = _coverage(state, column_names)
+    mean_gap = _mean_gap(state, column_names)
     mean_k = _mean_k(state, column_names)
     max_k = _max_k(state, column_names)
 
@@ -581,16 +602,19 @@ def _format_initial_state(
         f"- Total columns: {len(column_names)}\n"
         f"- Labeled: {len(state.labels)}\n"
         f"- Coverage: {coverage:.1%}\n"
-        f"- Mean conflict K: {mean_k:.4f}\n"
-        f"- Max conflict K: {max_k:.4f}\n"
+        f"- Mean belief gap (Pl − Bel): {mean_gap:.4f}  ← primary signal\n"
+        f"- Mean conflict K: {mean_k:.4f}  (diagnostic)\n"
+        f"- Max conflict K: {max_k:.4f}  (diagnostic)\n"
         f"- Disagreements (LLM vs ML, K > {boot_cfg.k_threshold}): "
         f"{len(disagreements)}\n"
         f"- LLM calls so far: {state.llm_calls_total}\n"
         f"- Budget: {boot_cfg.max_total_llm_calls} max calls\n\n"
         f"## Convergence Targets\n"
         f"- Coverage target: {boot_cfg.coverage_target:.0%}\n"
-        f"- K threshold: {boot_cfg.k_threshold}\n\n"
-        f"Please investigate the conflict report and work toward convergence."
+        f"- Gap threshold (primary): {boot_cfg.gap_threshold}\n"
+        f"- Bel floor: {boot_cfg.bel_floor}\n\n"
+        f"Investigate weakly-supported columns (high gap, low Bel) and "
+        f"work toward convergence on the belief-gap criterion."
     )
 
 

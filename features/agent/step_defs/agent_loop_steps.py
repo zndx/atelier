@@ -103,8 +103,8 @@ def _client_inspect_then_converge():
                 _make_tool_use_block(
                     "declare_converged",
                     {
-                        "convergence_kind": "k_threshold_met",
-                        "reason": "Mean K below threshold after inspection",
+                        "convergence_kind": "gap_threshold_met",
+                        "reason": "Mean belief gap below threshold after inspection",
                     },
                     "t1_converge",
                 ),
@@ -155,7 +155,7 @@ def _client_revisit_then_converge(high_k_columns):
                     "declare_converged",
                     {
                         "convergence_kind": "iterative_convergence",
-                        "reason": "K decreased after targeted revisit",
+                        "reason": "Belief gap shrunk after targeted revisit",
                     },
                     "t3_converge",
                 ),

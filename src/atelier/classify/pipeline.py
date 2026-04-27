@@ -726,6 +726,7 @@ def run_classification_pipeline(
             _identify_uncertain_columns,
             _llm_revisit,
             _llm_sweep,
+            _mean_gap,
             _mean_k,
             _run_ml_validation,
             record_iteration_metrics,
@@ -918,10 +919,11 @@ def run_classification_pipeline(
 
         disagreements = _identify_disagreements(state, column_names, boot_cfg)
         mean_k = _mean_k(state, column_names)
+        mean_gap = _mean_gap(state, column_names)
 
         logger.info(
-            "ML validation: mean K=%.3f, disagreements=%d",
-            mean_k, len(disagreements),
+            "ML validation: mean_gap=%.3f, mean_K=%.3f, disagreements=%d",
+            mean_gap, mean_k, len(disagreements),
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
@@ -1043,22 +1045,26 @@ def run_classification_pipeline(
                     break
 
                 if (
-                    mean_k < boot_cfg.k_threshold
+                    mean_gap < boot_cfg.gap_threshold
                     and iteration > boot_cfg.min_iterations
                 ):
-                    convergence_reason = "k_threshold_met"
-                    logger.info("Mean K=%.3f < threshold — converged", mean_k)
+                    convergence_reason = "gap_threshold_met"
+                    logger.info(
+                        "Mean belief gap=%.3f < threshold=%.3f — converged",
+                        mean_gap, boot_cfg.gap_threshold,
+                    )
                     break
 
-                # Early termination: K no longer decreasing (plateau).
+                # Early termination: belief gap no longer decreasing (plateau).
                 # Still honored AFTER the min_iterations floor so a truly
                 # plateaued run stops, but an iter-1 coincidence can't
                 # trigger it.
                 if should_stop_early(state) and iteration > boot_cfg.min_iterations:
                     convergence_reason = "plateau"
                     logger.info(
-                        "K not decreasing for 2 iterations — early stop (mean_K=%.3f)",
-                        mean_k,
+                        "Belief gap not decreasing for 2 iterations — "
+                        "early stop (mean_gap=%.3f)",
+                        mean_gap,
                     )
                     break
 
@@ -1133,6 +1139,7 @@ def run_classification_pipeline(
 
                 disagreements = _identify_disagreements(state, column_names, boot_cfg)
                 mean_k = _mean_k(state, column_names)
+                mean_gap = _mean_gap(state, column_names)
                 coverage = _coverage(state, column_names)
 
                 # Row MC: escalate row-unstable columns to full reservoir
@@ -1171,7 +1178,6 @@ def run_classification_pipeline(
         # high (~0.85 in live runs), making the flag permanently false.
         # Overwatch correctly flagged the resulting contradiction
         # between summary.converged=false and FSM state CONVERGED.
-        from atelier.classify.bootstrap import _mean_gap
         mean_gap = _mean_gap(state, column_names)
         converged = (
             coverage >= boot_cfg.coverage_target

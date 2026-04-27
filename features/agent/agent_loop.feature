@@ -27,8 +27,8 @@ Feature: Agent-driven classification convergence
 
   Scenario: declare_converged records reason in state
     Given a fresh bootstrap state
-    When I call declare_converged with reason "K below threshold"
-    Then the state agent_converged_reason should be "K below threshold"
+    When I call declare_converged with reason "Belief gap below threshold"
+    Then the state agent_converged_reason should be "Belief gap below threshold"
     And the state agent_reasoning should contain "CONVERGED"
 
   Scenario: Agent loop with mock client reaches convergence

@@ -160,8 +160,8 @@ interface TerminalModelsResponse {
 const CONVERGENCE_REASON_DESCRIPTIONS: Record<string, string> = {
   no_revisit_candidates:
     "Revisit candidate set was empty at loop exit — legitimate only AFTER min_iterations.",
-  k_threshold_met:
-    "Mean DST conflict K fell below threshold (honoring min_iterations floor).",
+  gap_threshold_met:
+    "Mean belief gap (Pl − Bel) fell below threshold — primary belief-gap convergence (honoring min_iterations floor).",
   plateau:
     "Belief gap stopped decreasing for 2+ iterations — converged by plateau detection.",
   budget_exhausted:
