@@ -36,10 +36,18 @@ function Landing() {
   const { activeDatasetId, activeSourceId, datasets, sources } = useDataset();
 
   useEffect(() => {
-    fetch("/api/status")
-      .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => setStatus(null));
+    // Poll /api/status periodically so a transient first-load failure
+    // (Vite up before the gateway, gRPC slow to bind, etc.) recovers
+    // automatically without the operator hitting refresh.  The Status
+    // page already polls /api/fsm/status on a 5s cadence; the Landing
+    // page's Service Status indicator now matches that pattern.
+    const fetchStatus = () =>
+      fetch("/api/status")
+        .then((r) => r.json())
+        .then(setStatus)
+        .catch(() => setStatus(null));
+    fetchStatus();
+    const statusInterval = setInterval(fetchStatus, 5000);
 
     fetch("/api/agents")
       .then((r) => r.json())
@@ -53,6 +61,8 @@ function Landing() {
       .then((r) => r.json())
       .then((data) => setTermCount(data.terms ?? null))
       .catch(() => setTermCount(null));
+
+    return () => clearInterval(statusInterval);
   }, [activeSourceId]);
 
   const skillCount = useMemo(
