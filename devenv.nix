@@ -126,7 +126,7 @@
       };
     };
     gateway = {
-      exec = "exec uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port 8090";
+      exec = "exec uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port \${CDSW_APP_PORT:-8090}";
       process-compose = {
         depends_on.grpc-server.condition = "process_healthy";
       };
