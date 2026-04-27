@@ -189,6 +189,17 @@ DEFAULT_PATTERN_MAP: dict[str, str] = {
     "mrn_pattern": "ICE.SENSITIVE.PID.HEALTH.MRN",          # MRN- prefix
     "ssh_key_pattern": "ICE.SENSITIVE.TECHNICAL.ACCESS_KEY", # ssh-rsa/ed25519/ecdsa prefix
     "certificate_pattern": "ICE.SENSITIVE.TECHNICAL.CERTIFICATE",  # -----BEGIN prefix
+    # ── Mobile / device identifiers ─────────────────────────────
+    # Targeted at DEVID parent (matches uuid_pattern, mac_address_pattern)
+    # — domain vocabularies that distinguish UDID / ICCID / IMEI as
+    # leaves under DEVID will let the LLM + sibling-context evidence
+    # resolve to the specific leaf; pattern alone isn't precise enough
+    # to claim the deeper code.  UDID's 40-hex shape overlaps with
+    # SHA-1 (hex_hash_pattern is quarantined), so name-match + sibling
+    # context still load-bearing for disambiguation in production.
+    "udid_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",        # 32 or 40 hex
+    "iccid_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",       # 19-20 digits + Luhn
+    "imei_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",        # 15 digits + Luhn
 }
 
 

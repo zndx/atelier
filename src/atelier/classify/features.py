@@ -102,6 +102,24 @@ _PATTERNS: dict[str, re.Pattern] = {
     "certificate_pattern": re.compile(
         r"^-----BEGIN (CERTIFICATE|PUBLIC KEY|RSA PRIVATE KEY)-----"
     ),
+    # ── Mobile / device identifiers ─────────────────────────────
+    # UDID: Apple device identifier — 32 hex (legacy) or 40 hex (UDID2).
+    # Anchored to exactly those two lengths to avoid colliding with the
+    # quarantined hex_hash_pattern (40-128 hex range).  Even so, 40-hex
+    # UDID and 40-hex SHA-1 are visually identical; per-detector mass
+    # is capped low (DEFAULT_PATTERN_MAP) so name-match + sibling
+    # context still dominate fusion when the column name disambiguates.
+    "udid_pattern": re.compile(
+        r"^[0-9a-fA-F]{32}$|^[0-9a-fA-F]{40}$"
+    ),
+    # ICCID: SIM card identifier — 19 or 20 digits with Luhn checksum.
+    "iccid_pattern": re.compile(
+        r"^\d{19,20}$"
+    ),
+    # IMEI: Mobile device identifier — exactly 15 digits with Luhn.
+    "imei_pattern": re.compile(
+        r"^\d{15}$"
+    ),
 }
 
 # ── Post-regex validators ────────────────────────────────────────────
@@ -197,6 +215,11 @@ _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "iso_currency_pattern": _is_iso_currency,
     "iata_pattern": _is_iata_code,
     "vin_pattern": _is_valid_vin,
+    # ICCID and IMEI both terminate in a Luhn check digit; reuse the
+    # existing validator.  Without these, plain numeric strings of the
+    # right length would false-positive the regex.
+    "iccid_pattern": _luhn_check,
+    "imei_pattern": _luhn_check,
 }
 
 
