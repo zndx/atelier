@@ -131,9 +131,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # Bootstrap convergence
     "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
     "classify.bootstrap.min_iterations": ("classify_bootstrap_min_iterations", int),
-    "classify.seam_a_review.enabled": ("classify_seam_a_review_enabled", bool),
-    "classify.seam_a_review.bel_threshold": ("classify_seam_a_review_bel_threshold", float),
-    "classify.seam_a_review.backend": ("classify_seam_a_review_backend", str),
+    "classify.cautious_review.enabled": ("classify_cautious_review_enabled", bool),
+    "classify.cautious_review.bel_threshold": ("classify_cautious_review_bel_threshold", float),
+    "classify.cautious_review.backend": ("classify_cautious_review_backend", str),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -347,10 +347,11 @@ class AtelierConfig:
     # Bootstrap convergence
     classify_bootstrap_max_iterations: int = 5
     classify_bootstrap_min_iterations: int = 2
-    # Seam A review — agent-mediated cautious-code backoff
-    classify_seam_a_review_enabled: bool = True
-    classify_seam_a_review_bel_threshold: float = 0.85
-    classify_seam_a_review_backend: str = "default"
+    # Cautious-code review — agent-mediated backoff for over-specified
+    # predictions.  See atelier.classify.cautious_review.
+    classify_cautious_review_enabled: bool = True
+    classify_cautious_review_bel_threshold: float = 0.85
+    classify_cautious_review_backend: str = "default"
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000

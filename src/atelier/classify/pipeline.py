@@ -1033,38 +1033,38 @@ def run_classification_pipeline(
         # ── Feature analysis (SHAP + SAGE, config-gated) ──────────
         _run_feature_analysis(cfg, classifications, all_samples, category_set, results_dir, mc_plan=mc_plan)
 
-        # ── Seam A Review — agent-mediated cautious-code backoff ──
+        # ── Cautious-code review — agent-mediated backoff ────────
         # Runs between FUSING and EVALUATING so accuracy numbers reflect
         # post-review predictions.  SHAP/SAGE attribute to features-in-
         # general (not per-column codes), so order doesn't disturb them.
-        # On by default — see classify.seam_a_review.enabled.
-        seam_a_audit: dict = {"enabled": False}
-        if getattr(cfg, "classify_seam_a_review_enabled", True):
-            from atelier.classify.seam_a_review import review_classifications
-            def _seam_a_progress(p: dict) -> None:
+        # On by default — see classify.cautious_review.enabled.
+        cautious_audit: dict = {"enabled": False}
+        if getattr(cfg, "classify_cautious_review_enabled", True):
+            from atelier.classify.cautious_review import review_classifications
+            def _cautious_progress(p: dict) -> None:
                 try:
                     fsm.advance(run_id, FSMState.FUSING, progress={
-                        "phase": "seam_a_review",
+                        "phase": "cautious_review",
                         **p,
                     })
                 except Exception:
                     pass
             try:
-                seam_a_audit = review_classifications(
+                cautious_audit = review_classifications(
                     classifications, cfg,
                     category_set=category_set,
-                    progress_callback=_seam_a_progress,
+                    progress_callback=_cautious_progress,
                 )
                 # Persist audit beside other artifacts.
-                (results_dir / "seam_a_review.json").write_text(
-                    json.dumps(seam_a_audit, indent=2, default=str) + "\n",
+                (results_dir / "cautious_review.json").write_text(
+                    json.dumps(cautious_audit, indent=2, default=str) + "\n",
                 )
             except Exception as exc:
                 logger.warning(
-                    "Seam A review failed (non-fatal, keeping pre-review predictions): %s",
+                    "Cautious-code review failed (non-fatal, keeping pre-review predictions): %s",
                     exc,
                 )
-                seam_a_audit = {"enabled": True, "error": str(exc)}
+                cautious_audit = {"enabled": True, "error": str(exc)}
 
         # ── EVALUATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.EVALUATING, progress={
@@ -1079,8 +1079,8 @@ def run_classification_pipeline(
         epistemic = epistemic_evaluation(classifications, category_set)
         summary["converged"] = converged
         summary["convergence_reason"] = convergence_reason
-        summary["seam_a_review"] = {
-            k: v for k, v in seam_a_audit.items() if k != "decisions"
+        summary["cautious_review"] = {
+            k: v for k, v in cautious_audit.items() if k != "decisions"
         }
         summary["epistemic_evaluation"] = epistemic
         from atelier.classify.bootstrap import k_convergence_rate
@@ -1904,7 +1904,7 @@ def _write_parquet(
             "pattern_signals": ", ".join(c.get("pattern_signals", {})),
             "dst_belief_path": json.dumps(c.get("belief_path", [])),
             "cautious_code": c.get("cautious_code", ""),
-            # Seam A review audit (Cautious-Code Review).  Empty strings
+            # Cautious-code review audit.  Empty strings
             # when the column wasn't a review candidate; the
             # pre-review code is the original predicted_code from
             # DST fusion before agent backoff.

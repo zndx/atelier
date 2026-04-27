@@ -1,25 +1,33 @@
-"""Cautious-Code Review — agent-mediated backoff for over-specified predictions.
+"""Cautious-code review — agent-mediated backoff for over-specified predictions.
 
-When the DST fusion produces a deeper code than the cautious-belief
-threshold supports, the over-specified code may be wrong.  Overwatch's
-analysis of run ``a0f80287`` named this Seam A: 12 errors clustered on
-the curator-provides-parent / pipeline-predicts-shipping-child split
-(``city → Shipping City``, ``country → Shipping Country``,
-``phone_number → Other Phone Number``, etc.).
+When the DST fusion commits to a deeper code than the cautious-belief
+threshold supports, the over-specified code may be wrong.  This module
+asks Claude (via the same LLM backend the classify pipeline uses, or
+optionally direct Anthropic for reasoning-budget access) to consider
+whether to back off to the cautious code given the column's values +
+sibling context.  The agent's decision and rationale are recorded for
+audit: ``predicted_code`` is updated in place when backoff is
+recommended, the original is preserved as ``predicted_code_pre_review``,
+and ``review_decision`` / ``review_rationale`` are stamped on the
+classification dict and into ``cautious_review.json`` beside the run
+parquet.
 
-This module asks Claude (via the same LLM backend the classify pipeline
-uses, or optionally direct Anthropic for reasoning-budget access) to
-consider whether to back off to the cautious code given the column's
-values + sibling context.  The agent's decision and rationale are
-recorded for audit: ``predicted_code`` is updated in place when backoff
-is recommended, the original is preserved as
-``predicted_code_pre_review``, and ``review_decision`` /
-``review_rationale`` are stamped on the classification dict and into
-``seam_a_review.json`` beside the run parquet.
+Aligns with existing cautious-classification vocabulary in the package
+— ``HierarchicalClassification.cautious_code(tau)`` defines the deepest
+code with belief above ``tau``; ``epistemic_evaluation`` reports
+``cautious_accuracy``.  This module is the runtime that closes the
+loop: when belief at the predicted depth is weak, ask whether to emit
+the cautious code instead.
 
-Project directive — on by default.  Iteration is part of the algorithm,
-and this is one of its iterations.  Toggle off only for ablation
-windows (compare-with-and-without).
+History: motivated by an overwatch finding on run ``a0f80287`` that
+clustered 12 errors on the curator-provides-parent /
+pipeline-predicts-child split (``city → Shipping City``, ``country →
+Shipping Country``, etc.).  The mechanism applies more broadly than
+that one cluster.
+
+Project directive — on by default.  Iteration is part of the
+algorithm, and this is one of its iterations.  Toggle off only for
+ablation windows (compare-with-and-without).
 """
 
 from __future__ import annotations
@@ -163,7 +171,7 @@ def _resolve_client(cfg, backend_choice: str):
     if backend_choice == "anthropic_direct":
         if not cfg.anthropic_api_key:
             raise ValueError(
-                "seam_a_review backend=anthropic_direct requires ANTHROPIC_API_KEY"
+                "cautious_review backend=anthropic_direct requires ANTHROPIC_API_KEY"
             )
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=timeout)
         # Direct Anthropic prefers cfg.agent_model (Opus 4.7 family)
@@ -182,7 +190,7 @@ def _resolve_client(cfg, backend_choice: str):
     # Default with non-Bedrock model → Anthropic direct
     if not cfg.anthropic_api_key:
         raise ValueError(
-            "seam_a_review default backend chose Anthropic but "
+            "cautious_review default backend chose Anthropic but "
             "ANTHROPIC_API_KEY is not set"
         )
     client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=timeout)
@@ -227,15 +235,15 @@ def review_classifications(
     / ``review_rationale`` are stamped on the column.
 
     Returns an audit dict suitable for writing as
-    ``seam_a_review.json`` beside the run's other artifacts.
+    ``cautious_review.json`` beside the run's other artifacts.
     """
-    if not getattr(cfg, "classify_seam_a_review_enabled", True):
+    if not getattr(cfg, "classify_cautious_review_enabled", True):
         return {"enabled": False}
 
     bel_threshold = float(
-        getattr(cfg, "classify_seam_a_review_bel_threshold", 0.85)
+        getattr(cfg, "classify_cautious_review_bel_threshold", 0.85)
     )
-    backend_choice = getattr(cfg, "classify_seam_a_review_backend", "default")
+    backend_choice = getattr(cfg, "classify_cautious_review_backend", "default")
 
     # Identify candidates: cautious differs from predicted AND belief is
     # below threshold (the deep code isn't strongly supported).
@@ -249,7 +257,7 @@ def review_classifications(
 
     if not candidates:
         logger.info(
-            "Seam A review: 0 candidates (bel_threshold=%.2f) — no review needed",
+            "Cautious review: 0 candidates (bel_threshold=%.2f) — no review needed",
             bel_threshold,
         )
         return {
@@ -269,7 +277,7 @@ def review_classifications(
         client, model = _resolve_client(cfg, backend_choice)
     except Exception as exc:
         logger.warning(
-            "Seam A review skipped — could not resolve LLM client: %s", exc,
+            "Cautious review skipped — could not resolve LLM client: %s", exc,
         )
         return {
             "enabled": True,
@@ -282,7 +290,7 @@ def review_classifications(
         }
 
     logger.info(
-        "Seam A review: %d candidates (bel_threshold=%.2f, model=%s)",
+        "Cautious review: %d candidates (bel_threshold=%.2f, model=%s)",
         len(candidates), bel_threshold, model,
     )
 
@@ -297,7 +305,7 @@ def review_classifications(
         if progress_callback:
             try:
                 progress_callback({
-                    "phase": "seam_a_review",
+                    "phase": "cautious_review",
                     "candidate_index": i,
                     "candidates_total": len(candidates),
                     "column": (
@@ -312,7 +320,7 @@ def review_classifications(
             decision = _invoke(client, model, prompt)
         except Exception as exc:
             logger.warning(
-                "Seam A review failed for %s.%s: %s — keeping predicted_code",
+                "Cautious review failed for %s.%s: %s — keeping predicted_code",
                 col.get("table_name", ""), col.get("column_name", ""), exc,
             )
             col["review_decision"] = "error"
@@ -363,7 +371,7 @@ def review_classifications(
     errored = sum(1 for d in decisions if d.get("decision") == "error")
 
     logger.info(
-        "Seam A review complete: %d/%d backed off, %d kept, %d errored",
+        "Cautious review complete: %d/%d backed off, %d kept, %d errored",
         backed_off, len(decisions), kept, errored,
     )
 
