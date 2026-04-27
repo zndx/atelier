@@ -495,11 +495,60 @@ def run_classification_pipeline(
         if taxonomy_findings:
             errors = [f for f in taxonomy_findings if f.severity == "error"]
             warnings = [f for f in taxonomy_findings if f.severity == "warning"]
-            for f in taxonomy_findings:
+
+            # Errors surface individually — they're rare, load-bearing,
+            # and signal structural vocabulary problems (duplicate
+            # codes etc.) the rest of the pipeline can't work around.
+            for f in errors:
                 logger.warning(
-                    "Taxonomy %s [%s]: %s",
-                    f.severity, f.kind, f.detail,
+                    "Taxonomy ERROR [%s]: %s", f.kind, f.detail,
                 )
+
+            # Warnings get a single summary line + a sidecar JSON
+            # alongside the run's other artifacts.  35 individual
+            # logger.warning lines per run is noise on the operator's
+            # console; the structured findings are the right surface
+            # for the vocabulary team to consume from the sidecar.
+            if warnings:
+                from collections import Counter
+                kind_counts = Counter(f.kind for f in warnings)
+                kind_summary = ", ".join(
+                    f"{n} {kind}" for kind, n in sorted(kind_counts.items())
+                )
+                logger.info(
+                    "Taxonomy validation: %d errors, %d warnings (%s); "
+                    "see %s/taxonomy_findings.json",
+                    len(errors), len(warnings), kind_summary, results_dir,
+                )
+                try:
+                    findings_payload = {
+                        "errors": [
+                            {
+                                "kind": f.kind,
+                                "severity": f.severity,
+                                "codes": list(f.codes),
+                                "detail": f.detail,
+                            }
+                            for f in errors
+                        ],
+                        "warnings": [
+                            {
+                                "kind": f.kind,
+                                "severity": f.severity,
+                                "codes": list(f.codes),
+                                "detail": f.detail,
+                            }
+                            for f in warnings
+                        ],
+                    }
+                    (results_dir / "taxonomy_findings.json").write_text(
+                        json.dumps(findings_payload, indent=2) + "\n",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to write taxonomy_findings.json: %s", exc,
+                    )
+
             strict = bool(getattr(cfg, "classify_taxonomy_strict_validation", False))
             if strict and (errors or warnings):
                 raise RuntimeError(
@@ -670,6 +719,7 @@ def run_classification_pipeline(
         from atelier.classify.bootstrap import (
             BootstrapConfig,
             BootstrapState,
+            FatalLLMError,
             bootstrap_config_from_cfg,
             _coverage,
             _identify_disagreements,
@@ -883,6 +933,11 @@ def run_classification_pipeline(
         # and to overwatch analysis — a green CONVERGED chip that hides
         # "no_revisit_candidates at iteration 1" is a silent failure.
         convergence_reason: str | None = None
+        # Free-form prose explanation populated by the agent loop's
+        # declare_converged tool; rendered as the tooltip body in the
+        # Status UI so operators see the agent's reasoning alongside
+        # the structured tag.  None on programmatic-loop runs.
+        convergence_reason_detail: str | None = None
 
         # Agent-driven convergence (when configured and credentials available)
         if cfg.classify_agent_enabled and (cfg.has_anthropic or cfg.has_bedrock):
@@ -898,9 +953,58 @@ def run_classification_pipeline(
                 column_names, samples_by_name, column_table,
                 category_set, frame, has_embeddings, discounts,
             )
+            # Post-agent fallback: if the agent declared convergence
+            # before the min_iterations directive was satisfied (the
+            # tool-side gate is the primary defense; this is the
+            # secondary), run a programmatic revisit pass over the
+            # broader uncertain-columns set.  Same machinery the
+            # programmatic loop uses; ensures the directive holds
+            # regardless of which loop drove convergence.
+            if state.iteration < boot_cfg.min_iterations:
+                logger.warning(
+                    "Agent declared convergence at iteration=%d but "
+                    "min_iterations=%d — running programmatic fallback "
+                    "revisit pass to honor the project directive.",
+                    state.iteration, boot_cfg.min_iterations,
+                )
+                fallback_candidates: list[str] = list(disagreements)
+                fb_uncertain = _identify_uncertain_columns(
+                    state, column_names, boot_cfg,
+                )
+                seen = set(fallback_candidates)
+                for n in fb_uncertain:
+                    if n not in seen:
+                        fallback_candidates.append(n)
+                        seen.add(n)
+                while (
+                    state.iteration < boot_cfg.min_iterations
+                    and fallback_candidates
+                ):
+                    state.iteration += 1
+                    try:
+                        _llm_revisit(
+                            state, boot_cfg, llm_backend, system_prompt,
+                            fallback_candidates, samples_by_name,
+                            column_table, category_set,
+                        )
+                    except FatalLLMError:
+                        raise
+                    _run_ml_validation(
+                        state, boot_cfg, column_names, samples_by_name,
+                        category_set, frame, has_embeddings,
+                        discounts=discounts,
+                    )
+                    fallback_candidates = list(_identify_uncertain_columns(
+                        state, column_names, boot_cfg,
+                    ))
+            # Carry the agent's structured tag (if it picked one) and
+            # its prose reason as a separate detail field.  Tag drives
+            # Status UI rendering; prose lands in the tooltip body.
             convergence_reason = (
-                state.agent_converged_reason or "agent_convergence"
+                state.agent_converged_tag
+                or ("agent_convergence" if state.agent_converged_reason else None)
             )
+            convergence_reason_detail = state.agent_converged_reason
         else:
             # Programmatic convergence loop (default).
             #
@@ -1167,6 +1271,7 @@ def run_classification_pipeline(
         epistemic = epistemic_evaluation(classifications, category_set)
         summary["converged"] = converged
         summary["convergence_reason"] = convergence_reason
+        summary["convergence_reason_detail"] = convergence_reason_detail
         summary["cautious_review"] = {
             k: v for k, v in cautious_audit.items() if k != "decisions"
         }

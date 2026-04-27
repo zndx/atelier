@@ -359,6 +359,14 @@ class BootstrapState:
     agent_reasoning: list[str] = field(default_factory=list)
     agent_turns: int = 0
     agent_converged_reason: str | None = None
+    # Structured tag corresponding to one of the convergence_reason
+    # enum values (iterative_convergence, no_revisit_candidates,
+    # k_threshold_met, plateau, budget_exhausted, agent_convergence).
+    # Populated by the declare_converged tool's convergence_kind
+    # parameter so the structured tag and the prose reason stay
+    # decoupled — Status UI keys on the tag, full prose lands in
+    # convergence_reason_detail.
+    agent_converged_tag: str | None = None
     # Monte Carlo sampling metadata
     propagated_count: int = 0
     escalated_count: int = 0

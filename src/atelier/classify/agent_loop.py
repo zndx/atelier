@@ -101,17 +101,55 @@ TOOLS = [
         "description": (
             "Declare the classification converged and exit the loop. "
             "Call when metrics are acceptable or further iteration "
-            "won't improve results."
+            "won't improve results.  The pipeline targets "
+            "``boot_cfg.min_iterations`` revisit cycles; when you "
+            "declare convergence early, pipeline-side fallback runs "
+            "additional programmatic revisits to honor the directive. "
+            "Prefer doing meaningful revisits inside the agent loop "
+            "rather than relying on the fallback — your candidate "
+            "selection and revisit context will be richer than what "
+            "the programmatic path can do."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "convergence_kind": {
+                    "type": "string",
+                    "enum": [
+                        "iterative_convergence",
+                        "no_revisit_candidates",
+                        "k_threshold_met",
+                        "plateau",
+                        "budget_exhausted",
+                        "agent_convergence",
+                    ],
+                    "description": (
+                        "Structured tag describing WHY this converged. "
+                        "Pick the most accurate from the enum so "
+                        "downstream consumers (Status UI, overwatch) can "
+                        "categorize the run.  Use 'iterative_convergence' "
+                        "when revisits have settled the predictions; "
+                        "'no_revisit_candidates' when no columns remain "
+                        "above the bel_floor / gap_threshold; "
+                        "'k_threshold_met' when mean_k < boot_cfg.k_threshold; "
+                        "'plateau' when belief gap stopped decreasing; "
+                        "'budget_exhausted' when LLM call budget is the "
+                        "constraint; 'agent_convergence' as a default "
+                        "when none of the above fit cleanly."
+                    ),
+                },
                 "reason": {
                     "type": "string",
-                    "description": "Why convergence is declared",
+                    "description": (
+                        "Free-form prose explaining the decision in 1-3 "
+                        "sentences with specific metric references.  This "
+                        "is the audit trail; surface the actual numbers "
+                        "you observed (mean_gap, mean_k, disagreements, "
+                        "etc.)."
+                    ),
                 },
             },
-            "required": ["reason"],
+            "required": ["convergence_kind", "reason"],
         },
     },
     {
@@ -159,6 +197,21 @@ with enriched context.
 4. After each revisit batch, check convergence — is mean K decreasing?
 5. Declare converged when: mean_K < threshold, or K has plateaued, or
    remaining disagreements are confusable pairs (expected ambiguity).
+
+## Project directive — minimum iterations
+The pipeline targets ``boot_cfg.min_iterations`` (default 2) revisit
+cycles before declaring convergence — "iteration is part of the
+algorithm we publish numbers for."  When the corpus' initial metrics
+look settled and you call ``declare_converged`` early, the pipeline-
+side fallback runs additional programmatic revisits over the
+broader uncertain-columns set to satisfy the directive.  Your job is
+to do thorough work within the agent loop; the pipeline guarantees
+the directive holds either way.
+
+If conflict / belief metrics warrant additional revisits, do them
+inside the loop — that's better than letting the fallback handle it,
+because you can pick the candidate set and enrich the revisit context
+more thoughtfully than the programmatic fallback can.
 
 ## Key Insight
 High conflict K is SIGNAL, not error. When cosine similarity says "EMAIL" but
@@ -443,11 +496,37 @@ def _handle_retrain_svm(
 def _handle_declare_converged(
     state: BootstrapState,
     reason: str,
+    convergence_kind: str = "agent_convergence",
+    *,
+    boot_cfg: BootstrapConfig | None = None,
 ) -> dict[str, Any]:
-    """Record convergence reason and signal loop exit."""
-    state.agent_reasoning.append(f"CONVERGED: {reason}")
+    """Record convergence reason and signal loop exit.
+
+    The ``min_iterations`` directive is enforced primarily by the
+    pipeline-side fallback in
+    :func:`atelier.classify.pipeline.run_classification_pipeline`,
+    which runs additional programmatic revisits after the agent loop
+    returns if ``state.iteration`` is below the floor.  The tool here
+    just accepts the agent's declaration and records the structured
+    tag + prose; that keeps the agent loop bounded by ``max_turns``
+    regardless of how the directive interacts with the corpus's
+    natural convergence.
+
+    A tool-side rejection (the original Tier 1A design) created an
+    unwinnable loop on small corpora where the predictions naturally
+    settle in one sweep — the agent has nothing meaningful to revisit
+    yet the gate refuses to let it declare.  Letting the pipeline
+    handle the directive avoids that pathology while still
+    guaranteeing the directive holds.
+    """
+    state.agent_reasoning.append(f"CONVERGED [{convergence_kind}]: {reason}")
     state.agent_converged_reason = reason
-    return {"converged": True, "reason": reason}
+    state.agent_converged_tag = convergence_kind
+    return {
+        "converged": True,
+        "convergence_kind": convergence_kind,
+        "reason": reason,
+    }
 
 
 # ── Client builder ───────────────────────────────────────────────
@@ -566,7 +645,12 @@ def _dispatch_tool(
         )
 
     elif tool_name == "declare_converged":
-        return _handle_declare_converged(state, tool_input.get("reason", ""))
+        return _handle_declare_converged(
+            state,
+            reason=tool_input.get("reason", ""),
+            convergence_kind=tool_input.get("convergence_kind", "agent_convergence"),
+            boot_cfg=boot_cfg,
+        )
 
     elif tool_name == "retrain_svm":
         return _handle_retrain_svm(state, samples, boot_cfg, cfg)
@@ -705,7 +789,7 @@ def run_agent_loop(
                     })
 
                 if block.name == "declare_converged":
-                    converged = True
+                    converged = bool(result.get("converged"))
 
             messages.append({"role": "user", "content": tool_results})
 

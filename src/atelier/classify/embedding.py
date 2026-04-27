@@ -58,14 +58,82 @@ class MultiDeviceEncoder:
         self._devices = list(devices)
         self._batch_size = batch_size
         self._shard_threshold = shard_threshold
-        # Lazy model allocation: we only load cuda:0 (or cpu) eagerly, which
+        # Lazy model allocation: we only load one device eagerly, which
         # covers the common case where batches stay below the shard
         # threshold.  Additional replicas come online only if multi-GPU
         # sharding actually engages — saves tens of seconds of startup
         # when MiniLM-sized models never saturate a single device.
         self._models: list[Any] = [None] * len(self._devices)
-        self._models[0] = self._load_one(0)
+        # Pick the device with the most free memory above a threshold
+        # (multi-tenant GPU hosts often have one device occupied by
+        # an unrelated training run; blindly grabbing devices[0] would
+        # crash with CUDA OOM on those hosts).  Falls back to
+        # devices[0] when probing fails or no device clears the
+        # threshold — preserves prior behaviour on single-GPU hosts.
+        self._eager_idx = self._pick_eager_device()
+        if self._eager_idx != 0:
+            logger.info(
+                "MultiDeviceEncoder eagerly loading on device %d (%s) — "
+                "more free memory than device 0",
+                self._eager_idx, self._devices[self._eager_idx],
+            )
+        self._models[self._eager_idx] = self._load_one(self._eager_idx)
         self._pool: ThreadPoolExecutor | None = None
+
+    def _pick_eager_device(self, min_free_gib: float = 1.5) -> int:
+        """Return the index of the device with most free memory.
+
+        Probes each CUDA device via ``torch.cuda.mem_get_info`` and
+        picks the one with the most free bytes above the threshold.
+        Falls back to index 0 when:
+
+        - Probing fails (torch unavailable, no CUDA, mem_get_info missing).
+        - ``self._devices`` is single-element (probing wouldn't help).
+        - Devices are CPU only.
+        - No device has at least ``min_free_gib`` free.
+
+        The 1.5 GiB threshold is chosen to leave headroom for the
+        MiniLM-L6 model load (~400 MB) plus typical batch activations
+        (~500 MB) plus some spare.  For larger encoder models this
+        should be raised.
+        """
+        if len(self._devices) <= 1:
+            return 0
+        if not all(d.startswith("cuda") for d in self._devices):
+            return 0
+        try:
+            import torch
+        except Exception:
+            return 0
+        if not torch.cuda.is_available():
+            return 0
+        if not hasattr(torch.cuda, "mem_get_info"):
+            return 0
+
+        threshold_bytes = int(min_free_gib * (1024 ** 3))
+        best_idx, best_free = 0, -1
+        for i, dev in enumerate(self._devices):
+            try:
+                # mem_get_info accepts either a device index (int) or a
+                # torch.device.  Devices in self._devices are strings
+                # like "cuda:0" — pass the integer parsed out.
+                idx = int(dev.split(":")[1]) if ":" in dev else i
+                free, _total = torch.cuda.mem_get_info(idx)
+            except Exception as exc:
+                logger.debug(
+                    "MultiDeviceEncoder: mem probe failed for %s: %s", dev, exc,
+                )
+                continue
+            if free > best_free:
+                best_free, best_idx = free, i
+        if best_free < threshold_bytes:
+            logger.warning(
+                "MultiDeviceEncoder: no device has >= %.1f GiB free "
+                "(best: %.2f GiB on %s); loading on devices[0] anyway",
+                min_free_gib, best_free / (1024 ** 3), self._devices[best_idx],
+            )
+            return 0
+        return best_idx
 
     def _load_one(self, idx: int):
         """Load one SentenceTransformer on ``self._devices[idx]``."""
@@ -110,8 +178,11 @@ class MultiDeviceEncoder:
 
         # Single-device model or small batch → direct encode.
         # Only one device configured, or small batch → single-device path.
+        # Use ``self._eager_idx`` rather than 0 because the eager device
+        # may not be index 0 — the constructor probes for the device
+        # with most free memory.
         if len(self._devices) == 1 or len(texts) < self._shard_threshold:
-            return self._models[0].encode(
+            return self._models[self._eager_idx].encode(
                 texts, normalize_embeddings=normalize_embeddings,
                 batch_size=bs, show_progress_bar=show_progress_bar,
                 convert_to_numpy=convert_to_numpy,

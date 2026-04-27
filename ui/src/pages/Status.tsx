@@ -497,11 +497,21 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
                   : "blue"
               }
               style={{ marginLeft: 8 }}
-              title={String(
-                CONVERGENCE_REASON_DESCRIPTIONS[
-                  String(progress.convergence_reason)
-                ] ?? progress.convergence_reason,
-              )}
+              title={(() => {
+                // Detail (free-form prose from the agent loop's
+                // declare_converged) takes precedence as the tooltip
+                // body — it's the actual run-specific reasoning.
+                // CONVERGENCE_REASON_DESCRIPTIONS[tag] is the generic
+                // description fallback when no detail is present
+                // (programmatic-loop runs).
+                const detail = progress.convergence_reason_detail;
+                if (detail) return String(detail);
+                return String(
+                  CONVERGENCE_REASON_DESCRIPTIONS[
+                    String(progress.convergence_reason)
+                  ] ?? progress.convergence_reason,
+                );
+              })()}
             >
               {String(progress.convergence_reason)}
             </Tag>
