@@ -212,9 +212,10 @@ def _maybe_retrain_svm(
     last_retrain_count: int,
     min_new_labels: int = 10,
 ) -> tuple[bool, int]:
-    """Retrain SVM on blended synth+frontier if meaningful accumulation.
+    """Retrain the incremental SVM on blended synth + frontier-tier labels.
 
-    Returns (retrained, current_frontier_count).
+    Skips when the number of new oracle labels since the last retrain is
+    below ``min_new_labels``.  Returns (retrained, current_frontier_count).
     """
     from atelier.classify import ml_inference
     from atelier.classify.ml_train import train_svm_on_frontier_labels
@@ -247,7 +248,7 @@ def _maybe_retrain_svm(
     # evidence despite fit_to_llm=True).
     from atelier.classify.svm_classifier import SVMClassifier
     ml_inference.install_svm(SVMClassifier.load(svm_frontier_path))
-    logger.info("SVM hot-swapped to frontier-trained model: %s", svm_frontier_path)
+    logger.info("Incremental SVM hot-swapped: %s", svm_frontier_path)
     return True, frontier_count
 
 
@@ -890,7 +891,7 @@ def run_classification_pipeline(
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
 
-        # ── Frontier SVM retrain #1: after first LLM sweep ───────
+        # ── Incremental SVM retrain #1: after first LLM sweep ───────
         svm_retrained = False
         svm_retrain_count = 0
         svm_frontier_path = results_dir / "svm_frontier.pkl"
@@ -1108,7 +1109,7 @@ def run_classification_pipeline(
                     disagreements, samples_by_name, column_table, category_set,
                 )
 
-                # ── Frontier SVM retrain #2: incremental ─────────
+                # ── Incremental SVM retrain #2: mid-loop ─────────
                 if boot_cfg.frontier_svm_retrain:
                     retrained, svm_retrain_count = _maybe_retrain_svm(
                         state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
@@ -1192,7 +1193,7 @@ def run_classification_pipeline(
                 "coverage_and_gap_met" if converged else "unknown"
             )
 
-        # ── Frontier SVM retrain #3: final (only if not converged)
+        # ── Incremental SVM retrain #3: final (only if not converged)
         if boot_cfg.frontier_svm_retrain and not converged:
             retrained, svm_retrain_count = _maybe_retrain_svm(
                 state, samples_by_name, svm_frontier_path, boot_cfg, cfg,

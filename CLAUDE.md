@@ -94,8 +94,11 @@ Key concepts worth internalizing before editing:
   converges on `mean(Pl − Bel)`, not on K (conflict). Gap is the primary
   signal; K is diagnostic.
 - **Bootstrap loop**: LLM sweep → ML validation → revisit disagreements
-  until gap threshold / bel-floor / max-iterations reached. Frontier SVM
-  hot-swap retrains on accumulated LLM labels during the loop.
+  until gap threshold / bel-floor / max-iterations reached. The
+  *incremental SVM* hot-swap-retrains on accumulated frontier-tier LLM
+  labels during the loop (active-learning idiom — see
+  `docs/src/architecture/pareto-capability-evolution.md` for why
+  "frontier" is reserved for the Pareto sense).
 - **Monte Carlo stratification** (`monte_carlo.py`, `row_sampler.py`) —
   for large corpora, only a stratified frontier gets LLM sweeps; the
   remainder receives label propagation with an elevated discount.

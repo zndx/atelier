@@ -573,7 +573,7 @@ def main() -> int:
         "| ``text``, ``x``, ``y`` | atlas-compatible tooltip + UMAP projection |",
         "",
         "The parquet is a reproducible artifact — the same LLM batch + "
-        "CatBoost + SVM frontier install it rests on can be re-run from "
+        "CatBoost + incremental SVM install it rests on can be re-run from "
         "this repo without retraining anything.  Every reconciliation "
         "number in this bundle comes from joining this parquet's "
         "``predicted_code`` against ``curated_reference.csv``.",

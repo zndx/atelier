@@ -217,7 +217,7 @@ def _output_datasets(
     if artifact_set:
         for path_field, role in (
             ("catboost_path", "catboost_classifier"),
-            ("svm_path", "svm_frontier_classifier"),
+            ("svm_path", "svm_incremental_classifier"),
             ("umap_path", "umap_projection"),
         ):
             path = artifact_set.get(path_field)

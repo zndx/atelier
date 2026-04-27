@@ -19,7 +19,7 @@ has converged.
 2. Agent calls get_conflict_report → identifies uncertain columns (high gap or low belief)
 3. Agent calls get_column_detail → inspects per-source evidence breakdown
 4. Agent calls revisit_columns → re-classifies with enriched context
-5. Agent calls retrain_svm → SVM learns from accumulated frontier labels
+5. Agent calls retrain_svm → incremental SVM learns from accumulated frontier-tier labels
 6. Agent calls check_convergence → verifies gap trend + belief floor
 7. Repeat 2-6 until satisfied
 8. Agent calls declare_converged with reason
@@ -38,13 +38,14 @@ agent uses to plan its next action.
 | `check_convergence` | — | mean_gap, mean_bel, frac_unclear, coverage, K (diagnostic), iteration history | Assess convergence via belief-gap criteria |
 | `get_column_detail` | `column_name` (string) | Per-source evidence breakdown, sample values, belief interval | Deep-dive into a specific column |
 | `declare_converged` | `reason` (string) | Confirmation | Exit loop with stated rationale |
-| `retrain_svm` | — | frontier_samples, classes, model_path | Retrain SVM on blended synth + frontier labels |
+| `retrain_svm` | — | frontier_samples, classes, model_path | Retrain incremental SVM on blended synth + frontier-tier labels |
 
 The `retrain_svm` tool (M9) lets the agent decide when to retrain the SVM
-classifier on accumulated frontier LLM labels. The retrained SVM is
-hot-swapped via `ml_inference.reset()` + `configure_paths()` and used in
-subsequent ML validation passes. The agent calls this when it judges enough
-new frontier labels have accumulated to improve classification accuracy.
+classifier on accumulated frontier-tier LLM labels. The retrained
+incremental SVM is hot-swapped via `ml_inference.reset()` +
+`configure_paths()` and used in subsequent ML validation passes. The
+agent calls this when it judges enough new frontier-tier labels have
+accumulated to improve classification accuracy.
 
 ### Agent System Prompt
 

@@ -58,11 +58,11 @@ Feature: LLM bootstrap convergence loop
     Then should_stop_early should return false
 
   @slow
-  Scenario: Frontier-label SVM retraining produces a functional model
+  Scenario: Incremental SVM retraining produces a functional model
     When I run the bootstrap pipeline with mock data and realistic mock LLM
     Then the bootstrap pipeline should reach CONVERGED state
-    And the SVM should have been retrained on frontier labels
-    And the frontier-trained SVM should produce valid probabilities
+    And the SVM should have been retrained on frontier-tier labels
+    And the incremental SVM should produce valid probabilities
 
   Scenario: FSM transitions through bootstrap states
     Given a fresh AgentFSM

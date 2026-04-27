@@ -916,7 +916,7 @@ function MLArtifactsCard() {
                       CB
                     </Tag>
                   </Tooltip>
-                  <Tooltip title={record.svm_path ? "SVM frontier" : "No SVM in this bundle"}>
+                  <Tooltip title={record.svm_path ? "Incremental SVM" : "No SVM in this bundle"}>
                     <Tag color={record.svm_path ? "blue" : "default"} style={{ margin: 0 }}>
                       SVM
                     </Tag>

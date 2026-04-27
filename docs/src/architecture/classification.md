@@ -133,26 +133,35 @@ Key implementation details:
   feature importance
 - **`is_fitted`** property for safe state checking before prediction
 
-#### Frontier-Label SVM Training (M9)
+#### Incremental SVM Training (M9)
+
+> **Terminology note.**  The SVM trained here is the *incremental SVM*
+> in active-learning nomenclature — it is retrained as new oracle
+> labels accumulate during the bootstrap loop.  The labels feeding it
+> come from the *frontier-tier* (Opus-class) LLM that runs the sweep
+> and revisit, so "frontier" still appears below as a label-source
+> qualifier.  The word "frontier" *as a noun* is reserved for the
+> Pareto frontier of pipeline configurations — see
+> [Pareto Capability Evolution](./pareto-capability-evolution.md).
 
 The Monte Carlo sampling architecture enables a stronger training signal for
 the SVM without breaking independence. After the bootstrap LLM sweep, the
-SVM is **retrained on blended synth + frontier labels** — high-quality
+SVM is **retrained on blended synth + frontier-tier labels** — high-quality
 classifications from the Opus-tier model on the stratified importance sample.
 
 ```
 _llm_sweep() → frontier columns get Opus labels
      ↓
-  RETRAIN #1: Blend synth data + frontier labels
-  SVM hot-swapped before first ML validation
+  RETRAIN #1: Blend synth data + frontier-tier labels
+  Incremental SVM hot-swapped before first ML validation
      ↓
-_run_ml_validation() — uses frontier-trained SVM
+_run_ml_validation() — uses incremental SVM
      ↓
   Convergence loop:
     Agent path: agent calls retrain_svm tool when it judges
                 enough new labels have accumulated
     Programmatic path: retrain after each revisit iteration
-                       that adds ≥10 new frontier labels
+                       that adds ≥10 new frontier-tier labels
      ↓
   RETRAIN #3 (final): Only if NOT converged
      ↓
@@ -161,7 +170,7 @@ _run_ml_validation() — uses frontier-trained SVM
 
 **Blending** ensures categories not in the frontier sample still have
 coverage from synth data (broad vocabulary), while corpus-specific patterns
-dominate via frontier signal (depth).
+dominate via frontier-tier signal (depth).
 
 **Independence is preserved** because:
 - Training signal: Opus (frontier model, used in LLM sweep)
@@ -173,9 +182,9 @@ The three independence axes:
 2. Different feature spaces (sparse TF-IDF vs. semantic LLM reasoning)
 3. Different inductive biases (maximum-margin classifier vs. autoregressive LM)
 
-The SVM becomes the **transmission mechanism** for frontier-quality signal —
-MC sampling bounds the Opus cost; the SVM amortizes Opus's accuracy across
-the entire table-space.
+The incremental SVM becomes the **transmission mechanism** for
+frontier-tier-quality signal — MC sampling bounds the Opus cost; the
+SVM amortizes Opus's accuracy across the entire table-space.
 
 ##### Configuration
 
@@ -188,9 +197,10 @@ classify.bootstrap {
 
 ##### Implementation
 
-- `train_svm_on_frontier_labels()` in `ml_train.py` — collects frontier
-  labels (`label_source in ("llm", "llm_revisit")`), blends with synth data,
-  trains `SVMClassifier`, saves to `results_dir/svm_frontier.pkl`
+- `train_svm_on_frontier_labels()` in `ml_train.py` — collects
+  frontier-tier labels (`label_source in ("llm", "llm_revisit")`),
+  blends with synth data, trains the incremental `SVMClassifier`,
+  saves to `results_dir/svm_frontier.pkl`
 - `_maybe_retrain_svm()` in `pipeline.py` — encapsulates retrain + hot-swap
   via `ml_inference.reset()` + `configure_paths()`
 - Three call sites in pipeline: post-sweep, iterative, final (if not converged)
@@ -615,5 +625,5 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M7** | Monte Carlo stratified sampling, label propagation, background SHAP | Done |
 | **M8** | GPU acceleration (NVIDIA driver symlink, batch encoding), meta-tagging overlay | Done |
 | **M8.5** | SVM signals alignment (Pipeline+FeatureUnion adoption, evidence independence documentation) | Done |
-| **M9** | Frontier-label SVM training (cross-model distillation via MC sampling) | Done |
+| **M9** | Incremental SVM training on frontier-tier labels (cross-model distillation via MC sampling) | Done |
 | M10 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |

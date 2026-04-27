@@ -173,7 +173,7 @@ def install_catboost(model) -> None:
 def install_svm(model) -> None:
     """Install an in-memory SVM model, bypassing disk-load.
 
-    Parallel to :func:`install_catboost`.  Used by the frontier-SVM
+    Parallel to :func:`install_catboost`.  Used by the incremental SVM
     hot-swap during bootstrap: after re-training on accumulated LLM
     labels, the new model is installed here so subsequent ML validation
     and final classification see it without touching the serialized

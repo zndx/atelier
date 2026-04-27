@@ -157,11 +157,11 @@ TOOLS = [
     {
         "name": "retrain_svm",
         "description": (
-            "Retrain the SVM classifier on blended synthetic + frontier LLM "
-            "labels. Call when you judge enough new frontier labels have "
-            "accumulated to improve the SVM's accuracy. The retrained SVM "
-            "will be used in subsequent ML validation passes. Returns the "
-            "number of frontier labels used and training statistics."
+            "Retrain the incremental SVM on blended synthetic + frontier-tier "
+            "LLM labels. Call when you judge enough new frontier-tier labels "
+            "have accumulated to improve the SVM's accuracy. The retrained "
+            "SVM will be used in subsequent ML validation passes. Returns "
+            "the number of frontier-tier labels used and training statistics."
         ),
         "input_schema": {
             "type": "object",
@@ -197,9 +197,9 @@ so gating convergence on K would be vestigial.  Reason about the gap.
 - revisit_columns: Re-classify selected columns with enriched context
 - check_convergence: See overall metrics (coverage, mean_gap, mean_k, trend)
 - declare_converged: Stop when further iteration won't help
-- retrain_svm: Retrain the SVM on accumulated frontier labels (blended with
-  synth data). Call after revisiting several batches to let the SVM learn
-  from the latest classifications.
+- retrain_svm: Retrain the incremental SVM on accumulated frontier-tier
+  labels (blended with synth data). Call after revisiting several batches
+  to let the SVM learn from the latest classifications.
 
 ## Strategy
 1. Check overall metrics — what is mean_gap?  Is it above gap_threshold?
@@ -456,7 +456,7 @@ def _handle_retrain_svm(
     boot_cfg: BootstrapConfig,
     cfg: AtelierConfig,
 ) -> dict[str, Any]:
-    """Retrain SVM on blended synth + frontier labels, hot-swap."""
+    """Retrain the incremental SVM on blended synth + frontier-tier labels, hot-swap."""
     from pathlib import Path
     from atelier.classify import ml_inference
     from atelier.classify.ml_train import train_svm_on_frontier_labels

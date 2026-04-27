@@ -87,23 +87,26 @@ def train_svm_on_frontier_labels(
     min_frontier_labels: int = 20,
     min_classes: int = 3,
 ) -> Path | None:
-    """Train SVM on blended synthetic + frontier LLM labels.
+    """Train the incremental SVM on blended synthetic + frontier-tier LLM labels.
 
-    Frontier labels come from the Opus-tier LLM sweep (label_source
-    in ("llm", "llm_revisit")).  Synth data provides broad vocabulary
-    coverage; frontier labels provide corpus-specific signal.
+    The "incremental" half names the SVM's role in the active-learning
+    bootstrap loop — it is retrained as new oracle labels accumulate.
+    "Frontier-tier" names the *source* of those labels: the Opus-class
+    LLM that runs the sweep + revisit (``label_source in ("llm",
+    "llm_revisit")``).  Synth data provides broad vocabulary coverage;
+    frontier-tier labels provide corpus-specific signal.
 
     DST independence is preserved because the SVM operates on sparse
-    TF-IDF features and is trained on frontier-model (Opus) labels,
+    TF-IDF features and is trained on frontier-tier (Opus) labels,
     while the LLM mass function in DST fusion uses the subagent model
     (Sonnet/Haiku).
 
     Args:
         state: BootstrapState with labels and label_source.
         samples_by_name: Column samples keyed by name.
-        output_path: Where to save the frontier-trained SVM.
+        output_path: Where to save the incremental SVM.
         synth_dir: Optional synth data dir for blending.
-        min_frontier_labels: Minimum frontier labels to proceed.
+        min_frontier_labels: Minimum frontier-tier labels to proceed.
         min_classes: Minimum distinct classes to proceed.
 
     Returns:
@@ -129,7 +132,7 @@ def train_svm_on_frontier_labels(
     frontier_count = len(frontier_texts)
     if frontier_count < min_frontier_labels:
         logger.info(
-            "Frontier SVM skip: %d labels < %d minimum",
+            "Incremental SVM skip: %d labels < %d minimum",
             frontier_count, min_frontier_labels,
         )
         return None
@@ -137,7 +140,7 @@ def train_svm_on_frontier_labels(
     distinct_classes = len(set(frontier_labels))
     if distinct_classes < min_classes:
         logger.info(
-            "Frontier SVM skip: %d classes < %d minimum",
+            "Incremental SVM skip: %d classes < %d minimum",
             distinct_classes, min_classes,
         )
         return None
@@ -168,7 +171,7 @@ def train_svm_on_frontier_labels(
     elapsed = time.monotonic() - t0
 
     logger.info(
-        "Frontier SVM trained: %d frontier + %d synth = %d samples, "
+        "Incremental SVM trained: %d frontier-tier + %d synth = %d samples, "
         "%d classes, %.1fs → %s",
         frontier_count, len(synth_texts), len(texts),
         len(set(labels)), elapsed, output_path,

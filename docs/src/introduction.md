@@ -152,16 +152,17 @@ frontier labels, and declares convergence when diminishing returns are
 reached. The **programmatic** variant uses gap + coverage thresholds
 for environments where tool-use isn't available.
 
-### Frontier-Label SVM Training
+### Incremental SVM Training
 
 After the first LLM sweep, the SVM is **retrained on blended synthetic +
-frontier labels** — high-quality classifications from the frontier model on
-the stratified importance sample. Synthetic data provides vocabulary breadth
-(all categories); frontier labels provide corpus-specific depth. The SVM is
-hot-swapped progressively across convergence iterations, carrying
-corpus-specific signal into each validation pass. DST independence is
-preserved: the SVM trains on frontier-model (Opus) labels while the LLM
-mass function in fusion uses the subagent model (Sonnet/Haiku).
+frontier-tier labels** — high-quality classifications from the frontier
+model on the stratified importance sample. Synthetic data provides
+vocabulary breadth (all categories); frontier-tier labels provide
+corpus-specific depth. The incremental SVM is hot-swapped progressively
+across convergence iterations, carrying corpus-specific signal into each
+validation pass. DST independence is preserved: the SVM trains on
+frontier-tier (Opus) labels while the LLM mass function in fusion uses
+the subagent model (Sonnet/Haiku).
 
 ## Scale
 
@@ -207,7 +208,7 @@ just up               # Start gRPC + gateway + Vite dev server
 - **[Classification Pipeline](./architecture/classification.md)** — DST methodology, evidence sources, bootstrap convergence
 - **[Monte Carlo Sampling](./architecture/monte-carlo.md)** — Stratified sampling for scale
 - **[GPU Acceleration](./architecture/gpu.md)** — CUDA detection and batch encoding
-- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, frontier-label retraining, CatBoost + SVM
+- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, incremental SVM retraining, CatBoost + SVM
 - **[Embeddings](./architecture/embeddings.md)** — Interactive parquet visualization
 - **[Data Sources](./architecture/data-sources.md)** — Source-aware versioning, OOTB sample, Hive auto-discovery
 - **[BDD Scenarios](./scenarios/overview.md)** — 141 scenarios across 4 domains

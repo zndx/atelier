@@ -207,14 +207,14 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     },
     "classify_bootstrap_frontier_svm_retrain": {
         "hocon_path": "classify.bootstrap.frontier_svm_retrain",
-        "label": "Frontier SVM Retrain",
-        "description": "Hot-swap the frontier SVM mid-loop as LLM labels accumulate",
+        "label": "Incremental SVM Retrain",
+        "description": "Hot-swap the incremental SVM mid-loop as LLM labels accumulate",
         "group": "convergence",
         "type": "switch",
         "default": True,
         "captions": {
-            True: "Retrain the frontier SVM on accumulated LLM labels each iteration — adaptive, slower.",
-            False: "Freeze the frontier SVM after first fit — faster but stale for high-conflict corpora.",
+            True: "Retrain the incremental SVM on accumulated LLM labels each iteration — adaptive, slower.",
+            False: "Freeze the incremental SVM after first fit — faster but stale for high-conflict corpora.",
         },
     },
     # ── Evidence & Fusion ─────────────────────────────────────────
@@ -246,14 +246,14 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     "classify_discount_svm": {
         "hocon_path": "classify.discounts.svm",
         "label": "SVM Discount",
-        "description": "Mass allocated to ignorance from frontier SVM evidence",
+        "description": "Mass allocated to ignorance from incremental SVM evidence",
         "group": "evidence",
         "type": "float",
         "min": 0.10,
         "max": 0.40,
         "step": 0.01,
         "default": 0.20,
-        "caption_template": "Reserve {value_pct}% of SVM mass as ignorance — lower = stronger frontier-SVM voice in fusion.",
+        "caption_template": "Reserve {value_pct}% of SVM mass as ignorance — lower = stronger incremental-SVM voice in fusion.",
     },
     "classify_discount_pattern_theta": {
         "hocon_path": "classify.discounts.pattern_theta",

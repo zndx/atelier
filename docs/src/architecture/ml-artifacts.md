@@ -1,7 +1,7 @@
 # ML Artifact Management + Extend Classification
 
 Each Atelier classify run trains a CatBoost classifier, optionally a
-SVM frontier classifier, and (when umap-learn handles the projection)
+incremental SVM classifier, and (when umap-learn handles the projection)
 a fitted UMAP reducer.  The **ML Artifact Set** feature makes those
 trained models first-class entities — registered in PG, listed in the
 UI, and replayable on new data through a streamlined **Extend

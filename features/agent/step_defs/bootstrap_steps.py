@@ -250,10 +250,10 @@ def step_should_not_stop(context):
     assert not should_stop_early(context.k_state), "Expected should_stop_early to return False"
 
 
-# ── Frontier SVM retraining ─────────────────────────────────────
+# ── Incremental SVM retraining ──────────────────────────────────
 
 
-@then("the SVM should have been retrained on frontier labels")
+@then("the SVM should have been retrained on frontier-tier labels")
 def step_svm_retrained(context):
     retrained = context.bootstrap_result.get("svm_retrained_on_frontier", False)
     assert retrained, (
@@ -262,8 +262,8 @@ def step_svm_retrained(context):
     )
 
 
-@then("the frontier-trained SVM should produce valid probabilities")
-def step_frontier_svm_valid(context):
+@then("the incremental SVM should produce valid probabilities")
+def step_incremental_svm_valid(context):
     model_path = context.bootstrap_result.get("svm_frontier_model_path")
     assert model_path, "No svm_frontier_model_path in bootstrap result"
 

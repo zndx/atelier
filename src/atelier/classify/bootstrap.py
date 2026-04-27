@@ -381,7 +381,7 @@ class BootstrapState:
     # LLM truncation tracking
     truncation_count: int = 0
     effective_batch_size: int = 50
-    # Frontier SVM retraining state
+    # Incremental SVM retraining state (filename retained: svm_frontier.pkl)
     svm_retrain_count: int = 0
     svm_frontier_path: str | None = None
 
