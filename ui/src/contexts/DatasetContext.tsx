@@ -29,6 +29,36 @@ export interface DatasetInfo {
   summary: string;
   fsm_run_id: string;
   created_at: string;
+  // Lineage for Extend Classification (added 20260427).  classify runs
+  // set artifact_set_id to the row they produced; extend runs set it
+  // to the row they consumed plus parent_dataset_id linking to the
+  // source classify dataset.
+  artifact_set_id?: string | null;
+  parent_dataset_id?: string | null;
+  run_kind?: string;
+}
+
+export interface MLArtifactSet {
+  id: string;
+  source_id: string | null;
+  fsm_run_id: string | null;
+  parent_artifact_set_id: string | null;
+  catboost_path: string;
+  catboost_classes_path: string;
+  svm_path: string | null;
+  svm_classes_path: string | null;
+  umap_path: string | null;
+  classes: string;            // JSON-encoded list
+  feature_groups: string | null;
+  vocab_signature: string;
+  embedding_model: string;
+  embedding_dim: number;
+  display_name: string | null;
+  summary: string | null;
+  is_active: boolean;
+  is_archived: boolean;
+  facets: string | null;
+  created_at: string;
 }
 
 export interface SmokeTestResult {
@@ -55,6 +85,11 @@ interface DatasetContextValue {
   setActiveDatasetId: (id: string | null) => void;
   refreshSources: () => Promise<void>;
   refreshDatasets: () => Promise<void>;
+  // ML Artifact Sets (Extend Classification, added 20260427).
+  artifactSets: MLArtifactSet[];
+  activeArtifactSetId: string | null;
+  setActiveArtifactSetId: (id: string | null) => Promise<void>;
+  refreshArtifactSets: () => Promise<void>;
   // Status-page state that should survive navigation.
   statusPlatformId: string | null;
   setStatusPlatformId: (id: string | null) => void;
@@ -117,6 +152,10 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
   );
   const [smokeTest, setSmokeTestRaw] = useState<SmokeTestState | null>(
     () => readSmokeTest(),
+  );
+  const [artifactSets, setArtifactSets] = useState<MLArtifactSet[]>([]);
+  const [activeArtifactSetId, setActiveArtifactSetIdRaw] = useState<string | null>(
+    null,  // server-side state — derived from artifactSets[].is_active on refresh
   );
 
   const setActiveSourceId = useCallback((id: string | null, opts?: { userPicked?: boolean }) => {
@@ -189,6 +228,38 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
     }
   }, [activeSourceId]);
 
+  const refreshArtifactSets = useCallback(async () => {
+    try {
+      const r = await fetch("/api/artifact-sets");
+      const data = await r.json();
+      const rows: MLArtifactSet[] = data.artifact_sets || [];
+      setArtifactSets(rows);
+      // Mirror server-side is_active into the client-side selector so
+      // panels can render `record.is_active` directly without an extra
+      // bookkeeping layer.
+      const active = rows.find((r) => r.is_active);
+      setActiveArtifactSetIdRaw(active ? active.id : null);
+    } catch {
+      setArtifactSets([]);
+      setActiveArtifactSetIdRaw(null);
+    }
+  }, []);
+
+  const setActiveArtifactSetId = useCallback(async (id: string | null) => {
+    if (id == null) return;
+    try {
+      const r = await fetch(
+        `/api/artifact-sets/${encodeURIComponent(id)}/activate`,
+        { method: "POST" },
+      );
+      if (r.ok) {
+        await refreshArtifactSets();
+      }
+    } catch {
+      // Swallow — the next refresh will reconcile.
+    }
+  }, [refreshArtifactSets]);
+
   // Fetch sources on mount
   useEffect(() => {
     refreshSources();
@@ -198,6 +269,13 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshDatasets();
   }, [refreshDatasets]);
+
+  // Fetch artifact sets on mount.  Status.tsx's FSM convergence
+  // handler also calls refreshArtifactSets so a freshly-completed
+  // classify run shows up in the panel without a manual refresh.
+  useEffect(() => {
+    refreshArtifactSets();
+  }, [refreshArtifactSets]);
 
   // Auto-select source.  Env-seeded rows win over the default
   // `sources[0]` so fresh CAI deploys land on the operator-intended
@@ -255,6 +333,10 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
         setActiveDatasetId,
         refreshSources,
         refreshDatasets,
+        artifactSets,
+        activeArtifactSetId,
+        setActiveArtifactSetId,
+        refreshArtifactSets,
         statusPlatformId,
         setStatusPlatformId,
         smokeTest,

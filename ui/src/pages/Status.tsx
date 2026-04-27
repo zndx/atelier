@@ -8,6 +8,7 @@ import {
   Descriptions,
   message,
   Progress,
+  Radio,
   Row,
   Select,
   Space,
@@ -19,13 +20,15 @@ import {
   Typography,
 } from "antd";
 import {
+  DeleteOutlined,
   EyeOutlined,
   ReloadOutlined,
+  RocketOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
-import { useDataset } from "../contexts/DatasetContext";
+import { useDataset, type MLArtifactSet } from "../contexts/DatasetContext";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -387,7 +390,7 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const { activeSourceId, refreshDatasets } = useDataset();
+  const { activeSourceId, refreshDatasets, refreshArtifactSets } = useDataset();
 
   const fetchFSM = () => {
     setFsmLoading(true);
@@ -442,12 +445,15 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const isRunning = !["IDLE", "CONVERGED", "ERROR"].includes(state);
   const progress = fsm?.progress ?? {};
 
-  // Refresh datasets when pipeline converges so the new dataset appears
+  // Refresh datasets + artifact sets when pipeline converges so the
+  // new dataset and its produced artifact set both appear without a
+  // manual click.  Extend runs also converge — same code path.
   useEffect(() => {
     if (state === "CONVERGED") {
       refreshDatasets();
+      refreshArtifactSets();
     }
-  }, [state, refreshDatasets]);
+  }, [state, refreshDatasets, refreshArtifactSets]);
 
   return (
     <Card
@@ -717,6 +723,246 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   );
 }
 
+function MLArtifactsCard() {
+  const {
+    activeSourceId,
+    sources,
+    datasets,
+    activeDatasetId,
+    artifactSets,
+    activeArtifactSetId,
+    setActiveArtifactSetId,
+    refreshArtifactSets,
+  } = useDataset();
+
+  const [extending, setExtending] = useState<boolean>(false);
+  const [archiving, setArchiving] = useState<string | null>(null);
+
+  const activeSource = sources.find((s) => s.id === activeSourceId);
+  const activeDataset = datasets.find((d) => d.id === activeDatasetId);
+
+  const archiveArtifact = async (id: string) => {
+    setArchiving(id);
+    try {
+      await fetch(`/api/artifact-sets/${encodeURIComponent(id)}/archive`, {
+        method: "POST",
+      });
+      await refreshArtifactSets();
+    } finally {
+      setArchiving(null);
+    }
+  };
+
+  const startExtend = async () => {
+    if (!activeSourceId || !activeArtifactSetId) {
+      message.error("Select a data source and an artifact set first");
+      return;
+    }
+    setExtending(true);
+    try {
+      const r = await fetch("/api/fsm/extend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source_id: activeSourceId,
+          artifact_set_id: activeArtifactSetId,
+          parent_dataset_id: activeDatasetId ?? null,
+        }),
+      });
+      const data = await r.json();
+      if (data.started) {
+        message.success(
+          `Extend Classification started — using artifact ${activeArtifactSetId.slice(0, 8)}`,
+        );
+      } else {
+        message.error(data.error || "Failed to start Extend Classification");
+      }
+    } catch (e) {
+      message.error(`Extend Classification failed: ${e}`);
+    } finally {
+      setExtending(false);
+    }
+  };
+
+  const canExtend = Boolean(
+    activeSourceId && activeArtifactSetId && activeDataset,
+  );
+
+  return (
+    <Card
+      title="ML Artifacts"
+      extra={
+        <Space>
+          {activeSource ? (
+            <Text type="secondary">
+              Source: <Text code>{activeSource.display_name}</Text>
+              {activeDataset && (
+                <>
+                  {" · "}
+                  Dataset: <Text code>v{activeDataset.version_number}</Text>
+                </>
+              )}
+            </Text>
+          ) : (
+            <Text type="secondary">No source selected</Text>
+          )}
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={refreshArtifactSets}
+            size="small"
+          >
+            Refresh
+          </Button>
+          <Tooltip
+            title={
+              !canExtend
+                ? "Select an active source, dataset, and artifact set to enable Extend"
+                : "Run a streamlined classification on the selected data source using the active artifact set (no LLM, no DST iteration)"
+            }
+          >
+            <Button
+              type="primary"
+              icon={<RocketOutlined />}
+              onClick={startExtend}
+              loading={extending}
+              disabled={!canExtend}
+              size="small"
+            >
+              Extend Classification
+            </Button>
+          </Tooltip>
+        </Space>
+      }
+    >
+      {artifactSets.length === 0 ? (
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          No artifact sets registered yet. Run the Classification Pipeline to
+          produce one — each completed classify run registers its trained
+          CatBoost / SVM / UMAP bundle here for re-use.
+        </Paragraph>
+      ) : (
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="id"
+          dataSource={artifactSets}
+          onRow={(record) => ({
+            style: {
+              cursor: "pointer",
+              background: record.id === activeArtifactSetId ? "#e6f4ff" : undefined,
+            },
+            onClick: () => setActiveArtifactSetId(record.id),
+          })}
+          columns={[
+            {
+              title: "Active",
+              key: "active",
+              width: 70,
+              align: "center" as const,
+              render: (_: unknown, record: MLArtifactSet) => (
+                <Radio
+                  checked={record.is_active}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveArtifactSetId(record.id);
+                  }}
+                />
+              ),
+            },
+            {
+              title: "Run ID",
+              dataIndex: "fsm_run_id",
+              key: "run_id",
+              width: 110,
+              render: (run_id: string | null, record: MLArtifactSet) => {
+                const id = run_id ?? record.id;
+                return run_id ? (
+                  <Link to={`/overwatch/${run_id}`}>
+                    <Text code>{id.slice(0, 8)}</Text>
+                  </Link>
+                ) : (
+                  <Text code type="secondary">{id.slice(0, 8)}</Text>
+                );
+              },
+            },
+            {
+              title: "Created",
+              dataIndex: "created_at",
+              key: "created",
+              render: (v: string) => {
+                if (!v) return "—";
+                try {
+                  return new Date(v).toLocaleString();
+                } catch {
+                  return v;
+                }
+              },
+            },
+            {
+              title: "Summary",
+              dataIndex: "summary",
+              key: "summary",
+              ellipsis: true,
+              render: (v: string | null) => v || "—",
+            },
+            {
+              title: "Models",
+              key: "models",
+              width: 130,
+              render: (_: unknown, record: MLArtifactSet) => (
+                <Space size={4}>
+                  <Tooltip title="CatBoost classifier">
+                    <Tag color={record.catboost_path ? "blue" : "default"} style={{ margin: 0 }}>
+                      CB
+                    </Tag>
+                  </Tooltip>
+                  <Tooltip title={record.svm_path ? "SVM frontier" : "No SVM in this bundle"}>
+                    <Tag color={record.svm_path ? "blue" : "default"} style={{ margin: 0 }}>
+                      SVM
+                    </Tag>
+                  </Tooltip>
+                  <Tooltip
+                    title={
+                      record.umap_path
+                        ? "UMAP projection bundled — Extend lands in same coordinate space"
+                        : "No UMAP — Extend re-fits a fresh projection"
+                    }
+                  >
+                    <Tag color={record.umap_path ? "blue" : "default"} style={{ margin: 0 }}>
+                      UMAP
+                    </Tag>
+                  </Tooltip>
+                </Space>
+              ),
+            },
+            {
+              title: "",
+              key: "actions",
+              width: 60,
+              render: (_: unknown, record: MLArtifactSet) => (
+                <Tooltip title="Archive (files on disk are kept)">
+                  <Button
+                    icon={<DeleteOutlined />}
+                    size="small"
+                    type="text"
+                    danger
+                    loading={archiving === record.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      archiveArtifact(record.id);
+                    }}
+                  />
+                </Tooltip>
+              ),
+            },
+          ]}
+        />
+      )}
+    </Card>
+  );
+}
+
+
 function DataSourceCard() {
   const {
     sources,
@@ -782,16 +1028,26 @@ function DataSourceCard() {
           })}
           columns={[
             {
+              title: "Active",
+              key: "active",
+              width: 70,
+              align: "center" as const,
+              render: (_: unknown, record: { id: string; is_active: boolean }) => (
+                <Radio
+                  checked={record.is_active}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    activateVersion(record.id);
+                  }}
+                />
+              ),
+            },
+            {
               title: "Version",
               dataIndex: "version_number",
               key: "version",
               width: 80,
-              render: (v: number, record: { id: string; is_active: boolean }) => (
-                <Space>
-                  <Text strong>v{v}</Text>
-                  {record.is_active && <Tag color="blue">active</Tag>}
-                </Space>
-              ),
+              render: (v: number) => <Text strong>v{v}</Text>,
             },
             {
               title: "Columns",
@@ -1301,6 +1557,13 @@ export default function Status() {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24}>
           <ClassificationPipelineCard hasClassifyLlm={status?.config?.has_classify_llm} />
+        </Col>
+      </Row>
+
+      {/* ── ML Artifacts (Extend Classification) ─── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <MLArtifactsCard />
         </Col>
       </Row>
 

@@ -732,6 +732,131 @@ def activate_dataset(dataset_id: str):
         return _error_envelope(f"activate_dataset failed: {exc}")
 
 
+# ── ML Artifact Sets ──────────────────────────────────────────────
+
+
+@app.get("/api/artifact-sets")
+def list_artifact_sets(source_id: str | None = None,
+                       include_archived: bool = False):
+    """Return registered ML artifact sets, newest first.
+
+    Each row indexes the on-disk paths of a CatBoost classifier (always)
+    plus optional SVM / UMAP and the training-time metadata an Extend
+    Classification run needs (vocab signature, embedding model, etc.).
+    """
+    try:
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        rows = dao.list_artifact_sets(
+            source_id=source_id, include_archived=include_archived,
+        )
+    except Exception as exc:
+        return _error_envelope(f"list_artifact_sets failed: {exc}")
+    return {"artifact_sets": rows}
+
+
+@app.get("/api/artifact-sets/{artifact_set_id}")
+def get_artifact_set(artifact_set_id: str):
+    """Return a single artifact set by id."""
+    try:
+        from atelier.db.dao import AtelierDao
+        row = AtelierDao().get_artifact_set(artifact_set_id)
+        if row is None:
+            return _error_envelope("Artifact set not found", status=404)
+        return row
+    except Exception as exc:
+        return _error_envelope(f"get_artifact_set failed: {exc}")
+
+
+@app.post("/api/artifact-sets/{artifact_set_id}/activate")
+def activate_artifact_set(artifact_set_id: str):
+    """Promote an artifact set to globally active.
+
+    Demotes any currently-active set in the same transaction; the
+    Postgres partial unique index on ``(is_active) WHERE is_active``
+    enforces the only-one-active invariant.
+    """
+    try:
+        from atelier.db.dao import AtelierDao
+        ok = AtelierDao().set_active_artifact_set(artifact_set_id)
+        if not ok:
+            return _error_envelope("Artifact set not found", status=404)
+        return {"ok": True, "artifact_set_id": artifact_set_id, "is_active": True}
+    except Exception as exc:
+        return _error_envelope(f"activate_artifact_set failed: {exc}")
+
+
+@app.post("/api/artifact-sets/{artifact_set_id}/archive")
+def archive_artifact_set(artifact_set_id: str):
+    """Soft-delete an artifact set.  Files on disk are untouched."""
+    try:
+        from atelier.db.dao import AtelierDao
+        ok = AtelierDao().archive_artifact_set(artifact_set_id)
+        if not ok:
+            return _error_envelope("Artifact set not found", status=404)
+        return {"ok": True, "artifact_set_id": artifact_set_id, "is_archived": True}
+    except Exception as exc:
+        return _error_envelope(f"archive_artifact_set failed: {exc}")
+
+
+@app.post("/api/artifact-sets/{artifact_set_id}/unarchive")
+def unarchive_artifact_set(artifact_set_id: str):
+    """Reverse the archive operation.  Does NOT promote to active."""
+    try:
+        from atelier.db.dao import AtelierDao
+        ok = AtelierDao().unarchive_artifact_set(artifact_set_id)
+        if not ok:
+            return _error_envelope("Artifact set not found", status=404)
+        return {"ok": True, "artifact_set_id": artifact_set_id, "is_archived": False}
+    except Exception as exc:
+        return _error_envelope(f"unarchive_artifact_set failed: {exc}")
+
+
+@app.get("/api/artifact-sets/{artifact_set_id}/compatibility")
+def artifact_set_compatibility(artifact_set_id: str, source_id: str):
+    """Pre-check whether an artifact set's vocab is compatible with a source.
+
+    Returns ``{status: ok|superset|partial|disjoint, missing_codes,
+    extra_codes}``.  The UI calls this before enabling the Extend
+    button so it can warn — never block — the operator.
+    """
+    try:
+        import json
+        from atelier.classify.artifact_set import check_compatibility
+        from atelier.classify.taxonomy import load_sample_vocabulary
+        from atelier.db.dao import AtelierDao
+
+        dao = AtelierDao()
+        row = dao.get_artifact_set(artifact_set_id)
+        if row is None:
+            return _error_envelope("Artifact set not found", status=404)
+
+        artifact_classes = json.loads(row["classes"])
+
+        # Resolve the source's preferred vocab.  For sources without a
+        # registered loader (hive — vocab is loaded at run start) we
+        # report ok against the artifact's own signature so the UI
+        # doesn't surface a spurious warning.
+        if source_id in ("ootb-sample", "synthetic"):
+            cs = load_sample_vocabulary(hierarchical=True)
+            source_classes = [c.code for c in cs.categories]
+        else:
+            source_classes = artifact_classes
+
+        report = check_compatibility(artifact_classes, source_classes)
+        return {
+            "artifact_set_id": artifact_set_id,
+            "source_id": source_id,
+            "status": report.status,
+            "missing_codes": report.missing_codes,
+            "extra_codes": report.extra_codes,
+            "artifact_signature": report.artifact_signature,
+            "candidate_signature": report.candidate_signature,
+        }
+    except Exception as exc:
+        return _error_envelope(f"artifact_set_compatibility failed: {exc}")
+
+
 # ── Archive / unarchive ──────────────────────────────────────────
 
 
@@ -2056,6 +2181,80 @@ def fsm_start_bootstrap():
     The convergence loop is now built into the single pipeline entry point.
     """
     return fsm_start()
+
+
+@app.post("/api/fsm/extend")
+def fsm_extend(body: dict):
+    """Start an Extend Classification run.
+
+    Body: ``{"source_id": "ootb-sample", "artifact_set_id": "abcd1234",
+    "parent_dataset_id": "wxyz5678"}`` (parent_dataset_id is optional).
+
+    Mirrors :func:`fsm_start`'s background-thread plumbing so the
+    existing /api/fsm/status polling carries the run through to the UI
+    without any new client-side wiring.  Rejects 409 when an FSM run
+    is already in flight.
+    """
+    import threading
+    try:
+        from atelier.classify import get_fsm
+        from atelier.classify.extend_pipeline import run_extend_classification
+        from atelier.config import load_config
+
+        source_id = body.get("source_id")
+        artifact_set_id = body.get("artifact_set_id")
+        parent_dataset_id = body.get("parent_dataset_id")
+
+        if not source_id:
+            return _error_envelope("source_id is required", status=400)
+        if not artifact_set_id:
+            return _error_envelope("artifact_set_id is required", status=400)
+
+        cfg = load_config()
+        fsm = get_fsm()
+
+        # Refuse to spawn while another run is in flight — the FSM
+        # singleton can only carry one run at a time.  Status codes
+        # match the pattern used by the bootstrap classify start above.
+        current = fsm.get_status()
+        if current and current.state.value not in ("IDLE", "CONVERGED", "ERROR"):
+            return _error_envelope(
+                f"FSM busy: {current.state.value}", status=409,
+            )
+
+        def _background():
+            try:
+                run_extend_classification(
+                    cfg, fsm,
+                    source_id=source_id,
+                    artifact_set_id=artifact_set_id,
+                    parent_dataset_id=parent_dataset_id,
+                )
+            except BaseException as exc:
+                logger.exception("Extend pipeline thread died: %s", exc)
+                try:
+                    from atelier.classify.fsm import FSMState
+                    cur = fsm.get_status()
+                    if cur and cur.state.value not in ("IDLE", "CONVERGED", "ERROR"):
+                        fsm.advance(
+                            cur.id, FSMState.ERROR,
+                            error=f"thread died: {type(exc).__name__}: {exc}",
+                        )
+                except Exception:
+                    logger.debug("FSM error-transition failed", exc_info=True)
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+
+        threading.Thread(target=_background, daemon=True).start()
+        return {
+            "started": True,
+            "run_kind": "extend",
+            "source_id": source_id,
+            "artifact_set_id": artifact_set_id,
+            "parent_dataset_id": parent_dataset_id,
+        }
+    except Exception as exc:
+        return _error_envelope(f"FSM extend failed: {exc}")
 
 
 @app.get("/api/fsm/runs")
