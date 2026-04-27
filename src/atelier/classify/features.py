@@ -599,6 +599,86 @@ class ColumnFeatures:
         mask = {n: (n == name) for n in FEATURE_NAMES}
         return self.to_embedding_text(mask)
 
+    def to_embedding_segments(self) -> dict[str, str | float | None]:
+        """Per-feature view used to build a structured CatBoost input.
+
+        Returns a dict keyed by ``FEATURE_NAMES`` with each value typed
+        according to the feature's natural shape:
+
+        - **Text features** (column_name, column_type, sample_values,
+          pattern_signals, sibling_context, value_description,
+          source_table) → ``str`` (empty string when missing).  Each is
+          encoded by the SentenceTransformer separately so its
+          contribution is preserved as a named slice in the model's
+          input vector — TreeSHAP attributes per slice → per source
+          feature.
+        - **Scalar features** (cardinality, null_ratio, value_entropy,
+          avg_value_length, numeric_ratio) → ``float`` or ``None``.
+          Passed through to CatBoost as native numerical inputs;
+          CatBoost handles NaN natively and TreeSHAP attributes
+          directly.
+
+        This is the foundation for genuine per-feature TreeSHAP
+        attribution: instead of compressing all 12 features into a
+        single concatenated string → 384-dim vector (which entangles
+        them so TreeSHAP can only report aggregate "embedding"
+        contribution), each feature occupies its own input slot.
+        """
+        # Text features — render the same content the legacy single-
+        # text path used, but per-feature so the encoder produces a
+        # dedicated 384-dim slice for each.
+        if self.is_generic_name and self.value_description:
+            # Generic names have no signal; let the value_description
+            # stand in (matches legacy to_embedding_text behaviour).
+            name_text = self.value_description
+        else:
+            name_text = self.column_name_humanized or ""
+        type_text = self.column_type or ""
+        samples_text = self.sample_values_text or ""
+        # pattern_signals serialized exactly the way to_embedding_text
+        # rendered it for the LLM, so the embedding lands on the same
+        # tokens the LLM saw.
+        if self.pattern_signals:
+            patterns_text = "patterns: " + ", ".join(self.pattern_signals.keys())
+        else:
+            patterns_text = ""
+        if self.sibling_names:
+            siblings_text = "siblings: " + ", ".join(self.sibling_names[:5])
+        else:
+            siblings_text = ""
+        # value_description only when not already used as the name stand-in.
+        if self.value_description and not self.is_generic_name:
+            value_desc_text = self.value_description
+        else:
+            value_desc_text = ""
+        source_table_text = self.source_table or ""
+
+        return {
+            "column_name": name_text,
+            "column_type": type_text,
+            "sample_values": samples_text,
+            "cardinality": (
+                float(self.cardinality) if self.cardinality is not None else None
+            ),
+            "null_ratio": (
+                float(self.null_ratio) if self.null_ratio is not None else None
+            ),
+            "value_entropy": (
+                float(self.value_entropy) if self.value_entropy is not None else None
+            ),
+            "pattern_signals": patterns_text,
+            "avg_value_length": (
+                float(self.avg_value_length)
+                if self.avg_value_length is not None else None
+            ),
+            "numeric_ratio": (
+                float(self.numeric_ratio) if self.numeric_ratio is not None else None
+            ),
+            "sibling_context": siblings_text,
+            "source_table": source_table_text,
+            "value_description": value_desc_text,
+        }
+
 
 # ── Extraction ───────────────────────────────────────────────────────
 

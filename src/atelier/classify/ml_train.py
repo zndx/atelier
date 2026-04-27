@@ -186,13 +186,21 @@ def train_catboost(
     depth: int = 6,
     learning_rate: float = 0.10,
 ) -> Path:
-    """Train CatBoost classifier on sentence-transformer embeddings.
+    """Train CatBoost on the structured per-feature input matrix.
+
+    Each column produces a ``ColumnFeatures``; the classifier encodes
+    one SentenceTransformer slice per text feature + scalar slots per
+    numeric feature internally, so TreeSHAP attributes natively per
+    source feature at inference / explanation time.  See
+    :class:`atelier.classify.catboost_classifier.CatBoostColumnClassifier`.
 
     Args:
         synth_dir: Directory with synth CSVs + reference_labels.json.
-        category_set: Used for building embedding text context.
+        category_set: Reserved for future per-source augmentation
+            (unused today; kept for caller-API stability).
         output_path: Where to save the .cbm model file.
-        embedding_model: Sentence-transformer model name.
+        embedding_model: Sentence-transformer model name (encoder for
+            the text-shaped feature slices).
         iterations: CatBoost boosting rounds.
         depth: CatBoost tree depth.
         learning_rate: CatBoost learning rate (shrinkage per round).
@@ -201,34 +209,32 @@ def train_catboost(
         Path to the saved model.
     """
     from atelier.classify.catboost_classifier import CatBoostColumnClassifier
-    from atelier.classify.embedding import embed_texts, set_model_name
+    from atelier.classify.embedding import set_model_name
     from atelier.classify.features import extract_features
 
     set_model_name(embedding_model)
     columns, reference_labels = _load_synth_data(synth_dir)
 
-    # Build embedding texts using the 12-feature extraction
-    embedding_texts: list[str] = []
+    # Build ColumnFeatures from each labeled column.
+    features_list = []
     labels: list[str] = []
     for col_name, values in columns.items():
         code = reference_labels.get(col_name)
         if not code:
             continue
-        features = extract_features(
+        features_list.append(extract_features(
             column_name=col_name,
             values=values[:5],
-        )
-        embedding_texts.append(features.to_embedding_text())
+        ))
         labels.append(code)
 
-    logger.info("Encoding %d columns with %s", len(embedding_texts), embedding_model)
-    import numpy as np
-    embeddings = np.array(embed_texts(embedding_texts))
-
-    logger.info("Training CatBoost on %d samples (%d dims)", len(labels), embeddings.shape[1])
+    logger.info(
+        "Training CatBoost on %d samples (encoder=%s, structured per-feature input)",
+        len(labels), embedding_model,
+    )
     classifier = CatBoostColumnClassifier()
     classifier.fit(
-        embeddings, labels,
+        features_list, labels,
         iterations=iterations, depth=depth, learning_rate=learning_rate,
     )
     classifier.save(output_path)
@@ -236,64 +242,72 @@ def train_catboost(
 
 
 def fit_catboost_to_llm_labels(
-    embedding_texts: list[str],
+    features_list: list,
     llm_codes: list[str],
     *,
     iterations: int = 1000,
     depth: int = 6,
     learning_rate: float = 0.10,
 ):
-    """Fit an in-memory CatBoost on (embedding_text, llm_predicted_code) pairs.
+    """Fit an in-memory CatBoost on ``(ColumnFeatures, llm_predicted_code)`` pairs.
 
-    Used by the pipeline's fit-to-LLM mode: after the LLM sweep labels
-    the corpus, we embed each column's feature text and fit a CatBoost
-    model that's literally trained to agree with the LLM.  Downstream
-    evidence fusion then uses this model (installed via
-    :func:`ml_inference.install_catboost`) instead of a pre-trained
-    reference, and the subsequent SHAP / SAGE tour attributes feature
-    contributions to the model that actually reproduces the LLM's
-    labeling — turning CatBoost into the explainability surface for
-    the LLM's decisions rather than a competing classifier.
+    Used by the pipeline's fit-to-LLM mode (REVEAL pattern): after the
+    LLM sweep labels the corpus, we fit CatBoost to **agree** with the
+    LLM on the columns it labeled.  CatBoost then generalizes to
+    columns held out from the LLM pass — same vocabulary, same
+    feature space, no oracle dependency at inference time.
+
+    Because CatBoost is trained on the **structured per-feature input**
+    (one SentenceTransformer slice per text feature + scalar slots per
+    numeric), TreeSHAP attribution at evaluation time attributes
+    natively per source feature.  This makes CatBoost the genuine
+    explainability surface for the LLM's labeling decisions:
+    "predicted code ``X`` because the column_name contributed +0.4
+    SHAP, sample_values contributed +0.3, pattern_signals contributed
+    +0.2..."
+
+    Args:
+        features_list: ``list[ColumnFeatures]`` — one per LLM-labeled
+            column.  Length must match ``llm_codes``.
+        llm_codes: The LLM's predicted code per column.
+        iterations / depth / learning_rate: CatBoost hyperparameters.
 
     Returns the trained :class:`CatBoostColumnClassifier`, or None when
     input is insufficient (``< 2`` distinct classes or fewer than 10
     samples).  The caller decides how to react to None.
     """
     from atelier.classify.catboost_classifier import CatBoostColumnClassifier
-    from atelier.classify.embedding import embed_texts
 
-    if len(embedding_texts) != len(llm_codes):
+    if len(features_list) != len(llm_codes):
         raise ValueError(
-            f"len mismatch: {len(embedding_texts)} texts vs {len(llm_codes)} codes"
+            f"len mismatch: {len(features_list)} features vs {len(llm_codes)} codes"
         )
-    if len(embedding_texts) < 10:
+    if len(features_list) < 10:
         logger.info(
-            "fit_to_llm: only %d labels — skipping (need >= 10)", len(embedding_texts),
+            "fit_to_llm: only %d labels — skipping (need >= 10)",
+            len(features_list),
         )
         return None
 
     pairs = [
-        (t, c) for t, c in zip(embedding_texts, llm_codes)
-        if t and c
+        (f, c) for f, c in zip(features_list, llm_codes)
+        if f is not None and c
     ]
     if len({c for _, c in pairs}) < 2:
         logger.info("fit_to_llm: only one distinct class — skipping")
         return None
 
-    texts = [t for t, _ in pairs]
+    feats = [f for f, _ in pairs]
     codes = [c for _, c in pairs]
 
-    import numpy as np
-    logger.info("fit_to_llm: embedding %d texts", len(texts))
-    embeddings = np.array(embed_texts(texts))
-
     logger.info(
-        "fit_to_llm: training CatBoost (%d samples, %d classes, iter=%d)",
+        "fit_to_llm: training CatBoost (%d samples, %d classes, iter=%d, "
+        "structured per-feature input)",
         len(codes), len(set(codes)), iterations,
     )
     classifier = CatBoostColumnClassifier()
     classifier.fit(
-        embeddings, codes,
+        feats, codes,
         iterations=iterations, depth=depth, learning_rate=learning_rate,
     )
     return classifier

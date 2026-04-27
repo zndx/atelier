@@ -1,44 +1,44 @@
 """Item-wise SHAP feature importance analysis.
 
 Provides per-item (per-column) explanations of classification decisions,
-complementing the global SAGE analysis.  Two methods are available:
+complementing the global SAGE analysis.  Two methods are available;
+both attribute to the 12 named features defined in
+``features.FEATURE_NAMES``.
 
-1. **Embedding PermutationSHAP** (default when GPU available) —
-   ``shap.PermutationExplainer`` (or the GPU-accelerated kernel in
-   ``gpu_importance.gpu_permutation_shap``) on the 12 named features
-   defined in ``features.FEATURE_NAMES`` (column_name, column_type,
-   sample_values, cardinality, null_ratio, value_entropy,
-   pattern_signals, avg_value_length, numeric_ratio, sibling_context,
-   source_table, value_description).  Per-item attributions correspond
-   directly to the source features the embedding text composes —
-   matches the project's interpretability intent.  ~60s on CPU, fast
-   on GPU; reuses ``FeatureMaskModel`` from sage.py.
+1. **CatBoost TreeSHAP** — exact O(TLD) algorithm on the CatBoost
+   model's structured input.  CatBoost is trained with each source
+   feature occupying its own input slice (7 SentenceTransformer-
+   embedded text features + 5 scalar features; see
+   :func:`atelier.classify.embedding.feature_input_groups`).
+   ``_build_feature_groups`` slices the raw SHAP output by source
+   feature, so ``shap_top1_name``/``shap_top2_name``/``shap_top3_name``
+   are always one of the 12 ``FEATURE_NAMES``.  Fast (~2 seconds for
+   50 items).
 
-2. **CatBoost TreeSHAP** (opt-in) — exact O(TLD) algorithm on the
-   CatBoost feature space (the 384-dim sentence embedding of the
-   concatenated ``embedding_text``, plus any discrete features).
-   Fast (~2 seconds for 50 items), BUT the 384 raw embedding
-   dimensions don't correspond to the 12 named source features —
-   they're a learned compression.  ``_build_feature_groups`` sums
-   the 384 SHAP values into a single "embedding" group, which means
-   ``shap_top1_name = "embedding"`` for every row with rank-2/3
-   empty.  Genuine per-feature TreeSHAP attribution requires
-   retraining CatBoost on the 12 features as **native inputs**
-   (rather than their concatenated embedding) — a model-architecture
-   change deferred to a dedicated session.  Until that lands, this
-   path is opt-in only via ``method="catboost_treeshap"``; the
-   default-when-CatBoost-loaded behavior was that TreeSHAP wins, but
-   that prioritized speed over the interpretive contract.
+2. **Embedding PermutationSHAP** — ``shap.PermutationExplainer`` (or
+   the GPU-accelerated kernel in ``gpu_importance.gpu_permutation_shap``)
+   on the same 12 features.  Reaches per-feature attribution by
+   ablating each feature's contribution to the embedding text and
+   re-encoding.  Slower (~60s on CPU; fast on GPU); reuses
+   ``FeatureMaskModel`` from sage.py.
 
-The auto-selection priority is:
+Both methods produce the same conceptual output (per-feature
+attribution); they differ in speed-vs-fidelity tradeoffs.  TreeSHAP is
+exact for the CatBoost model's tree decisions; PermutationSHAP is
+sampling-based.  The auto-selection priority is:
 
-    GPU available  →  Embedding PermutationSHAP (interpretable, fast on GPU)
-    No GPU, no CB  →  Skip (CPU PermutationSHAP too slow for default)
-    method=opt-in  →  Honored as requested
+    GPU available + no CatBoost  →  Embedding PermutationSHAP (GPU)
+    method="auto", default        →  Try TreeSHAP first (now that
+                                     it produces per-feature output);
+                                     fall back to PermutationSHAP
+                                     when CatBoost isn't loaded
+    method=opt-in                 →  Honored as requested
 
-Operators who want the speed of TreeSHAP and accept the aggregate-
-embedding interpretation can request it explicitly via
-``classify.shap.method = "treeshap"``.
+Per-feature TreeSHAP became viable in a 2026-04 refactor that moved
+CatBoost from a single 384-dim concatenated-embedding input to a
+named-feature structured input.  Prior to that, the 384 dims were a
+learned compression of all 12 features and TreeSHAP could only
+report aggregate "embedding" contribution.
 
 Ported from signals/src/sigint/shap_analysis.py, adapted for atelier's
 embedding.py and 12-feature ColumnFeatures.
@@ -64,48 +64,24 @@ logger = logging.getLogger(__name__)
 
 
 def _build_feature_groups(
-    emb_dim: int, n_discrete: int,
+    model_groups: list[tuple[str, int, int]] | None = None,
 ) -> list[tuple[str, int, int]]:
-    """Build (name, start, end) slices mapping CatBoost dims to groups.
+    """Return ``(name, start, end)`` slices for SHAP per-feature grouping.
 
-    CatBoost features layout: [embedding(emb_dim) | discrete(n_discrete)]
-    Returns list of (group_name, start_idx, end_idx) where end is exclusive.
+    Defers to the model's persisted ``_feature_groups`` (saved at fit
+    time and loaded back from the sidecar JSON) when available, falling
+    back to the canonical layout from
+    :func:`atelier.classify.embedding.feature_input_groups`.
 
-    .. note::
-        The "embedding" group sums all ``emb_dim`` (384) raw SHAP values
-        into one bucket because the current CatBoost classifier is
-        trained on the **embedding of the concatenated 12-feature
-        text**, not on the 12 features as native inputs.  Per-feature
-        TreeSHAP attribution would require retraining CatBoost with
-        the 12 features as separate inputs — see the module docstring
-        for the deferred rework.  In the interim, callers that want
-        per-feature attribution should use ``run_embedding_shap``
-        (PermutationSHAP over the 12 features), which is the default
-        when GPU is available.
-    """  # TODO(deferred): per-feature TreeSHAP requires CatBoost retraining on individual features (see module docstring)
-    groups: list[tuple[str, int, int]] = []
-    offset = 0
-
-    # Full embedding
-    groups.append(("embedding", offset, offset + emb_dim))
-    offset += emb_dim
-
-    # Discrete features (individual)
-    # These come from CatBoostColumnClassifier which uses 384-dim embedding only
-    # Discrete features aren't included in the current CatBoost training,
-    # but this is future-proof for when they are.
-    if n_discrete > 0:
-        discrete_names = [
-            "cardinality", "null_ratio", "value_entropy",
-            "pattern_email", "pattern_phone", "pattern_ssn",
-            "pattern_ipv4", "pattern_uuid", "pattern_date_iso",
-            "pattern_url", "pattern_credit_card",
-        ]
-        for i in range(min(n_discrete, len(discrete_names))):
-            groups.append((discrete_names[i], offset + i, offset + i + 1))
-        offset += n_discrete
-
-    return groups
+    The model-side persistence guarantees that even if the canonical
+    layout evolves, a previously-trained model's SHAP output is still
+    grouped against the layout it was trained with — no
+    fit-time/inference-time drift.
+    """
+    if model_groups:
+        return list(model_groups)
+    from atelier.classify.embedding import feature_input_groups
+    return list(feature_input_groups())
 
 
 @dataclass(frozen=True)
@@ -155,57 +131,57 @@ class ShapResult:
 
 
 def run_catboost_shap(
-    model,
-    X_eval: np.ndarray,
+    cb_classifier,
+    features_list,
     predicted_indices: np.ndarray,
-    emb_dim: int = 384,
 ) -> ShapResult:
-    """Compute item-wise SHAP values using CatBoost's built-in TreeSHAP.
+    """Compute per-item SHAP values via CatBoost TreeSHAP, grouped by source feature.
 
-    .. note::
-        This path attributes to the CatBoost model's native input space
-        (the 384-dim sentence embedding of the concatenated
-        ``embedding_text``, plus any discrete features).  The 384
-        embedding dimensions are a **learned compression** of the 12
-        named source features and do not correspond to them
-        individually — ``_build_feature_groups`` sums them into one
-        "embedding" group, which is why ``shap_top1_name = "embedding"``
-        on every row with rank-2/3 empty.  Genuine per-feature
-        TreeSHAP attribution requires retraining CatBoost on the 12
-        features as **native inputs** rather than their concatenated
-        embedding — a model-architecture change deferred to a
-        dedicated session.  For per-feature attribution today, use
-        ``run_embedding_shap`` (PermutationSHAP).
+    The classifier was trained with a structured input where each of the
+    12 ``ColumnFeatures`` occupies its own named slice (see
+    :func:`atelier.classify.embedding.feature_input_groups`).  TreeSHAP
+    runs at the per-dim level (raw SHAP shape ``(N, n_classes,
+    n_dims+1)`` for multiclass), and we sum within each named slice to
+    produce per-feature attribution.
+
+    The grouping is read from the classifier's persisted
+    ``_feature_groups`` so saved models stay aligned with the input
+    shape they were trained on, even if the canonical layout evolves.
 
     Args:
-        model: Fitted CatBoostClassifier (or CatBoostColumnClassifier._model).
-        X_eval: (N, n_features) feature matrix used for prediction.
+        cb_classifier: Fitted ``CatBoostColumnClassifier`` (or any
+            object exposing ``_model`` and ``_feature_groups``).
+        features_list: List of ColumnFeatures for each item to explain.
         predicted_indices: (N,) array of predicted class indices.
-        emb_dim: Embedding dimension (default 384 for MiniLM-L6).
 
     Returns:
-        ShapResult with grouped feature importance per item.
-    """  # TODO(deferred): production-ready per-feature TreeSHAP requires CatBoost retraining on individual features (see module docstring)
+        ShapResult with per-feature shap_values shaped ``(N, n_groups)``,
+        feature_names = the source feature names from FEATURE_NAMES.
+    """
     from catboost import Pool
+    from atelier.classify.embedding import embed_features
 
     t0 = time.time()
+
+    # Encode features → structured matrix matching what CatBoost was
+    # trained on.  This is the same shape the classifier sees at
+    # inference; SHAP on this matrix attributes per input dim, which
+    # then groups cleanly by named slice.
+    X_eval = embed_features(features_list)
     N, total_dim = X_eval.shape
 
+    model = cb_classifier._model
     pool = Pool(X_eval)
 
-    # CatBoost ShapValues: shape depends on classification type
     raw_shap = model.get_feature_importance(
         type="ShapValues",
         data=pool,
     )
 
     n_feat = total_dim
-
-    # CatBoost ShapValues shape:
-    #   MultiClass: (N, n_classes, n_features+1)
-    #   Binary:     (N, n_features+1)
     if raw_shap.ndim == 3:
-        # Extract SHAP values for each item's predicted class
+        # MultiClass: (N, n_classes, n_features+1).  Extract SHAP values
+        # for each item's predicted class.
         item_shap = np.zeros((N, n_feat))
         base_values = np.zeros(N)
         for i in range(N):
@@ -218,19 +194,15 @@ def run_catboost_shap(
         item_shap = raw_shap[:, :n_feat]
         base_value = float(np.mean(raw_shap[:, n_feat]))
 
-    # Group raw dims into interpretable feature groups
-    n_discrete = max(0, total_dim - emb_dim)
-    groups = _build_feature_groups(emb_dim, n_discrete)
-
+    # Sum per-dim SHAP values within each named feature slice.
+    groups = _build_feature_groups(getattr(cb_classifier, "_feature_groups", None))
     group_names = [g[0] for g in groups]
     grouped_shap = np.zeros((N, len(groups)))
-
     for g_idx, (_, start, end) in enumerate(groups):
         if end <= n_feat:
             grouped_shap[:, g_idx] = np.sum(item_shap[:, start:end], axis=1)
 
     elapsed = time.time() - t0
-
     logger.info(
         "CatBoost TreeSHAP: %d items, %d feature groups, %.1fs",
         N, len(groups), elapsed,
@@ -399,29 +371,32 @@ def run_shap_analysis(
             return None
 
     # method == "auto"
+    # TreeSHAP first when a CatBoost model is loaded — now that
+    # CatBoost is trained on the structured per-feature input, TreeSHAP
+    # produces per-feature attribution natively (no aggregate-
+    # "embedding" bucket) and is faster than PermutationSHAP.
+    treeshap_result = _run_treeshap(all_features, category_set)
+    if treeshap_result is not None:
+        return treeshap_result
+
+    # No CatBoost model loaded — fall back to PermutationSHAP.  Use GPU
+    # path when available (fast); skip on CPU rather than block.
     try:
         from atelier.classify.gpu import preflight_gpu
         gpu_available = preflight_gpu().available
     except Exception:
         gpu_available = False
-
     if gpu_available:
         try:
             return run_embedding_shap(all_features, category_set)
         except Exception as e:
-            logger.warning(
-                "GPU PermutationSHAP failed under method=auto, falling back "
-                "to TreeSHAP if a CatBoost model is loaded: %s", e,
-            )
-            return _run_treeshap(all_features, category_set)
+            logger.warning("GPU PermutationSHAP failed under method=auto: %s", e)
+            return None
 
-    # No GPU under auto: skip rather than block on slow CPU PermutationSHAP
-    # or land the TreeSHAP single-"embedding" attribution by default.
     logger.info(
-        "SHAP auto: no GPU available — skipping per-item SHAP.  Set "
-        "classify.shap.method='permutation' to run the slow CPU path "
-        "explicitly, or 'treeshap' for the aggregate-embedding "
-        "interpretation."
+        "SHAP auto: no CatBoost model loaded and no GPU available — "
+        "skipping per-item SHAP.  Set classify.shap.method='permutation' "
+        "to run the slow CPU PermutationSHAP path explicitly."
     )
     return None
 
@@ -438,29 +413,26 @@ def _run_treeshap(
     """
     try:
         from atelier.classify.ml_inference import get_catboost
-        from atelier.classify.embedding import embed_texts
 
         cb = get_catboost()
         if cb is None or cb._model is None:
             logger.debug("CatBoost TreeSHAP requested but no model loaded")
             return None
 
-        # Build the evaluation matrix (same as predict_catboost)
-        texts = [f.to_embedding_text() for f in all_features]
-        X_eval = np.array(embed_texts(texts))
-
-        # Get predicted class indices
-        proba_list = [cb.predict_proba_single(X_eval[i]) for i in range(len(all_features))]
+        # Predict classes via the classifier (which internally encodes
+        # the features → structured matrix).
+        proba_list = [
+            cb.predict_proba_single(f) for f in all_features
+        ]
         classes = cb._classes
         predicted_indices = np.array([
             classes.index(max(p, key=p.get)) if p else 0
             for p in proba_list
         ])
 
-        return run_catboost_shap(
-            cb._model, X_eval, predicted_indices,
-            emb_dim=X_eval.shape[1],
-        )
+        # run_catboost_shap re-encodes internally so SHAP attribution
+        # lands on the same structured matrix the classifier saw.
+        return run_catboost_shap(cb, all_features, predicted_indices)
     except Exception as e:
         logger.debug("CatBoost TreeSHAP unavailable: %s", e)
         return None

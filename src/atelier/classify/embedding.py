@@ -313,6 +313,131 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return embeddings.tolist()
 
 
+# Order MUST match what ``CatBoostColumnClassifier`` expects in its
+# concatenated input — and what
+# ``shap_explanations._build_feature_groups`` slices by.  The three
+# constants below are the SINGLE source of truth; refactoring the
+# input shape means updating exactly these.
+
+# Text features get their own SentenceTransformer encoding (one
+# 384-dim slice each).  Order is fixed to keep slice offsets stable.
+EMBED_TEXT_FEATURES: list[str] = [
+    "column_name",
+    "column_type",
+    "sample_values",
+    "pattern_signals",
+    "sibling_context",
+    "value_description",
+    "source_table",
+]
+
+# Scalar features pass through as native CatBoost numerical inputs.
+# Missing values become NaN — CatBoost handles them natively.
+EMBED_SCALAR_FEATURES: list[str] = [
+    "cardinality",
+    "null_ratio",
+    "value_entropy",
+    "avg_value_length",
+    "numeric_ratio",
+]
+
+
+def feature_input_groups(emb_dim: int = 384) -> list[tuple[str, int, int]]:
+    """Return ``(feature_name, start, end)`` slices into the concatenated
+    CatBoost input matrix produced by :func:`embed_features`.
+
+    Used by:
+    - ``CatBoostColumnClassifier.fit`` to set ``feature_names`` so trees
+      and SHAP both see human-readable feature identifiers
+    - ``shap_explanations._build_feature_groups`` to sum per-slice SHAP
+      values back into per-feature attribution
+
+    The slice ordering is fixed: 7 text features × ``emb_dim`` dims
+    each, then 5 scalar features × 1 dim each.  Total dims:
+    ``7 * emb_dim + 5`` (= 2693 at the default 384-dim encoder).
+    """
+    groups: list[tuple[str, int, int]] = []
+    offset = 0
+    for name in EMBED_TEXT_FEATURES:
+        groups.append((name, offset, offset + emb_dim))
+        offset += emb_dim
+    for name in EMBED_SCALAR_FEATURES:
+        groups.append((name, offset, offset + 1))
+        offset += 1
+    return groups
+
+
+def embed_features(features_list) -> "Any":
+    """Encode a list of ``ColumnFeatures`` into the structured input matrix.
+
+    Each row is the concatenation of:
+
+    - 7 SentenceTransformer slices (column_name, column_type,
+      sample_values, pattern_signals, sibling_context,
+      value_description, source_table), each of size ``emb_dim``
+      (384 for the default MiniLM-L6 encoder).
+    - 5 scalar slots (cardinality, null_ratio, value_entropy,
+      avg_value_length, numeric_ratio).  ``None`` becomes ``NaN``;
+      CatBoost handles missing values natively.
+
+    Total per-row dimension: ``7 * emb_dim + 5``.  The ordering
+    matches :func:`feature_input_groups` so TreeSHAP can be sliced
+    back to per-feature attribution.
+
+    Empty text segments (e.g. column has no sibling context, no
+    pattern matches) still occupy their slice but encode to a
+    consistent "empty-text" embedding from MiniLM.  Tree splits
+    learn to recognize that as "feature unavailable" rather than
+    requiring a sentinel value.
+
+    Encoding cost: one batched ``encode`` call on
+    ``len(features_list) * len(EMBED_TEXT_FEATURES)`` strings.  The
+    ``MultiDeviceEncoder`` already batches optimally; the 7×
+    increase over the legacy single-text path is amortized by the
+    batched call.
+    """
+    import numpy as np
+
+    n = len(features_list)
+    if n == 0:
+        return np.zeros((0, 7 * 384 + 5), dtype=np.float32)
+
+    # Collect per-feature texts in feature-major order so we can flatten
+    # for a single batched encode and reshape back cleanly.
+    segments_per_row = [f.to_embedding_segments() for f in features_list]
+
+    # Flatten: [row0_feat0, row0_feat1, ..., row0_featK, row1_feat0, ...]
+    # Then reshape encoded result to (n, K, emb_dim).  Row-major flatten
+    # keeps per-row slices contiguous for fast np.concatenate at the end.
+    flat_texts: list[str] = []
+    for row in segments_per_row:
+        for fname in EMBED_TEXT_FEATURES:
+            flat_texts.append(str(row.get(fname, "") or ""))
+
+    model = _get_model()
+    flat_emb = model.encode(
+        flat_texts, normalize_embeddings=True, batch_size=_batch_size,
+    )
+    flat_emb = np.asarray(flat_emb, dtype=np.float32)
+    emb_dim = flat_emb.shape[1] if flat_emb.size else 384
+
+    # (n, K, emb_dim) → (n, K * emb_dim)
+    text_block = flat_emb.reshape(n, len(EMBED_TEXT_FEATURES), emb_dim)
+    text_block = text_block.reshape(n, len(EMBED_TEXT_FEATURES) * emb_dim)
+
+    # Scalar block — same row order, NaN for missing.
+    scalar_block = np.full(
+        (n, len(EMBED_SCALAR_FEATURES)), fill_value=np.nan, dtype=np.float32,
+    )
+    for i, row in enumerate(segments_per_row):
+        for j, fname in enumerate(EMBED_SCALAR_FEATURES):
+            v = row.get(fname)
+            if v is not None:
+                scalar_block[i, j] = float(v)
+
+    return np.concatenate([text_block, scalar_block], axis=1)
+
+
 def classify_cosine(
     features: ColumnFeatures,
     category_set: CategorySet,

@@ -87,9 +87,15 @@ def get_svm(model_path: str | Path | None = None):
 def predict_catboost(features, category_set) -> tuple[dict[str, float], dict[str, float]] | None:
     """Get CatBoost probabilities + variance for a single column.
 
+    The classifier encodes the structured per-feature input internally
+    (one SentenceTransformer slice per text feature; native scalar
+    columns for numerics).  See
+    :class:`atelier.classify.catboost_classifier.CatBoostColumnClassifier`.
+
     Args:
         features: ColumnFeatures from extract_features().
-        category_set: Category set for embedding context.
+        category_set: Category set for embedding context (unused at
+            the inference layer; kept for backward-compat callers).
 
     Returns:
         (proba, variance) dicts, or None if model not loaded.
@@ -98,16 +104,10 @@ def predict_catboost(features, category_set) -> tuple[dict[str, float], dict[str
     if model is None:
         return None
 
-    from atelier.classify.embedding import embed_texts
-    import numpy as np
-
-    text = features.to_embedding_text()
-    embedding = np.array(embed_texts([text]))
-
-    proba = model.predict_proba_single(embedding[0])
+    proba = model.predict_proba_single(features)
 
     try:
-        variance_list = model.virtual_ensemble_variance(embedding)
+        variance_list = model.virtual_ensemble_variance([features])
         variance = variance_list[0] if variance_list else {}
     except Exception:
         variance = {}

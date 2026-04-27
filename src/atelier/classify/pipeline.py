@@ -141,7 +141,7 @@ def _install_fit_to_llm_catboost(
         )
         return
 
-    texts: list[str] = []
+    features_list: list = []
     codes: list[str] = []
     for col_name, llm_code in state.labels.items():
         if not llm_code:
@@ -160,18 +160,15 @@ def _install_fit_to_llm_catboost(
                 source_table=sample.table_name,
                 distinct_count=sample.distinct_count,
             )
-            text = feats.to_embedding_text()
         except Exception:
             continue
-        if not text:
-            continue
-        texts.append(text)
+        features_list.append(feats)
         codes.append(llm_code)
 
-    if len(texts) < min_labels:
+    if len(features_list) < min_labels:
         logger.info(
-            "fit_to_llm: %d usable (text, code) pairs after filtering — skipping",
-            len(texts),
+            "fit_to_llm: %d usable (features, code) pairs after filtering — skipping",
+            len(features_list),
         )
         return
 
@@ -179,7 +176,7 @@ def _install_fit_to_llm_catboost(
     from atelier.classify import ml_inference
 
     classifier = fit_catboost_to_llm_labels(
-        texts, codes,
+        features_list, codes,
         iterations=int(cfg.classify_catboost_iterations),
         depth=int(cfg.classify_catboost_depth),
         learning_rate=float(cfg.classify_catboost_learning_rate),
@@ -188,9 +185,15 @@ def _install_fit_to_llm_catboost(
         return
 
     ml_inference.install_catboost(classifier)
+    if save_path is not None:
+        try:
+            classifier.save(save_path)
+            logger.info("fit_to_llm: CatBoost persisted to %s", save_path)
+        except Exception as exc:
+            logger.warning("fit_to_llm: failed to save CatBoost to %s: %s", save_path, exc)
     logger.info(
         "fit_to_llm: installed CatBoost trained on %d LLM labels across %d classes",
-        len(texts), len(set(codes)),
+        len(features_list), len(set(codes)),
     )
     if save_path is not None:
         try:
