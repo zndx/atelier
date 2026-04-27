@@ -16,6 +16,7 @@
 - [Synthetic Data & Training](./architecture/synth.md)
 - [Embeddings](./architecture/embeddings.md)
 - [Data Sources & Versioning](./architecture/data-sources.md)
+- [ML Artifacts & Extend Classification](./architecture/ml-artifacts.md)
 - [Proposed Integrations](./architecture/integrations.md)
 
 # Operations

@@ -118,8 +118,33 @@ def run_extend_classification(
             f"before running Extend."
         )
 
-    # Eager file-existence preflight (production guard).  Fail fast in
-    # the LOADING_VOCAB phase rather than partway through CLASSIFYING.
+    # Eager file-existence preflight (production guard).  Fail fast
+    # BEFORE creating the FSM run, so a missing artifact file doesn't
+    # leave a half-started run row in the FSM history.  Validates each
+    # path explicitly with a clear error message — load_for_extend's
+    # own checks raise FileNotFoundError, but this layer also enforces
+    # internal consistency (e.g. svm_classes_path set without svm_path).
+    _preflight_artifact_paths(artifact_row)
+
+    # Embedding-model identity check (production guard).  An artifact
+    # set trained against MiniLM-L6-v2 will produce nonsense
+    # predictions if invoked with BGE-large at runtime — different
+    # embedding shape, different semantic space.  Block the run with
+    # a clear error when the live cfg's embedding model differs.
+    cfg_embedding = getattr(
+        cfg, "embedding_model", "sentence-transformers/all-MiniLM-L6-v2",
+    )
+    if (artifact_row.get("embedding_model")
+            and artifact_row["embedding_model"] != cfg_embedding):
+        raise ValueError(
+            f"Embedding model mismatch: artifact set {artifact_set_id} "
+            f"was trained with {artifact_row['embedding_model']!r} but "
+            f"the runtime config uses {cfg_embedding!r}.  Embeddings "
+            f"would land in different semantic spaces and predictions "
+            f"would be meaningless.  Re-train the artifact set or "
+            f"revert the embedding model change."
+        )
+
     bundle = load_for_extend(artifact_row)
     artifact_classes = bundle.classes
     if not artifact_classes:
@@ -552,6 +577,63 @@ def _apply_overlay(cfg: Any) -> Any:
         return apply_to_config(cfg)
     except Exception:
         return cfg
+
+
+def _preflight_artifact_paths(row: dict) -> None:
+    """Production guard: raise ValueError if artifact files are missing.
+
+    Validates every non-NULL path on the row exists on disk BEFORE the
+    Extend FSM run is created.  Catches the case where artifact files
+    were moved / deleted out from under a registered row — the DB
+    pointer is stale and the bundle would fail mid-run.
+
+    Also enforces internal consistency: when svm_path is set,
+    svm_classes_path must also be set (the SVM bundle is incomplete
+    without its sidecar).
+    """
+    set_id = row.get("id", "<unknown>")
+
+    # Required: catboost + sidecar.
+    for key in ("catboost_path", "catboost_classes_path"):
+        path = row.get(key)
+        if not path:
+            raise ValueError(
+                f"Artifact set {set_id} missing required field {key!r}"
+            )
+        if not Path(path).is_file():
+            raise ValueError(
+                f"Artifact set {set_id}: {key} points at {path!r} which "
+                f"does not exist on disk.  The artifact files may have "
+                f"been moved or deleted; archive the row and re-run "
+                f"the classify pipeline to rebuild."
+            )
+
+    # Optional: SVM (when one path is set, the sidecar must be too).
+    svm_path = row.get("svm_path")
+    svm_classes_path = row.get("svm_classes_path")
+    if svm_path and not svm_classes_path:
+        raise ValueError(
+            f"Artifact set {set_id}: svm_path set but svm_classes_path "
+            f"is NULL — sidecar is required for the SVM to load."
+        )
+    if svm_path and not Path(svm_path).is_file():
+        raise ValueError(
+            f"Artifact set {set_id}: svm_path points at {svm_path!r} "
+            f"which does not exist on disk."
+        )
+    if svm_classes_path and not Path(svm_classes_path).is_file():
+        raise ValueError(
+            f"Artifact set {set_id}: svm_classes_path points at "
+            f"{svm_classes_path!r} which does not exist on disk."
+        )
+
+    # Optional: UMAP (no sidecar — single .pkl file).
+    umap_path = row.get("umap_path")
+    if umap_path and not Path(umap_path).is_file():
+        raise ValueError(
+            f"Artifact set {set_id}: umap_path points at {umap_path!r} "
+            f"which does not exist on disk."
+        )
 
 
 def _write_extend_parquet(

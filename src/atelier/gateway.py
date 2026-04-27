@@ -2210,6 +2210,18 @@ def fsm_extend(body: dict):
         if not artifact_set_id:
             return _error_envelope("artifact_set_id is required", status=400)
 
+        # Pre-check the artifact set exists at the gateway layer so a
+        # nonexistent id returns 404 synchronously instead of leaving
+        # the operator polling the FSM for a run that errored in a
+        # background thread.
+        from atelier.db.dao import AtelierDao
+        dao = AtelierDao()
+        if dao.get_artifact_set(artifact_set_id) is None:
+            return _error_envelope(
+                f"Artifact set {artifact_set_id!r} not found",
+                status=404,
+            )
+
         cfg = load_config()
         fsm = get_fsm()
 
@@ -2231,7 +2243,7 @@ def fsm_extend(body: dict):
                     parent_dataset_id=parent_dataset_id,
                 )
             except BaseException as exc:
-                logger.exception("Extend pipeline thread died: %s", exc)
+                _log.exception("Extend pipeline thread died: %s", exc)
                 try:
                     from atelier.classify.fsm import FSMState
                     cur = fsm.get_status()
@@ -2241,7 +2253,7 @@ def fsm_extend(body: dict):
                             error=f"thread died: {type(exc).__name__}: {exc}",
                         )
                 except Exception:
-                    logger.debug("FSM error-transition failed", exc_info=True)
+                    _log.debug("FSM error-transition failed", exc_info=True)
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                     raise
 
