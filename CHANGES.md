@@ -192,7 +192,41 @@ smoke before promoting to `v0.3.0` GA.
 
 ---
 
-## v0.2.0 — 2026-04-13
+## v0.2.0-m10 — 2026-04-19 (Phase Gate #2 milestone)
 
-Phase-gate-2 baseline.  See `docs/notes/2026-04-19/170000_phase_gate_2.md`
-for the full report.
+Marks the **10th M-numbered milestone** — the validation maturity gate
+where the iterative DST-fusion loop was demonstrably consulting injected
+evidence.  Carries 76 commits since v0.2.0.  Headlines:
+
+- **Belief-gap convergence pivot** (replaces K-conflict gating)
+- **Cautious-Code Review** (Seam A backoff) — agent-mediated review of
+  over-specified DST predictions before they ship
+- **TreeSHAP per-feature attribution** via structured CatBoost input
+- **Phase-gate validation: 97.8%** on meta-tagging — beats the LLM
+  baseline; documented in `docs/notes/2026-04-19/`
+- **Reasoning-trace citation analyzer** — directional evidence that
+  pass-2 reasoning consults injected evidence terms.  +9 pts iterative
+  gain on the attribution pilot via prescriptive revisit
+- **Live LLM-sweep visibility** on the Status page
+- **Curated-reference terminology** (renamed from `ground_truth`)
+- **Governance SDK integration** (Atlas + Ranger + CDP discovery)
+- **/health-check skill** with `chk` terminal alias
+- **Settings page Phase 1 + 2** (46 controls, 5 tabs)
+- **Pipeline invariants enforced** at entry (`max_iterations >= 2`,
+  `catboost.fit_to_llm = true`)
+
+The full commit list for this window is captured in the v0.3.0-rc1
+section above — v0.2.0-m10 is a stable intermediate milestone that
+v0.3.0-rc1 builds on (M1–M4 ML Artifact Sets + Extend Classification
+all land *after* this milestone).
+
+This tag's history: originally `v0.2.0-phase-gate-2` (working name),
+then briefly `v0.2.1`; final name is `v0.2.0-m10` to fit the
+M-numbered milestone series and establish a `v0.2.0-mN` pattern for
+intermediate milestone releases.
+
+---
+
+## v0.2.0 — 2026-04-16
+
+Vocabulary routing, LLM robustness, rich terminal, UX polish.

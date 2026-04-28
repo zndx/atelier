@@ -636,4 +636,5 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M8** | GPU acceleration (NVIDIA driver symlink, batch encoding), meta-tagging overlay | Done |
 | **M8.5** | SVM signals alignment (Pipeline+FeatureUnion adoption, evidence independence documentation) | Done |
 | **M9** | Incremental SVM training on frontier-tier labels (cross-model distillation via MC sampling) | Done |
-| M10 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |
+| **M10** | Phase Gate #2 — belief-gap convergence pivot, Cautious-Code Review, TreeSHAP per-feature attribution, reasoning-trace citation analyzer (+9 pts iterative gain), 97.8% phase-gate validation on meta-tagging | Done |
+| M11 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |
