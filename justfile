@@ -143,12 +143,12 @@ bootstrap-secrets:
 
 # Decrypt CAI env defaults (requires age private key)
 decrypt-secrets:
-    sops --decrypt --input-type dotenv --output-type dotenv .env.cai.enc > .env.cai
+    sops --decrypt --output-type dotenv .env.cai.enc > .env.cai
     @echo "Decrypted .env.cai ($(wc -l < .env.cai) lines)"
 
 # Encrypt CAI env defaults (after editing .env.cai)
 encrypt-secrets:
-    sops --encrypt --input-type dotenv --output-type dotenv .env.cai > .env.cai.enc
+    sops --encrypt --input-type dotenv --output-type json .env.cai > .env.cai.enc
     @echo "Encrypted .env.cai.enc"
 
 # Decrypt the curated-reference CSV from BDD fixtures into build/data/

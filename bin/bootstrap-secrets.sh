@@ -53,7 +53,7 @@ fi
 
 # 1) Deployment defaults (dotenv shape) → .env.cai
 if [ -f .env.cai.enc ]; then
-  if sops --decrypt --input-type dotenv --output-type dotenv \
+  if sops --decrypt --output-type dotenv \
         .env.cai.enc > .env.cai 2>/dev/null; then
     echo "bootstrap-secrets: decrypted .env.cai ($(wc -l < .env.cai) lines)"
   else
