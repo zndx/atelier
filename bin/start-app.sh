@@ -243,8 +243,16 @@ if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   PGLITE_PORT=5440
   echo "Starting PGlite on port $PGLITE_PORT..."
   mkdir -p .app/pgdata
+  # Bump V8's old-space heap.  PGlite + pgvector hold result sets and
+  # index pages in the Node heap; the ~4 GB default cap is tight for
+  # runs that touch thousands of columns and the WASM allocator
+  # aborts (kernel/cgroup OOM-kill, no Node-level error trace) when
+  # it can't satisfy a request.  CAI hosts have plenty of headroom —
+  # override via PGLITE_NODE_MAX_OLD_SPACE_MB if needed.
+  NODE_MAX_OLD_SPACE_MB="${PGLITE_NODE_MAX_OLD_SPACE_MB:-8192}"
   PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
-    node scripts/pglite-server.mjs > .app/pglite.log 2>&1 &
+    node --max-old-space-size="$NODE_MAX_OLD_SPACE_MB" \
+      scripts/pglite-server.mjs > .app/pglite.log 2>&1 &
   PGLITE_PID=$!
 
   wait_for_pglite "$PGLITE_PORT" 10 120
@@ -350,11 +358,43 @@ else:
 # Start gRPC server (background)
 echo "Starting gRPC server on port 50051..."
 python -m atelier.server &
+GRPC_PID=$!
 
 wait_for_service "gRPC server" \
     "python -c \"import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)\"" \
     30
 
-# Start HTTP gateway serving React build + REST-to-gRPC bridge
+# Start HTTP gateway serving React build + REST-to-gRPC bridge.
+# Backgrounded (was foreground) so the shell can monitor every
+# critical child and exit when any one dies — see the wait-n loop
+# below.
 echo "Starting HTTP gateway on $HOST:$PORT..."
-python -m uvicorn atelier.gateway:app --host "$HOST" --port "$PORT"
+python -m uvicorn atelier.gateway:app --host "$HOST" --port "$PORT" &
+UVICORN_PID=$!
+
+# ── Self-healing on critical-child death ─────────────────────────
+# If PGlite, the gRPC server, or uvicorn dies, we exit so
+# scripts/startup_app.py restarts the whole stack with backoff.
+# Without this, a PGlite OOM-kill leaves uvicorn alive serving 500s
+# against a dead database until the AMP is manually restarted —
+# pool_pre_ping in dao.py will reconnect to a fresh PGlite, so a
+# clean restart is enough to recover.
+#
+# `wait -n` returns when any backgrounded child exits.  We protect
+# against `set -e` by routing the exit code through `||`.
+wait -n || exit_code=$?
+exit_code="${exit_code:-0}"
+
+echo "" >&2
+echo "Critical child exited (code $exit_code) — taking down the stack so scripts/startup_app.py can restart." >&2
+for spec in "PGlite:${PGLITE_PID:-}" "gRPC server:${GRPC_PID:-}" "uvicorn gateway:${UVICORN_PID:-}"; do
+    name="${spec%%:*}"; pid="${spec##*:}"
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        echo "  → $name (PID $pid) is gone" >&2
+    fi
+done
+if [ -f .app/pglite.log ]; then
+    echo "  → tail of .app/pglite.log:" >&2
+    tail -n 10 .app/pglite.log 2>&1 | sed 's/^/      /' >&2
+fi
+exit "$exit_code"
