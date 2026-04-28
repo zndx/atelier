@@ -141,9 +141,14 @@ bdd-runtime:
 bootstrap-secrets:
     bash bin/bootstrap-secrets.sh
 
-# Decrypt CAI env defaults (requires age private key)
+# Decrypt CAI env defaults (requires age private key).
+# Decrypts as JSON and shell-quotes each value so values containing
+# spaces or special chars survive `source .env.cai` cleanly — sops's
+# native dotenv output leaves values unquoted.
 decrypt-secrets:
-    sops --decrypt --output-type dotenv .env.cai.enc > .env.cai
+    sops --decrypt --output-type json .env.cai.enc \
+      | python3 -c 'import json,shlex,sys; d=json.load(sys.stdin); [print(f"{k}={shlex.quote(str(v))}") for k,v in d.items() if not k.startswith("sops")]' \
+      > .env.cai
     @echo "Decrypted .env.cai ($(wc -l < .env.cai) lines)"
 
 # Encrypt CAI env defaults (after editing .env.cai)

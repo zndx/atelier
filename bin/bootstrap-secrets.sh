@@ -52,9 +52,24 @@ if [ "$have_sops" -eq 0 ]; then
 fi
 
 # 1) Deployment defaults (dotenv shape) → .env.cai
+#
+# We decrypt as JSON (the on-disk SOPS format) and then emit dotenv
+# lines with each value shell-quoted via Python's shlex.quote.  SOPS
+# native --output-type dotenv leaves values unquoted, so a value
+# containing a space (e.g. ATELIER_APP_DISPLAY_NAME="Context Clarity")
+# breaks `source .env.cai` in start-app.sh — bash splits on the space
+# and tries to execute the second word as a command.  shlex.quote
+# handles spaces, embedded quotes, and other special chars safely.
 if [ -f .env.cai.enc ]; then
-  if sops --decrypt --output-type dotenv \
-        .env.cai.enc > .env.cai 2>/dev/null; then
+  if sops --decrypt --output-type json .env.cai.enc 2>/dev/null \
+       | python3 -c '
+import json, shlex, sys
+data = json.load(sys.stdin)
+for k, v in data.items():
+    if k.startswith("sops"):
+        continue
+    print(f"{k}={shlex.quote(str(v))}")
+' > .env.cai 2>/dev/null; then
     echo "bootstrap-secrets: decrypted .env.cai ($(wc -l < .env.cai) lines)"
   else
     # Decrypt failed — no SOPS_AGE_KEY, wrong recipient, etc.
