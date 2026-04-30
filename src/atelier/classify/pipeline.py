@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1141,6 +1142,43 @@ def run_classification_pipeline(
             pass
 
 
+_HIVE_DB_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _parse_hive_vocab_uri(vocab_uri: str) -> tuple[str, str]:
+    """Parse a hive-style ``vocab_uri`` into ``(database, table)``.
+
+    The only accepted shape is ``{db}.annotations`` where ``db`` is a
+    Hive identifier (alnum + underscore, leading letter).  All other
+    shapes raise ``ValueError`` so the calling pipeline surfaces a real
+    cause to the operator instead of silently routing to the wrong
+    database — historically this manifested as runs falling back to the
+    16-leaf universal vocabulary while the user's selection was ignored.
+    """
+    if not vocab_uri or not vocab_uri.strip():
+        raise ValueError(
+            "vocab_uri is empty; expected \"{db}.annotations\""
+        )
+    parts = vocab_uri.split(".")
+    if len(parts) != 2 or not parts[0]:
+        raise ValueError(
+            f"vocab_uri={vocab_uri!r} does not match expected "
+            f"\"{{db}}.annotations\" form"
+        )
+    database, table = parts
+    if table != "annotations":
+        raise ValueError(
+            f"vocab_uri={vocab_uri!r}: table must be 'annotations', "
+            f"got {table!r}"
+        )
+    if not _HIVE_DB_IDENT_RE.match(database):
+        raise ValueError(
+            f"vocab_uri={vocab_uri!r}: unsafe database identifier "
+            f"{database!r} (expected alnum + underscore, leading letter)"
+        )
+    return database, table
+
+
 def _load_vocabulary(
     cfg,
     build_dir: Path,
@@ -1196,22 +1234,31 @@ def _load_vocabulary(
                     f"Filesystem vocab_uri={vocab_uri!r} points at a missing file"
                 )
 
-        domain_cs = _load_domain_annotations(cfg, build_dir, connection_name)
-        if domain_cs is not None and len(domain_cs.categories) > 0:
-            if not isinstance(domain_cs, HierarchicalCategorySet):
-                domain_cs = HierarchicalCategorySet(
-                    name=domain_cs.name,
-                    categories=list(domain_cs.categories),
-                )
-            log.info(
-                "Loaded domain vocabulary: %d leaf categories (vocab_uri=%s)",
-                len(domain_cs.categories), vocab_uri,
+        try:
+            db_from_uri, _ = _parse_hive_vocab_uri(vocab_uri)
+            domain_cs = _load_domain_annotations(
+                cfg, build_dir, connection_name, database=db_from_uri,
             )
-            return domain_cs
-        raise RuntimeError(
-            f"Could not load domain annotations from vocab_uri={vocab_uri!r} "
-            f"via connection {connection_name!r}"
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not load domain annotations from vocab_uri={vocab_uri!r} "
+                f"via connection {connection_name!r}"
+            ) from exc
+        if domain_cs is None or len(domain_cs.categories) == 0:
+            raise RuntimeError(
+                f"Domain annotations from vocab_uri={vocab_uri!r} returned "
+                f"0 categories via connection {connection_name!r}"
+            )
+        if not isinstance(domain_cs, HierarchicalCategorySet):
+            domain_cs = HierarchicalCategorySet(
+                name=domain_cs.name,
+                categories=list(domain_cs.categories),
+            )
+        log.info(
+            "Loaded domain vocabulary: %d leaf categories (vocab_uri=%s)",
+            len(domain_cs.categories), vocab_uri,
         )
+        return domain_cs
 
     # Env-default Hive: when the operator set ATELIER_CLASSIFY_CONNECTION
     # + ATELIER_CLASSIFY_DATABASE but no explicit vocab_uri was threaded
@@ -1249,37 +1296,56 @@ def _load_vocabulary(
     return universal
 
 
-def _load_domain_annotations(cfg, build_dir: Path, connection_name):
+def _load_domain_annotations(
+    cfg,
+    build_dir: Path,
+    connection_name,
+    *,
+    database: str,
+):
     """Load domain-specific annotations from cache or hive.
 
-    Returns a CategorySet of domain terms, or None if unavailable.
+    Returns a CategorySet of domain terms, or ``None`` if hive returns an
+    empty annotations table.  Hive load failures are *not* caught here —
+    callers wrap them with chained context (the user-facing vocab_uri),
+    so the operator sees the real cause instead of a silent fallback.
+
+    Cache is keyed by ``{connection_name}__{database}.json`` to prevent
+    cross-source poisoning when an operator switches between data
+    sources within the same project ``build/`` tree.
     """
     log = logging.getLogger(__name__)
     cache_dir = build_dir / "data" / "annotations"
-    cache_path = cache_dir / "annotations.json"
+    cache_path = cache_dir / f"{connection_name}__{database}.json"
 
-    # Try cached first — but reject empty caches (poisoned by prior failures)
     if cache_path.exists():
         cs = load_annotations_from_json(cache_path, hierarchical=True)
         if len(cs.categories) > 0:
-            log.info("Loaded %d domain categories from cache %s", len(cs.categories), cache_path)
+            log.info(
+                "Loaded %d domain categories from cache %s",
+                len(cs.categories), cache_path,
+            )
             return cs
-        log.warning("Cache %s contains 0 categories — treating as corrupt, will re-fetch", cache_path)
+        log.warning(
+            "Cache %s contains 0 categories — treating as corrupt, will re-fetch",
+            cache_path,
+        )
         cache_path.unlink()
 
-    # Try hive
-    try:
-        cs = load_annotations_from_hive(cfg, connection_name)
-        if len(cs.categories) == 0:
-            log.warning("Hive returned 0 domain categories — skipping domain layer")
-            return None
-        log.info("Loaded %d domain categories from hive", len(cs.categories))
-        save_annotations_json(cs, cache_path)
-        return cs
-    except Exception as exc:
-        log.warning("Failed to load domain annotations from hive: %s", exc)
-
-    return None
+    cs = load_annotations_from_hive(cfg, connection_name, database)
+    if len(cs.categories) == 0:
+        log.warning(
+            "Hive returned 0 domain categories from %s.annotations via %s "
+            "— skipping domain layer",
+            database, connection_name,
+        )
+        return None
+    log.info(
+        "Loaded %d domain categories from hive (%s.annotations via %s)",
+        len(cs.categories), database, connection_name,
+    )
+    save_annotations_json(cs, cache_path)
+    return cs
 
 
 # ── Confusable pairs ──────────────────────────────────────────────
