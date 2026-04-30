@@ -135,38 +135,170 @@ def _redistribute_confusable_mass(
 # ── Cosine similarity ────────────────────────────────────────────────
 
 
+def _cosine_reliability(
+    top1_sim: float,
+    top2_sim: float | None,
+    *,
+    floor: float = 0.10,
+    ceiling: float = 0.70,
+    tau_abs: float = 0.40,
+    sigma_abs: float = 0.10,
+    sigma_marg: float = 0.05,
+    w_abs: float = 0.6,
+    w_marg: float = 0.4,
+) -> float:
+    """Reliability factor α(s₁, s₂) for the cosine source.
+
+    Implements Haenni & Hartmann 2006, *Modeling Partially Reliable
+    Information Sources: A General Approach Based on Dempster-Shafer
+    Theory* (Information Fusion 7(4), 361-379, §3): a source's
+    reliability is an observable function of source-quality
+    indicators, and the contributed mass is bounded by α with
+    ``(1 - α)`` allocated to ignorance.
+
+    Two quality indicators here:
+
+    * ``α_abs`` — sigmoid of the top-1 absolute similarity centered
+      at ``tau_abs``.  Encodes "is cosine matching anything strongly,
+      or just noise?"  Below ~0.30 absolute similarity is noise on
+      sentence-transformer embeddings; above ~0.50 is a clear match.
+    * ``α_marg`` — tanh of the top-1/top-2 margin scaled by
+      ``sigma_marg``.  Encodes "is the top-1 a decisive winner, or
+      ambiguous among similar candidates?"  A margin of 0.10 yields
+      ~0.96; a margin of 0.005 yields ~0.10.
+
+    Weighted blend, then clamped to ``[floor, ceiling]``.  The
+    ``ceiling`` corresponds to the legacy static-discount behavior
+    (1 - 0.30 = 0.70 evidence mass): under sharp signal we recover
+    the prior allocation; under diffuse signal we allocate close to
+    ``floor`` to cosine and the rest to Θ.
+    """
+    alpha_abs = 1.0 / (1.0 + math.exp(-(top1_sim - tau_abs) / sigma_abs))
+    if top2_sim is not None:
+        margin = max(0.0, top1_sim - top2_sim)
+        alpha_marg = math.tanh(margin / sigma_marg)
+    else:
+        alpha_marg = 1.0
+    alpha = w_abs * alpha_abs + w_marg * alpha_marg
+    return max(floor, min(ceiling, alpha))
+
+
+def _margin_weight(
+    top1_sim: float,
+    top2_sim: float | None,
+    *,
+    sigma_marg: float = 0.05,
+) -> float:
+    """Fraction of cosine evidence mass to concentrate on top-1.
+
+    Margin-aware mass allocation addresses the softmax-compression
+    pathology on large vocabularies: a sharp top-1 with a clear
+    top-1/top-2 margin should carry weight on top-1 alone rather
+    than dilute across hundreds of softmax-flattened siblings.
+    Returns ``tanh((s₁ - s₂) / σ_marg)`` clamped to ``[0, 1]``.
+
+    When the margin is wide, almost all evidence mass concentrates
+    on top-1 (mass = α * margin_weight); the residual ``α * (1 -
+    margin_weight)`` follows the softmax distribution across all
+    candidates.  When the margin is narrow, the formula reduces to
+    classical softmax allocation across the candidate set.
+
+    Complements ``_cosine_reliability``: α gates *how much* mass
+    cosine contributes; this gates *how concentrated* that mass is.
+    """
+    if top2_sim is None:
+        return 1.0
+    margin = max(0.0, top1_sim - top2_sim)
+    return math.tanh(margin / sigma_marg)
+
+
 def cosine_to_mass(
     similarities: dict[str, float],
     frame: FrameOfDiscernment,
     discount: float = 0.3,
+    *,
+    reliability_floor: float = 0.10,
 ) -> BeliefAssignment:
     """Convert cosine similarities to a mass function.
 
-    Applies softmax to similarities, then discounts by *discount* so
-    a fraction of mass goes to Theta (total ignorance).
+    Applies reliability-shaped allocation per Haenni & Hartmann 2006
+    (see ``_cosine_reliability``): the source-reliability factor α
+    is computed dynamically from top-1 absolute similarity and
+    top-1/top-2 margin, replacing the static ``1 - discount``
+    evidence allocation.  ``discount`` is reinterpreted here as the
+    *complement of the reliability ceiling* — under sharp cosine
+    signal we recover the prior behavior (α ≈ 1 - discount); under
+    diffuse signal we allocate close to ``reliability_floor`` to
+    cosine and the remainder to Θ.
+
+    The α-bounded evidence mass is then split via margin-aware
+    allocation (``_margin_weight``): a sharp top-1 with a clear
+    top-1/top-2 margin concentrates mass on top-1 directly rather
+    than diluting through softmax over hundreds of siblings (the
+    pathology that motivated this change — see
+    ``docs/src/architecture/dst-evidence-independence.md``).
+
+    Args:
+        similarities: ``{code: cosine_similarity}`` over candidate
+            codes.  Values are raw cosines (typically 0-1 range for
+            sentence-transformer embeddings).
+        frame: The frame of discernment.
+        discount: Complement of the reliability ceiling
+            (``ceiling = 1 - discount``).  Default 0.30 preserves
+            the legacy maximum-mass behavior under sharp signal.
+        reliability_floor: Minimum reliability under any conditions.
+            Default 0.10 keeps cosine contributing some signal even
+            when noisy.
     """
     if not similarities:
         return frame.vacuous()
 
-    max_sim = max(similarities.values())
-    exp_sims = {
-        code: math.exp(sim - max_sim)
-        for code, sim in similarities.items()
-        if code in frame.singletons
-    }
+    # Restrict to codes that are real singletons in the frame.
+    in_frame = {code: sim for code, sim in similarities.items()
+                if code in frame.singletons}
+    if not in_frame:
+        return frame.vacuous()
+
+    sorted_sims = sorted(in_frame.values(), reverse=True)
+    top1 = sorted_sims[0]
+    top2 = sorted_sims[1] if len(sorted_sims) > 1 else None
+
+    # α — Haenni-Hartmann reliability bounded by [floor, ceiling].
+    alpha = _cosine_reliability(
+        top1, top2, floor=reliability_floor, ceiling=1.0 - discount,
+    )
+    # Margin weight — fraction of α to concentrate on top-1.
+    margin_w = _margin_weight(top1, top2)
+
+    # Softmax distribution across all in-frame singletons (used for
+    # the residual mass when margin is narrow, and for ranking when
+    # we need the top-1 code identity).
+    max_sim = top1
+    exp_sims = {code: math.exp(sim - max_sim) for code, sim in in_frame.items()}
     total_exp = sum(exp_sims.values())
     if total_exp <= 0:
         return frame.vacuous()
+    softmax_probs = {code: ev / total_exp for code, ev in exp_sims.items()}
 
+    # Identify the top-1 code (deterministic tie-break by code id).
+    top1_code = max(in_frame.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+    # Margin-aware allocation:
+    #   m(top1) = α * margin_w   (concentrated on the decisive winner)
+    #   m(rest_i) = α * (1 - margin_w) * softmax_prob_i
+    # When margin_w → 1 (sharp): top-1 takes nearly all of α.
+    # When margin_w → 0 (diffuse): falls back to pure softmax(α).
     masses: dict[FocalElement, float] = {}
-    evidence_mass = 1.0 - discount
-    for code, exp_val in exp_sims.items():
-        prob = exp_val / total_exp
-        mass = prob * evidence_mass
-        if mass > 1e-15:
-            masses[frame.singleton(code)] = mass
+    top1_share = alpha * margin_w
+    residual = alpha * (1.0 - margin_w)
+    for code, prob in softmax_probs.items():
+        m = residual * prob
+        if code == top1_code:
+            m += top1_share
+        if m > 1e-15:
+            masses[frame.singleton(code)] = m
 
-    masses[frame.theta] = discount
+    masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)
     return BeliefAssignment(masses=masses)
 

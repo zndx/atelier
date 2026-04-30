@@ -84,6 +84,27 @@ Feature: DST evidence-source independence
     And the prompt contains "Transaction Amount"
     And the prompt contains "translate to the closest fit"
 
+  Scenario Outline: Cosine reliability shaping concentrates mass on a clear top-1
+    # Haenni & Hartmann 2006 — source reliability α derived from
+    # observable quality signals (top-1 absolute similarity, top-1/
+    # top-2 margin), with margin-aware allocation that concentrates
+    # mass on top-1 instead of diluting it through softmax over
+    # hundreds of siblings.  Replaces the static discount=0.30
+    # behavior whose softmax compression made cosine unable to
+    # carry mass on large vocabularies.
+    Given a frame with <vocab_size> singletons
+    And cosine similarities with top-1 "<top1>" at <sim1> and top-2 at <sim2>
+    When I convert similarities to mass
+    Then the top-1 singleton mass is <expected_band>
+    And the Theta mass is <theta_band>
+
+    Examples: regimes
+      | vocab_size | top1   | sim1 | sim2 | expected_band      | theta_band         |
+      | 300        | sharp  | 0.70 | 0.50 | at least 0.55      | at most 0.35       |
+      | 300        | clear  | 0.45 | 0.20 | at least 0.55      | at most 0.35       |
+      | 300        | ambig  | 0.45 | 0.44 | at most 0.20       | at least 0.45      |
+      | 300        | noise  | 0.23 | 0.23 | at most 0.05       | at least 0.85      |
+
   Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
     # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
     # and data/sample/ontology.json (300+ leaf OOTB-sample expansion

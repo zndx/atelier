@@ -609,6 +609,83 @@ def step_prompt_contains(context, needle):
     )
 
 
+# ── Cosine reliability shaping ──────────────────────────────────
+
+
+@given("a frame with {n:d} singletons")
+def step_frame_with_n_singletons(context, n):
+    from atelier.classify.belief import FrameOfDiscernment
+    from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
+    cats = [
+        ReferenceCategory(
+            code=f"acme.{i // 30}.{i % 30}",
+            label=f"L{i}",
+            embedding_text="",
+            abbrev="",
+        )
+        for i in range(n)
+    ]
+    cs = HierarchicalCategorySet("scaled-test", cats, cats)
+    context.cosine_frame = FrameOfDiscernment(cs)
+    context.cosine_codes = [c.code for c in cats]
+
+
+@given('cosine similarities with top-1 "{label}" at {sim1:g} and top-2 at {sim2:g}')
+def step_cosine_similarities(context, label, sim1, sim2):
+    codes = context.cosine_codes
+    sims = {code: float(sim2) for code in codes[2:]}
+    sims[codes[0]] = float(sim1)
+    sims[codes[1]] = float(sim2)
+    context.cosine_similarities = sims
+    context.cosine_top1_code = codes[0]
+
+
+@when("I convert similarities to mass")
+def step_cosine_to_mass(context):
+    from atelier.classify.mass_functions import cosine_to_mass
+    context.cosine_mass = cosine_to_mass(
+        context.cosine_similarities, context.cosine_frame, discount=0.30,
+    )
+
+
+def _parse_band(spec: str) -> tuple[str, float]:
+    spec = spec.strip()
+    if spec.startswith("at least"):
+        return ("ge", float(spec.split()[-1]))
+    if spec.startswith("at most"):
+        return ("le", float(spec.split()[-1]))
+    raise ValueError(f"Unrecognised band spec: {spec!r}")
+
+
+@then("the top-1 singleton mass is {band}")
+def step_top1_mass_band(context, band):
+    op, threshold = _parse_band(band)
+    fe = context.cosine_frame.singleton(context.cosine_top1_code)
+    actual = context.cosine_mass.masses.get(fe, 0.0)
+    if op == "ge":
+        assert actual >= threshold - 1e-9, (
+            f"top-1 mass {actual:.4f} < {threshold:.4f}"
+        )
+    else:
+        assert actual <= threshold + 1e-9, (
+            f"top-1 mass {actual:.4f} > {threshold:.4f}"
+        )
+
+
+@then("the Theta mass is {band}")
+def step_theta_mass_band(context, band):
+    op, threshold = _parse_band(band)
+    theta_mass = context.cosine_mass.masses.get(context.cosine_frame.theta, 0.0)
+    if op == "ge":
+        assert theta_mass >= threshold - 1e-9, (
+            f"Theta mass {theta_mass:.4f} < {threshold:.4f}"
+        )
+    else:
+        assert theta_mass <= threshold + 1e-9, (
+            f"Theta mass {theta_mass:.4f} > {threshold:.4f}"
+        )
+
+
 # ── Universal vocabulary provenance guard ───────────────────────
 
 

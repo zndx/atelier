@@ -199,6 +199,76 @@ ever fabricating a code in the user's frame. Compatible with — and
 strengthens — the indep-tier consensus + reliability-discount
 mechanisms above.
 
+## Cosine reliability shaping (Haenni-Hartmann 2006)
+
+Static `discount=0.30` allocated 0.70 of cosine mass uniformly via
+softmax across all candidate singletons. On large vocabularies (300+
+leaves) this produced softmax compression — even a sharp top-1 hit
+landed at ~0.004 mass per code. Cosine could see the right answer
+but couldn't carry it through fusion, and the indep-tier consensus
+sat permanently below the revisit threshold.
+
+`mass_functions.cosine_to_mass` now applies dynamic source
+reliability per Haenni & Hartmann 2006, *Modeling Partially
+Reliable Information Sources: A General Approach Based on
+Dempster-Shafer Theory* (Information Fusion 7(4), 361–379, §3):
+the source-reliability factor α is an observable function of
+quality indicators, with `(1 − α)` allocated to ignorance.
+
+Two quality indicators:
+
+* **α_abs** — sigmoid of top-1 absolute similarity around `τ_abs =
+  0.40` with `σ_abs = 0.10`. Encodes "is cosine matching anything
+  strongly, or just noise?"
+* **α_marg** — `tanh((s₁ − s₂) / σ_marg)` with `σ_marg = 0.05`.
+  Encodes "is the top-1 a decisive winner, or ambiguous among
+  similar candidates?"
+
+Weighted blend (`w_abs = 0.6, w_marg = 0.4`), clamped to
+`[reliability_floor, reliability_ceiling] = [0.10, 1 −
+classify_discount_cosine]`. The ceiling preserves the legacy
+maximum-mass behavior under sharp signal; the floor keeps cosine
+contributing some mass even under noise.
+
+The α-bounded evidence mass is then split via **margin-aware
+allocation**:
+
+```
+m(top-1) = α · margin_weight + α · (1 − margin_weight) · softmax_top1
+m(top-i, i>1) = α · (1 − margin_weight) · softmax_top_i
+m(Θ) = 1 − α
+```
+
+where `margin_weight = tanh((s₁ − s₂) / σ_marg)`. When the margin
+is wide, almost all evidence mass concentrates on top-1 directly
+rather than diluting through softmax. When the margin is narrow,
+the formula reduces to classical softmax allocation across the
+full candidate set.
+
+Behavior across regimes (BDD-locked in
+`features/agent/evidence_independence.feature`, "Cosine reliability
+shaping concentrates mass on a clear top-1"):
+
+| Top-1 sim | Top-2 sim | α | margin_weight | Top-1 mass | Θ mass |
+|---:|---:|---:|---:|---:|---:|
+| 0.70 | 0.50 | 0.700 | 1.000 | **0.700** | 0.300 |
+| 0.45 | 0.20 | 0.700 | 1.000 | **0.700** | 0.300 |
+| 0.45 | 0.44 | 0.452 | 0.197 | 0.091 | 0.548 |
+| 0.23 | 0.23 | 0.100 | 0.002 | 0.0005 | 0.900 |
+
+Sharp signal recovers the legacy ceiling allocation but
+concentrates it on top-1 (~170× the prior compressed mass).
+Ambiguous and noise regimes correctly route most mass to Θ rather
+than fabricating false confidence. The indep-tier revisit gate
+(threshold 0.45) is now reachable on cosine alone whenever cosine
+has clear semantic signal.
+
+Composes cleanly with the indep-tier consensus computation: when
+cosine carries decisive mass on a code different from the LLM's
+vote, that code becomes the indep-tier top-1 and the revisit gate
+fires — which is the soundness invariant the whole evidence-
+independence treatment is reaching for.
+
 ## Pattern-target alias resolver
 
 A second, narrower bug surfaced during investigation: the static
@@ -225,10 +295,9 @@ this shim approximates remains future work.
 
 ## Deferred work
 
-This treatment is conservative: it preserves Dempster's rule
-end-to-end and handles non-distinctness through reliability
-discounting. Two future refinements were scoped out of the present
-change:
+This treatment preserves Dempster's rule end-to-end and handles
+non-distinctness through reliability discounting + per-source
+reliability shaping. One future refinement remains scoped out:
 
 - **Tiered fusion with the cautious rule (Denoeux 2008).** Combine
   the LLM-derivative cluster `{llm, catboost, svm}` via cautious
@@ -240,16 +309,10 @@ change:
   Trade-off: cautious is non-normalising, so derivative-tier-only
   columns will see narrower belief intervals (which is *correct*
   behaviour but a UI shift).
-- **Dynamic cosine reliability (Haenni & Hartmann 2006, *Modeling
-  Partially Reliable Information Sources*).** Replace the static
-  `discount=0.30` with a reliability factor `α(s₁, s₂)` shaped by
-  cosine top-1 absolute similarity and top-1/top-2 margin, so sharp
-  cosine signal carries weight and diffuse cosine remains
-  appropriately ignorant. Naturally complements the tiered fusion.
 
 The `combine_multiple` infrastructure already supports adding a
 `strategy="cautious"` branch alongside the existing `dempster` /
-`yager` options, so both refinements are surgical when they land.
+`yager` options, so the refinement is surgical when it lands.
 
 ## References
 
