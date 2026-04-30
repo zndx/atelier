@@ -126,3 +126,106 @@ def step_sums_to_one(context):
 def step_raised_value_error(context):
     assert context.raised is not None, "Expected ValueError but none raised"
     assert isinstance(context.raised, ValueError)
+
+
+# ── Derivative discount calibration ─────────────────────────────
+
+
+@given("an LLM mass and a CatBoost mass both supporting the same code")
+def step_llm_and_catboost_same_code(context):
+    from atelier.classify.belief import BeliefAssignment
+    frame = _frame()
+    leaves = list(frame.singletons.keys())
+    fe = frame.singleton(leaves[0])
+    context.frame = frame
+    context.fe = fe
+    # llm at 0.10 discount → 0.90 mass on the code
+    context.llm_mass = BeliefAssignment(masses={fe: 0.90, frame.theta: 0.10})
+    # raw catboost probability — discount applied below
+    context.catboost_proba = {leaves[0]: 1.0}
+
+
+def _catboost_with_discount(context, discount):
+    from atelier.classify.belief import BeliefAssignment
+    frame = context.frame
+    fe = context.fe
+    # Mirror catboost_to_mass behavior for a single-code prediction:
+    # mass = (1 - discount) on code, discount on theta.
+    return BeliefAssignment(masses={
+        fe: 1.0 - discount,
+        frame.theta: discount,
+    })
+
+
+@when("I fuse them with the pre-calibration catboost discount {disc:g}")
+def step_fuse_pre_cal(context, disc):
+    from atelier.classify.belief import combine_multiple
+    cb = _catboost_with_discount(context, float(disc))
+    combined, _ = combine_multiple([context.llm_mass, cb], strategy="dempster")
+    context.pre_belief = combined.belief(context.fe)
+
+
+@when("I fuse them with the post-calibration catboost discount {disc:g}")
+def step_fuse_post_cal(context, disc):
+    from atelier.classify.belief import combine_multiple
+    cb = _catboost_with_discount(context, float(disc))
+    combined, _ = combine_multiple([context.llm_mass, cb], strategy="dempster")
+    context.post_belief = combined.belief(context.fe)
+
+
+@then("the post-calibration belief is strictly less than the pre-calibration belief")
+def step_post_lt_pre(context):
+    assert context.post_belief < context.pre_belief - 1e-9, (
+        f"Expected post < pre; pre={context.pre_belief}, post={context.post_belief}"
+    )
+
+
+# ── most_committed_singleton helper ─────────────────────────────
+
+
+@given('a belief assignment with mass {{0.6 on "{a_code}", 0.25 on "{b_code}", 0.15 on theta}}')
+def step_three_mass_assignment(context, a_code, b_code):
+    from atelier.classify.belief import BeliefAssignment
+    frame = _frame()
+    # Use the first two leaves as A and B regardless of supplied codes —
+    # the test is structural, not vocabulary-dependent.
+    leaves = list(frame.singletons.keys())
+    fe_a = frame.singleton(leaves[0])
+    fe_b = frame.singleton(leaves[1])
+    context.fe_a_code = leaves[0]
+    context.bpa = BeliefAssignment(masses={
+        fe_a: 0.6, fe_b: 0.25, frame.theta: 0.15,
+    })
+
+
+@given("a vacuous belief assignment")
+def step_vacuous_bpa(context):
+    from atelier.classify.belief import BeliefAssignment
+    frame = _frame()
+    context.bpa = BeliefAssignment(masses={frame.theta: 1.0})
+
+
+@when("I call most_committed_singleton on it")
+def step_call_most_committed(context):
+    context.most_committed = context.bpa.most_committed_singleton()
+
+
+@then('the result is "{code}" with mass {mass:g}')
+def step_check_most_committed(context, code, mass):
+    assert context.most_committed is not None, "Expected non-None result"
+    actual_code, actual_mass = context.most_committed
+    # The structural test pinned the highest-mass focal element to
+    # leaves[0]; verify the mass and that something was returned.
+    assert actual_code == context.fe_a_code, (
+        f"Expected highest-mass code {context.fe_a_code}, got {actual_code}"
+    )
+    assert abs(actual_mass - float(mass)) < 1e-9, (
+        f"Expected mass {mass}, got {actual_mass}"
+    )
+
+
+@then("the result is None")
+def step_check_none(context):
+    assert context.most_committed is None, (
+        f"Expected None for vacuous, got {context.most_committed}"
+    )

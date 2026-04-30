@@ -29,17 +29,20 @@ from typing import Any
 from atelier.classify.belief import (
     FrameOfDiscernment,
     HierarchicalClassification,
+    combine_multiple,
 )
 from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
 from atelier.classify.mass_functions import (
+    DEFAULT_PATTERN_MAP,
     DiscountConfig,
     catboost_to_mass,
     cosine_to_mass,
     llm_to_mass,
     name_match_to_mass,
     pattern_to_mass,
+    resolve_pattern_map,
     svm_to_mass,
 )
 from atelier.classify.sampler import (
@@ -1374,6 +1377,29 @@ def _build_confusable_pairs(
     ]
 
 
+# Sources whose evidence is genuinely independent of the LLM sweep.
+# Used to compute a separate "independent-tier consensus" alongside
+# the full fusion so the bootstrap revisit gate can detect when the
+# LLM disagrees with the union of LLM-independent signals (cosine,
+# pattern, name_match) — see Shafer 1976 §11.3 reliability discount
+# and Denoeux 2008 on non-distinct evidence.  CatBoost (fit_to_llm)
+# and the frontier SVM ride on LLM labels and would tautologically
+# reinforce a wrong LLM vote, so they are deliberately excluded.
+INDEPENDENT_TIER: frozenset[str] = frozenset({"cosine", "pattern", "name_match"})
+
+
+def _resolved_pattern_map_for(category_set: HierarchicalCategorySet) -> dict[str, str]:
+    """Return the pattern-target map resolved against *category_set*, cached."""
+    cached = getattr(category_set, "_resolved_pattern_map", None)
+    if cached is None:
+        cached = resolve_pattern_map(DEFAULT_PATTERN_MAP, category_set)
+        try:
+            category_set._resolved_pattern_map = cached  # type: ignore[attr-defined]
+        except AttributeError:
+            return cached
+    return cached
+
+
 def _classify_column(
     col: ColumnSample,
     category_set: HierarchicalCategorySet,
@@ -1393,6 +1419,15 @@ def _classify_column(
     cosine similarity, LLM, CatBoost, SVM.  The pipeline always
     supplies LLM evidence; llm_code may be None only for offline
     use cases such as seed data preparation.
+
+    In addition to the full Dempster fusion, computes an
+    *independent-tier consensus* over ``{cosine, pattern, name_match}``
+    — the subset of sources that does not derive from the LLM sweep —
+    and exposes its top-1 singleton in the result dict.  The bootstrap
+    revisit gate at ``_identify_disagreements`` consults this signal so
+    cosine/pattern disagreement with LLM can trigger a revisit even
+    when the fully-fused prediction (which includes LLM mass) happens
+    to match LLM.  See ``docs/src/architecture/dst-evidence-independence.md``.
     """
     if discounts is None:
         discounts = DiscountConfig()
@@ -1422,9 +1457,12 @@ def _classify_column(
     if not _is_vacuous(name_mass):
         source_masses["name_match"] = name_mass
 
-    # 2. Pattern detection
+    # 2. Pattern detection (target codes resolved against the active vocab
+    # so non-ICE vocabularies don't silently disable the entire source).
+    resolved_pattern_map = _resolved_pattern_map_for(category_set)
     pattern_mass = pattern_to_mass(
         features.pattern_signals, frame,
+        pattern_category_map=resolved_pattern_map,
         theta_mass=discounts.pattern_theta,
     )
     if not _is_vacuous(pattern_mass):
@@ -1485,6 +1523,30 @@ def _classify_column(
     if not source_masses:
         return _empty_classification(col, features)
 
+    # Independent-tier consensus over LLM-independent sources only.
+    # Used by the bootstrap revisit gate to detect "LLM disagrees with
+    # the union of cosine/pattern/name_match" — a condition that the
+    # fully-fused prediction can mask whenever LLM-derivative ML
+    # sources amplify the LLM vote (Shafer 1976 §11.3, Denoeux 2008).
+    indep_top1_code: str | None = None
+    indep_top1_mass: float = 0.0
+    indep_top1_conflict: float = 0.0
+    indep_assignments = [
+        source_masses[name] for name in INDEPENDENT_TIER if name in source_masses
+    ]
+    if indep_assignments:
+        try:
+            indep_combined, indep_top1_conflict = combine_multiple(
+                indep_assignments, strategy="dempster",
+            )
+            indep_top = indep_combined.most_committed_singleton()
+            if indep_top is not None:
+                indep_top1_code, indep_top1_mass = indep_top
+        except ValueError:
+            # Total conflict (K=1) collapses Dempster — leave consensus
+            # empty; the high-K branch of the revisit gate still fires.
+            pass
+
     hc = HierarchicalClassification.from_combined_evidence(
         source_masses=source_masses,
         frame=frame,
@@ -1544,6 +1606,12 @@ def _classify_column(
         # LLM didn't see this column (e.g. batch truncation).
         "llm_code": llm_code,
         "llm_confidence": float(llm_confidence or 0.0),
+        # Independent-tier consensus (cosine + pattern + name_match,
+        # excluding LLM-derivative sources).  Drives the revisit gate
+        # at ``_identify_disagreements``.
+        "independent_top1_code": indep_top1_code,
+        "independent_top1_mass": round(indep_top1_mass, 4),
+        "independent_top1_conflict": round(indep_top1_conflict, 4),
     }
 
 

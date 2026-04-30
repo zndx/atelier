@@ -141,6 +141,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.gap_threshold": ("classify_bootstrap_gap_threshold", float),
     "classify.bootstrap.clarity_target": ("classify_bootstrap_clarity_target", float),
     "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
+    "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
     "classify.discounts.svm": ("classify_discount_svm", float),
@@ -354,19 +355,25 @@ class AtelierConfig:
     classify_bootstrap_gap_threshold: float = 0.15
     classify_bootstrap_clarity_target: float = 0.20
     classify_bootstrap_bel_floor: float = 0.50
+    classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
 
-    # DST discount factors
+    # DST discount factors.  The catboost_*/svm defaults are calibrated
+    # above the cosine discount because those sources are LLM-derivative
+    # in this pipeline (see ml_train.fit_catboost_to_llm_labels and the
+    # frontier-SVM filter at ml_train lines 118-127); per Shafer 1976
+    # §11.3 + Denoeux 2008, non-distinct evidence requires substantial
+    # discount to avoid double-counting under Dempster's rule.
     classify_discount_cosine: float = 0.30
-    classify_discount_svm: float = 0.20
+    classify_discount_svm: float = 0.55
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
     classify_discount_name_match_code: float = 0.50
     classify_discount_name_match_alias: float = 0.50
     classify_discount_name_match_overlap: float = 0.30
-    classify_discount_catboost_base: float = 0.10
+    classify_discount_catboost_base: float = 0.55
     classify_discount_catboost_variance_scale: float = 1.6
-    classify_discount_catboost_max: float = 0.50
-    classify_discount_catboost_fallback: float = 0.15
+    classify_discount_catboost_max: float = 0.75
+    classify_discount_catboost_fallback: float = 0.55
     classify_discount_confusable_ratio_threshold: float = 3.0
 
     # CatBoost training hyperparameters

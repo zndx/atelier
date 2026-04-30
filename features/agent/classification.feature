@@ -97,6 +97,7 @@ Feature: Dempster-Shafer classification pipeline
     And category "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN" label should be "Payment Card Number"
     And category "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.CARD.PAN" abbrev should be "PAN"
 
+
   @slow
   Scenario: Structured evaluation produces per-category metrics
     When I run the classification pipeline with mock data

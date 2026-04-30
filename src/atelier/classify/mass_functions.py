@@ -9,11 +9,14 @@ name matching (M0), LLM classification (M1), CatBoost (M2), SVM (M2).
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from dataclasses import dataclass
 
 from atelier.classify.belief import BeliefAssignment, FocalElement, FrameOfDiscernment
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -22,19 +25,36 @@ class DiscountConfig:
 
     Each value controls how much evidence mass the corresponding source
     allocates to Theta (total ignorance).  Higher = more conservative.
+
+    Discount calibration follows Shafer's reliability operator (1976,
+    §11.3): ``m'(A) = α·m(A); m'(Θ) = α·m(Θ) + (1-α)`` for source
+    reliability α = 1 - discount.  When evidence sources are *non-
+    distinct* — the LLM-derivative case described by Denoeux 2008 —
+    Dempster's rule double-counts overlapping mass.  The principled
+    response is a substantial discount on derivative sources so the
+    fused belief reflects the underlying independent signal rather
+    than amplified self-agreement.
+
+    In this pipeline ``catboost_*`` and ``svm`` ride on labels that
+    are deterministic transforms of the LLM sweep (see
+    ``ml_train.fit_catboost_to_llm_labels`` and the frontier-SVM
+    label filter at ``ml_train`` lines 118-127), so their defaults
+    are calibrated above the genuinely independent ``cosine``
+    discount.  See ``docs/src/architecture/dst-evidence-independence.md``
+    for the full rationale.
     """
 
     cosine: float = 0.30
-    svm: float = 0.20
+    svm: float = 0.55
     pattern_theta: float = 0.25
     name_match_exact: float = 0.70
     name_match_code: float = 0.50
     name_match_alias: float = 0.50
     name_match_overlap: float = 0.30
-    catboost_base: float = 0.10
+    catboost_base: float = 0.55
     catboost_variance_scale: float = 1.6
-    catboost_max: float = 0.50
-    catboost_fallback: float = 0.15
+    catboost_max: float = 0.75
+    catboost_fallback: float = 0.55
     confusable_ratio_threshold: float = 3.0
 
     @classmethod
@@ -210,6 +230,112 @@ _QUARANTINED_PATTERN_MAP: dict[str, str] = {
     "license_plate_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
     "eth_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
 }
+
+
+def _normalize_token(value: str) -> str:
+    """Lowercase + strip non-alphanumerics for alias comparison."""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def resolve_pattern_map(
+    default_map: dict[str, str],
+    category_set,
+) -> dict[str, str]:
+    """Resolve canonical ICE.* pattern targets against the active vocabulary.
+
+    The default map at ``DEFAULT_PATTERN_MAP`` references canonical
+    BFO/Common-Core mnemonic codes (``ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT``
+    etc.).  When the user-selected vocabulary uses a different code
+    convention — e.g. dotted-numeric ``1.1.1.2.5.1`` — every pattern
+    target falls outside ``frame.singletons`` and ``pattern_to_mass``
+    silently returns vacuous mass, disabling the entire pattern source
+    with no operator-visible warning.
+
+    This resolver maps each ICE.* target through three fallback layers
+    against ``category_set``:
+
+    1. **Direct hit**: target exists in ``category_set.all_by_code``.
+    2. **By abbrev**: leaf mnemonic (the suffix after the last ``.``)
+       matches a category's ``abbrev`` field.
+    3. **By common-name alias**: leaf mnemonic appears in a category's
+       ``common_names`` field after token normalization.
+
+    On a miss we log a single ``WARNING`` and drop the entry so the
+    pattern source contributes nothing for that pattern (preserving the
+    pre-resolver fail-safe semantics) instead of pointing at a
+    nonexistent code.
+
+    Returns a new ``{pattern_name: resolved_code}`` map containing only
+    patterns whose target was successfully resolved.
+
+    Args:
+        default_map: pattern-name → canonical-target-code mapping.
+        category_set: ``HierarchicalCategorySet`` describing the active
+            vocabulary; uses ``all_by_code``, ``by_abbrev``, and
+            ``all_categories``.
+
+    Notes:
+        Resolver runs once per pipeline run (called from
+        ``_classify_column``).  The deeper BFO/Common-Core ontology
+        mapping that this shim approximates remains future work.
+    """
+    if not default_map:
+        return {}
+
+    all_by_code = getattr(category_set, "all_by_code", {}) or {}
+    by_abbrev = getattr(category_set, "by_abbrev", {}) or {}
+    all_categories = getattr(category_set, "all_categories", []) or []
+
+    resolved: dict[str, str] = {}
+    misses: list[tuple[str, str]] = []
+
+    for pattern, target in default_map.items():
+        if not target:
+            continue
+
+        if target in all_by_code:
+            resolved[pattern] = target
+            continue
+
+        leaf = target.rsplit(".", 1)[-1]
+        leaf_norm = _normalize_token(leaf)
+        if not leaf_norm:
+            misses.append((pattern, target))
+            continue
+
+        abbrev_hit = by_abbrev.get(leaf) or by_abbrev.get(leaf.upper())
+        if abbrev_hit is not None:
+            resolved[pattern] = abbrev_hit.code
+            continue
+
+        alias_hit = None
+        for cat in all_categories:
+            common = getattr(cat, "common_names", "") or ""
+            if not common:
+                continue
+            tokens = re.split(r"[|,;/]+", common)
+            for tok in tokens:
+                if _normalize_token(tok) == leaf_norm:
+                    alias_hit = cat
+                    break
+            if alias_hit is not None:
+                break
+
+        if alias_hit is not None:
+            resolved[pattern] = alias_hit.code
+            continue
+
+        misses.append((pattern, target))
+
+    if misses:
+        miss_summary = ", ".join(f"{p}->{t}" for p, t in misses)
+        logger.warning(
+            "Pattern source: %d target(s) not in active vocabulary; "
+            "patterns disabled for this run: %s",
+            len(misses), miss_summary,
+        )
+
+    return resolved
 
 
 def pattern_to_mass(

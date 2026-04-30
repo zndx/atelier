@@ -153,6 +153,11 @@ class BootstrapConfig:
     gap_threshold: float = 0.15
     clarity_target: float = 0.10
     bel_floor: float = 0.50
+    # Minimum independent-tier consensus mass required to fire a revisit
+    # on the basis of indep-tier vs LLM disagreement.  Below this floor
+    # the cosine/pattern/name_match signal is too diffuse to act on
+    # alone (the existing high-K branch still fires when relevant).
+    indep_revisit_mass_threshold: float = 0.45
     # Wall-clock deadline for the LLM sweep.  ``0`` (default) disables
     # the brake — the attempts cap and consecutive-failure breaker cover
     # the dead-endpoint case, and a healthy-but-slow sweep (large vocab
@@ -192,6 +197,9 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         gap_threshold=cfg.classify_bootstrap_gap_threshold,
         clarity_target=cfg.classify_bootstrap_clarity_target,
         bel_floor=cfg.classify_bootstrap_bel_floor,
+        indep_revisit_mass_threshold=getattr(
+            cfg, "classify_bootstrap_indep_revisit_mass_threshold", 0.45,
+        ),
     )
 
 
@@ -249,6 +257,13 @@ class BootstrapState:
     ml_uncertainty: dict[str, float] = field(default_factory=dict)
     ml_belief: dict[str, float] = field(default_factory=dict)
     ml_plausibility: dict[str, float] = field(default_factory=dict)
+    # Independent-tier consensus (cosine + pattern + name_match) per
+    # column.  Populated alongside ml_prediction in _run_ml_validation.
+    # The revisit gate compares these against the LLM vote without the
+    # tautological inclusion of LLM-derivative ML sources.
+    independent_top1: dict[str, str] = field(default_factory=dict)
+    independent_top1_mass: dict[str, float] = field(default_factory=dict)
+    independent_top1_conflict: dict[str, float] = field(default_factory=dict)
     llm_calls_total: int = 0
     # Every entry into ``_classify_batch_with_retry`` increments this —
     # success, halve, or failed-at-min.  ``llm_calls_total`` only moves on
@@ -848,24 +863,78 @@ def _run_ml_validation(
             state.ml_belief[name] = result["belief"]
             state.ml_plausibility[name] = result["plausibility"]
 
+        indep_code = result.get("independent_top1_code")
+        if indep_code:
+            state.independent_top1[name] = indep_code
+            state.independent_top1_mass[name] = float(
+                result.get("independent_top1_mass", 0.0) or 0.0,
+            )
+            state.independent_top1_conflict[name] = float(
+                result.get("independent_top1_conflict", 0.0) or 0.0,
+            )
+
 
 def _identify_disagreements(
     state: BootstrapState,
     column_names: list[str],
     cfg: BootstrapConfig,
 ) -> list[str]:
-    """Find columns where LLM and ML disagree AND K is high."""
-    disagreements = []
+    """Find columns that warrant an LLM revisit.
+
+    A revisit fires when *either*:
+
+    1. The independent-tier consensus (cosine + pattern + name_match)
+       has a top-1 prediction at meaningful mass (≥
+       ``indep_revisit_mass_threshold``) that disagrees with the LLM
+       vote.  This branch matters because the LLM-derivative ML
+       sources (CatBoost-fit-to-LLM, frontier SVM) cannot, by
+       construction, contradict the LLM — see Shafer 1976 §11.3 on
+       reliability discounting and Denoeux 2008 on non-distinct
+       evidence.  The fully-fused ``ml_prediction`` therefore tracks
+       the LLM whenever the LLM is loud, masking genuine
+       independent-source disagreement.  Comparing LLM against the
+       ``{cosine, pattern, name_match}`` consensus restores a real
+       cross-source disagreement test.
+
+    2. K is high *and* the fused prediction differs from LLM.  This
+       is the legacy gate, retained as a safety net for cases where
+       the independent consensus is diffuse but conflict is
+       diagnostically high (typical when the LLM is over-confident
+       on a code the ML cluster scattered against).
+
+    Indep-tier disagreement is prioritized in the returned ordering
+    because it carries the strongest soundness signal.
+    """
+    disagreements: list[tuple[str, int, float]] = []
     for name in column_names:
         llm_code = state.labels.get(name)
         ml_code = state.ml_prediction.get(name)
-        k = state.ml_conflict.get(name, 0)
+        k = state.ml_conflict.get(name, 0.0)
+        indep_code = state.independent_top1.get(name)
+        indep_mass = state.independent_top1_mass.get(name, 0.0)
 
-        if llm_code and ml_code and llm_code != ml_code and k > cfg.k_threshold:
-            disagreements.append(name)
+        fire_indep = bool(
+            llm_code
+            and indep_code
+            and indep_code != llm_code
+            and indep_mass >= cfg.indep_revisit_mass_threshold
+        )
+        fire_high_k = bool(
+            llm_code
+            and ml_code
+            and llm_code != ml_code
+            and k > cfg.k_threshold
+        )
 
-    disagreements.sort(key=lambda n: -state.ml_conflict.get(n, 0))
-    return disagreements
+        if fire_indep:
+            # Tier 0: indep-tier disagreement at meaningful mass.
+            disagreements.append((name, 0, -indep_mass))
+        elif fire_high_k:
+            # Tier 1: high-K legacy safety net.
+            disagreements.append((name, 1, -k))
+
+    disagreements.sort(key=lambda entry: (entry[1], entry[2]))
+    return [name for name, _, _ in disagreements]
 
 
 def _llm_revisit(
@@ -903,6 +972,18 @@ def _llm_revisit(
                 col.values, col.column_type, pattern_signals,
             )
 
+        # Independent-tier consensus and label, when present, surface
+        # the LLM-independent counter-evidence the gate fired on so the
+        # revisit prompt can reason against it explicitly.
+        indep_code = state.independent_top1.get(name, "")
+        indep_label = ""
+        if indep_code:
+            indep_cat = (
+                category_set.by_code.get(indep_code)
+                or category_set.all_by_code.get(indep_code)
+            )
+            indep_label = indep_cat.label if indep_cat else indep_code
+
         revisit_context[name] = {
             "ml_prediction": ml_label or ml_code,
             "belief": 0.0,
@@ -914,6 +995,11 @@ def _llm_revisit(
             "previous": {
                 "code": llm_code,
                 "confidence": state.confidence.get(name, 0),
+            },
+            "independent_consensus": {
+                "code": indep_code,
+                "label": indep_label,
+                "mass": round(state.independent_top1_mass.get(name, 0.0), 4),
             },
         }
 

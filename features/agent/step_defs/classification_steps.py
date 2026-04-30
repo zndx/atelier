@@ -472,3 +472,58 @@ def step_check_state(context, expected):
 @then("the transition should be rejected with an error")
 def step_transition_rejected(context):
     assert context.transition_error is not None, "Expected transition error"
+
+
+# ── Pattern map alias resolver ──────────────────────────────────
+
+
+@given('a fictitious vocabulary with abbrev "{abbrev}" at code "{code}"')
+def step_fictitious_vocab(context, abbrev, code):
+    """Build a tiny test vocabulary with a fictitious code namespace.
+
+    Codes are deliberately drawn from a fictitious ``acme.*`` namespace
+    so the BDD source carries no customer-derived encoding (provenance
+    audit 2026-04-30; see fixtures/PROVENANCE.md).
+    """
+    from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
+    cats = [
+        ReferenceCategory(
+            code=code, label="Test Term", embedding_text="", abbrev=abbrev,
+        ),
+        ReferenceCategory(
+            code="acme.misc", label="Other", embedding_text="", abbrev="OTHER",
+        ),
+    ]
+    context.numeric_vocab = HierarchicalCategorySet("test", cats, cats)
+
+
+@when("I resolve the default pattern map against that vocabulary")
+def step_resolve_pattern_map(context):
+    from atelier.classify.mass_functions import DEFAULT_PATTERN_MAP, resolve_pattern_map
+    context.resolved_pattern_map = resolve_pattern_map(
+        DEFAULT_PATTERN_MAP, context.numeric_vocab,
+    )
+
+
+@then('the resolved map binds "{pattern}" to "{code}"')
+def step_resolved_binds(context, pattern, code):
+    actual = context.resolved_pattern_map.get(pattern)
+    assert actual == code, (
+        f"Expected {pattern}->{code}, got {pattern}->{actual}; "
+        f"resolved={context.resolved_pattern_map}"
+    )
+
+
+@then("the resolved map omits patterns whose target abbrev is not in the vocabulary")
+def step_resolved_omits(context):
+    # Only TXNAMT is in the vocabulary, so monetary_pattern should be the
+    # only resolved entry (or at most one or two more if other defaults
+    # happen to map through abbrev/aliases — assert the count is small
+    # and ssn_pattern (no SSN abbrev in our test vocab) is absent).
+    resolved = context.resolved_pattern_map
+    assert "ssn_pattern" not in resolved, (
+        f"ssn_pattern should not resolve against a vocab without SSN; got {resolved}"
+    )
+    assert "monetary_pattern" in resolved, (
+        f"monetary_pattern should resolve via TXNAMT abbrev; got {resolved}"
+    )

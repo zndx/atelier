@@ -11,6 +11,7 @@
 - [gRPC & Gateway](./architecture/grpc.md)
 - [Keystone Agents](./architecture/agents.md)
 - [Classification Pipeline](./architecture/classification.md)
+- [DST Evidence Independence](./architecture/dst-evidence-independence.md)
 - [Monte Carlo Sampling](./architecture/monte-carlo.md)
 - [GPU Acceleration](./architecture/gpu.md)
 - [Synthetic Data & Training](./architecture/synth.md)

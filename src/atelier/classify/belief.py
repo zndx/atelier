@@ -102,6 +102,23 @@ class BeliefAssignment:
                 total += m / len(fe.codes)
         return total
 
+    def most_committed_singleton(self) -> tuple[str, float] | None:
+        """Return the (code, mass) of the highest-mass singleton, or None.
+
+        Used by the independent-tier consensus extraction in
+        ``_classify_column`` (see Shafer 1976 §11.3 reliability discount
+        and Denoeux 2008 on non-distinct evidence): the consensus of
+        truly LLM-independent sources is taken as the argmax over the
+        fused mass restricted to singleton focal elements.
+        """
+        best: tuple[str, float] | None = None
+        for fe, m in self.masses.items():
+            if len(fe.codes) != 1:
+                continue
+            if best is None or m > best[1]:
+                best = (next(iter(fe.codes)), m)
+        return best
+
 
 def dempster_combine(
     m1: BeliefAssignment, m2: BeliefAssignment,
