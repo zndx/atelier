@@ -148,28 +148,6 @@ def step_hive_source_no_uri(context):
     context.vocab_uri = None
 
 
-@given('ATELIER_CLASSIFY_DATABASE is "{value}"')
-def step_classify_db_env(context, value):
-    """Documents the env-default the user-selected branch must override.
-
-    The user-selected branch never reads ATELIER_CLASSIFY_DATABASE — but
-    set it anyway so an accidental fallback path would surface a wrong
-    database in the assertions.
-    """
-    import os
-    original = os.environ.get("ATELIER_CLASSIFY_DATABASE")
-    os.environ["ATELIER_CLASSIFY_DATABASE"] = value
-    _ensure_cleanups(context)
-
-    def restore():
-        if original is None:
-            os.environ.pop("ATELIER_CLASSIFY_DATABASE", None)
-        else:
-            os.environ["ATELIER_CLASSIFY_DATABASE"] = original
-
-    context._cleanups.append(restore)
-
-
 @given("load_annotations_from_hive is stubbed to return a non-empty CategorySet")
 def step_stub_hive_returns(context):
     import atelier.classify.pipeline as pipeline_mod
