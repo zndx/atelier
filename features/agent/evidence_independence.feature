@@ -54,3 +54,22 @@ Feature: DST evidence-source independence
     Given a fictitious vocabulary with abbrev "TXNAMT" at code "acme.fin.txn"
     When I resolve the default pattern map against that vocabulary
     Then the resolved map omits patterns whose target abbrev is not in the vocabulary
+
+  Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
+    # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
+    # and data/sample/ontology.json (300+ leaf OOTB-sample expansion
+    # built by scripts/expand_vocabulary.py).  Both must be free of
+    # customer-internal abbrev conventions and numeric encoding —
+    # contamination unwound 2026-04-30 after an audit identified that
+    # a deprecated mock_annotations.json fixture had carried customer
+    # conventions into the universal layer.  See
+    # src/atelier/classify/fixtures/PROVENANCE.md for public-source
+    # attribution per leaf abbrev.
+    When I load the "<vocab>" vocabulary fixture
+    Then no abbrev value begins with "C_"
+    And the notation field is empty for every entry
+
+    Examples:
+      | vocab     |
+      | universal |
+      | sample    |

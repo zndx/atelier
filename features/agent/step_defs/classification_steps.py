@@ -527,3 +527,70 @@ def step_resolved_omits(context):
     assert "monetary_pattern" in resolved, (
         f"monetary_pattern should resolve via TXNAMT abbrev; got {resolved}"
     )
+
+
+# ── Universal vocabulary provenance guard ───────────────────────
+
+
+@when('I load the "{vocab}" vocabulary fixture')
+def step_load_named_vocab(context, vocab):
+    import json
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[3]
+    paths = {
+        "universal": repo_root / "src" / "atelier" / "classify" / "fixtures" / "universal_vocabulary.json",
+        "sample": repo_root / "data" / "sample" / "ontology.json",
+    }
+    if vocab not in paths:
+        raise ValueError(f"Unknown vocab fixture: {vocab!r}; expected one of {sorted(paths)}")
+    with open(paths[vocab]) as f:
+        context.universal_records = json.load(f)
+    context.universal_vocab_label = vocab
+
+
+@when("I load the universal vocabulary fixture")
+def step_load_universal_raw(context):
+    import json
+    from pathlib import Path
+    fixtures_dir = (
+        Path(__file__).resolve().parents[3]
+        / "src" / "atelier" / "classify" / "fixtures"
+    )
+    path = fixtures_dir / "universal_vocabulary.json"
+    with open(path) as f:
+        context.universal_records = json.load(f)
+    context.universal_vocab_label = "universal"
+
+
+@then('no abbrev value begins with "{prefix}"')
+def step_no_abbrev_prefix(context, prefix):
+    offenders = [
+        r["code"]
+        for r in context.universal_records
+        if str(r.get("abbrev", "") or "").startswith(prefix)
+    ]
+    label = getattr(context, "universal_vocab_label", "vocab")
+    assert not offenders, (
+        f"[{label}] Found {len(offenders)} entr{'y' if len(offenders) == 1 else 'ies'} "
+        f"with abbrev starting '{prefix}': {offenders[:10]}"
+        f"{' …' if len(offenders) > 10 else ''}. "
+        "See PROVENANCE.md — class-prefix abbrevs are a customer-internal "
+        "convention and must not appear in shipped Atelier vocabularies."
+    )
+
+
+@then("the notation field is empty for every entry")
+def step_notation_empty(context):
+    offenders = [
+        (r["code"], r.get("notation"))
+        for r in context.universal_records
+        if str(r.get("notation", "") or "").strip()
+    ]
+    label = getattr(context, "universal_vocab_label", "vocab")
+    assert not offenders, (
+        f"[{label}] Found {len(offenders)} entr{'y' if len(offenders) == 1 else 'ies'} "
+        f"with non-empty notation: {offenders[:5]}"
+        f"{' …' if len(offenders) > 5 else ''}. "
+        "See PROVENANCE.md — numeric notation values are customer-encoded "
+        "and must not appear in shipped Atelier vocabularies."
+    )
