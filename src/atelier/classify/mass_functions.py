@@ -237,6 +237,117 @@ def _normalize_token(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
+# ── Ontology priors ─────────────────────────────────────────────────
+
+
+_ONTOLOGY_BY_CODE_CACHE: dict[str, dict] | None = None
+_ONTOLOGY_PATH_CACHE: dict[str, list[str]] = {}
+
+
+def _load_universal_ontology() -> dict[str, dict]:
+    """Load + index ``universal_vocabulary.json`` by code, lazily.
+
+    Returns a flat ``{code: entry}`` map.  Cached at module level so
+    every per-column ontology lookup is an O(1) dict hit after first
+    call.
+    """
+    global _ONTOLOGY_BY_CODE_CACHE
+    if _ONTOLOGY_BY_CODE_CACHE is not None:
+        return _ONTOLOGY_BY_CODE_CACHE
+
+    import json
+    from pathlib import Path
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    path = fixtures_dir / "universal_vocabulary.json"
+    try:
+        with open(path) as f:
+            records = json.load(f)
+    except Exception as exc:
+        logger.warning("Failed to load universal vocabulary for ontology priors: %s", exc)
+        _ONTOLOGY_BY_CODE_CACHE = {}
+        return _ONTOLOGY_BY_CODE_CACHE
+
+    indexed: dict[str, dict] = {r["code"]: r for r in records if r.get("code")}
+    _ONTOLOGY_BY_CODE_CACHE = indexed
+    return indexed
+
+
+def _ontology_path_labels(code: str) -> list[str]:
+    """Walk parent_code chain to the root, returning labels root→leaf.
+
+    Uses the universal vocabulary's parent_code field to reconstruct
+    the ontological path (e.g. ``["Sensitive Data", "Personally
+    Identifiable Data", "Financial Data", "Payment Data", "Transaction
+    Amount"]``).  Cached per code.
+    """
+    if code in _ONTOLOGY_PATH_CACHE:
+        return _ONTOLOGY_PATH_CACHE[code]
+
+    by_code = _load_universal_ontology()
+    labels: list[str] = []
+    current = code
+    seen: set[str] = set()
+    while current and current not in seen:
+        seen.add(current)
+        entry = by_code.get(current)
+        if not entry:
+            break
+        labels.insert(0, entry.get("label") or current)
+        current = entry.get("parent_code") or ""
+    _ONTOLOGY_PATH_CACHE[code] = labels
+    return labels
+
+
+def lookup_pattern_ontology(
+    pattern: str,
+    pattern_category_map: dict[str, str] | None = None,
+) -> dict | None:
+    """Return canonical ICE.* metadata for a fired pattern, or None.
+
+    Used as a publicly-grounded semantic prior fed into:
+
+    * the column embedding text (so cosine sees ontology terms an
+      embedding model recognizes from training, not just the regex
+      name — see ``ColumnFeatures.to_embedding_text``);
+    * the first-pass LLM user prompt (so the LLM has a translation
+      anchor when the user vocabulary lacks a direct equivalent of
+      the detected pattern — He et al. 2023, ontology alignment via
+      LLMs);
+    * SAGE/SHAP attribution (as the ``ontology_priors`` ablatable
+      feature, distinct from raw embedding text).
+
+    The returned dict carries label, description, common_names, the
+    full ontological path (root→leaf), and the canonical code itself.
+    Every element traces to a public source — see
+    ``src/atelier/classify/fixtures/PROVENANCE.md``.
+
+    Returns ``None`` when the pattern has no entry in the pattern map
+    or when the target code is missing from the universal vocabulary
+    (defensive — both should be invariants).
+    """
+    if pattern_category_map is None:
+        pattern_category_map = DEFAULT_PATTERN_MAP
+
+    target_code = pattern_category_map.get(pattern)
+    if not target_code:
+        return None
+
+    by_code = _load_universal_ontology()
+    entry = by_code.get(target_code)
+    if not entry:
+        return None
+
+    return {
+        "pattern": pattern,
+        "code": target_code,
+        "label": entry.get("label") or "",
+        "description": entry.get("description") or "",
+        "common_names": entry.get("common_names") or "",
+        "path": _ontology_path_labels(target_code),
+    }
+
+
 def resolve_pattern_map(
     default_map: dict[str, str],
     category_set,

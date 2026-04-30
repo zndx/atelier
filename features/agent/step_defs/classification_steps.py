@@ -529,6 +529,86 @@ def step_resolved_omits(context):
     )
 
 
+# ── Ontology priors threading ───────────────────────────────────
+
+
+@given("a column whose values match the monetary pattern")
+def step_monetary_column(context):
+    from atelier.classify.sampler import ColumnSample
+    context.monetary_sample = ColumnSample(
+        table_name="acme_table",
+        name="acme_table.amount_col",
+        column_type="object",
+        values=["$3559.80", "$1553.91", "$1887.79", "$223.06", "$1899.48"],
+        siblings=["acme_table.row_id"],
+        total_count=5, null_count=0, distinct_count=5,
+    )
+
+
+@when("I extract features from that column")
+def step_extract_features_for_monetary(context):
+    from atelier.classify.features import extract_features
+    s = context.monetary_sample
+    context.monetary_features = extract_features(
+        column_name=s.name,
+        column_type=s.column_type,
+        values=s.values,
+        siblings=s.siblings,
+        source_table=s.table_name,
+        total_count=s.total_count,
+        null_count=s.null_count,
+        distinct_count=s.distinct_count,
+    )
+
+
+@then('the ontology_priors list contains a "{label}" entry')
+def step_ontology_priors_has(context, label):
+    priors = context.monetary_features.ontology_priors
+    labels = [p.get("label", "") for p in priors]
+    assert label in labels, f"Expected {label!r} in {labels}"
+
+
+@then('the embedding text contains "{needle}"')
+def step_embedding_text_contains(context, needle):
+    text = context.monetary_features.to_embedding_text()
+    assert needle in text, f"Expected {needle!r} in embedding text:\n{text}"
+
+
+@then('the embedding text contains the alias "{alias}"')
+def step_embedding_text_contains_alias(context, alias):
+    text = context.monetary_features.to_embedding_text()
+    assert alias in text, f"Expected alias {alias!r} in embedding text:\n{text}"
+
+
+@then('ablating the "{feature}" feature removes those tokens from the embedding text')
+def step_ablation_removes_ontology(context, feature):
+    f = context.monetary_features
+    full_text = f.to_embedding_text()
+    mask = {n: True for n in f.feature_names}
+    mask[feature] = False
+    ablated_text = f.to_embedding_text(mask)
+    assert "Transaction Amount" in full_text
+    assert "Transaction Amount" not in ablated_text, (
+        f"Ablation of {feature!r} did not remove ontology tokens; "
+        f"ablated text still contains:\n{ablated_text}"
+    )
+
+
+@when("I build the LLM batch user prompt for that column")
+def step_build_user_prompt(context):
+    from atelier.classify.llm_backend import build_batch_user_prompt
+    context.user_prompt = build_batch_user_prompt(
+        [context.monetary_sample], table_name="acme_table",
+    )
+
+
+@then('the prompt contains "{needle}"')
+def step_prompt_contains(context, needle):
+    assert needle in context.user_prompt, (
+        f"Expected {needle!r} in prompt:\n{context.user_prompt}"
+    )
+
+
 # ── Universal vocabulary provenance guard ───────────────────────
 
 

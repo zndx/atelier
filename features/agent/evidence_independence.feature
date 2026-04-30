@@ -55,6 +55,35 @@ Feature: DST evidence-source independence
     When I resolve the default pattern map against that vocabulary
     Then the resolved map omits patterns whose target abbrev is not in the vocabulary
 
+  Scenario: Ontology priors thread canonical ICE.* metadata through embedding text
+    # When a pattern fires, the canonical universal-vocabulary label,
+    # description, common-names aliases, and full ontological path are
+    # injected into the column embedding text so cosine similarity is
+    # anchored to publicly-grounded ontology terms (recognizable to
+    # any frontier embedding model from training) rather than just
+    # the regex name.  See mass_functions.lookup_pattern_ontology and
+    # docs/src/architecture/dst-evidence-independence.md.
+    Given a column whose values match the monetary pattern
+    When I extract features from that column
+    Then the ontology_priors list contains a "Transaction Amount" entry
+    And the embedding text contains "Transaction Amount"
+    And the embedding text contains the alias "amount, payment, price"
+    And ablating the "ontology_priors" feature removes those tokens from the embedding text
+
+  Scenario: Ontology priors reach the first-pass LLM prompt
+    # Publicly-grounded canonical metadata is fed to the LLM on every
+    # batch so it has a translation anchor when the user vocabulary
+    # doesn't carry an exact equivalent of a detected pattern (He et
+    # al. 2023, ontology alignment via LLMs).  The LLM is explicitly
+    # told to translate to the closest fit in the candidate
+    # vocabulary; the canonical ICE.* code is never a valid
+    # classification target.
+    Given a column whose values match the monetary pattern
+    When I build the LLM batch user prompt for that column
+    Then the prompt contains "Pattern-detected ontology priors"
+    And the prompt contains "Transaction Amount"
+    And the prompt contains "translate to the closest fit"
+
   Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
     # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
     # and data/sample/ontology.json (300+ leaf OOTB-sample expansion

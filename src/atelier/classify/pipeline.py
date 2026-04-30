@@ -1579,6 +1579,13 @@ def _classify_column(
         "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
+        # Canonical ICE.* metadata for fired patterns — feeds cosine
+        # via the augmented embedding text and the LLM prompt at
+        # first pass.  Surfaced here so SAGE/SHAP attribution can
+        # treat ontology priors as a discrete feature distinct from
+        # raw embedding text.  Universal-substrate codes; never
+        # returned as classification targets.
+        "ontology_priors": list(features.ontology_priors),
         "belief_path": belief_path,
         "cautious_code": hc.cautious_code(0.7),
         # Curated reference (per-column answer key for accuracy checks)
@@ -1634,6 +1641,7 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "evidence_sources": {},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
+        "ontology_priors": list(features.ontology_priors),
         "reference_code": col.reference_code,
         "reference_label": "",
         "matches_reference": None,

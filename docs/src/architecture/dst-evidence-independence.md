@@ -143,6 +143,62 @@ The revisit prompt context at `bootstrap._llm_revisit` now includes
 the independent-tier consensus code/label/mass so the LLM has the
 counter-evidence in front of it during the second pass.
 
+## Ontology priors — substrate as semantic anchor
+
+Patterns detect at extraction time. When a pattern fires we resolve
+its canonical ICE.* metadata from `universal_vocabulary.json` (label,
+description, common-name aliases, full ontological path root→leaf)
+and thread that metadata through three insertion points sourced from
+a single lookup (`mass_functions.lookup_pattern_ontology`):
+
+1. **Embedding text** (`features.ColumnFeatures.to_embedding_text` —
+   `ontology_priors` is a discrete `FEATURE_NAMES` entry, ablatable
+   for SAGE). Cosine similarity then operates over publicly-grounded
+   ontology terms an embedding model recognizes from training rather
+   than the regex name alone. On the failure case that motivated this
+   work, the column embedding gains the literal substring "Transaction
+   Amount; The monetary value of a financial transaction.; aliases:
+   amount, payment, price; ontology: Sensitive Data → Personally
+   Identifiable Data → Financial Data → Payment Data → Transaction
+   Amount" — orders of magnitude more semantic surface than `patterns:
+   monetary_pattern` carried.
+
+2. **First-pass LLM user prompt**
+   (`llm_backend.build_batch_user_prompt`). Every batch — sweep AND
+   revisit — the prompt now includes per-column "Pattern-detected
+   ontology priors (from Atelier's universal taxonomy — translate to
+   the closest fit in the candidate vocabulary)" with each fired
+   pattern's label, description, alias list, and path. The LLM is
+   explicitly instructed that the canonical ICE.* code is never a
+   valid classification target; its job is ontology alignment from
+   the publicly-grounded substrate to the user's frame (He et al.
+   2023, *Exploring Large Language Models for Ontology Alignment*;
+   Hertling & Paulheim 2023, *OLaLa: Ontology Matching with LLMs*;
+   Ehrig & Sure 2004 for the classical foundation).
+
+3. **SAGE/SHAP attribution surface**
+   (`features.FEATURE_NAMES`). `ontology_priors` is now its own
+   ablatable feature distinct from `pattern_signals` and
+   `sample_values`. Operators can attribute classification mass to
+   the publicly-grounded ontology prior independently of the raw
+   embedding text — the explainability story ties each prediction
+   back to the public substrate that motivated it.
+
+Surfaced in the result dict as `ontology_priors` (list of dicts:
+`pattern, code, label, description, common_names, path,
+match_fraction`). The codes are universal-substrate IDs; they never
+appear in user-facing classifications. The user's vocabulary
+remains the authoritative result space; ICE.* is the bridge.
+
+Architectural significance: this is the substrate→tagging bridge
+the design has been pointing at. Pattern detection was always
+publicly-grounded; the resolver turns ICE.* into the user's codes
+when it can; when it can't, ontology priors carry the public
+semantic anchor straight through to cosine + LLM + SHAP without
+ever fabricating a code in the user's frame. Compatible with — and
+strengthens — the indep-tier consensus + reliability-discount
+mechanisms above.
+
 ## Pattern-target alias resolver
 
 A second, narrower bug surfaced during investigation: the static

@@ -328,6 +328,62 @@ def build_system_prompt(category_table: str, category_set=None) -> str:
     )
 
 
+def _ontology_priors_for_sample(sample) -> list[dict]:
+    """Detect patterns + look up canonical ICE.* metadata for one sample.
+
+    Surfaced to the LLM as a publicly-grounded semantic anchor on
+    every batch, not just on revisit — when the user vocabulary
+    doesn't carry an exact match for a detected pattern, the LLM can
+    still translate from the canonical ontology label/description to
+    the closest fit in the user's frame (He et al. 2023, *Exploring
+    Large Language Models for Ontology Alignment*).  See
+    ``mass_functions.lookup_pattern_ontology``.
+    """
+    values = getattr(sample, "values", None) or []
+    if not values:
+        return []
+    try:
+        from atelier.classify.features import detect_patterns
+        from atelier.classify.mass_functions import lookup_pattern_ontology
+    except Exception:
+        return []
+    patterns = detect_patterns(values)
+    priors: list[dict] = []
+    for pattern_name, fraction in (patterns or {}).items():
+        prior = lookup_pattern_ontology(pattern_name)
+        if prior is None:
+            continue
+        prior = dict(prior)
+        prior["match_fraction"] = float(fraction)
+        priors.append(prior)
+    return priors
+
+
+def _render_ontology_priors(priors: list[dict]) -> list[str]:
+    """Render ontology priors as compact prompt lines."""
+    if not priors:
+        return []
+    rendered: list[str] = []
+    for prior in priors:
+        label = prior.get("label", "")
+        desc = prior.get("description", "")
+        aliases = prior.get("common_names", "")
+        path = prior.get("path", []) or []
+        path_render = " → ".join(p for p in path if p != "Information Content Entity")
+        bits: list[str] = []
+        if label:
+            bits.append(label)
+        if desc:
+            bits.append(desc)
+        if aliases:
+            bits.append(f"aliases: {aliases}")
+        if path_render:
+            bits.append(f"path: {path_render}")
+        if bits:
+            rendered.append("- " + "; ".join(bits))
+    return rendered
+
+
 def build_batch_user_prompt(
     samples: list,
     revisit_context: dict[str, dict] | None = None,
@@ -360,6 +416,20 @@ def build_batch_user_prompt(
         if sample.siblings:
             lines.append(f"Siblings: {sample.siblings}")
 
+        # Pattern-detected ontology priors — canonical metadata from
+        # Atelier's BFO/IAO-grounded universal vocabulary.  Fed to
+        # the LLM on every batch (sweep + revisit) so it has a
+        # publicly-grounded translation anchor when the user
+        # vocabulary doesn't carry an exact equivalent of the
+        # detected pattern.  Choose the closest fit from the user's
+        # own taxonomy; the canonical ICE.* code itself is NEVER a
+        # valid classification target.
+        priors = _ontology_priors_for_sample(sample)
+        rendered_priors = _render_ontology_priors(priors)
+        if rendered_priors:
+            lines.append("Pattern-detected ontology priors (from Atelier's universal taxonomy — translate to the closest fit in the candidate vocabulary):")
+            lines.extend(rendered_priors)
+
         if revisit:
             ml_pred = revisit.get("ml_prediction", "")
             bel = revisit.get("belief", 0.0)
@@ -372,6 +442,13 @@ def build_batch_user_prompt(
                 prev = revisit["previous"]
                 lines.append(
                     f"Your previous: {prev.get('code', '?')} (conf={prev.get('confidence', 0):.2f})"
+                )
+            indep = revisit.get("independent_consensus") or {}
+            if indep.get("code"):
+                lines.append(
+                    f"Independent-tier consensus (cosine + pattern + name_match, "
+                    f"excluding LLM-derivative ML): {indep.get('label') or indep['code']} "
+                    f"(mass={indep.get('mass', 0):.2f})"
                 )
 
         parts.append("\n".join(lines))

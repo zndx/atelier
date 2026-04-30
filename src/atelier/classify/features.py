@@ -213,6 +213,13 @@ FEATURE_NAMES: list[str] = [
     "sibling_context",
     "source_table",
     "value_description",
+    # Canonical ICE.* metadata (label / description / common_names /
+    # ontological path) for each fired pattern.  Surfaced as its own
+    # ablatable feature so SAGE/SHAP can attribute classification mass
+    # to the publicly-grounded ontology prior independently of the
+    # raw embedding text.  See mass_functions.lookup_pattern_ontology
+    # and fixtures/PROVENANCE.md.
+    "ontology_priors",
 ]
 
 
@@ -494,7 +501,8 @@ def detect_sibling_domain(
 class ColumnFeatures:
     """Discrete, ablatable features extracted from a column sample.
 
-    Each of the 12 features can be independently masked for SAGE analysis.
+    Each feature can be independently masked for SAGE analysis (see
+    ``FEATURE_NAMES``).
     """
 
     column_name_humanized: str
@@ -510,6 +518,16 @@ class ColumnFeatures:
     source_table: str | None = None
     value_description: str = ""
     is_generic_name: bool = False
+    # Canonical ICE.* metadata for each fired pattern, resolved from
+    # the universal vocabulary at extraction time.  Populated by
+    # ``mass_functions.lookup_pattern_ontology`` — each entry is a
+    # dict with keys: pattern, code, label, description,
+    # common_names, path (root→leaf).  Threaded through embedding
+    # text + LLM prompt + SHAP feature surface; the canonical labels
+    # never appear in user-facing classifications (the universal
+    # vocab is a substrate, not a tagging layer — see
+    # docs/src/architecture/dst-evidence-independence.md).
+    ontology_priors: list[dict] = field(default_factory=list)
 
     @property
     def feature_names(self) -> list[str]:
@@ -553,6 +571,34 @@ class ColumnFeatures:
 
         if _enabled("pattern_signals") and self.pattern_signals:
             parts.append("patterns: " + ", ".join(self.pattern_signals.keys()))
+
+        # Canonical ontology metadata for fired patterns — embeds the
+        # public-grounded label/description so cosine sees terms an
+        # embedding model recognizes from training.  Distinct feature
+        # so SAGE can ablate it independently of pattern_signals.
+        if _enabled("ontology_priors") and self.ontology_priors:
+            prior_strs: list[str] = []
+            for prior in self.ontology_priors:
+                label = prior.get("label", "")
+                desc = prior.get("description", "")
+                aliases = prior.get("common_names", "")
+                path = prior.get("path", []) or []
+                # Skip the "Information Content Entity" root from the
+                # rendered path — it adds no semantic discriminator.
+                path_render = " → ".join(p for p in path if p != "Information Content Entity")
+                bits: list[str] = []
+                if label:
+                    bits.append(label)
+                if desc:
+                    bits.append(desc)
+                if aliases:
+                    bits.append(f"aliases: {aliases}")
+                if path_render:
+                    bits.append(f"ontology: {path_render}")
+                if bits:
+                    prior_strs.append("; ".join(bits))
+            if prior_strs:
+                parts.append("ontology priors: " + " | ".join(prior_strs))
 
         if _enabled("avg_value_length") and self.avg_value_length is not None:
             parts.append(f"avg_len={self.avg_value_length:.1f}")
@@ -632,6 +678,20 @@ def extract_features(
     entropy = _shannon_entropy(values) if values else None
     patterns = detect_patterns(values)
 
+    # Resolve every fired pattern to its canonical ICE.* metadata —
+    # this becomes a publicly-grounded semantic prior threaded through
+    # the embedding text, the LLM prompt, and SAGE/SHAP attribution.
+    # See mass_functions.lookup_pattern_ontology.
+    from atelier.classify.mass_functions import lookup_pattern_ontology
+    ontology_priors: list[dict] = []
+    for pattern_name, fraction in (patterns or {}).items():
+        prior = lookup_pattern_ontology(pattern_name)
+        if prior is None:
+            continue
+        prior = dict(prior)
+        prior["match_fraction"] = float(fraction)
+        ontology_priors.append(prior)
+
     avg_len: float | None = None
     if values:
         avg_len = round(sum(len(v) for v in values) / len(values), 2)
@@ -657,4 +717,5 @@ def extract_features(
         source_table=source_table,
         value_description=val_desc,
         is_generic_name=generic,
+        ontology_priors=ontology_priors,
     )
