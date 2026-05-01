@@ -283,12 +283,276 @@ def build_category_table(category_set) -> str:
     return "\n".join(lines)
 
 
+def _category_min_rating(cat) -> int | None:
+    """Lowest sensitivity rating across roles; None if no usable rating.
+
+    The customer-vocab convention is "lower number = more sensitive"
+    on a per-role rating dict.  ``"N/A"`` values are skipped.  Returns
+    ``None`` when the category has no rating dict or no numeric
+    entries — caller should fall through to path conventions
+    (``ICE.SENSITIVE.*`` etc.) when this is None across a vocabulary.
+    """
+    sens = getattr(cat, "sensitivity", None)
+    if not sens:
+        return None
+    vals: list[int] = []
+    for v in sens.values():
+        if v == "N/A" or v is None:
+            continue
+        try:
+            vals.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return min(vals) if vals else None
+
+
+def _sensitive_subtree_summary(category_set) -> str:
+    """Identify high-sensitivity / catch-all subtrees in *category_set*.
+
+    Returns a compact Markdown summary the LLM can use to locate the
+    right sensitive parent code when no leaf is a clean fit.  Three
+    branches:
+
+    1. **Sensitivity ratings present** (customer vocabs): tier each
+       category by ``min_rating`` (≤1 high, ==2 moderate, ≥3 low).
+       Find each tier's most-shallow ancestor by walking
+       ``parent_code`` chains; pick exemplars by abbrev-presence
+       preferred, then label-length.  Catch-all = low-tier root with
+       largest descendant set, biased toward labels containing
+       "non-sensitive".
+    2. **Path conventions only** (universal vocab): detect by code
+       prefix ``ICE.SENSITIVE`` / ``ICE.NONSENSITIVE``; emit roots +
+       3 abbreviated leaf exemplars under SENSITIVE.
+    3. **Neither signal**: return ``""`` so the prompt block degrades
+       to the generic Type-II preamble naming no specific codes.
+
+    Output capped at ~6 lines so the prompt budget stays bounded.
+    See ``docs/src/architecture/dst-evidence-independence.md``.
+    """
+    cats = getattr(category_set, "all_categories", None)
+    if not cats:
+        cats = getattr(category_set, "categories", None)
+    if not cats:
+        return ""
+
+    by_code = {c.code: c for c in cats}
+    has_ratings = any(_category_min_rating(c) is not None for c in cats)
+
+    def _root_of_tier(tier_codes: set[str]) -> str | None:
+        """Most-shallow ancestor that contains ≥70% of tier_codes.
+
+        Customer vocabularies often have sensitive codes scattered
+        across multiple branches with no single tier-only-walk root;
+        we want an honest "majority coverage" ancestor (e.g. the
+        Personal Data parent that contains most of the sensitive
+        leaves) rather than an arbitrary tier-only sentinel.
+
+        Counts tier members covered by each candidate ancestor (any
+        code in ``by_code`` whose descendant set includes that
+        ancestor's code-path prefix), picks the most-shallow whose
+        coverage fraction meets the threshold.
+        """
+        if not tier_codes:
+            return None
+        total = len(tier_codes)
+        candidates: list[tuple[str, int, int]] = []  # (code, depth, coverage)
+        for cand_code in by_code:
+            covered = sum(
+                1 for tc in tier_codes
+                if tc == cand_code or tc.startswith(cand_code + ".")
+            )
+            if covered / total >= 0.70:
+                candidates.append((cand_code, cand_code.count("."), covered))
+        if not candidates:
+            # No single ancestor covers the majority — return the
+            # shallowest tier member as a representative.
+            return min(tier_codes, key=lambda c: (c.count("."), c))
+        # Most-shallow (smallest depth) wins; tie-break by larger
+        # coverage, then by code lexicographic order for determinism.
+        candidates.sort(key=lambda t: (t[1], -t[2], t[0]))
+        return candidates[0][0]
+
+    def _exemplars(tier_codes: set[str], n: int = 3) -> list[str]:
+        members = [by_code[c] for c in tier_codes if c in by_code]
+        members.sort(
+            key=lambda c: (
+                0 if getattr(c, "abbrev", "") else 1,
+                len(c.label or ""),
+            )
+        )
+        out: list[str] = []
+        for m in members:
+            label = getattr(m, "abbrev", "") or m.label or m.code
+            if label not in out:
+                out.append(label)
+            if len(out) >= n:
+                break
+        return out
+
+    if has_ratings:
+        # Branch A — customer vocabs with per-role sensitivity ratings.
+        tiers: dict[str, set[str]] = {"high": set(), "moderate": set(), "low": set()}
+        for c in cats:
+            r = _category_min_rating(c)
+            if r is None:
+                continue
+            if r <= 1:
+                tiers["high"].add(c.code)
+            elif r == 2:
+                tiers["moderate"].add(c.code)
+            else:
+                tiers["low"].add(c.code)
+
+        lines: list[str] = ["**Vocabulary sensitivity map (computed for this run):**"]
+        for tier_name in ("high", "moderate"):
+            if not tiers[tier_name]:
+                continue
+            root = _root_of_tier(tiers[tier_name])
+            if root is None:
+                continue
+            root_cat = by_code.get(root)
+            root_label = root_cat.label if root_cat else root
+            ex = _exemplars(tiers[tier_name])
+            ex_str = ", ".join(ex)
+            display = "High-sensitivity" if tier_name == "high" else "Moderate-sensitivity"
+            lines.append(
+                f"- {display} subtree: rooted at `{root}` {root_label} — "
+                f"{len(tiers[tier_name])} codes including {ex_str}."
+            )
+        if tiers["low"]:
+            # Catch-all = low-tier code with largest descendant set,
+            # biased toward labels containing "non-sensitive".
+            candidates: list[tuple[str, int, int]] = []
+            for c in cats:
+                if c.code not in tiers["low"]:
+                    continue
+                desc_count = sum(
+                    1 for other in cats
+                    if other.code != c.code and other.code.startswith(c.code + ".")
+                )
+                non_sens_bias = 1 if "non-sensitive" in (c.label or "").lower() else 0
+                candidates.append((c.code, desc_count, non_sens_bias))
+            if candidates:
+                candidates.sort(key=lambda t: (-t[2], -t[1], t[0]))
+                catch_all_code = candidates[0][0]
+                catch_all_cat = by_code.get(catch_all_code)
+                catch_all_label = catch_all_cat.label if catch_all_cat else catch_all_code
+                lines.append(
+                    f"- Non-sensitive catch-all: `{catch_all_code}` {catch_all_label}."
+                )
+        if len(lines) > 1:
+            return "\n".join(lines)
+
+    # Branch B — universal vocab with ICE.SENSITIVE / ICE.NONSENSITIVE paths.
+    has_ice_paths = any(
+        c.code.startswith("ICE.SENSITIVE") or c.code.startswith("ICE.NONSENSITIVE")
+        for c in cats
+    )
+    if has_ice_paths:
+        lines = ["**Vocabulary sensitivity map (computed for this run):**"]
+        sensitive_codes = {c.code for c in cats if c.code.startswith("ICE.SENSITIVE")}
+        nonsens_codes = {c.code for c in cats if c.code.startswith("ICE.NONSENSITIVE")}
+        if sensitive_codes:
+            ex = _exemplars(sensitive_codes)
+            ex_str = ", ".join(ex)
+            lines.append(
+                f"- High-sensitivity subtree: rooted at `ICE.SENSITIVE` Sensitive Data — "
+                f"{len(sensitive_codes)} codes including {ex_str}."
+            )
+        if nonsens_codes:
+            # Pick the most-shallow code in the non-sensitive subtree.
+            shortest = sorted(nonsens_codes, key=lambda c: (c.count("."), c))[0]
+            label_cat = by_code.get(shortest)
+            label = label_cat.label if label_cat else shortest
+            lines.append(
+                f"- Non-sensitive catch-all: `{shortest}` {label}."
+            )
+        if len(lines) > 1:
+            return "\n".join(lines)
+
+    # Branch C — neither signal; let the prompt's generic Type-II
+    # preamble stand alone without naming codes that may not exist.
+    return ""
+
+
+_GOVERNANCE_COST_MODEL_TEXT = (
+    "## Governance Cost Model\n"
+    "\n"
+    "Data-governance classification is **cost-asymmetric**. Failing to "
+    "flag truly sensitive data (false negative, Type II) exposes "
+    "regulated information and creates compliance liability. Flagging "
+    "non-sensitive data as sensitive (false positive, Type I) creates "
+    "review overhead but is recoverable. Treat the two as if "
+    "cost(FN) ≫ cost(FP).\n"
+    "\n"
+    "**Decision rule under uncertainty.** When concrete signals — "
+    "detected patterns (SSN, PAN, IBAN, email, phone, dates of birth, "
+    "monetary amounts), value formats, sibling-column PII context, or "
+    "ontology priors — point toward a sensitive interpretation, prefer "
+    "the closest **sensitive** category over a non-sensitive catch-all, "
+    "even if no leaf is a perfect match. Choose the most specific "
+    "sensitive parent code you can defend rather than dropping the "
+    "column into a generic non-sensitive bucket. When ontology priors "
+    "and pattern detections both point at a sensitive category, treat "
+    "their agreement as strong evidence; prefer that category over your "
+    "own naming-based intuition unless you can articulate why both are "
+    "wrong.\n"
+    "\n"
+    "**Guard against over-classification.** This preference applies "
+    "*only* when concrete signals exist. Pure operational, structural, "
+    "technical, or audit-metadata fields (timestamps, surrogate keys, "
+    "status enums, system-generated booleans, internal table names) "
+    "with no PII signal remain non-sensitive — do not promote them.\n"
+    "\n"
+    "**Honest confidence calibration.** Report the confidence you "
+    "actually have, not a confidence inflated by this rule. If you "
+    "classify a column as non-sensitive but at least one signal pulls "
+    "the other way, lower your confidence (e.g. 0.55–0.70) and surface "
+    "the sensitive candidate as the top alternative — this flags the "
+    "column for downstream review. Conversely, do not inflate "
+    "confidence on a sensitive choice just because the cost model "
+    "favors caution; report the evidence you actually saw."
+)
+
+
+def _governance_cost_model_block(summary: str) -> str:
+    """Build the Governance Cost Model section of the system prompt.
+
+    Per Elkan 2001 (*The Foundations of Cost-Sensitive Learning*) and
+    privacy-regime conventions (GDPR Art. 25 data protection by
+    default; HIPAA Safe Harbor; PCI DSS), cost(false-negative) ≫
+    cost(false-positive) for data-sensitivity classification.  The
+    block instructs the LLM to bias toward sensitive parents under
+    uncertainty when concrete signals exist, with explicit guards
+    against over-classification and confidence inflation.
+
+    When *summary* is non-empty (vocabulary has identifiable
+    sensitivity structure), append it so the LLM can locate the
+    right sensitive parent code by name.  When empty, the fixed
+    preamble stands alone — the model never sees fabricated codes.
+    """
+    if summary:
+        return (
+            f"{_GOVERNANCE_COST_MODEL_TEXT}\n"
+            "\n"
+            "Use the map below to locate the right sensitive parent when "
+            "no leaf fits cleanly:\n"
+            "\n"
+            f"{summary}"
+        )
+    return _GOVERNANCE_COST_MODEL_TEXT
+
+
 def build_system_prompt(category_table: str, category_set=None) -> str:
     """Build the bootstrap classification system prompt.
 
     When *category_set* is provided, the response-format example uses real
     codes from the loaded vocabulary so the LLM doesn't hallucinate codes
     from a different naming convention (e.g. ICE.* vs numeric dot-codes).
+    The Governance Cost Model section is also vocabulary-aware: when the
+    vocab carries sensitivity ratings or ICE.* path conventions, the
+    block names the high-sensitivity subtree and catch-all so the LLM
+    can locate the right sensitive parent under uncertainty.
     """
     # Pick two real codes for the example (primary + alternative)
     example_code = "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN"
@@ -301,6 +565,9 @@ def build_system_prompt(category_table: str, category_set=None) -> str:
         elif len(cats) == 1:
             example_code = cats[0].code
             example_alt = cats[0].code
+
+    sensitivity_summary = _sensitive_subtree_summary(category_set)
+    governance_block = _governance_cost_model_block(sensitivity_summary)
 
     return (
         "You are a data governance classification engine. Your task is to "
@@ -320,6 +587,8 @@ def build_system_prompt(category_table: str, category_set=None) -> str:
         "- Provide confidence 0.0–1.0 and brief evidence.\n"
         "- For each column, list up to 3 alternative categories with confidence.\n"
         "- Respond with ONLY a JSON array, no markdown fencing.\n"
+        "\n"
+        f"{governance_block}\n"
         "\n"
         "## Response Format\n"
         "\n"

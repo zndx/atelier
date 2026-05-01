@@ -515,6 +515,90 @@ Aitken / Anderson empirically rather than rhetorically. Phase A
 ships that substrate; Phase B and Phase C are gated on what the
 substrate reveals.
 
+## Cost-sensitive classification at the LLM layer (Elkan 2001)
+
+All the prior mechanisms operate at or below the fusion layer —
+they shape *how* per-source evidence is combined into a fused
+belief.  But on the canonical failure case
+(`loan_applications.requested_amount`), the LLM at confidence 0.88
+plus its derivative cluster (CatBoost, SVM) reinforces a vote on
+`0.1 Internal Non-Sensitive`, and Dempster fusion's normalization
+preserves that dominance.  Algorithmic mitigations stalled at
+Bel ≈ 0.74 — an honest reduction from Bel = 0.955 baseline, but
+the headline classification still miscategorized financial PII.
+
+The principled response, per **cost-sensitive classification**
+(Elkan 2001, *The Foundations of Cost-Sensitive Learning*) is to
+adjust the decision threshold under asymmetric cost.  In data
+governance the asymmetry is severe: failing to flag truly
+sensitive data (false negative, Type II) creates regulatory
+liability (GDPR Art. 25 data protection by default; HIPAA Safe
+Harbor; PCI DSS scope creep guidance), while over-classifying
+(false positive, Type I) produces review overhead but is
+recoverable.  Treating the costs as `cost(FN) ≫ cost(FP)` is the
+canonical privacy-regime convention.
+
+Atelier applies this at the **LLM layer** — upstream of fusion —
+via a Governance Cost Model section in the system prompt
+(`llm_backend.build_system_prompt`).  Three components:
+
+- **Fixed cost-asymmetry preamble.** Frames Type II vs Type I
+  cost asymmetry in plain terms; gives the LLM a decision rule
+  for when concrete signals (patterns, value formats, sibling
+  PII context, ontology priors) point toward sensitivity:
+  prefer the closest sensitive parent code over the non-
+  sensitive catch-all.
+
+- **Vocabulary-aware sensitivity map.**
+  `_sensitive_subtree_summary(category_set)` walks the loaded
+  vocab at prompt-build time and identifies the high-sensitivity
+  subtree root (and moderate / non-sensitive catch-all) using
+  one of three branches:
+  * **Customer vocabularies** with per-role sensitivity ratings:
+    tier each category by `min_rating := min(int(v) for v in
+    sensitivity.values() if v != "N/A")` (`≤1` high, `==2`
+    moderate, `≥3` low); find each tier's majority-coverage
+    ancestor (the most-shallow code that contains ≥70% of tier
+    members as descendants).
+  * **Universal vocabulary** with `ICE.SENSITIVE.*` /
+    `ICE.NONSENSITIVE.*` path conventions: detect by code
+    prefix.
+  * **Neither signal**: empty summary, prompt block degrades to
+    the generic preamble naming no specific codes.
+
+- **Honest confidence calibration.** Asks the LLM symmetrically
+  to lower confidence on sensitive-leaning non-sensitive picks
+  AND not to inflate confidence on sensitive picks merely
+  because the cost model favors caution.
+
+The prompt block is **default-on** for every classification run;
+no config knob.  Built once per pipeline run at
+`pipeline.py:577` so the helper computation is amortized and the
+new content lives inside the Anthropic prompt-cache prefix —
+one-time cache miss on the first batch, normal cache hits
+thereafter.  Token cost is bounded (~250–300 fixed + ~80 for
+the per-vocab summary).
+
+This composes cleanly with everything below it: reliability
+discounts on derivative sources still suppress double-counting,
+cosine reliability shaping still concentrates mass on clear
+top-1 hits, hierarchical aggregation still flows residual mass
+to internal-node focal elements, the indep-tier consensus gate
+still triggers revisits on cross-source disagreement, and
+`cautious_promoted_code` still applies Smets least-commitment
+on uncertain leaves.  The Governance Cost Model changes what
+the LLM votes — biasing toward sensitive parents under
+uncertainty — leaving every downstream mechanism unchanged.
+
+The hypothesis: with a governance prior at the source, the LLM
+will either (a) pick a defensible sensitive parent code on
+columns like `requested_amount`, or (b) lower its confidence on
+the non-sensitive choice — either of which is an improvement
+over the status quo.  The exact behavior is non-deterministic
+and confirmed against real LLM runs; BDD scenarios assert the
+prompt structure (`features/agent/governance_cost_model.feature`),
+not the LLM's vote.
+
 ## Pattern-target alias resolver
 
 A second, narrower bug surfaced during investigation: the static
