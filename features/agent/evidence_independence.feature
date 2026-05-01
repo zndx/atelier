@@ -185,6 +185,34 @@ Feature: DST evidence-source independence
     And I record iteration 1 metrics
     Then the contraction_rate at iteration 1 is approximately 1.0
 
+  Scenario: Per-column trajectory grows with each recorded iteration
+    # Per-column residual history complements the corpus-wide
+    # IterationMetrics with a column-major view: one snapshot per
+    # labeled column per iteration, captured by
+    # record_iteration_metrics.  Foundation for per-column ρ,
+    # bandit-style revisit ordering, and Aitken Δ² early-stop
+    # (Phase B — gated on this trajectory data).
+    Given a BootstrapState with three labeled columns
+    When I record three successive iteration metrics
+    Then state.column_history has an entry for each labeled column
+    And each column's snapshot sequence has length 3
+    And each column's iteration sequence is contiguous starting at 0
+
+  Scenario: Revisit flag propagates into the trajectory snapshot
+    Given a BootstrapState with three labeled columns
+    When I record iteration 0 with no revisits
+    And I record iteration 1 with column "a" revisited
+    Then column "a" snapshot at iteration 1 has revisited=true
+    And column "b" snapshot at iteration 1 has revisited=false
+
+  Scenario: Per-column ρ computes from trajectory
+    Given a BootstrapState with one column whose gap sequence is 0.40, 0.20, 0.10
+    Then column_contraction for that column is approximately 0.5
+
+  Scenario: Per-column ρ returns None when fewer than two snapshots
+    Given a BootstrapState with one column and a single iteration recorded
+    Then column_contraction for that column is None
+
   Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
     # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
     # and data/sample/ontology.json (300+ leaf OOTB-sample expansion

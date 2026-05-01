@@ -249,6 +249,39 @@ class IterationMetrics:
 
 
 @dataclass
+class ColumnResidualSnapshot:
+    """Per-column residual at one iteration of the bootstrap loop.
+
+    Captured by ``record_iteration_metrics`` after each iteration's
+    ML validation completes, so the snapshot reflects the post-
+    iteration state.  Together with the corpus-wide
+    ``IterationMetrics``, snapshots form the column-major view that
+    operators / overwatch / future acceleration schemes consume.
+
+    The corpus-wide ``IterationMetrics`` is time-major (one row per
+    iteration with aggregates across columns).  ``column_history``
+    on ``BootstrapState`` is column-major (one list per column with
+    snapshots across iterations).  Both views are needed: corpus
+    aggregates drive the headline convergence loop; per-column
+    trajectories let operators see which specific columns are
+    converging vs stalling — and let future acceleration schemes
+    (bandit revisit ordering, Aitken Δ² early-stop, per-column
+    Anderson on oscillating populations) operate on real per-column
+    data.
+    """
+
+    iteration: int
+    gap: float                  # Pl − Bel for the predicted code
+    bel: float
+    K: float                    # ml_conflict (fused conflict)
+    indep_top1_code: str | None
+    indep_top1_mass: float
+    label: str | None           # state.labels[name] at snapshot time
+    label_source: str | None    # "llm" | "llm_revisit" | "propagated"
+    revisited: bool             # True iff this iteration's _llm_revisit touched it
+
+
+@dataclass
 class BatchAttempt:
     """Audit record for a single LLM batch call (success, truncated, or failed).
 
@@ -334,6 +367,12 @@ class BootstrapState:
     # Frontier SVM retraining state
     svm_retrain_count: int = 0
     svm_frontier_path: str | None = None
+    # Per-column residual trajectory.  Appended in
+    # ``record_iteration_metrics`` after each iteration's ML
+    # validation; column-major view of the convergence behaviour.
+    # See ``ColumnResidualSnapshot`` and
+    # docs/src/architecture/dst-evidence-independence.md.
+    column_history: dict[str, list[ColumnResidualSnapshot]] = field(default_factory=dict)
 
 
 # ── Phase helpers ────────────────────────────────────────────────
@@ -1184,8 +1223,24 @@ def record_iteration_metrics(
     column_names: list[str],
     disagreement_count: int,
     cfg: BootstrapConfig | None = None,
+    revisited_this_iter: set[str] | None = None,
 ) -> IterationMetrics:
-    """Capture metrics for the current iteration."""
+    """Capture metrics for the current iteration.
+
+    Appends one ``ColumnResidualSnapshot`` per labeled column to
+    ``state.column_history`` so the column-major trajectory view
+    stays in sync with the time-major ``IterationMetrics`` aggregate.
+    Columns absent from ``state.labels`` are skipped (symmetric with
+    ``_mean_gap`` / ``_frac_needing_clarification``).
+
+    Args:
+        revisited_this_iter: Names of columns whose label was
+            re-evaluated by ``_llm_revisit`` during the iteration.
+            Surfaced on each snapshot so downstream analysis (per-
+            column ρ, bandit ordering, Aitken early-stop) can
+            distinguish "settled spontaneously" from "settled after
+            revisit".  Optional; defaults to no columns flagged.
+    """
     # Compute the unified residual + cross-source disagreement
     # fraction.  When cfg is provided (the production path), these
     # become first-class diagnostics tracking convergence per Saad
@@ -1217,6 +1272,33 @@ def record_iteration_metrics(
     state.iteration_metrics.append(metrics)
     # Contraction rate needs the just-appended row, so compute after.
     metrics.contraction_rate = round(contraction_rate(state), 4)
+
+    # Per-column trajectory append.  One snapshot per labeled column
+    # per iteration; column-major view that complements the time-
+    # major IterationMetrics.  Foundation for per-column ρ, bandit
+    # ordering, Aitken early-stop (Phase B) and possible Anderson on
+    # oscillating populations (Phase C).
+    revisited_set = revisited_this_iter or set()
+    for name in column_names:
+        if name not in state.labels:
+            continue
+        snap = ColumnResidualSnapshot(
+            iteration=state.iteration,
+            gap=round(
+                state.ml_plausibility.get(name, 1.0)
+                - state.ml_belief.get(name, 0.0), 4,
+            ),
+            bel=round(state.ml_belief.get(name, 0.0), 4),
+            K=round(state.ml_conflict.get(name, 0.0), 4),
+            indep_top1_code=state.independent_top1.get(name),
+            indep_top1_mass=round(
+                state.independent_top1_mass.get(name, 0.0), 4,
+            ),
+            label=state.labels.get(name),
+            label_source=state.label_source.get(name),
+            revisited=(name in revisited_set),
+        )
+        state.column_history.setdefault(name, []).append(snap)
 
     logger.info(
         "Iteration %d: mean_K=%.4f mean_gap=%.4f mean_bel=%.4f "
@@ -1354,6 +1436,30 @@ def contraction_rate(state: BootstrapState) -> float:
     if prev <= 1e-12:
         return 0.0
     return curr / prev
+
+
+def column_contraction(state: BootstrapState, name: str) -> float | None:
+    """Per-column contraction factor ρ_col over the column's trajectory.
+
+    Returns ``residual_now / residual_prev`` using the column's gap as
+    residual (falls back to K when the prior gap is zero).  ``None``
+    when fewer than two snapshots exist for the column.
+
+    Mirrors :func:`contraction_rate` at the column level: ρ_col < 1
+    means the column is converging, ρ_col → 1 stalled, ρ_col > 1
+    diverging.  Per-column ρ is what bandit-style revisit ordering
+    and Aitken Δ² early-stop (Phase B) consume — Phase A delivers
+    the helper, but does not yet act on it.
+    """
+    hist = state.column_history.get(name, [])
+    if len(hist) < 2:
+        return None
+    prev, curr = hist[-2], hist[-1]
+    if prev.gap > 1e-9:
+        return curr.gap / prev.gap
+    if prev.K > 1e-9:
+        return curr.K / prev.K
+    return None
 
 
 def gap_convergence_rate(state: BootstrapState) -> float:

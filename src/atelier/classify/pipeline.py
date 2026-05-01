@@ -760,8 +760,12 @@ def run_classification_pipeline(
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
-        # Record iteration-0 metrics from initial ML validation
-        record_iteration_metrics(state, column_names, len(disagreements), boot_cfg)
+        # Record iteration-0 metrics from initial ML validation.
+        # No revisits at iteration 0; pass an empty revisited set.
+        record_iteration_metrics(
+            state, column_names, len(disagreements), boot_cfg,
+            revisited_this_iter=set(),
+        )
 
         # Agent-driven convergence (when configured and credentials available)
         if cfg.classify_agent_enabled and (cfg.has_anthropic or cfg.has_bedrock):
@@ -830,6 +834,14 @@ def run_classification_pipeline(
                     "mean_k": round(mean_k, 4),
                 })
 
+                # Snapshot the columns that will be revisited THIS
+                # iteration so the per-column trajectory append (in
+                # record_iteration_metrics below) can mark them
+                # ``revisited=True``.  Captured before _llm_revisit
+                # mutates state.labels and before disagreements is
+                # re-computed for the next iteration.
+                revisited_this_iter: set[str] = set(disagreements)
+
                 _llm_revisit(
                     state, boot_cfg, llm_backend, system_prompt,
                     disagreements, samples_by_name, column_table, category_set,
@@ -885,7 +897,10 @@ def run_classification_pipeline(
                             escalated,
                         )
 
-                record_iteration_metrics(state, column_names, len(disagreements), boot_cfg)
+                record_iteration_metrics(
+                    state, column_names, len(disagreements), boot_cfg,
+                    revisited_this_iter=revisited_this_iter,
+                )
 
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         coverage = _coverage(state, column_names)
@@ -984,6 +999,22 @@ def run_classification_pipeline(
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
         eval_report.write_json(results_dir / "evaluation_report.json")
+
+        # Per-column residual trajectories — column-major view of the
+        # bootstrap loop's convergence behaviour, complementary to the
+        # time-major iteration_history in classifications.  Used for
+        # offline analysis (Phase B/C acceleration backtest), operator
+        # post-mortem on stuck columns, and audit.  See
+        # docs/src/architecture/dst-evidence-independence.md.
+        from dataclasses import asdict as _dc_asdict
+        trajectories_path = results_dir / "column_trajectories.json"
+        trajectories_payload = {
+            name: [_dc_asdict(snap) for snap in hist]
+            for name, hist in state.column_history.items()
+        }
+        trajectories_path.write_text(
+            json.dumps(trajectories_payload, indent=2, default=str) + "\n",
+        )
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 

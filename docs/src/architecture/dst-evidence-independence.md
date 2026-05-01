@@ -453,6 +453,68 @@ existing UI rendering. ``cautious_promoted_code`` lives
 alongside it as a separate field operators consult when
 ``needs_clarification`` is True.
 
+## Per-column residual trajectory
+
+The corpus-wide residual norm + contraction factor establish the
+headline iterative-method diagnostic, but they obscure per-column
+behaviour. `BootstrapState.column_history: dict[str, list[ColumnResidualSnapshot]]`
+captures the column-major view: one snapshot per labeled column per
+iteration, populated in `record_iteration_metrics` after each
+iteration's ML validation completes. Each snapshot records the
+column's gap, belief, K, indep-tier top-1 code/mass, label, label
+source, and a `revisited` flag indicating whether
+`_llm_revisit` touched the column in that iteration.
+
+`bootstrap.column_contraction(state, name)` mirrors the corpus-wide
+`contraction_rate` at the column level: ρ_col = current_gap /
+prev_gap (falling back to K when gap is zero), or `None` when the
+column has fewer than two snapshots. ρ_col < 1 means the column is
+converging; ρ_col → 1 stalled; ρ_col > 1 diverging. Per-column ρ
+exposes the empirical contraction distribution that corpus
+aggregates obscure — operators see *which specific columns* are
+converging vs stalling.
+
+The full trajectory is written to
+`build/results/{run_id}/column_trajectories.json` at pipeline end
+alongside `classifications.json`, enabling offline analysis,
+operator post-mortem, and audit. The agent loop's
+`iteration_history` carries a summarized view (per-column
+gap/bel/K sequences plus ρ_col) so the agent can reason about
+which columns are moving.
+
+This trajectory infrastructure is the **substrate** for any
+future acceleration scheme. Three plausible Phase B / Phase C
+extensions all consume it:
+
+* **Bandit-style revisit ordering** (Phase B) — extend
+  `_identify_disagreements` to mix `expected_revisit_gain(name)`
+  derived from history into the sort key. Revisits ordered by
+  predicted marginal residual reduction. Default-off knob;
+  trajectory data backs it.
+
+* **Aitken Δ² early-stop** (Phase B) — for columns with ≥3
+  snapshots and a clean linear-convergence pattern, predict the
+  limit and skip further revisits when the predicted gap is
+  below `cfg.gap_threshold`. Saves LLM cost on the predictable
+  tail. Default-off knob; trajectory data backs it.
+
+* **Limited per-column belief-mass Anderson** (Phase C, deferred)
+  — only on columns that genuinely oscillate (per-column ρ near 1
+  with sign-changing residual differences). Phase A's trajectories
+  let us measure whether such a population exists before shipping
+  any Anderson code.
+
+The honest framing: classical Anderson acceleration on the full
+belief-vector iteration is poorly suited to LLM-driven dynamics
+(stochastic T, mostly-static state, discrete labels, targeted-not-
+uniform revisit). What's value-add given the problem structure is
+the per-column trajectory data itself — operators see per-column
+convergence behaviour, future acceleration schemes have real
+per-column data to operate on, and we can decide between bandit /
+Aitken / Anderson empirically rather than rhetorically. Phase A
+ships that substrate; Phase B and Phase C are gated on what the
+substrate reveals.
+
 ## Pattern-target alias resolver
 
 A second, narrower bug surfaced during investigation: the static

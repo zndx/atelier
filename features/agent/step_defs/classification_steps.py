@@ -925,6 +925,178 @@ def step_contraction_approx(context, n, expected):
     )
 
 
+# ── Per-column trajectory + ρ_col ───────────────────────────────
+
+
+@given("a BootstrapState with three labeled columns")
+def step_state_three_columns(context):
+    from atelier.classify.bootstrap import BootstrapState, BootstrapConfig
+    state = BootstrapState()
+    cfg = BootstrapConfig()
+    column_names = ["a", "b", "c"]
+    for n in column_names:
+        state.labels[n] = "acme.misc"
+        state.label_source[n] = "llm"
+        state.ml_belief[n] = 0.55
+        state.ml_plausibility[n] = 0.85
+        state.ml_conflict[n] = 0.40
+    context.traj_state = state
+    context.traj_cfg = cfg
+    context.traj_columns = column_names
+
+
+@when("I record three successive iteration metrics")
+def step_record_three_iterations(context):
+    from atelier.classify.bootstrap import record_iteration_metrics
+    state = context.traj_state
+    for i in range(3):
+        state.iteration = i
+        record_iteration_metrics(
+            state, context.traj_columns, 0, context.traj_cfg,
+            revisited_this_iter=set(),
+        )
+
+
+@then("state.column_history has an entry for each labeled column")
+def step_column_history_complete(context):
+    state = context.traj_state
+    for name in context.traj_columns:
+        assert name in state.column_history, (
+            f"Expected {name!r} in column_history; got {list(state.column_history)}"
+        )
+
+
+@then("each column's snapshot sequence has length {n:d}")
+def step_snapshot_sequence_length(context, n):
+    state = context.traj_state
+    for name in context.traj_columns:
+        actual = len(state.column_history[name])
+        assert actual == n, (
+            f"Expected {n} snapshots for {name!r}; got {actual}"
+        )
+
+
+@then("each column's iteration sequence is contiguous starting at {start:d}")
+def step_snapshot_iter_contiguous(context, start):
+    state = context.traj_state
+    for name in context.traj_columns:
+        iters = [s.iteration for s in state.column_history[name]]
+        expected = list(range(start, start + len(iters)))
+        assert iters == expected, (
+            f"Column {name!r} iteration sequence {iters} != expected {expected}"
+        )
+
+
+@when("I record iteration {n:d} with no revisits")
+def step_record_no_revisit(context, n):
+    from atelier.classify.bootstrap import record_iteration_metrics
+    if not hasattr(context, "traj_state"):
+        # Allow this step to be the first if the column-fixture wasn't built.
+        from atelier.classify.bootstrap import BootstrapState, BootstrapConfig
+        state = BootstrapState()
+        cfg = BootstrapConfig()
+        cols = ["a", "b", "c"]
+        for c in cols:
+            state.labels[c] = "acme.misc"
+            state.label_source[c] = "llm"
+            state.ml_belief[c] = 0.55
+            state.ml_plausibility[c] = 0.85
+            state.ml_conflict[c] = 0.40
+        context.traj_state = state
+        context.traj_cfg = cfg
+        context.traj_columns = cols
+    context.traj_state.iteration = n
+    record_iteration_metrics(
+        context.traj_state, context.traj_columns, 0, context.traj_cfg,
+        revisited_this_iter=set(),
+    )
+
+
+@when('I record iteration {n:d} with column "{col}" revisited')
+def step_record_with_revisit(context, n, col):
+    from atelier.classify.bootstrap import record_iteration_metrics
+    context.traj_state.iteration = n
+    # Improve the revisited column's residuals slightly so the
+    # snapshot reflects post-revisit state.
+    context.traj_state.ml_belief[col] = 0.78
+    context.traj_state.ml_conflict[col] = 0.18
+    context.traj_state.label_source[col] = "llm_revisit"
+    record_iteration_metrics(
+        context.traj_state, context.traj_columns, 0, context.traj_cfg,
+        revisited_this_iter={col},
+    )
+
+
+@then('column "{col}" snapshot at iteration {n:d} has revisited={flag}')
+def step_snapshot_revisited(context, col, n, flag):
+    state = context.traj_state
+    snap = next((s for s in state.column_history[col] if s.iteration == n), None)
+    assert snap is not None, f"No snapshot for column {col!r} at iteration {n}"
+    expected = flag.lower() == "true"
+    assert snap.revisited == expected, (
+        f"Column {col!r} snapshot at iteration {n}: revisited={snap.revisited}, expected {expected}"
+    )
+
+
+@given("a BootstrapState with one column whose gap sequence is {g0:g}, {g1:g}, {g2:g}")
+def step_state_with_gap_sequence(context, g0, g1, g2):
+    from atelier.classify.bootstrap import (
+        BootstrapState, BootstrapConfig, record_iteration_metrics,
+    )
+    state = BootstrapState()
+    cfg = BootstrapConfig()
+    name = "a"
+    state.labels[name] = "acme.misc"
+    state.label_source[name] = "llm"
+    state.ml_plausibility[name] = 0.90
+    state.ml_conflict[name] = 0.20
+    for i, g in enumerate([float(g0), float(g1), float(g2)]):
+        # Set bel so that pl - bel == g.
+        state.ml_belief[name] = state.ml_plausibility[name] - g
+        state.iteration = i
+        record_iteration_metrics(state, [name], 0, cfg, revisited_this_iter=set())
+    context.traj_state = state
+    context.traj_cfg = cfg
+    context.traj_columns = [name]
+
+
+@then("column_contraction for that column is approximately {expected:g}")
+def step_column_contraction_approx(context, expected):
+    from atelier.classify.bootstrap import column_contraction
+    rho = column_contraction(context.traj_state, context.traj_columns[0])
+    assert rho is not None, "column_contraction returned None"
+    assert abs(rho - float(expected)) < 0.05, (
+        f"column_contraction={rho:.3f} not ≈ {expected}"
+    )
+
+
+@given("a BootstrapState with one column and a single iteration recorded")
+def step_state_single_iter(context):
+    from atelier.classify.bootstrap import (
+        BootstrapState, BootstrapConfig, record_iteration_metrics,
+    )
+    state = BootstrapState()
+    cfg = BootstrapConfig()
+    name = "a"
+    state.labels[name] = "acme.misc"
+    state.label_source[name] = "llm"
+    state.ml_belief[name] = 0.55
+    state.ml_plausibility[name] = 0.85
+    state.ml_conflict[name] = 0.40
+    state.iteration = 0
+    record_iteration_metrics(state, [name], 0, cfg, revisited_this_iter=set())
+    context.traj_state = state
+    context.traj_cfg = cfg
+    context.traj_columns = [name]
+
+
+@then("column_contraction for that column is None")
+def step_column_contraction_none(context):
+    from atelier.classify.bootstrap import column_contraction
+    rho = column_contraction(context.traj_state, context.traj_columns[0])
+    assert rho is None, f"Expected None; got {rho!r}"
+
+
 # ── Universal vocabulary provenance guard ───────────────────────
 
 

@@ -259,7 +259,10 @@ def _handle_revisit_columns(
 
     disagreements = _identify_disagreements(state, all_column_names, boot_cfg)
     new_mean_k = _mean_k(state, all_column_names)
-    record_iteration_metrics(state, all_column_names, len(disagreements), boot_cfg)
+    record_iteration_metrics(
+        state, all_column_names, len(disagreements), boot_cfg,
+        revisited_this_iter=set(column_names_to_revisit),
+    )
 
     return {
         "revisited": len(column_names_to_revisit),
