@@ -761,7 +761,7 @@ def run_classification_pipeline(
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
         # Record iteration-0 metrics from initial ML validation
-        record_iteration_metrics(state, column_names, len(disagreements))
+        record_iteration_metrics(state, column_names, len(disagreements), boot_cfg)
 
         # Agent-driven convergence (when configured and credentials available)
         if cfg.classify_agent_enabled and (cfg.has_anthropic or cfg.has_bedrock):
@@ -885,7 +885,7 @@ def run_classification_pipeline(
                             escalated,
                         )
 
-                record_iteration_metrics(state, column_names, len(disagreements))
+                record_iteration_metrics(state, column_names, len(disagreements), boot_cfg)
 
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         coverage = _coverage(state, column_names)

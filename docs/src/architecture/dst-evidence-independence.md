@@ -6,6 +6,61 @@ why the discount calibration and revisit gate are structured the way
 they are. It is intended to be cited by code reviewers and academic
 readers.
 
+## The pipeline as iterative refinement
+
+Atelier's bootstrap loop is **iterative refinement on a belief-
+assignment vector** B over columns: ``B_{n+1} = T(B_n)``, where T
+composes the LLM sweep, ML validation (CatBoost + SVM), DST fusion,
+and targeted revisit on disagreement. Cast in the language of
+classical numerical analysis (Banach 1922; Saad 2003 §4.1,
+*Iterative Methods for Sparse Linear Systems*), every component of
+the pipeline maps onto a numerical-method primitive:
+
+| Component | Numerical-methods primitive |
+|---|---|
+| Bootstrap loop | Fixed-point iteration on B |
+| LLM sweep | Stochastic operator T_LLM (Robbins-Monro 1951 framing) |
+| ML validation | Deterministic linearization T_ML |
+| DST fusion | Combiner ⊕ producing fused state |
+| Targeted revisit on disagreement | Local smoothing in multigrid (Brandt 1977) |
+| Pl − Bel gap | A posteriori error estimate per column |
+| Conflict K | Nonlinear residual diagnostic |
+| Ontology priors | **Preconditioner** — conditions first-pass output |
+| Reliability discount on derivative sources | **Damping / step-size control** |
+| Hierarchical cosine mass | **Coarse-grid correction** (multigrid) |
+| `cautious_promoted_code` | **Projection onto coarse grid** at level where evidence unambiguous (Smets 1993) |
+| `needs_clarification` | Residual-exceeds-tolerance flag |
+
+The diagnostic that ties the framework together is the
+**residual norm** ``‖r(B)‖`` — a unified scalar measuring distance
+from the fixed point — and the **contraction factor** ``ρ_n =
+‖r_{n+1}‖ / ‖r_n‖``, the headline iterative-method indicator
+(Saad §4.1):
+
+* ``ρ < 1``: contractive — successive iterations reduce residual.
+* ``ρ → 1``: stalled — iterations not making progress; warrants
+  strategy change (different fusion rule, different preconditioner,
+  agent escalation).
+* ``ρ > 1``: diverging — iterations growing the residual.
+
+`bootstrap.residual_norm` and `bootstrap.contraction_rate`
+implement the diagnostic. The unified residual is an L2
+combination of four normalized components: mean(gap) /
+gap_threshold, frac_unclear / clarity_target, mean(K) /
+k_threshold, and frac(indep-tier disagreement at meaningful mass).
+A residual_norm of 1.0 means "at convergence threshold across the
+board"; values <1 are converged. Both are surfaced in
+`IterationMetrics` and the agent loop's `iteration_history`.
+
+This framing is what makes the rest of the design — non-
+distinctness handling, hierarchical aggregation, ontology priors,
+reliability shaping — operate as a cohesive accuracy-targeting
+engine rather than a collection of clever heuristics. Each
+mechanism is a numerical-method primitive in service of driving
+the residual to zero.
+
+
+
 ## The non-distinctness problem
 
 Dempster's rule of combination assumes the bodies of evidence being

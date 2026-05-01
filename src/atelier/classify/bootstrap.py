@@ -26,6 +26,7 @@ FSM, HOCON config, and classification pipeline.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -205,7 +206,22 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
 
 @dataclass
 class IterationMetrics:
-    """Metrics captured at each bootstrap iteration."""
+    """Metrics captured at each bootstrap iteration.
+
+    The bootstrap loop is iterative refinement on a belief-assignment
+    vector B over columns: B_{n+1} = T(B_n), where T composes the
+    LLM sweep, ML validation, DST fusion, and targeted revisit on
+    disagreement.  Per Saad 2003 §4.1 (*Iterative Methods for Sparse
+    Linear Systems*), an iterative method's primary diagnostic is
+    its **residual norm** ``‖r(B)‖`` — a scalar measure of distance
+    from the fixed point — and the **contraction factor** ``ρ_n =
+    ‖r_{n+1}‖ / ‖r_n‖``, which distinguishes contractive (ρ < 1,
+    converging) from stalled (ρ → 1) from diverging (ρ > 1) regimes.
+
+    ``residual_norm`` and ``contraction_rate`` here implement that
+    diagnostic for Atelier's pipeline.  See
+    ``docs/src/architecture/dst-evidence-independence.md``.
+    """
 
     iteration: int
     mean_k: float
@@ -221,6 +237,15 @@ class IterationMetrics:
     mean_gap: float = 0.0        # mean(Pl - Bel) for predicted categories
     mean_bel: float = 0.0        # mean belief for predicted categories
     frac_unclear: float = 0.0    # fraction of columns needing clarification
+    # Numerical-methods convergence diagnostics.  ``residual_norm`` is
+    # a unified scalar combining gap, K, frac_unclear, and indep-tier
+    # disagreement (each normalized so 1.0 means "at threshold" and 0
+    # means "fully converged").  ``contraction_rate`` is ρ_n =
+    # residual_norm / prior_residual_norm; <1 means converging, →1
+    # stalled, >1 diverging (Saad 2003 §4.1).
+    residual_norm: float = 0.0
+    contraction_rate: float = 0.0
+    indep_tier_disagreement_frac: float = 0.0
 
 
 @dataclass
@@ -1158,8 +1183,22 @@ def record_iteration_metrics(
     state: BootstrapState,
     column_names: list[str],
     disagreement_count: int,
+    cfg: BootstrapConfig | None = None,
 ) -> IterationMetrics:
     """Capture metrics for the current iteration."""
+    # Compute the unified residual + cross-source disagreement
+    # fraction.  When cfg is provided (the production path), these
+    # become first-class diagnostics tracking convergence per Saad
+    # 2003 §4.1.  Falls back gracefully when cfg is omitted (legacy
+    # callers / tests).
+    r_norm = 0.0
+    indep_frac = 0.0
+    if cfg is not None:
+        r_norm = round(residual_norm(state, column_names, cfg), 4)
+        indep_frac = round(
+            _indep_tier_disagreement_frac(state, column_names, cfg), 4,
+        )
+
     metrics = IterationMetrics(
         iteration=state.iteration,
         mean_k=round(_mean_k(state, column_names), 4),
@@ -1172,13 +1211,21 @@ def record_iteration_metrics(
         frac_unclear=round(_frac_needing_clarification(
             state, column_names,
         ), 4),
+        residual_norm=r_norm,
+        indep_tier_disagreement_frac=indep_frac,
     )
     state.iteration_metrics.append(metrics)
+    # Contraction rate needs the just-appended row, so compute after.
+    metrics.contraction_rate = round(contraction_rate(state), 4)
+
     logger.info(
         "Iteration %d: mean_K=%.4f mean_gap=%.4f mean_bel=%.4f "
-        "unclear=%.1f%% disagreements=%d coverage=%.1f%%",
+        "unclear=%.1f%% disagreements=%d coverage=%.1f%% "
+        "‖r‖=%.3f ρ=%.3f indep_disagree=%.1f%%",
         metrics.iteration, metrics.mean_k, metrics.mean_gap, metrics.mean_bel,
         metrics.frac_unclear * 100, metrics.disagreements, metrics.coverage * 100,
+        metrics.residual_norm, metrics.contraction_rate,
+        metrics.indep_tier_disagreement_frac * 100,
     )
     return metrics
 
@@ -1193,6 +1240,120 @@ def k_convergence_rate(state: BootstrapState) -> float:
     if len(metrics) < 2:
         return 0.0
     return (metrics[-1].mean_k - metrics[0].mean_k) / (len(metrics) - 1)
+
+
+def _indep_tier_disagreement_frac(
+    state: BootstrapState,
+    column_names: list[str],
+    cfg: BootstrapConfig,
+) -> float:
+    """Fraction of labeled columns where indep-tier consensus
+    disagrees with the LLM at meaningful mass.
+
+    A column contributes to this residual when:
+      - LLM and indep-tier top-1 disagree, AND
+      - indep-tier top-1 mass ≥ ``cfg.indep_revisit_mass_threshold``.
+
+    This is the cross-source soundness component of the unified
+    residual — it measures the fraction of columns where the
+    publicly-grounded sources (cosine, pattern, name_match) are
+    at odds with the LLM-derivative cluster.
+    """
+    labeled = [n for n in column_names if n in state.labels]
+    if not labeled:
+        return 0.0
+    threshold = cfg.indep_revisit_mass_threshold
+    bad = 0
+    for name in labeled:
+        llm_code = state.labels.get(name)
+        indep_code = state.independent_top1.get(name)
+        indep_mass = state.independent_top1_mass.get(name, 0.0)
+        if (
+            llm_code and indep_code
+            and indep_code != llm_code
+            and indep_mass >= threshold
+        ):
+            bad += 1
+    return bad / len(labeled)
+
+
+def residual_norm(
+    state: BootstrapState,
+    column_names: list[str],
+    cfg: BootstrapConfig,
+) -> float:
+    """Unified residual norm ``‖r(B)‖`` for the bootstrap iteration.
+
+    The bootstrap loop is iterative refinement on a belief-assignment
+    vector B; the residual is a scalar measure of distance from
+    convergence (Saad 2003 §4.1).  This implementation combines four
+    normalized components, each scaled so 1.0 means "at convergence
+    threshold" and 0 means "fully converged":
+
+      r_gap = mean(Pl - Bel) / gap_threshold
+      r_unclear = frac_unclear / clarity_target
+      r_K = mean(K) / k_threshold
+      r_indep = frac(indep-tier disagreement at meaningful mass)
+
+    Combined via L2 norm (root-mean-square) so any single component
+    going large dominates while many small components don't add up
+    spuriously:  ``r = sqrt((r_gap^2 + r_unclear^2 + r_K^2 + r_indep^2) / 4)``
+
+    A residual_norm of 1.0 means "at convergence threshold across the
+    board"; values <1 are converged, >1 are not.  Tracking the
+    residual across iterations exposes the contraction factor ρ_n =
+    r_n / r_{n-1} — see ``contraction_rate``.
+    """
+    if not column_names:
+        return 0.0
+
+    # Each component normalized to its convergence threshold.
+    gap = _mean_gap(state, column_names)
+    r_gap = gap / cfg.gap_threshold if cfg.gap_threshold > 0 else gap
+
+    frac_unc = _frac_needing_clarification(
+        state, column_names,
+        gap_threshold=cfg.gap_threshold, bel_floor=cfg.bel_floor,
+    )
+    r_unclear = (
+        frac_unc / cfg.clarity_target if cfg.clarity_target > 0 else frac_unc
+    )
+
+    mean_k = _mean_k(state, column_names)
+    r_k = mean_k / cfg.k_threshold if cfg.k_threshold > 0 else mean_k
+
+    r_indep = _indep_tier_disagreement_frac(state, column_names, cfg)
+
+    components = [r_gap, r_unclear, r_k, r_indep]
+    sq = sum(c * c for c in components) / len(components)
+    return math.sqrt(sq)
+
+
+def contraction_rate(state: BootstrapState) -> float:
+    """Per-iteration contraction factor ρ_n = ‖r_{n+1}‖ / ‖r_n‖.
+
+    Following Saad 2003 §4.1, the contraction factor is the
+    headline diagnostic for any iterative method:
+
+      * ρ < 1: converging — successive iterations reduce residual.
+      * ρ → 1: stalled — iterations not making progress.
+      * ρ > 1: diverging — iterations growing residual.
+
+    For a linear contraction, ρ is constant and equals the
+    asymptotic convergence rate.  For nonlinear iterations, ρ is
+    typically estimated empirically per-step (this function).
+
+    Returns 0.0 if fewer than two iterations have been recorded
+    or the prior residual is zero (avoid division-by-zero).
+    """
+    metrics = state.iteration_metrics
+    if len(metrics) < 2:
+        return 0.0
+    prev = metrics[-2].residual_norm
+    curr = metrics[-1].residual_norm
+    if prev <= 1e-12:
+        return 0.0
+    return curr / prev
 
 
 def gap_convergence_rate(state: BootstrapState) -> float:

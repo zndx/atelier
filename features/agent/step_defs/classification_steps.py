@@ -849,6 +849,82 @@ def step_rationale_mentions(context, needle):
     )
 
 
+# ── Numerical-methods convergence diagnostics ───────────────────
+
+
+@given("a BootstrapState with high gap, conflict, and indep-tier disagreement")
+def step_state_high_residual(context):
+    from atelier.classify.bootstrap import BootstrapState, BootstrapConfig
+    state = BootstrapState()
+    cfg = BootstrapConfig()
+    column_names = ["a", "b", "c", "d", "e"]
+    for n in column_names:
+        state.labels[n] = "0.1"
+        state.ml_belief[n] = 0.45
+        state.ml_plausibility[n] = 0.85
+        state.ml_conflict[n] = 0.55
+    state.independent_top1["a"] = "1.1.1.1.1"
+    state.independent_top1_mass["a"] = 0.55
+    context.numerical_state = state
+    context.numerical_cfg = cfg
+    context.numerical_columns = column_names
+
+
+@when("I record iteration {n:d} metrics")
+def step_record_iteration(context, n):
+    from atelier.classify.bootstrap import record_iteration_metrics
+    context.numerical_state.iteration = n
+    record_iteration_metrics(
+        context.numerical_state,
+        context.numerical_columns,
+        disagreement_count=2,
+        cfg=context.numerical_cfg,
+    )
+
+
+@when("the state improves on the next iteration")
+def step_state_improves(context):
+    state = context.numerical_state
+    for n in context.numerical_columns:
+        state.ml_belief[n] = 0.78
+        state.ml_plausibility[n] = 0.85
+        state.ml_conflict[n] = 0.18
+    state.independent_top1_mass["a"] = 0.20
+
+
+@when("the state does not change")
+def step_state_stalls(context):
+    pass  # leave state untouched between iterations
+
+
+@then("the residual_norm decreases between iterations")
+def step_residual_decreases(context):
+    metrics = context.numerical_state.iteration_metrics
+    assert len(metrics) >= 2, "Need at least 2 iterations recorded"
+    assert metrics[-1].residual_norm < metrics[-2].residual_norm, (
+        f"Expected residual to decrease; got {metrics[-2].residual_norm:.3f} "
+        f"→ {metrics[-1].residual_norm:.3f}"
+    )
+
+
+@then("the contraction_rate at iteration {n:d} is below {threshold:g}")
+def step_contraction_below(context, n, threshold):
+    metrics = context.numerical_state.iteration_metrics
+    rate = metrics[n].contraction_rate
+    assert rate < float(threshold), (
+        f"Iteration {n} contraction_rate {rate:.3f} not < {threshold}"
+    )
+
+
+@then("the contraction_rate at iteration {n:d} is approximately {expected:g}")
+def step_contraction_approx(context, n, expected):
+    metrics = context.numerical_state.iteration_metrics
+    rate = metrics[n].contraction_rate
+    assert abs(rate - float(expected)) < 0.05, (
+        f"Iteration {n} contraction_rate {rate:.3f} not ≈ {expected}"
+    )
+
+
 # ── Universal vocabulary provenance guard ───────────────────────
 
 

@@ -259,7 +259,7 @@ def _handle_revisit_columns(
 
     disagreements = _identify_disagreements(state, all_column_names, boot_cfg)
     new_mean_k = _mean_k(state, all_column_names)
-    record_iteration_metrics(state, all_column_names, len(disagreements))
+    record_iteration_metrics(state, all_column_names, len(disagreements), boot_cfg)
 
     return {
         "revisited": len(column_names_to_revisit),
@@ -325,6 +325,11 @@ def _handle_check_convergence(
                 "frac_unclear": m.frac_unclear,
                 "disagreements": m.disagreements,
                 "coverage": m.coverage,
+                # Numerical-methods diagnostics (Saad 2003 §4.1):
+                # ‖r‖ unified residual norm; ρ contraction factor.
+                "residual_norm": m.residual_norm,
+                "contraction_rate": m.contraction_rate,
+                "indep_tier_disagreement_frac": m.indep_tier_disagreement_frac,
             }
             for m in state.iteration_metrics
         ],

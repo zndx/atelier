@@ -164,6 +164,27 @@ Feature: DST evidence-source independence
     Then promoted_from is null
     And the rationale mentions "commit_threshold"
 
+  Scenario: Unified residual norm reduces under successful refinement
+    # The bootstrap loop is iterative refinement on a belief-
+    # assignment vector.  Per Saad 2003 §4.1 the headline diagnostic
+    # is the residual norm ‖r(B)‖ + the contraction factor ρ_n =
+    # ‖r_{n+1}‖ / ‖r_n‖.  Successful iterations should drop the
+    # residual; ρ < 1 indicates a contractive regime; ρ → 1
+    # indicates a stalled iteration that warrants strategy change.
+    Given a BootstrapState with high gap, conflict, and indep-tier disagreement
+    When I record iteration 0 metrics
+    And the state improves on the next iteration
+    And I record iteration 1 metrics
+    Then the residual_norm decreases between iterations
+    And the contraction_rate at iteration 1 is below 1.0
+
+  Scenario: Stalled iteration surfaces ρ → 1
+    Given a BootstrapState with high gap, conflict, and indep-tier disagreement
+    When I record iteration 0 metrics
+    And the state does not change
+    And I record iteration 1 metrics
+    Then the contraction_rate at iteration 1 is approximately 1.0
+
   Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
     # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
     # and data/sample/ontology.json (300+ leaf OOTB-sample expansion
