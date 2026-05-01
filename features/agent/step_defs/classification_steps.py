@@ -810,6 +810,45 @@ def step_cross_includes_leaf(context, label):
     )
 
 
+@then('the evidence string contains "{needle}"')
+def step_evidence_contains(context, needle):
+    evidence = context.loan_hc.evidence
+    assert needle in evidence, (
+        f"Expected {needle!r} in evidence string:\n{evidence}"
+    )
+
+
+@then('cross_subtree_belief includes a code from the "{prefix}" subtree')
+def step_cross_includes_subtree(context, prefix):
+    matches = [r for r in context.loan_cross if r["code"].startswith(prefix)]
+    assert matches, (
+        f"cross_subtree_belief contains no code starting with {prefix!r}; "
+        f"got: {context.loan_cross}"
+    )
+
+
+@when("I compute cautious_promoted_code at commit threshold {threshold:g}")
+def step_compute_promoted(context, threshold):
+    context.loan_promoted = context.loan_hc.cautious_promoted_code(
+        commit_threshold=float(threshold),
+    )
+
+
+@then("promoted_from is null")
+def step_promoted_from_null(context):
+    assert context.loan_promoted["promoted_from"] is None, (
+        f"Expected promoted_from=null, got {context.loan_promoted}"
+    )
+
+
+@then('the rationale mentions "{needle}"')
+def step_rationale_mentions(context, needle):
+    rationale = context.loan_promoted.get("rationale", "")
+    assert needle in rationale, (
+        f"Expected {needle!r} in rationale: {rationale}"
+    )
+
+
 # ── Universal vocabulary provenance guard ───────────────────────
 
 

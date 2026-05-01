@@ -341,6 +341,63 @@ backward compatibility — operators consume the cautious /
 cross-subtree fields when ``needs_clarification = True`` or when
 the cross-subtree summary surfaces a competing internal node.
 
+## Operator-facing visibility
+
+The fusion mechanisms above can produce mathematically correct
+belief structures that are nonetheless invisible to operators
+when the result-dict surface area is too narrow. Three small
+changes close that gap:
+
+### Evidence string carries per-source codes + competing summary
+
+`HierarchicalClassification.from_combined_evidence` builds the
+``evidence`` field. Previously: ``dst(cosine=0.65, llm=0.77,
+catboost=0.42, svm=0.22) → Internal Non-Sensitive [Bel=0.71,
+...]`` — masses only, not the codes each source voted. Now:
+``dst(cosine→1.4.1.1.1(0.65), llm→0.1(0.77), ...) → Internal
+Non-Sensitive [Bel=0.67, ...] [competing: Sensitive (1)
+Bel=0.26]`` — leaf-level disagreement is visible at a glance,
+and a "competing" trailer surfaces non-trivial belief in any
+non-predicted top-level subtree.
+
+### `cross_subtree_belief` is always informative
+
+The 0.5 absolute threshold previously suppressed competing-
+subtree alternatives whenever Dempster fusion compressed their
+mass below the headline bar (the common case when one source
+dominates). The default is now lower (0.20) AND a
+``always_include_top_per_subtree`` rule guarantees that the
+highest-belief leaf and highest-belief internal node from each
+top-level subtree appears in the result regardless of
+threshold (subject to a small ``min_bel`` floor so we don't
+flood the result with noise). Operators always see the
+structured "what does each subtree look like?" view.
+
+### `cautious_promoted_code` (Smets least-commitment)
+
+Per Smets 1993 (*Belief Functions: The Disjunctive Rule of
+Combination and the Generalized Bayesian Theorem* and related
+work on least-commitment), when a fine-grained decision is
+unsupported by evidence the principled response is to commit
+only at the level of granularity where evidence IS unambiguous.
+This is exactly the mechanism for "the predicted leaf is not
+the right answer; the parent code is more honest."
+
+`HierarchicalClassification.cautious_promoted_code` returns
+either the predicted leaf (no promotion) or the most-specific
+code anywhere in the hierarchy whose belief meets the
+``commit_threshold`` (default 0.55). Promotion fires only when
+``needs_clarification = True`` — operators get the leaf
+prediction by default; the cautious promotion is the
+epistemically-honest fallback when the system itself flags the
+prediction as uncertain.
+
+The ``predicted_code`` field retains its leaf-argmax semantics
+for backward compatibility with Atlas governance sync and
+existing UI rendering. ``cautious_promoted_code`` lives
+alongside it as a separate field operators consult when
+``needs_clarification`` is True.
+
 ## Pattern-target alias resolver
 
 A second, narrower bug surfaced during investigation: the static

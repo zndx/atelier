@@ -442,22 +442,46 @@ class HierarchicalClassification:
             })
         return path
 
-    def cross_subtree_belief(self, bel_threshold: float = 0.5) -> list[dict]:
-        """Return every code (leaf or internal) where Bel ≥ threshold,
-        anywhere in the hierarchy.
+    def cross_subtree_belief(
+        self,
+        bel_threshold: float = 0.20,
+        *,
+        always_include_top_per_subtree: bool = True,
+        min_bel: float = 0.05,
+    ) -> list[dict]:
+        """Return belief for codes across the full hierarchy, surfacing
+        cross-subtree alternatives that ``belief_path`` cannot show.
 
-        Unlike :meth:`belief_path`, which is confined to the predicted
-        code's ancestor chain, this walks the full frame — every
-        singleton and every internal-node focal element — and returns
-        the codes that carry sufficient belief.  Used by
-        :meth:`cautious_code` and surfaced to operators so cross-
-        subtree disagreement is visible: when the LLM votes a leaf in
-        subtree A but cosine evidence localizes to subtree B, both are
-        legitimate "honest" classifications and the operator should
-        see both.
+        Walks every singleton AND every internal-node focal element in
+        the frame and returns the structured belief view.  Three
+        inclusion rules cooperate:
+
+        1. **Threshold inclusion** — any code (leaf or internal) where
+           ``Bel ≥ bel_threshold`` is included.  Default 0.20 surfaces
+           non-trivial competing belief without flooding the result;
+           0.5 (the prior default) was too strict to surface
+           alternatives when one source dominates Dempster fusion.
+
+        2. **Top-per-subtree inclusion** — when
+           ``always_include_top_per_subtree`` is True, the highest-
+           belief leaf AND highest-belief internal node from each
+           top-level subtree (grouped by the first code component) is
+           included regardless of threshold, provided ``Bel ≥
+           min_bel``.  This guarantees that the operator-facing view
+           always shows the "competing subtree" candidate even when
+           Dempster fusion has compressed its mass below the headline
+           threshold — the loan-amount-as-non-sensitive failure mode
+           was structurally invisible without this rule.
+
+        3. **De-duplication** — each code appears at most once.
 
         Sorted most-specific first (deepest code by dot count); ties
         broken by descending belief.
+
+        Used by :meth:`cautious_code` and surfaced to operators in the
+        result dict (``cross_subtree_belief``) so cross-subtree
+        disagreement between LLM (leaf vote) and cosine / pattern /
+        name_match (subtree localization) is always visible.
         """
         if self.belief_assignment is None or self._frame is None:
             return []
@@ -474,33 +498,172 @@ class HierarchicalClassification:
             )
             return cat.label if cat else code
 
+        def _add(code: str, fe, kind: str) -> None:
+            if code in seen:
+                return
+            bel = self.belief_assignment.belief(fe)
+            seen.add(code)
+            rows.append({
+                "code": code,
+                "label": _resolve_label(code),
+                "bel": round(bel, 3),
+                "pl": round(self.belief_assignment.plausibility(fe), 3),
+                "depth": code.count("."),
+                "kind": kind,
+            })
+
+        # Pass 1: threshold inclusion.
         for code, fe in self._frame.singletons.items():
-            bel = self.belief_assignment.belief(fe)
-            if bel >= bel_threshold and code not in seen:
-                seen.add(code)
-                rows.append({
-                    "code": code,
-                    "label": _resolve_label(code),
-                    "bel": round(bel, 3),
-                    "pl": round(self.belief_assignment.plausibility(fe), 3),
-                    "depth": code.count("."),
-                    "kind": "leaf",
-                })
+            if self.belief_assignment.belief(fe) >= bel_threshold:
+                _add(code, fe, "leaf")
         for code, fe in self._frame.internal_nodes.items():
-            bel = self.belief_assignment.belief(fe)
-            if bel >= bel_threshold and code not in seen:
-                seen.add(code)
-                rows.append({
-                    "code": code,
-                    "label": _resolve_label(code),
-                    "bel": round(bel, 3),
-                    "pl": round(self.belief_assignment.plausibility(fe), 3),
-                    "depth": code.count("."),
-                    "kind": "internal",
-                })
+            if self.belief_assignment.belief(fe) >= bel_threshold:
+                _add(code, fe, "internal")
+
+        # Pass 2: top-per-subtree inclusion.  Group by first code
+        # component (the top-level subtree root); for each group,
+        # add the highest-belief leaf and the highest-belief
+        # internal node above ``min_bel``.
+        if always_include_top_per_subtree:
+            def _root(code: str) -> str:
+                return code.split(".", 1)[0] if code else ""
+
+            roots: dict[str, dict[str, tuple[str, object, float]]] = {}
+            for code, fe in self._frame.singletons.items():
+                bel = self.belief_assignment.belief(fe)
+                if bel < min_bel:
+                    continue
+                r = _root(code)
+                slot = roots.setdefault(r, {})
+                cur = slot.get("leaf")
+                if cur is None or bel > cur[2]:
+                    slot["leaf"] = (code, fe, bel)
+            for code, fe in self._frame.internal_nodes.items():
+                bel = self.belief_assignment.belief(fe)
+                if bel < min_bel:
+                    continue
+                r = _root(code)
+                slot = roots.setdefault(r, {})
+                cur = slot.get("internal")
+                if cur is None or bel > cur[2]:
+                    slot["internal"] = (code, fe, bel)
+            for slot in roots.values():
+                if "leaf" in slot:
+                    code, fe, _ = slot["leaf"]
+                    _add(code, fe, "leaf")
+                if "internal" in slot:
+                    code, fe, _ = slot["internal"]
+                    _add(code, fe, "internal")
 
         rows.sort(key=lambda r: (-r["depth"], -r["bel"]))
         return rows
+
+    def cautious_promoted_code(
+        self,
+        commit_threshold: float = 0.55,
+        *,
+        require_clarification: bool = True,
+    ) -> dict:
+        """Apply Smets' least-commitment principle to surface a more
+        honest prediction than the leaf-argmax when evidence is
+        conflicted.
+
+        Returns a dict ``{"code", "label", "depth", "bel",
+        "promoted_from", "rationale"}`` describing either:
+
+        * the predicted leaf (no promotion) — ``promoted_from`` is
+          None and ``rationale`` explains why no promotion fired; OR
+        * a more-general code (an internal node, possibly in a
+          *different* subtree from the predicted leaf) whose belief
+          is above ``commit_threshold`` and which is the most-
+          specific such code in the frame.
+
+        Promotion fires only when ``require_clarification`` is True
+        AND ``self.needs_clarification`` is True — operators get the
+        leaf prediction by default; the cautious promotion is the
+        epistemically-honest *fallback* when the system itself flags
+        the prediction as uncertain.
+
+        Smets 1993 (*Belief Functions: The Disjunctive Rule of
+        Combination and the Generalized Bayesian Theorem*) and
+        related work on least-commitment: when a fine-grained
+        decision is unsupported by evidence, the principled response
+        is to commit only at the level of granularity where evidence
+        IS unambiguous.  Our leaf prediction stays the user-facing
+        ``predicted_code`` for backward compatibility; the promoted
+        code lives in a separate field operators can consult when
+        ``needs_clarification`` is True.
+        """
+        if self.category is None:
+            return {
+                "code": "",
+                "label": "",
+                "depth": 0,
+                "bel": 0.0,
+                "promoted_from": None,
+                "rationale": "no predicted category",
+            }
+
+        predicted_code = self.category.code
+        predicted_bel = self.belief_at(predicted_code)
+        predicted_label = getattr(self.category, "label", predicted_code)
+        predicted_depth = predicted_code.count(".")
+
+        no_promote = {
+            "code": predicted_code,
+            "label": predicted_label,
+            "depth": predicted_depth,
+            "bel": round(predicted_bel, 3),
+            "promoted_from": None,
+            "rationale": "predicted leaf retained",
+        }
+
+        if require_clarification and not self.needs_clarification:
+            no_promote["rationale"] = "prediction is settled (needs_clarification=False)"
+            return no_promote
+
+        # If the predicted leaf already has Bel ≥ commit_threshold,
+        # no promotion needed — the leaf is unambiguous enough.
+        if predicted_bel >= commit_threshold:
+            no_promote["rationale"] = (
+                f"predicted leaf Bel={predicted_bel:.2f} ≥ commit_threshold "
+                f"{commit_threshold:.2f}"
+            )
+            return no_promote
+
+        # Find the most-specific code anywhere in the frame whose
+        # belief meets the commit threshold.
+        rows = self.cross_subtree_belief(bel_threshold=commit_threshold)
+        if not rows:
+            no_promote["rationale"] = (
+                f"no code anywhere reaches commit_threshold "
+                f"{commit_threshold:.2f}; retained predicted leaf"
+            )
+            return no_promote
+
+        # Most-specific first; if the top row IS the predicted code,
+        # no promotion (we'd be promoting to ourselves).
+        top = rows[0]
+        if top["code"] == predicted_code:
+            no_promote["rationale"] = (
+                f"predicted leaf is already the most-specific code with "
+                f"Bel ≥ {commit_threshold:.2f}"
+            )
+            return no_promote
+
+        return {
+            "code": top["code"],
+            "label": top["label"],
+            "depth": top["depth"],
+            "bel": top["bel"],
+            "promoted_from": predicted_code,
+            "rationale": (
+                f"predicted leaf {predicted_code} (Bel={predicted_bel:.2f}) "
+                f"below commit_threshold {commit_threshold:.2f}; promoted to "
+                f"most-specific code with Bel≥{commit_threshold:.2f} "
+                f"(needs_clarification=True; Smets least-commitment)"
+            ),
+        }
 
     def cautious_code(self, bel_threshold: float = 0.7) -> str:
         """Return the most-specific code anywhere in the hierarchy
@@ -590,14 +753,23 @@ class HierarchicalClassification:
         if cat is None and hasattr(category_set, "all_by_code"):
             cat = category_set.all_by_code.get(best_code)
 
-        # Build evidence string
+        # Build evidence string with per-source top-1 *code* (not just
+        # mass) so operators can see at a glance which source voted
+        # which code — disagreement at the leaf level is then visible
+        # without consulting the evidence_sources field separately.
         source_parts = []
         for name, ba in source_masses.items():
-            best_mass = max(
-                (m for fe, m in ba.masses.items() if len(fe.codes) == 1),
-                default=0.0,
-            )
-            source_parts.append(f"{name}={best_mass:.3f}")
+            top: tuple[float, str | None] = (0.0, None)
+            for fe, m in ba.masses.items():
+                if len(fe.codes) != 1:
+                    continue
+                code = next(iter(fe.codes))
+                if m > top[0]:
+                    top = (m, code)
+            if top[1]:
+                source_parts.append(f"{name}→{top[1]}({top[0]:.2f})")
+            else:
+                source_parts.append(f"{name}=0.000")
 
         bel = combined.belief(frame.singleton(best_code))
         pl = combined.plausibility(frame.singleton(best_code))
@@ -613,6 +785,38 @@ class HierarchicalClassification:
         )
         if confusable_parts:
             evidence += f" [confusable: {', '.join(confusable_parts)}]"
+
+        # Cross-subtree alternative summary — when a non-predicted
+        # subtree's internal node carries non-trivial belief,
+        # surface it inline so the operator sees the competing
+        # honest answer alongside the predicted leaf.  The strict
+        # 0.5 threshold on cross_subtree_belief is too high to
+        # surface alternatives when the LLM dominates fusion (Bel
+        # in competing subtrees gets normalized down by Dempster
+        # against a confident LLM); use a lower 0.15 absolute
+        # threshold here to expose the conflict where it matters.
+        predicted_subtree_root = best_code.split(".")[0] if best_code else ""
+        competing_internals: list[tuple[str, str, float]] = []
+        for code, fe in frame.internal_nodes.items():
+            if not code:
+                continue
+            if code.split(".")[0] == predicted_subtree_root:
+                continue  # same subtree as the prediction — skip
+            ib = combined.belief(fe)
+            if ib >= 0.15:
+                anc = (
+                    getattr(category_set, "all_by_code", {}).get(code)
+                    or getattr(category_set, "by_code", {}).get(code)
+                )
+                label = anc.label if anc else code
+                competing_internals.append((code, label, ib))
+        if competing_internals:
+            competing_internals.sort(key=lambda c: -c[2])
+            top_competing = competing_internals[0]
+            evidence += (
+                f" [competing: {top_competing[1]} "
+                f"({top_competing[0]}) Bel={top_competing[2]:.2f}]"
+            )
 
         return cls(
             category=cat,

@@ -130,6 +130,40 @@ Feature: DST evidence-source independence
     Then cross_subtree_belief includes "Financial Data" as an internal-node entry
     And cross_subtree_belief includes "Internal Non-Sensitive" as a leaf entry
 
+  Scenario: Evidence string surfaces per-source top-1 codes
+    # The evidence summary previously showed only mass values per
+    # source (e.g. "cosine=0.65, llm=0.77") which hid leaf-level
+    # disagreement.  Now shows source→code(mass) so operators see
+    # which code each source voted, making cross-source conflict
+    # visible at a glance.
+    Given a HierarchicalClassification where the LLM voted "0.1" but cosine localizes to "Financial Data"
+    Then the evidence string contains "cosine→"
+    And the evidence string contains "llm→"
+    And the evidence string contains "→ Internal Non-Sensitive"
+
+  Scenario: Evidence string appends competing-subtree summary when present
+    Given a HierarchicalClassification where the LLM voted "0.1" but cosine localizes to "Financial Data"
+    Then the evidence string contains "competing"
+
+  Scenario: cross_subtree_belief surfaces top-per-subtree alternatives below the threshold
+    # The structured cross-subtree view always includes the highest-
+    # belief leaf and internal node from each top-level subtree
+    # regardless of the absolute threshold, so operators see the
+    # competing subtree even when Dempster fusion compresses its
+    # mass below the headline bar.
+    Given a HierarchicalClassification where the LLM voted "0.1" but cosine localizes to "Financial Data"
+    When I list cross_subtree_belief at threshold 0.50
+    Then cross_subtree_belief includes a code from the "1." subtree
+
+  Scenario: cautious_promoted_code retains predicted leaf when belief is sufficient
+    # Smets' least-commitment principle: promote only when the
+    # predicted leaf's belief is below the commit threshold AND the
+    # system flags needs_clarification.
+    Given a HierarchicalClassification where the LLM voted "0.1" but cosine localizes to "Financial Data"
+    When I compute cautious_promoted_code at commit threshold 0.55
+    Then promoted_from is null
+    And the rationale mentions "commit_threshold"
+
   Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
     # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
     # and data/sample/ontology.json (300+ leaf OOTB-sample expansion

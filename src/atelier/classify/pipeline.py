@@ -1596,7 +1596,16 @@ def _classify_column(
         # subtree's internal-node parent appears here with its
         # belief mass, even when the predicted leaf sits elsewhere.
         # See docs/src/architecture/dst-evidence-independence.md.
-        "cross_subtree_belief": hc.cross_subtree_belief(0.5),
+        "cross_subtree_belief": hc.cross_subtree_belief(),
+        # Smets' least-commitment promotion — when the predicted
+        # leaf is below the commit threshold AND the system flags
+        # ``needs_clarification``, this field carries the more-
+        # general code where evidence IS unambiguous.  ``predicted_code``
+        # retains its leaf-argmax semantics for backward
+        # compatibility with Atlas governance sync; operators
+        # consult ``cautious_promoted_code`` when the prediction is
+        # flagged as uncertain.
+        "cautious_promoted_code": hc.cautious_promoted_code(),
         # Curated reference (per-column answer key for accuracy checks)
         # attached at sample-load time by the source loader.  The code
         # is a reference for accuracy checking, not a published
