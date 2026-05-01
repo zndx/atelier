@@ -284,35 +284,18 @@ def build_category_table(category_set) -> str:
 
 
 def _sensitive_subtree_summary(category_set) -> str:
-    """Identify the publicly-grounded sensitivity structure when present.
+    """Markdown summary of the sensitivity structure, ICE conventions only.
 
-    Returns a compact Markdown summary the LLM can use to locate the
-    right sensitive parent code when no leaf is a clean fit — but
-    *only* when the loaded vocabulary uses Atelier's own
-    publicly-grounded ICE conventions (``ICE.SENSITIVE.*`` /
-    ``ICE.NONSENSITIVE.*``).  Returns ``""`` for every other shape.
+    When the loaded vocabulary uses Atelier's publicly-grounded
+    ``ICE.SENSITIVE.*`` / ``ICE.NONSENSITIVE.*`` paths, return a
+    compact Markdown block naming the high-sensitivity subtree
+    root, the catch-all, and a few publicly-grounded leaf
+    abbreviations (per ``fixtures/PROVENANCE.md``).  Return ``""``
+    for every other vocabulary shape so the prompt stays silent
+    where we can't verify the sensitivity encoding is publicly
+    grounded.
 
-    The framework deliberately makes **no assumptions about
-    arbitrary taxonomies**.  Customer / domain vocabularies arrive
-    with widely-varying sensitivity encodings — numeric ratings of
-    different scales, string labels, hierarchical conventions
-    derived from the customer's compliance regime, or no
-    sensitivity signal at all.  Inferring a "sensitivity map" from
-    an unfamiliar schema would either fabricate misleading
-    structure (e.g. picking a placeholder ancestor label as a
-    "subtree root") or leak customer-specific encoding into the
-    prompt that we can't verify is publicly grounded.
-
-    For non-ICE vocabularies the LLM still has: (a) the full
-    markdown category table at the top of the system prompt,
-    (b) per-column ontology priors for any column where pattern
-    detection fires, (c) the fixed cost-asymmetry preamble with
-    the decision rule.  That's sufficient to navigate the
-    customer's own taxonomy without the framework guessing at its
-    structure.
-
-    See ``docs/src/architecture/dst-evidence-independence.md`` and
-    ``src/atelier/classify/fixtures/PROVENANCE.md``.
+    See ``docs/src/architecture/dst-evidence-independence.md``.
     """
     cats = getattr(category_set, "all_categories", None)
     if not cats:
@@ -357,72 +340,62 @@ def _sensitive_subtree_summary(category_set) -> str:
     return ""
 
 
-_GOVERNANCE_COST_MODEL_TEXT = (
-    "## Governance Cost Model\n"
+_GOVERNANCE_PERSPECTIVE_TEXT = (
+    "## Sensitivity classification perspective\n"
     "\n"
-    "Data-governance classification is **cost-asymmetric**. Failing to "
-    "flag truly sensitive data (false negative, Type II) exposes "
-    "regulated information and creates compliance liability. Flagging "
-    "non-sensitive data as sensitive (false positive, Type I) creates "
-    "review overhead but is recoverable. Treat the two as if "
-    "cost(FN) ≫ cost(FP).\n"
+    "You're operating in the same problem-space as the BFO and CCO "
+    "information-content-entity ontologies you know well, and the "
+    "privacy regimes (GDPR, HIPAA, PCI DSS) those ontologies overlap "
+    "with. Treat each of the customer's categories as their own "
+    "refinement of those publicly-grounded concepts, and pick "
+    "whichever of their codes best matches the canonical sensitivity "
+    "concept you'd otherwise assign — Personally Identifiable "
+    "Information, Financial Information, Technical Identifier, "
+    "Biometric, and so on.\n"
     "\n"
-    "**Decision rule under uncertainty.** When concrete signals — "
-    "detected patterns (SSN, PAN, IBAN, email, phone, dates of birth, "
-    "monetary amounts), value formats, sibling-column PII context, or "
-    "ontology priors — point toward a sensitive interpretation, prefer "
-    "the closest **sensitive** category over a non-sensitive catch-all, "
-    "even if no leaf is a perfect match. Choose the most specific "
-    "sensitive parent code you can defend rather than dropping the "
-    "column into a generic non-sensitive bucket. When ontology priors "
-    "and pattern detections both point at a sensitive category, treat "
-    "their agreement as strong evidence; prefer that category over your "
-    "own naming-based intuition unless you can articulate why both are "
-    "wrong.\n"
+    "A practical asymmetry: in governance, calling sensitive data "
+    "non-sensitive is a larger error than the reverse. When concrete "
+    "signals — patterns detected on the values, PII-laden sibling "
+    "columns, monetary or identifier value formats, an ontology prior "
+    "pointing sensitive — converge on a sensitive interpretation, "
+    "lean that way even when no leaf is a clean match. Pick the most "
+    "specific sensitive parent you can defend rather than dropping "
+    "the column into a generic non-sensitive bucket. When signals are "
+    "genuinely absent (operational metadata, surrogate keys, "
+    "timestamps, status enums), non-sensitive is the correct call — "
+    "don't reach for sensitive just because of the asymmetry.\n"
     "\n"
-    "**Guard against over-classification.** This preference applies "
-    "*only* when concrete signals exist. Pure operational, structural, "
-    "technical, or audit-metadata fields (timestamps, surrogate keys, "
-    "status enums, system-generated booleans, internal table names) "
-    "with no PII signal remain non-sensitive — do not promote them.\n"
-    "\n"
-    "**Honest confidence calibration.** Report the confidence you "
-    "actually have, not a confidence inflated by this rule. If you "
-    "classify a column as non-sensitive but at least one signal pulls "
-    "the other way, lower your confidence (e.g. 0.55–0.70) and surface "
-    "the sensitive candidate as the top alternative — this flags the "
-    "column for downstream review. Conversely, do not inflate "
-    "confidence on a sensitive choice just because the cost model "
-    "favors caution; report the evidence you actually saw."
+    "Calibrate confidence to what you actually saw, not to this "
+    "asymmetry."
 )
 
 
 def _governance_cost_model_block(summary: str) -> str:
-    """Build the Governance Cost Model section of the system prompt.
+    """Compose the sensitivity-classification perspective section.
 
-    Per Elkan 2001 (*The Foundations of Cost-Sensitive Learning*) and
-    privacy-regime conventions (GDPR Art. 25 data protection by
-    default; HIPAA Safe Harbor; PCI DSS), cost(false-negative) ≫
-    cost(false-positive) for data-sensitivity classification.  The
-    block instructs the LLM to bias toward sensitive parents under
-    uncertainty when concrete signals exist, with explicit guards
-    against over-classification and confidence inflation.
+    Invokes the LLM's existing knowledge of BFO/CCO and the
+    privacy-regime conventions (GDPR Art. 25, HIPAA Safe Harbor,
+    PCI DSS) and frames the classification task as mapping the
+    customer's taxonomy onto those publicly-grounded concepts.
+    Cost-sensitive classification (Elkan 2001, *The Foundations
+    of Cost-Sensitive Learning*) is invoked as a "practical
+    asymmetry" rather than a hard rule — modern LLMs respond
+    better to collaborative framing than to prescriptive
+    checklists.
 
-    When *summary* is non-empty (vocabulary has identifiable
-    sensitivity structure), append it so the LLM can locate the
-    right sensitive parent code by name.  When empty, the fixed
-    preamble stands alone — the model never sees fabricated codes.
+    Appends the per-run sensitivity hierarchy when
+    ``_sensitive_subtree_summary`` produces one (ICE-conventions
+    only); falls back silently otherwise.
     """
     if summary:
         return (
-            f"{_GOVERNANCE_COST_MODEL_TEXT}\n"
+            f"{_GOVERNANCE_PERSPECTIVE_TEXT}\n"
             "\n"
-            "Use the map below to locate the right sensitive parent when "
-            "no leaf fits cleanly:\n"
+            "For reference, this vocabulary's sensitivity hierarchy:\n"
             "\n"
             f"{summary}"
         )
-    return _GOVERNANCE_COST_MODEL_TEXT
+    return _GOVERNANCE_PERSPECTIVE_TEXT
 
 
 def build_system_prompt(category_table: str, category_set=None) -> str:

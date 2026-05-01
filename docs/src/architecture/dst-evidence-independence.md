@@ -539,55 +539,46 @@ recoverable.  Treating the costs as `cost(FN) ≫ cost(FP)` is the
 canonical privacy-regime convention.
 
 Atelier applies this at the **LLM layer** — upstream of fusion —
-via a Governance Cost Model section in the system prompt
-(`llm_backend.build_system_prompt`).  Three components:
+via a *Sensitivity classification perspective* section in the
+system prompt (`llm_backend.build_system_prompt`). The framing is
+deliberately collaborative rather than prescriptive: modern LLMs
+respond better to a colleague's framing than to a compliance
+checklist. Three load-bearing moves:
 
-- **Fixed cost-asymmetry preamble.** Frames Type II vs Type I
-  cost asymmetry in plain terms; gives the LLM a decision rule
-  for when concrete signals (patterns, value formats, sibling
-  PII context, ontology priors) point toward sensitivity:
-  prefer the closest sensitive parent code over the non-
-  sensitive catch-all.
+- **Invoke what the LLM already knows.** The preamble names BFO,
+  CCO, and the privacy regimes (GDPR, HIPAA, PCI DSS) those
+  ontologies overlap with — concepts the model has substantial
+  training exposure to. The customer's taxonomy is framed as
+  "their refinement of those publicly-grounded concepts," and
+  the model is asked to pick whichever of their codes matches
+  the canonical sensitivity concept it would otherwise assign
+  (PII, Financial Information, Technical Identifier, Biometric,
+  etc.). No re-teaching, no rule list — invocation.
 
-- **Vocabulary-aware sensitivity map (ICE-only).**
-  `_sensitive_subtree_summary(category_set)` activates only on
-  Atelier's own publicly-grounded ICE conventions
-  (`ICE.SENSITIVE.*` / `ICE.NONSENSITIVE.*`). When the loaded
-  vocabulary uses these path conventions, the helper emits a
-  Markdown summary naming the sensitive root, the catch-all, and
-  up to three publicly-grounded leaf abbreviations (per
-  `src/atelier/classify/fixtures/PROVENANCE.md`). For every
-  other shape — customer vocabularies, future taxonomies,
-  arbitrary domain extensions — the helper returns `""` and the
-  prompt block degrades to the generic preamble naming no
-  specific codes.
+- **State the asymmetry once, casually.** Cost-sensitive
+  classification appears as "a practical asymmetry: in
+  governance, calling sensitive data non-sensitive is a larger
+  error than the reverse." The over-classification guard is
+  embedded conversationally: "When signals are genuinely absent
+  (operational metadata, surrogate keys, timestamps, status
+  enums), non-sensitive is the correct call — don't reach for
+  sensitive just because of the asymmetry." One sentence on
+  confidence calibration: "Calibrate confidence to what you
+  actually saw, not to this asymmetry."
 
-  The framework deliberately makes **no assumptions about
-  arbitrary taxonomies**. Customer / domain vocabularies arrive
-  with widely-varying sensitivity encodings: numeric ratings of
-  different scales, string labels, hierarchical conventions
-  derived from the customer's compliance regime, or no
-  sensitivity signal at all. Inferring a "sensitivity map" from
-  an unfamiliar schema would either fabricate misleading
-  structure (e.g. picking a placeholder ancestor as a "subtree
-  root") or leak customer-specific encoding into the prompt that
-  we can't verify is publicly grounded. The narrow ICE-only
-  activation is honest: it tells the LLM what the framework
-  knows and stays silent where it doesn't.
-
-  For non-ICE vocabularies the LLM still has: (a) the full
-  markdown category table at the top of the system prompt,
-  (b) per-column ontology priors for any column where pattern
-  detection fires (each prior names a publicly-grounded ICE
-  concept the LLM can translate to the customer's frame),
-  (c) the fixed cost-asymmetry preamble with the decision rule.
-  That is sufficient to navigate any taxonomy without the
-  framework guessing at its sensitivity structure.
-
-- **Honest confidence calibration.** Asks the LLM symmetrically
-  to lower confidence on sensitive-leaning non-sensitive picks
-  AND not to inflate confidence on sensitive picks merely
-  because the cost model favors caution.
+- **Vocabulary-aware sensitivity map, ICE conventions only.**
+  `_sensitive_subtree_summary(category_set)` activates on
+  `ICE.SENSITIVE.*` / `ICE.NONSENSITIVE.*` paths and emits a
+  Markdown block naming the sensitive root, catch-all, and a
+  few publicly-grounded leaf abbreviations (per
+  `src/atelier/classify/fixtures/PROVENANCE.md`). Returns `""`
+  for every other vocabulary shape so the prompt stays silent
+  where the framework can't verify the encoding is publicly
+  grounded. For non-ICE vocabularies the LLM still has the full
+  markdown category table, per-column ontology priors for
+  pattern-bearing columns, and the perspective preamble — that
+  is sufficient to navigate any taxonomy without the framework
+  guessing at its sensitivity structure.
 
 The prompt block is **default-on** for every classification run;
 no config knob.  Built once per pipeline run at
