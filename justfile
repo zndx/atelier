@@ -170,6 +170,15 @@ encrypt-reference:
         build/data/curated_reference.csv > features/fixtures/curated_reference.csv.enc
     @echo "Encrypted features/fixtures/curated_reference.csv.enc"
 
+# ── Governance ────────────────────────────────────────────────────
+
+# Push default.annotations → Atlas as classification typedefs.
+# Idempotent: skips typedefs that already exist (no drift correction).
+# Atlas creds come from ATELIER_ATLAS_URL/USER/PASSWORD via materialized HOCON.
+sync-taxonomy *ARGS:
+    env -i $(cat build/config/atelier.env 2>/dev/null | xargs) PATH="$$PATH" \
+        uv run python -m atelier.governance taxonomy {{ARGS}}
+
 # ── Versioning ────────────────────────────────────────────────────
 
 # Bump version: just bump-version --minor (or --patch, --major, X.Y.Z)

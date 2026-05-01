@@ -39,6 +39,7 @@ class TaxonomyNode:
     label: str  # human-readable, e.g. "Email Address"
     notation: str = ""  # SKOS numeric code, e.g. "1.1.1.1"
     parent_code: str = ""  # e.g. "SENS.PID.CI"
+    description: str = ""  # long-form text for Atlas typedef description; falls back to label
 
     @property
     def super_types(self) -> list[str]:
@@ -79,7 +80,7 @@ def sync_taxonomy_to_atlas(
 
         ok = atlas.ensure_classification(
             node.code,
-            description=node.label,
+            description=node.description or node.label,
             super_types=node.super_types,
             notation=node.notation,
         )

@@ -229,6 +229,23 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "QDRANT_PORT"
     elif _field == "qdrant_grpc_port":
         _env = "QDRANT_GRPC_PORT"
+    # Governance fields use shortened names in HOCON ${?VAR} substitution
+    # (config/base.conf:494-517) — mirror those here so materialization
+    # round-trips correctly under `env -i $(cat build/config/atelier.env...)`.
+    elif _field == "governance_atlas_url":
+        _env = "ATELIER_ATLAS_URL"
+    elif _field == "governance_atlas_username":
+        _env = "ATELIER_ATLAS_USER"
+    elif _field == "governance_atlas_password":
+        _env = "ATELIER_ATLAS_PASSWORD"
+    elif _field == "governance_ranger_url":
+        _env = "ATELIER_RANGER_URL"
+    elif _field == "governance_ranger_username":
+        _env = "ATELIER_RANGER_USER"
+    elif _field == "governance_ranger_password":
+        _env = "ATELIER_RANGER_PASSWORD"
+    elif _field == "governance_cluster_name":
+        _env = "ATELIER_CLUSTER_NAME"
     _FIELD_TO_ENV[_field] = _env
 
 
