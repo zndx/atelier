@@ -683,10 +683,21 @@ class HierarchicalClassification:
         Tie-break is most-specific first, then highest belief.  Falls
         back to the predicted leaf or root when no code meets the
         threshold.
+
+        Important: ``cross_subtree_belief`` returns two kinds of rows
+        — codes that actually clear ``bel_threshold`` (the cautious
+        candidates) and an "always-include-top-per-subtree" fallback
+        intended for operator-facing display.  This method
+        deliberately filters to the former: a fallback row at low
+        belief is informative for the UI but is NOT a code at which
+        evidence is unambiguous, so it must not be returned as the
+        cautious choice.
         """
         rows = self.cross_subtree_belief(bel_threshold=bel_threshold)
-        if rows:
-            return rows[0]["code"]
+        eligible = [r for r in rows if r["bel"] >= bel_threshold]
+        if eligible:
+            # cross_subtree_belief sorts most-specific first; preserve.
+            return eligible[0]["code"]
         # No code meets the threshold — fall back to walking the
         # predicted code's ancestor chain (legacy semantics) so the
         # caller still gets a non-empty answer.
