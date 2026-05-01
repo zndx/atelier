@@ -15,17 +15,17 @@ from behave import given, when, then
 
 @when("I build the system prompt against the universal vocabulary")
 def step_build_prompt_universal(context):
-    from atelier.classify.llm_backend import build_category_table, build_system_prompt
+    from atelier.classify.llm_backend import build_category_tree, build_system_prompt
     from atelier.classify.taxonomy import load_universal_vocabulary
     vocab = load_universal_vocabulary(hierarchical=True)
-    table = build_category_table(vocab)
+    table = build_category_tree(vocab)
     context.system_prompt = build_system_prompt(table, category_set=vocab)
 
 
 @when("I build the system prompt against that fictitious vocabulary")
 def step_build_prompt_fictitious(context):
-    from atelier.classify.llm_backend import build_category_table, build_system_prompt
-    table = build_category_table(context.numeric_vocab)
+    from atelier.classify.llm_backend import build_category_tree, build_system_prompt
+    table = build_category_tree(context.numeric_vocab)
     context.system_prompt = build_system_prompt(table, category_set=context.numeric_vocab)
 
 

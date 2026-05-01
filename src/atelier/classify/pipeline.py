@@ -568,12 +568,12 @@ def run_classification_pipeline(
             should_stop_early,
         )
         from atelier.classify.llm_backend import (
-            build_category_table,
+            build_category_tree,
             build_system_prompt,
         )
 
         boot_cfg = bootstrap_config_from_cfg(cfg)
-        category_table = build_category_table(category_set)
+        category_table = build_category_tree(category_set)
         system_prompt = build_system_prompt(category_table, category_set=category_set)
 
         # Wire config → ml_inference model paths
