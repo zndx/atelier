@@ -93,7 +93,11 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "type": "choice",
         "choices": ["default", "anthropic_direct", "bedrock"],
         "default": "default",
-        "caption_template": "Review backend: {value}.",
+        "captions": {
+            "default": "Follow whatever backend the classify pipeline uses.",
+            "anthropic_direct": "Force direct Anthropic API — enables Opus 4.7 reasoning-budget access.",
+            "bedrock": "Route review calls through Bedrock.",
+        },
     },
     "classify_bootstrap_k_threshold": {
         "hocon_path": "classify.bootstrap.k_threshold",
@@ -619,7 +623,11 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "type": "choice",
         "choices": ["auto", "permutation", "treeshap"],
         "default": "auto",
-        "caption_template": "SHAP method: {value}.",
+        "captions": {
+            "auto": "Auto: GPU PermutationSHAP over 12 named features when available, skips on CPU.",
+            "permutation": "Permutation: force PermutationSHAP regardless of hardware.",
+            "treeshap": "TreeSHAP: fast CatBoost-native — attributes to aggregate embedding group, not the 12 source features.",
+        },
     },
     "classify_shap_top_k": {
         "hocon_path": "classify.shap.top_k",
