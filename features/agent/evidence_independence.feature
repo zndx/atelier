@@ -188,6 +188,57 @@ Feature: DST evidence-source independence
     When the LLM votes internal node "ICE.SENSITIVE.TECHNICAL" at confidence 0.80
     Then the resulting mass function carries singleton mass on "ICE.SENSITIVE.TECHNICAL.IPADDR"
 
+  Scenario: Headline picker selects internal-node parent over a wrong-subtree leaf
+    # Atlas-style governance treats every node as a first-class
+    # tagging target, including for the *headline* prediction.  When
+    # the LLM votes a parent in subtree A (e.g. ``Financial Data``)
+    # at high confidence and cosine localizes to a leaf in subtree B
+    # (e.g. ``Internal Non-Sensitive``), the parent and the leaf
+    # occupy *different* focal elements with their own committed
+    # masses.  The picker iterates both singletons and internal-node
+    # focal elements, ranks by direct mass m(A) (Smets' least-
+    # commitment principle: commit at the level evidence directly
+    # supports — Bel(A) would systematically promote ancestors), and
+    # returns the parent when its committed mass exceeds the
+    # competing leaf's.  Without this, the leaf-only argmax would
+    # silently pick the wrong-subtree leaf and bury the parent in
+    # ``cross_subtree_belief`` where downstream consumers may not
+    # see it.
+    Given a frame from the loan hierarchy
+    And the LLM votes internal node "1.1.1.1" at confidence 0.90 with discount 0.15
+    And cosine localizes to wrong-subtree leaf "0.1" at mass 0.55
+    When I fuse those sources into a HierarchicalClassification
+    Then the headline predicted_code is the internal node "1.1.1.1"
+    And the headline category label is "Financial Data"
+
+  Scenario: Headline picker selects leaf when leaf has its own committed mass within the parent
+    # Sanity check — the parent-aware picker must not over-promote.
+    # When cosine votes a leaf inside the LLM-voted parent (say
+    # ``Salary`` inside ``Financial Data``), Dempster's rule
+    # concentrates mass on the leaf via the intersection
+    # parent ∩ {leaf} = {leaf}.  The leaf ends up with materially
+    # higher direct mass than the parent's residual, and the picker
+    # correctly returns the leaf — Smets least-commitment "go as
+    # specific as the evidence supports".
+    Given a frame from the loan hierarchy
+    And the LLM votes internal node "1.1.1.1" at confidence 0.90 with discount 0.15
+    And cosine localizes to in-subtree leaf "1.1.1.1.1" at mass 0.65
+    When I fuse those sources into a HierarchicalClassification
+    Then the headline predicted_code is the leaf "1.1.1.1.1"
+
+  Scenario: Headline picker excludes Theta and depth-0 root from candidacy
+    # Theta (frame of total ignorance) and the depth-0 root carry
+    # mass under vacuous fusion but are never legitimate tags.  When
+    # every source is vacuous (all mass on Theta), the picker falls
+    # back to the leaf-pignistic argmax so the headline is still a
+    # real category — preserving prior behavior in the no-evidence
+    # case while keeping Theta out of the result.
+    Given a frame from the loan hierarchy
+    And every source is vacuous
+    When I fuse those sources into a HierarchicalClassification
+    Then the headline predicted_code is a depth-1-or-deeper code
+    And the headline predicted_code is not the empty string
+
   Scenario: cautious_promoted_code retains predicted leaf when belief is sufficient
     # Smets' least-commitment principle: promote only when the
     # predicted leaf's belief is below the commit threshold AND the

@@ -1274,3 +1274,110 @@ def step_mass_on_singleton(context, code):
     assert mass > 1e-6, (
         f"Expected non-zero singleton mass on {code!r}; got {mass}"
     )
+
+
+# ── Parent-aware headline picker (Stage 4) ───────────────────────
+
+
+@given('a frame from the loan hierarchy')
+def step_loan_frame(context):
+    from atelier.classify.belief import FrameOfDiscernment
+    context.headline_cs = _build_loan_hierarchy()
+    context.headline_frame = FrameOfDiscernment(context.headline_cs)
+    context.headline_sources = {}
+
+
+@given('the LLM votes internal node "{code}" at confidence {conf:g} with discount {discount:g}')
+def step_headline_llm_votes_parent(context, code, conf, discount):
+    from atelier.classify.mass_functions import llm_to_mass
+    context.headline_sources["llm"] = llm_to_mass(
+        category_code=code,
+        confidence=float(conf),
+        alternatives=[],
+        frame=context.headline_frame,
+        discount=float(discount),
+    )
+
+
+@given('cosine localizes to wrong-subtree leaf "{code}" at mass {mass:g}')
+def step_headline_cosine_wrong_subtree(context, code, mass):
+    # Build a sharp cosine assignment on the wrong-subtree leaf so the
+    # leaf-only argmax would have picked it pre-Stage-4.
+    from atelier.classify.belief import BeliefAssignment
+    frame = context.headline_frame
+    assert code in frame.singletons, f"{code!r} is not a leaf singleton"
+    leaf_fe = frame.singletons[code]
+    m = float(mass)
+    context.headline_sources["cosine"] = BeliefAssignment(
+        masses={leaf_fe: m, frame.theta: 1.0 - m}
+    )
+
+
+@given('cosine localizes to in-subtree leaf "{code}" at mass {mass:g}')
+def step_headline_cosine_in_subtree(context, code, mass):
+    from atelier.classify.belief import BeliefAssignment
+    frame = context.headline_frame
+    assert code in frame.singletons, f"{code!r} is not a leaf singleton"
+    leaf_fe = frame.singletons[code]
+    m = float(mass)
+    context.headline_sources["cosine"] = BeliefAssignment(
+        masses={leaf_fe: m, frame.theta: 1.0 - m}
+    )
+
+
+@given('every source is vacuous')
+def step_headline_vacuous(context):
+    frame = context.headline_frame
+    context.headline_sources = {"llm": frame.vacuous(), "cosine": frame.vacuous()}
+
+
+@when('I fuse those sources into a HierarchicalClassification')
+def step_headline_fuse(context):
+    from atelier.classify.belief import HierarchicalClassification
+    context.headline_hc = HierarchicalClassification.from_combined_evidence(
+        source_masses=context.headline_sources,
+        frame=context.headline_frame,
+        category_set=context.headline_cs,
+    )
+
+
+@then('the headline predicted_code is the internal node "{code}"')
+def step_headline_is_internal(context, code):
+    actual = context.headline_hc.category.code
+    assert actual == code, (
+        f"Expected headline to be internal node {code!r}; got {actual!r} "
+        f"({context.headline_hc.category.label})"
+    )
+    # Confirm it really is treated as an internal node in the frame.
+    assert code in context.headline_frame.internal_nodes, (
+        f"{code!r} is not an internal node in the frame"
+    )
+
+
+@then('the headline category label is "{label}"')
+def step_headline_label(context, label):
+    actual = getattr(context.headline_hc.category, "label", None)
+    assert actual == label, f"Expected label {label!r}; got {actual!r}"
+
+
+@then('the headline predicted_code is the leaf "{code}"')
+def step_headline_is_leaf(context, code):
+    actual = context.headline_hc.category.code
+    assert actual == code, f"Expected leaf headline {code!r}; got {actual!r}"
+    assert code in context.headline_frame.singletons, (
+        f"{code!r} is not a leaf singleton in the frame"
+    )
+
+
+@then('the headline predicted_code is a depth-1-or-deeper code')
+def step_headline_depth_floor(context):
+    code = context.headline_hc.category.code
+    assert code, f"Expected non-empty headline code; got {code!r}"
+    depth = code.count(".")
+    assert depth >= 1, f"Expected depth ≥ 1; got code {code!r} at depth {depth}"
+
+
+@then('the headline predicted_code is not the empty string')
+def step_headline_nonempty(context):
+    code = context.headline_hc.category.code
+    assert code, f"Expected non-empty headline code; got {code!r}"

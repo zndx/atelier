@@ -748,17 +748,64 @@ class HierarchicalClassification:
                 combined = frame.vacuous()
                 conflict = 1.0
 
-        # Find best category via pignistic probability
-        best_code = None
-        best_betp = -1.0
-        for code, singleton in frame.singletons.items():
-            betp = combined.pignistic_probability(singleton)
-            if betp > best_betp:
-                best_betp = betp
-                best_code = code
+        # Pick the headline focal element — Atlas-style "every node is
+        # a first-class tag" + Smets least-commitment.  Iterate both
+        # singletons and internal-node focal elements; rank by *direct*
+        # mass m(A) (not Bel(A), which sums subset masses and would
+        # systematically promote ancestors over their committed
+        # descendants).  Tie-break: most-specific first (deeper code
+        # wins), then deterministic by code.  Theta and depth-0 root
+        # are excluded — total ignorance is never a useful tag.
+        # Confusable pairs are excluded — "A or B" is not a single tag.
+        #
+        # Fallback: when no focal element has direct mass on a depth≥1
+        # code (every source vacuous, all mass on Theta), revert to the
+        # leaf-pignistic argmax so we always return *some* code.
+        internal_codes = {fe: code for code, fe in frame.internal_nodes.items()}
+
+        candidates: list[tuple[str, float, int]] = []
+        for fe, m in combined.masses.items():
+            if m < 1e-9 or fe == frame.theta:
+                continue
+            if len(fe.codes) == 1:
+                code = next(iter(fe.codes))
+            elif fe in internal_codes:
+                code = internal_codes[fe]
+            else:
+                continue
+            depth = code.count(".")
+            if depth == 0 or not code:
+                continue
+            candidates.append((code, m, depth))
+
+        best_code: str | None = None
+        if candidates:
+            candidates.sort(key=lambda c: (-c[1], -c[2], c[0]))
+            best_code = candidates[0][0]
+
+        if best_code is None:
+            best_betp = -1.0
+            for code, singleton in frame.singletons.items():
+                betp = combined.pignistic_probability(singleton)
+                if betp > best_betp:
+                    best_betp = betp
+                    best_code = code
 
         if best_code is None:
             raise ValueError("No singletons in frame")
+
+        # Resolve the headline focal element for downstream Bel/Pl
+        # queries.  Singleton vs internal-node dispatch — the prior
+        # leaf-only picker only ever needed ``frame.singleton``.
+        if best_code in frame.singletons:
+            best_fe = frame.singletons[best_code]
+            best_betp = combined.pignistic_probability(best_fe)
+        else:
+            best_fe = frame.internal_nodes[best_code]
+            # For an internal-node headline, BetP is undefined as a
+            # singleton transform; report Bel(A) as the analog
+            # operator-facing "confidence in this tag".
+            best_betp = combined.belief(best_fe)
 
         cat = category_set.by_code.get(best_code)
         if cat is None and hasattr(category_set, "all_by_code"):
@@ -766,15 +813,24 @@ class HierarchicalClassification:
 
         # Build evidence string with per-source top-1 *code* (not just
         # mass) so operators can see at a glance which source voted
-        # which code — disagreement at the leaf level is then visible
-        # without consulting the evidence_sources field separately.
+        # which code — disagreement is then visible without consulting
+        # the evidence_sources field separately.  Singletons and
+        # internal-node focal elements both qualify; the latter
+        # surfaces parent-level votes (Atlas-style "every node is a
+        # tag") which would otherwise read as ``name=0.000`` despite
+        # carrying real evidence.
         source_parts = []
         for name, ba in source_masses.items():
             top: tuple[float, str | None] = (0.0, None)
             for fe, m in ba.masses.items():
-                if len(fe.codes) != 1:
+                if fe == frame.theta:
                     continue
-                code = next(iter(fe.codes))
+                if len(fe.codes) == 1:
+                    code = next(iter(fe.codes))
+                elif fe in internal_codes:
+                    code = internal_codes[fe]
+                else:
+                    continue
                 if m > top[0]:
                     top = (m, code)
             if top[1]:
@@ -782,8 +838,8 @@ class HierarchicalClassification:
             else:
                 source_parts.append(f"{name}=0.000")
 
-        bel = combined.belief(frame.singleton(best_code))
-        pl = combined.plausibility(frame.singleton(best_code))
+        bel = combined.belief(best_fe)
+        pl = combined.plausibility(best_fe)
 
         confusable_parts: list[str] = []
         for fe, m in combined.masses.items():
