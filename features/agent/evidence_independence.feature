@@ -10,48 +10,52 @@ Feature: DST evidence-source independence
   silently disappearing when a vocabulary uses non-ICE codes.
   See docs/src/architecture/dst-evidence-independence.md.
 
-  # Scenario codes below use a fictitious ``acme.*`` namespace so the
-  # BDD source carries no customer-derived encoding (audit
-  # 2026-04-30).  The mechanisms under test (revisit gate, resolver,
-  # provenance) are namespace-agnostic — any non-ICE code system
-  # exercises the same paths.
+  # Scenario codes below are drawn from publicly-grounded ontologies:
+  # the Atelier ``ICE.*`` namespace (Information Content Entity, per
+  # IAO_0000030; see ``src/atelier/classify/fixtures/PROVENANCE.md``)
+  # for sensitivity-bearing exemplars, and the Common Core Ontologies
+  # (``cco:*``) namespace where a non-ICE example is required to
+  # exercise the resolver's namespace-agnostic path.  The mechanisms
+  # under test (revisit gate, resolver, provenance) are
+  # namespace-agnostic — any code system exercises the same paths.
 
   Scenario: Revisit fires on independent-tier disagreement when fused prediction matches LLM
     # LLM and the LLM-derivative ML cluster agree on a code, so the
     # legacy gate (llm_code != fused_code) cannot fire.  The
     # cosine + pattern + name_match consensus disagrees at high
     # mass — the soundness condition the indep-tier branch is for.
-    Given a BootstrapState with LLM "acme.misc" and indep-tier consensus "acme.fin.txn" at mass 0.75
-    And the fused ml_prediction also equals "acme.misc" with conflict K=0.20
+    Given a BootstrapState with LLM "ICE.NONSENSITIVE" and indep-tier consensus "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT" at mass 0.75
+    And the fused ml_prediction also equals "ICE.NONSENSITIVE" with conflict K=0.20
     When I call _identify_disagreements with k_threshold 0.30 and indep_revisit_mass_threshold 0.45
     Then the column should appear in the disagreements list
 
   Scenario: Indep-tier branch is gated by mass threshold
-    Given a BootstrapState with LLM "acme.misc" and indep-tier consensus "acme.fin.txn" at mass 0.30
-    And the fused ml_prediction also equals "acme.misc" with conflict K=0.20
+    Given a BootstrapState with LLM "ICE.NONSENSITIVE" and indep-tier consensus "ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT" at mass 0.30
+    And the fused ml_prediction also equals "ICE.NONSENSITIVE" with conflict K=0.20
     When I call _identify_disagreements with k_threshold 0.30 and indep_revisit_mass_threshold 0.45
     Then the column should not appear in the disagreements list
 
   Scenario: High-K branch still fires as safety net
     # No indep-tier consensus available — legacy high-K branch carries.
-    Given a BootstrapState with LLM "acme.misc" and no indep-tier consensus
-    And the fused ml_prediction equals "acme.account.balance" with conflict K=0.85
+    Given a BootstrapState with LLM "ICE.NONSENSITIVE" and no indep-tier consensus
+    And the fused ml_prediction equals "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN" with conflict K=0.85
     When I call _identify_disagreements with k_threshold 0.30 and indep_revisit_mass_threshold 0.45
     Then the column should appear in the disagreements list
 
-  Scenario: Pattern map resolves through abbrev when target code differs from default
-    # When a vocabulary uses a code system that doesn't match the
-    # static ICE.* pattern targets (e.g. dotted-string customer codes,
-    # numeric encodings, domain-specific schemes), the resolver maps
-    # through the leaf mnemonic.  The fictitious ``acme.fin.txn`` here
-    # exercises the same path that any non-ICE customer vocabulary
-    # would — the resolver is namespace-agnostic.
-    Given a fictitious vocabulary with abbrev "TXNAMT" at code "acme.fin.txn"
+  Scenario: Pattern map resolves through abbrev when target code is in a non-ICE namespace
+    # When a vocabulary adopts ontology classes from outside Atelier's
+    # own ICE namespace as governance types (e.g. Common Core
+    # Ontologies' ``cco:MoneyTransfer`` published as an Apache Atlas
+    # classification type), the resolver maps the canonical pattern
+    # to the leaf via its mnemonic abbrev rather than its IRI.  The
+    # mechanism is namespace-agnostic — BFO, CCO, DPV, or domain
+    # extensions all reach the leaf the same way.
+    Given a vocabulary with abbrev "TXNAMT" at code "cco:MoneyTransfer"
     When I resolve the default pattern map against that vocabulary
-    Then the resolved map binds "monetary_pattern" to "acme.fin.txn"
+    Then the resolved map binds "monetary_pattern" to "cco:MoneyTransfer"
 
   Scenario: Pattern map resolver logs misses without raising
-    Given a fictitious vocabulary with abbrev "TXNAMT" at code "acme.fin.txn"
+    Given a vocabulary with abbrev "TXNAMT" at code "cco:MoneyTransfer"
     When I resolve the default pattern map against that vocabulary
     Then the resolved map omits patterns whose target abbrev is not in the vocabulary
 
@@ -154,6 +158,35 @@ Feature: DST evidence-source independence
     Given a HierarchicalClassification where the LLM voted "0.1" but cosine localizes to "Financial Data"
     When I list cross_subtree_belief at threshold 0.50
     Then cross_subtree_belief includes a code from the "1." subtree
+
+  Scenario: LLM vote at an internal-node code lands on the internal-node focal element
+    # Apache Atlas treats every node in a classification hierarchy as
+    # a first-class tagging target.  When the LLM votes an
+    # internal-node (parent) code such as
+    # ``ICE.SENSITIVE.PID.CONTACT`` — the publicly-grounded
+    # Information Content Entity for "Contact Information" — the
+    # ``llm_to_mass`` converter attaches evidence mass to the
+    # internal-node focal element directly rather than coercing to
+    # a child leaf.  Under Dempster's rule a parent focal element
+    # is the union of its leaf descendants (Shafer 1976 §3); the
+    # downstream ``cross_subtree_belief`` and ``cautious_promoted_code``
+    # selectors then surface the parent belief without any post-hoc
+    # aggregation.  See docs/src/architecture/dst-evidence-independence.md.
+    Given a hierarchical frame with internal node "ICE.SENSITIVE.PID.CONTACT" over leaves "ICE.SENSITIVE.PID.CONTACT.EMAIL" and "ICE.SENSITIVE.PID.CONTACT.PHONE"
+    When the LLM votes internal node "ICE.SENSITIVE.PID.CONTACT" at confidence 0.70
+    Then the resulting mass function carries non-zero mass on the internal-node focal element for "ICE.SENSITIVE.PID.CONTACT"
+    And no mass is allocated to either leaf singleton from that vote
+
+  Scenario: LLM vote at a degenerate internal node (single leaf descendant) coerces to the leaf
+    # When an internal node has exactly one leaf descendant in the
+    # frame, the parent and its leaf are extensionally identical
+    # under DST (the focal element is the same singleton set).
+    # ``llm_to_mass`` collapses the vote to the singleton in this
+    # degenerate case to keep the focal-element granularity minimal
+    # and avoid spurious internal-node bookkeeping.
+    Given a hierarchical frame with internal node "ICE.SENSITIVE.TECHNICAL" over a single leaf "ICE.SENSITIVE.TECHNICAL.IPADDR"
+    When the LLM votes internal node "ICE.SENSITIVE.TECHNICAL" at confidence 0.80
+    Then the resulting mass function carries singleton mass on "ICE.SENSITIVE.TECHNICAL.IPADDR"
 
   Scenario: cautious_promoted_code retains predicted leaf when belief is sufficient
     # Smets' least-commitment principle: promote only when the

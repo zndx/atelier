@@ -937,12 +937,11 @@ def llm_to_mass(
     if not category_code:
         return frame.vacuous()
 
-    # Coerce non-singleton codes (parent codes, near-misses) to valid leaves
-    resolved = _coerce_to_singleton(category_code, frame)
-    if resolved is None:
+    primary_fe = _resolve_to_focal_element(category_code, frame)
+    if primary_fe is None:
         import logging
         logging.getLogger(__name__).debug(
-            "LLM code %r not in frame singletons and unresolvable — vacuous",
+            "LLM code %r not in frame and unresolvable — vacuous",
             category_code,
         )
         return frame.vacuous()
@@ -952,9 +951,13 @@ def llm_to_mass(
 
     # Primary prediction
     primary_mass = confidence * evidence_mass
-    masses[frame.singleton(resolved)] = primary_mass
+    masses[primary_fe] = primary_mass
 
-    # Distribute remaining evidence to alternatives (also coerced)
+    # Distribute remaining evidence to alternatives (parent or leaf level —
+    # whichever the LLM voted at).  Parent-level alternatives become
+    # internal-node focal elements directly; Dempster's rule combines
+    # internal-node and leaf focal elements natively (parent = union of
+    # leaf descendants).
     remaining = evidence_mass - primary_mass
     if remaining > 1e-15 and alternatives:
         alt_total = sum(a.get("confidence", 0.0) for a in alternatives)
@@ -962,18 +965,68 @@ def llm_to_mass(
             for alt in alternatives:
                 alt_code = alt.get("code", "")
                 alt_conf = alt.get("confidence", 0.0)
-                alt_resolved = _coerce_to_singleton(alt_code, frame) if alt_code else None
-                if alt_resolved and alt_conf > 0:
+                alt_fe = (
+                    _resolve_to_focal_element(alt_code, frame) if alt_code else None
+                )
+                if alt_fe is not None and alt_conf > 0:
                     alt_mass = (alt_conf / alt_total) * remaining
                     if alt_mass > 1e-15:
-                        fe = frame.singleton(alt_resolved)
-                        masses[fe] = masses.get(fe, 0.0) + alt_mass
+                        masses[alt_fe] = masses.get(alt_fe, 0.0) + alt_mass
 
     # Theta gets discount + any unallocated evidence
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
     masses = _redistribute_confusable_mass(masses, frame)
     return BeliefAssignment(masses=masses)
+
+
+def _resolve_to_focal_element(
+    code: str,
+    frame: FrameOfDiscernment,
+) -> FocalElement | None:
+    """Resolve an LLM-emitted code to a frame focal element.
+
+    Atlas-style governance treats every node in the taxonomy as a
+    first-class tagging target, so a parent-level vote is a real
+    answer — not a leaf-resolution failure.  We honor that here:
+
+      1. Code is a leaf singleton → singleton focal element.
+      2. Code is an internal node (parent) with a curated focal
+         element in the frame → internal-node focal element
+         (the union of its leaf descendants).  Mass attached
+         here flows naturally through Dempster's rule against
+         leaf-level evidence; ``cross_subtree_belief`` and
+         ``cautious_promoted_code`` already aggregate up the
+         hierarchy and will see this directly.
+      3. Internal node with a single leaf descendant → coerce to
+         the leaf (degenerate parent — the parent and its only
+         leaf are semantically identical).
+      4. Prefix matching for near-miss leaves: a code that is a
+         strict prefix of exactly one singleton resolves to that
+         singleton (e.g.  ``ICE.SENSITIVE.PID.IDENTITY.GOVID`` →
+         ``ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN`` when SSN is the
+         only descendant in the frame).
+
+    Returns ``None`` for unresolvable / ambiguous codes.
+    """
+    if code in frame.singletons:
+        return frame.singletons[code]
+
+    if code in frame.internal_nodes:
+        fe = frame.internal_nodes[code]
+        if len(fe.codes) == 1:
+            leaf = next(iter(fe.codes))
+            if leaf in frame.singletons:
+                return frame.singletons[leaf]
+        return fe
+
+    # Prefix-match near-miss leaves
+    prefix = code + "."
+    matches = [s for s in frame.singletons if s.startswith(prefix)]
+    if len(matches) == 1:
+        return frame.singletons[matches[0]]
+
+    return None
 
 
 # ── ML classifiers (CatBoost + SVM) ─────────────────────────────────

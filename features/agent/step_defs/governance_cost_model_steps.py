@@ -22,8 +22,8 @@ def step_build_prompt_universal(context):
     context.system_prompt = build_system_prompt(table, category_set=vocab)
 
 
-@when("I build the system prompt against that fictitious vocabulary")
-def step_build_prompt_fictitious(context):
+@when("I build the system prompt against that non-ICE vocabulary")
+def step_build_prompt_non_ice(context):
     from atelier.classify.llm_backend import build_category_tree, build_system_prompt
     table = build_category_tree(context.numeric_vocab)
     context.system_prompt = build_system_prompt(table, category_set=context.numeric_vocab)

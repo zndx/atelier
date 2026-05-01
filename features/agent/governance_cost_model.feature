@@ -37,15 +37,16 @@ Feature: Sensitivity-classification perspective in the LLM system prompt
     And the system prompt contains "ICE.NONSENSITIVE"
     And the system prompt mentions at least one of "SSN", "PAN", or "EMAIL"
 
-  Scenario: Sensitivity map omitted on a fictitious non-ICE vocabulary
-    # A vocabulary that does NOT use ICE conventions gets only the
-    # perspective preamble — no sensitivity map is fabricated from
-    # unfamiliar schema.  The framework makes no assumptions about
-    # arbitrary taxonomies; future vocabularies with different
-    # sensitivity encodings, scales, or no encoding at all all
-    # degrade to this branch.
-    Given a fictitious vocabulary with abbrev "TXNAMT" at code "acme.fin.txn"
-    When I build the system prompt against that fictitious vocabulary
+  Scenario: Sensitivity map omitted on a non-ICE vocabulary
+    # A vocabulary outside Atelier's own ICE namespace (e.g. a CCO
+    # domain extension, a DPV-based governance vocabulary, or a
+    # legacy customer encoding) gets only the perspective preamble —
+    # no sensitivity map is fabricated from unfamiliar schema.  The
+    # framework deliberately makes no assumption about arbitrary
+    # taxonomies' sensitivity encodings, scales, or absence of
+    # encoding; any such vocabulary degrades to this branch.
+    Given a non-ICE vocabulary with abbrev "TXNAMT" at code "cco:MoneyTransfer"
+    When I build the system prompt against that non-ICE vocabulary
     Then the system prompt contains "BFO and CCO"
     And the system prompt does not contain "Vocabulary sensitivity map"
     And the system prompt does not contain "ICE.SENSITIVE"
@@ -56,7 +57,7 @@ Feature: Sensitivity-classification perspective in the LLM system prompt
     # regardless of whether it carries other sensitivity metadata.
     # The helper deliberately avoids inferring structure from
     # arbitrary schemas.
-    Given a fictitious vocabulary with abbrev "TXNAMT" at code "acme.fin.txn"
+    Given a non-ICE vocabulary with abbrev "TXNAMT" at code "cco:MoneyTransfer"
     Then _sensitive_subtree_summary returns the empty string for that vocabulary
 
   Scenario: Taxonomy renders parents as first-class rows alongside leaves

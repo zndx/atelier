@@ -477,13 +477,18 @@ def step_transition_rejected(context):
 # ── Pattern map alias resolver ──────────────────────────────────
 
 
-@given('a fictitious vocabulary with abbrev "{abbrev}" at code "{code}"')
-def step_fictitious_vocab(context, abbrev, code):
-    """Build a tiny test vocabulary with a fictitious code namespace.
+@given('a vocabulary with abbrev "{abbrev}" at code "{code}"')
+@given('a non-ICE vocabulary with abbrev "{abbrev}" at code "{code}"')
+def step_non_ice_vocab(context, abbrev, code):
+    """Build a tiny test vocabulary whose codes are outside Atelier's
+    own ICE namespace.
 
-    Codes are deliberately drawn from a fictitious ``acme.*`` namespace
-    so the BDD source carries no customer-derived encoding (provenance
-    audit 2026-04-30; see fixtures/PROVENANCE.md).
+    Used by scenarios that exercise namespace-agnostic mechanisms
+    (resolver, sensitivity-map activation gate) — the codes can be
+    drawn from any publicly-grounded ontology (BFO, CCO, DPV) or a
+    domain-extension namespace; the mechanism doesn't care.  See
+    ``src/atelier/classify/fixtures/PROVENANCE.md`` for the public
+    sources of the abbrevs themselves.
     """
     from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
     cats = [
@@ -491,7 +496,10 @@ def step_fictitious_vocab(context, abbrev, code):
             code=code, label="Test Term", embedding_text="", abbrev=abbrev,
         ),
         ReferenceCategory(
-            code="acme.misc", label="Other", embedding_text="", abbrev="OTHER",
+            code="cco:GenericInformationContentEntity",
+            label="Other",
+            embedding_text="",
+            abbrev="OTHER",
         ),
     ]
     context.numeric_vocab = HierarchicalCategorySet("test", cats, cats)
@@ -618,7 +626,7 @@ def step_frame_with_n_singletons(context, n):
     from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
     cats = [
         ReferenceCategory(
-            code=f"acme.{i // 30}.{i % 30}",
+            code=f"ICE.TEST.S{i // 30}.L{i % 30}",
             label=f"L{i}",
             embedding_text="",
             abbrev="",
@@ -935,7 +943,7 @@ def step_state_three_columns(context):
     cfg = BootstrapConfig()
     column_names = ["a", "b", "c"]
     for n in column_names:
-        state.labels[n] = "acme.misc"
+        state.labels[n] = "ICE.NONSENSITIVE"
         state.label_source[n] = "llm"
         state.ml_belief[n] = 0.55
         state.ml_plausibility[n] = 0.85
@@ -997,7 +1005,7 @@ def step_record_no_revisit(context, n):
         cfg = BootstrapConfig()
         cols = ["a", "b", "c"]
         for c in cols:
-            state.labels[c] = "acme.misc"
+            state.labels[c] = "ICE.NONSENSITIVE"
             state.label_source[c] = "llm"
             state.ml_belief[c] = 0.55
             state.ml_plausibility[c] = 0.85
@@ -1046,7 +1054,7 @@ def step_state_with_gap_sequence(context, g0, g1, g2):
     state = BootstrapState()
     cfg = BootstrapConfig()
     name = "a"
-    state.labels[name] = "acme.misc"
+    state.labels[name] = "ICE.NONSENSITIVE"
     state.label_source[name] = "llm"
     state.ml_plausibility[name] = 0.90
     state.ml_conflict[name] = 0.20
@@ -1078,7 +1086,7 @@ def step_state_single_iter(context):
     state = BootstrapState()
     cfg = BootstrapConfig()
     name = "a"
-    state.labels[name] = "acme.misc"
+    state.labels[name] = "ICE.NONSENSITIVE"
     state.label_source[name] = "llm"
     state.ml_belief[name] = 0.55
     state.ml_plausibility[name] = 0.85
@@ -1161,4 +1169,108 @@ def step_notation_empty(context):
         f"{' …' if len(offenders) > 5 else ''}. "
         "See PROVENANCE.md — numeric notation values are customer-encoded "
         "and must not appear in shipped Atelier vocabularies."
+    )
+
+
+# ── Parent-aware DST frame (Stage 3) ────────────────────────────
+
+
+def _build_internal_node_frame(context, internal_code: str, leaves: list[str]):
+    """Helper: construct a HierarchicalCategorySet plus FrameOfDiscernment
+    around one internal node and its leaf descendants.
+
+    Adds a sibling leaf in a sibling subtree (``ICE.NONSENSITIVE``,
+    drawn from the publicly-grounded ICE catch-all) so the internal
+    node's descendant set is a strict subset of ``leaf_codes`` —
+    required for the parent to register as an internal-node focal
+    element distinct from Theta.  See
+    ``FrameOfDiscernment._build_focal_elements`` and
+    ``src/atelier/classify/fixtures/PROVENANCE.md``.
+    """
+    from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
+    from atelier.classify.belief import FrameOfDiscernment
+
+    internal_cat = ReferenceCategory(
+        code=internal_code, label=internal_code, embedding_text=internal_code,
+    )
+    leaf_cats = [
+        ReferenceCategory(
+            code=leaf, label=leaf, embedding_text=leaf, parent_code=internal_code,
+        )
+        for leaf in leaves
+    ]
+    sibling_leaf = ReferenceCategory(
+        code="ICE.NONSENSITIVE",
+        label="Non-Sensitive Data",
+        embedding_text="Non-Sensitive Data",
+    )
+    cs = HierarchicalCategorySet(
+        name="test",
+        categories=leaf_cats + [sibling_leaf],
+        all_categories=[internal_cat] + leaf_cats + [sibling_leaf],
+    )
+    context.parent_frame_cs = cs
+    context.parent_frame = FrameOfDiscernment(cs)
+    context.parent_code = internal_code
+    context.leaf_codes = leaves
+
+
+@given('a hierarchical frame with internal node "{node}" over leaves "{leaf_a}" and "{leaf_b}"')
+def step_internal_two_leaves(context, node, leaf_a, leaf_b):
+    _build_internal_node_frame(context, node, [leaf_a, leaf_b])
+
+
+@given('a hierarchical frame with internal node "{node}" over a single leaf "{leaf}"')
+def step_internal_single_leaf(context, node, leaf):
+    _build_internal_node_frame(context, node, [leaf])
+
+
+@when('the LLM votes internal node "{code}" at confidence {confidence:g}')
+def step_llm_votes_internal_node(context, code, confidence):
+    from atelier.classify.mass_functions import llm_to_mass
+    context.parent_vote_mass = llm_to_mass(
+        category_code=code,
+        confidence=float(confidence),
+        alternatives=[],
+        frame=context.parent_frame,
+    )
+
+
+@then('the resulting mass function carries non-zero mass on the internal-node focal element for "{code}"')
+def step_mass_on_internal_node(context, code):
+    frame = context.parent_frame
+    assert code in frame.internal_nodes, (
+        f"{code!r} is not an internal node in the test frame; "
+        f"internal_nodes={list(frame.internal_nodes)}"
+    )
+    fe = frame.internal_nodes[code]
+    mass = context.parent_vote_mass.masses.get(fe, 0.0)
+    assert mass > 1e-6, (
+        f"Expected non-zero mass on internal-node focal element {code!r}; "
+        f"got {mass} (masses={ {str(k): v for k, v in context.parent_vote_mass.masses.items()} })"
+    )
+
+
+@then("no mass is allocated to either leaf singleton from that vote")
+def step_no_leaf_singleton_mass(context):
+    frame = context.parent_frame
+    masses = context.parent_vote_mass.masses
+    for leaf in context.leaf_codes:
+        fe = frame.singletons[leaf]
+        m = masses.get(fe, 0.0)
+        assert m <= 1e-9, (
+            f"Expected zero leaf-singleton mass on {leaf!r}; got {m}"
+        )
+
+
+@then('the resulting mass function carries singleton mass on "{code}"')
+def step_mass_on_singleton(context, code):
+    frame = context.parent_frame
+    assert code in frame.singletons, (
+        f"{code!r} is not a singleton in the test frame"
+    )
+    fe = frame.singletons[code]
+    mass = context.parent_vote_mass.masses.get(fe, 0.0)
+    assert mass > 1e-6, (
+        f"Expected non-zero singleton mass on {code!r}; got {mass}"
     )
