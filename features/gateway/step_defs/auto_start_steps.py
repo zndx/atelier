@@ -121,3 +121,90 @@ def step_no_prior_runs(context):
 
 def _restore_last_user_selected(gateway_mod, prior) -> None:
     gateway_mod._last_user_selected_source_id = prior  # type: ignore[assignment]
+
+
+# ── Persistent state-file path ──────────────────────────────────
+
+
+def _ensure_clean_state_file(context) -> None:
+    """Delete any leftover state file once per scenario, register cleanup.
+
+    The real state path is at
+    ``build/state/last_active_source.txt``.  Tests use it directly
+    (no monkeypatching) for isolation: each scenario starts with
+    no prior state and registers a cleanup so the file is removed
+    after the scenario regardless of pass/fail.
+
+    Idempotent within a scenario via ``context._state_file_initialized``
+    so subsequent persist-step calls within the same scenario don't
+    clobber data the scenario itself just wrote.  Behave's
+    per-scenario context-attribute scoping made an earlier
+    monkeypatch-the-path approach leak across scenarios; using the
+    real path with explicit before/after-scenario file handling is
+    more robust and exercises the actual production code path.
+    """
+    from atelier import gateway
+    state_path = gateway._active_source_state_path()
+
+    if getattr(context, "_state_file_initialized", False):
+        return  # already cleaned this scenario; further writes/reads use real state
+
+    if state_path.exists():
+        state_path.unlink()
+    context._state_file_initialized = True
+
+    if not hasattr(context, "_cleanups"):
+        context._cleanups = []
+
+    def _clear_state_file():
+        try:
+            state_path.unlink()
+        except FileNotFoundError:
+            pass
+        # Reset the per-scenario init flag so the next scenario in
+        # the same feature re-enters the cleanup-registration path.
+        # behave shares context attrs across scenarios in the same
+        # feature; without this reset the flag persists and the
+        # next scenario's cleanup is never registered.
+        context._state_file_initialized = False
+    context._cleanups.append(_clear_state_file)
+
+
+@given('the persistent state file holds source_id "{source_id}"')
+def step_state_file_holds(context, source_id):
+    _ensure_clean_state_file(context)
+    from atelier import gateway
+    gateway._persist_active_source_id(source_id)
+    # Also stub the DAO to ensure we read from file, not DAO.
+    prior = gateway._last_user_selected_source_id
+    # Don't stub here — the real _last_user_selected_source_id will
+    # read the (now-redirected) state file first.
+    context.add_cleanup(lambda: None)
+
+
+@then('_last_user_selected_source_id returns "{source_id}"')
+def step_last_user_selected_returns(context, source_id):
+    from atelier import gateway
+    actual = gateway._last_user_selected_source_id()
+    assert actual == source_id, f"got {actual!r}, expected {source_id!r}"
+
+
+@when('I persist source_id "{source_id}"')
+def step_persist_source_id(context, source_id):
+    _ensure_clean_state_file(context)
+    from atelier import gateway
+    gateway._persist_active_source_id(source_id)
+
+
+@when('I persist source_id ""')
+def step_persist_source_id_empty(context):
+    _ensure_clean_state_file(context)
+    from atelier import gateway
+    gateway._persist_active_source_id("")
+
+
+@then('_read_persisted_source_id returns "{source_id}"')
+def step_read_persisted_returns(context, source_id):
+    from atelier import gateway
+    actual = gateway._read_persisted_source_id()
+    assert actual == source_id, f"got {actual!r}, expected {source_id!r}"
