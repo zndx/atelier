@@ -442,17 +442,96 @@ class HierarchicalClassification:
             })
         return path
 
-    def cautious_code(self, bel_threshold: float = 0.7) -> str:
-        """Return deepest code where Bel exceeds threshold.
+    def cross_subtree_belief(self, bel_threshold: float = 0.5) -> list[dict]:
+        """Return every code (leaf or internal) where Bel ≥ threshold,
+        anywhere in the hierarchy.
 
-        Answers: 'At what taxonomy level is evidence unambiguous?'
-        May return a parent code when leaf-level evidence is ambiguous.
+        Unlike :meth:`belief_path`, which is confined to the predicted
+        code's ancestor chain, this walks the full frame — every
+        singleton and every internal-node focal element — and returns
+        the codes that carry sufficient belief.  Used by
+        :meth:`cautious_code` and surfaced to operators so cross-
+        subtree disagreement is visible: when the LLM votes a leaf in
+        subtree A but cosine evidence localizes to subtree B, both are
+        legitimate "honest" classifications and the operator should
+        see both.
+
+        Sorted most-specific first (deepest code by dot count); ties
+        broken by descending belief.
         """
+        if self.belief_assignment is None or self._frame is None:
+            return []
+        if self._category_set is None:
+            return []
+
+        seen: set[str] = set()
+        rows: list[dict] = []
+
+        def _resolve_label(code: str) -> str:
+            cat = (
+                getattr(self._category_set, "all_by_code", {}).get(code)
+                or getattr(self._category_set, "by_code", {}).get(code)
+            )
+            return cat.label if cat else code
+
+        for code, fe in self._frame.singletons.items():
+            bel = self.belief_assignment.belief(fe)
+            if bel >= bel_threshold and code not in seen:
+                seen.add(code)
+                rows.append({
+                    "code": code,
+                    "label": _resolve_label(code),
+                    "bel": round(bel, 3),
+                    "pl": round(self.belief_assignment.plausibility(fe), 3),
+                    "depth": code.count("."),
+                    "kind": "leaf",
+                })
+        for code, fe in self._frame.internal_nodes.items():
+            bel = self.belief_assignment.belief(fe)
+            if bel >= bel_threshold and code not in seen:
+                seen.add(code)
+                rows.append({
+                    "code": code,
+                    "label": _resolve_label(code),
+                    "bel": round(bel, 3),
+                    "pl": round(self.belief_assignment.plausibility(fe), 3),
+                    "depth": code.count("."),
+                    "kind": "internal",
+                })
+
+        rows.sort(key=lambda r: (-r["depth"], -r["bel"]))
+        return rows
+
+    def cautious_code(self, bel_threshold: float = 0.7) -> str:
+        """Return the most-specific code anywhere in the hierarchy
+        whose belief meets the threshold.
+
+        Answers: 'At what taxonomy level is evidence unambiguous —
+        considering the full frame, not just the predicted leaf's
+        ancestor chain?'  Walks every singleton AND every internal-
+        node focal element so a subtree-localized signal that
+        conflicts with the LLM's leaf vote can still surface (the
+        loan-amount-as-non-sensitive failure mode: cosine localizes
+        to ``Financial Data`` but the LLM picks ``Internal Non-
+        Sensitive``; cautious_code should be able to return
+        ``Financial Data`` despite it sitting in a different
+        subtree from the predicted leaf).
+
+        Tie-break is most-specific first, then highest belief.  Falls
+        back to the predicted leaf or root when no code meets the
+        threshold.
+        """
+        rows = self.cross_subtree_belief(bel_threshold=bel_threshold)
+        if rows:
+            return rows[0]["code"]
+        # No code meets the threshold — fall back to walking the
+        # predicted code's ancestor chain (legacy semantics) so the
+        # caller still gets a non-empty answer.
         path = self.belief_path()
-        for entry in path:  # leaf-first ordering
+        for entry in path:
             if entry["bel"] >= bel_threshold:
                 return entry["code"]
-        return path[-1]["code"] if path else ""  # fall back to root
+        return path[-1]["code"] if path else ""
 
     @classmethod
     def from_combined_evidence(

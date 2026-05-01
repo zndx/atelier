@@ -1588,6 +1588,15 @@ def _classify_column(
         "ontology_priors": list(features.ontology_priors),
         "belief_path": belief_path,
         "cautious_code": hc.cautious_code(0.7),
+        # Codes anywhere in the hierarchy (leaf or internal node)
+        # whose belief meets the threshold — surfaces cross-subtree
+        # disagreement that ``belief_path`` (confined to the
+        # predicted leaf's ancestor chain) cannot show.  When cosine
+        # evidence localizes to a subtree the LLM did not pick, the
+        # subtree's internal-node parent appears here with its
+        # belief mass, even when the predicted leaf sits elsewhere.
+        # See docs/src/architecture/dst-evidence-independence.md.
+        "cross_subtree_belief": hc.cross_subtree_belief(0.5),
         # Curated reference (per-column answer key for accuracy checks)
         # attached at sample-load time by the source loader.  The code
         # is a reference for accuracy checking, not a published

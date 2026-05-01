@@ -105,6 +105,31 @@ Feature: DST evidence-source independence
       | 300        | ambig  | 0.45 | 0.44 | at most 0.20       | at least 0.45      |
       | 300        | noise  | 0.23 | 0.23 | at most 0.05       | at least 0.85      |
 
+  Scenario: Hierarchical cosine mass aggregates at common-ancestor internal node
+    # When cosine top-K candidates cluster within a subtree but no
+    # single leaf is decisive, mass should aggregate at the
+    # subtree's internal-node focal element rather than diluting
+    # across leaves (Shafer 1976 §3, Smets 1990 §6 on refinement).
+    # Without this aggregation, cosine's localized signal gets lost
+    # in Dempster fusion against a confident LLM vote in a
+    # different subtree.
+    Given a hierarchy with a "Financial Data" parent over four leaves and an "Internal Non-Sensitive" sibling
+    And cosine top-1 is "Salary" at sim 0.50 with three siblings within "Financial Data" at sim 0.46-0.48
+    When I convert similarities to mass with hierarchical aggregation
+    Then the "Financial Data" internal node carries non-zero mass
+    And belief at "Financial Data" exceeds belief at "Internal Non-Sensitive"
+
+  Scenario: cautious_code walks the full hierarchy across subtrees
+    # When the LLM votes a leaf in subtree A but cosine evidence
+    # localizes to subtree B at sufficient belief, cautious_code
+    # must be able to return the subtree-B internal node — not be
+    # confined to the predicted leaf's ancestor chain.
+    Given a HierarchicalClassification where the LLM voted "0.1" but cosine localizes to "Financial Data"
+    When I compute cautious_code at threshold 0.50
+    And I list cross_subtree_belief at threshold 0.10
+    Then cross_subtree_belief includes "Financial Data" as an internal-node entry
+    And cross_subtree_belief includes "Internal Non-Sensitive" as a leaf entry
+
   Scenario Outline: Shipped vocabularies carry no customer-derived naming conventions
     # Atelier ships universal_vocabulary.json (BFO/IAO-grounded base)
     # and data/sample/ontology.json (300+ leaf OOTB-sample expansion

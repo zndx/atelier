@@ -212,6 +212,67 @@ def _margin_weight(
     return math.tanh(margin / sigma_marg)
 
 
+def _significant_subtree(
+    top1_code: str,
+    softmax_probs: dict[str, float],
+    frame: FrameOfDiscernment,
+    *,
+    concentration_threshold: float = 0.50,
+) -> tuple[FocalElement | None, float]:
+    """Find the most-specific internal node containing *top1_code* whose
+    descendant leaves capture ≥ ``concentration_threshold`` of the
+    softmax probability mass.
+
+    Used by ``cosine_to_mass`` to redirect residual evidence mass to a
+    subtree-level internal node when cosine has clear localization to
+    a subtree but ambiguity within it.  When the most-specific such
+    internal node exists, ``(focal_element, concentration_fraction)``
+    is returned; otherwise ``(None, 0.0)``.
+
+    Hierarchical Dempster-Shafer (Shafer 1976 §3, Smets 1990 §6 on
+    refinement) — internal-node focal elements represent
+    disjunctions; mass on a disjunction means "the answer is
+    somewhere in this set" without committing to a specific
+    element.  Without this aggregation step, cosine evidence
+    distributed across leaves of a common ancestor gets
+    structurally lost when fused via Dempster's rule against a
+    confident LLM vote in a different subtree (the loan-amount-as-
+    non-sensitive failure mode).
+
+    Walking from the top-1 leaf upward (rather than requiring every
+    top-K candidate to share an LCA) tolerates outliers — a small
+    amount of probability leaking outside the subtree doesn't void
+    the aggregation, as long as the *bulk* of the mass remains
+    inside.
+    """
+    if top1_code not in frame.singletons:
+        return None, 0.0
+
+    # Candidate internal nodes are those whose descendant set
+    # contains top1_code.  The frame already exposes them; pick the
+    # most-specific (smallest descendant set) whose subtree
+    # concentration meets the threshold.
+    candidates: list[tuple[FocalElement, float, int]] = []
+    for code, fe in frame.internal_nodes.items():
+        if top1_code not in fe.codes:
+            continue
+        concentration = sum(
+            prob for c, prob in softmax_probs.items() if c in fe.codes
+        )
+        if concentration >= concentration_threshold:
+            candidates.append((fe, concentration, len(fe.codes)))
+
+    if not candidates:
+        return None, 0.0
+
+    # Most-specific = smallest descendant set.  Tie-break by higher
+    # concentration, then by deterministic frozen-set ordering.
+    candidates.sort(
+        key=lambda c: (c[2], -c[1], tuple(sorted(c[0].codes)))
+    )
+    return candidates[0][0], candidates[0][1]
+
+
 def cosine_to_mass(
     similarities: dict[str, float],
     frame: FrameOfDiscernment,
@@ -285,18 +346,36 @@ def cosine_to_mass(
 
     # Margin-aware allocation:
     #   m(top1) = α * margin_w   (concentrated on the decisive winner)
-    #   m(rest_i) = α * (1 - margin_w) * softmax_prob_i
-    # When margin_w → 1 (sharp): top-1 takes nearly all of α.
-    # When margin_w → 0 (diffuse): falls back to pure softmax(α).
+    #   m(rest)  = α * (1 - margin_w)  → split between LCA internal
+    #     node (when top-K share an ancestor) and per-leaf softmax.
     masses: dict[FocalElement, float] = {}
     top1_share = alpha * margin_w
     residual = alpha * (1.0 - margin_w)
+
+    # Hierarchical aggregation: walk up from the top-1 leaf, find
+    # the most-specific internal node whose descendants capture a
+    # significant fraction of softmax mass, and redirect that
+    # in-subtree residual to the internal-node focal element.  This
+    # gives Dempster fusion an honest disjunctive signal ("the
+    # answer is somewhere in subtree X") rather than diffuse leaf
+    # mass that gets lost when the LLM votes confidently in a
+    # different subtree.  See _significant_subtree.
+    subtree_fe, lca_concentration = _significant_subtree(
+        top1_code, softmax_probs, frame,
+    )
+
+    lca_share = residual * lca_concentration
+    leaf_residual = residual - lca_share
+
     for code, prob in softmax_probs.items():
-        m = residual * prob
+        m = leaf_residual * prob
         if code == top1_code:
             m += top1_share
         if m > 1e-15:
             masses[frame.singleton(code)] = m
+
+    if subtree_fe is not None and lca_share > 1e-15:
+        masses[subtree_fe] = masses.get(subtree_fe, 0.0) + lca_share
 
     masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)

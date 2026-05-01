@@ -269,6 +269,78 @@ vote, that code becomes the indep-tier top-1 and the revisit gate
 fires — which is the soundness invariant the whole evidence-
 independence treatment is reaching for.
 
+## Hierarchical mass aggregation + cross-subtree visibility
+
+A separate structural gap surfaced after reliability shaping
+landed: when cosine evidence localizes to a *subtree* (multiple
+financial-leaning leaves under a common parent) but the LLM picks
+a confident leaf in a *different* subtree, the predicted code falls
+to the LLM's leaf and there is no surfaced signal that an
+honest-but-coarser parent would apply. Three cooperating fixes
+close that gap:
+
+### 1. Cosine emits hierarchical mass
+
+`mass_functions.cosine_to_mass` now walks up from the cosine top-1
+leaf, finds the most-specific internal node whose descendants
+capture ≥ 50% of the softmax probability mass
+(``_significant_subtree``), and redirects the in-subtree residual
+mass to that internal-node focal element rather than diluting it
+across leaves. The frame already exposed every parent code as an
+internal-node ``FocalElement`` (descendant leaf set); we just
+weren't *emitting* mass there. Hierarchical Dempster-Shafer
+treatment per Shafer 1976 §3 and Smets 1990 §6 (refinement /
+coarsening): an internal-node focal element represents a
+disjunction — "the answer is somewhere in this subtree" — without
+committing to a specific leaf.
+
+Walking up from top-1 (rather than requiring every top-K to share
+an LCA) tolerates outliers cleanly: a small amount of probability
+leaking outside the subtree doesn't void the aggregation as long
+as the bulk of mass remains inside.
+
+Sharp-signal regimes are unaffected — when the margin is wide
+the residual mass `α · (1 − margin_weight)` is small, so the
+hierarchical aggregation simply scales proportionally. The
+top-1 leaf still wins when one is decisive.
+
+### 2. `cautious_code` walks the full hierarchy
+
+`HierarchicalClassification.cautious_code` previously walked only
+the predicted code's ancestor chain via `belief_path` —
+structurally blind to belief mass in any other subtree. It now
+delegates to `cross_subtree_belief`, which iterates every
+singleton AND every internal-node focal element in the frame and
+returns those with ``Bel ≥ threshold``. The most-specific code
+wins, regardless of subtree.
+
+Concretely: when the LLM votes ``0.1 Internal Non-Sensitive`` but
+cosine's hierarchical aggregation puts ``Bel(Financial Data) =
+0.55`` on a different subtree's parent, ``cautious_code(0.5)`` can
+now return ``Financial Data`` — not just ``0`` (the predicted
+code's parent).
+
+### 3. `cross_subtree_belief` surfaces the conflict
+
+The result dict now carries a ``cross_subtree_belief`` field
+listing every code (leaf or internal node, any subtree) where
+``Bel ≥ 0.5``. Operators see both the LLM's leaf vote AND the
+cosine-derived alternative subtree as legitimate signals,
+instead of the predicted-leaf-only ``belief_path``. When evidence
+sources disagree on the *subtree*, both candidates appear and the
+operator can act on the disagreement directly.
+
+This composes cleanly with the prior mechanisms: reliability
+shaping ensures cosine top-1 carries enough mass to trigger
+hierarchical aggregation when signal is clear; the indep-tier
+gate fires when cosine's hierarchical mass disagrees with LLM at
+the leaf level; and ``cross_subtree_belief`` makes the cross-
+subtree disagreement explicit in the operator-facing result. The
+``predicted_code`` field retains its leaf-argmax semantics for
+backward compatibility — operators consume the cautious /
+cross-subtree fields when ``needs_clarification = True`` or when
+the cross-subtree summary surfaces a competing internal node.
+
 ## Pattern-target alias resolver
 
 A second, narrower bug surfaced during investigation: the static

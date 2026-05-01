@@ -686,6 +686,130 @@ def step_theta_mass_band(context, band):
         )
 
 
+# ── Hierarchical mass + cross-subtree belief ────────────────────
+
+
+def _build_loan_hierarchy():
+    from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
+    cats = [
+        ReferenceCategory(code="0", label="Not Sensitive", embedding_text="", abbrev="", parent_code=None),
+        ReferenceCategory(code="0.1", label="Internal Non-Sensitive", embedding_text="", abbrev="INOS", parent_code="0"),
+        ReferenceCategory(code="1", label="Sensitive", embedding_text="", abbrev="", parent_code=None),
+        ReferenceCategory(code="1.1", label="PID", embedding_text="", abbrev="", parent_code="1"),
+        # Sibling subtree under PID so Financial Data has a strictly
+        # smaller descendant set than its parent — exercises the
+        # "most-specific internal node" tie-break correctly.
+        ReferenceCategory(code="1.1.0", label="Contact", embedding_text="", abbrev="", parent_code="1.1"),
+        ReferenceCategory(code="1.1.0.1", label="Email", embedding_text="", abbrev="EMAIL", parent_code="1.1.0"),
+        ReferenceCategory(code="1.1.1.1", label="Financial Data", embedding_text="", abbrev="", parent_code="1.1"),
+        ReferenceCategory(code="1.1.1.1.1", label="Salary", embedding_text="", abbrev="SALARY", parent_code="1.1.1.1"),
+        ReferenceCategory(code="1.1.1.1.2", label="Bonus", embedding_text="", abbrev="BONUS", parent_code="1.1.1.1"),
+        ReferenceCategory(code="1.1.1.1.3", label="Stock", embedding_text="", abbrev="STOCK", parent_code="1.1.1.1"),
+        ReferenceCategory(code="1.1.1.1.4", label="Financial Documentation", embedding_text="", abbrev="FINDOC", parent_code="1.1.1.1"),
+    ]
+    leaves = [c for c in cats if c.code in {"0.1", "1.1.0.1", "1.1.1.1.1", "1.1.1.1.2", "1.1.1.1.3", "1.1.1.1.4"}]
+    return HierarchicalCategorySet("loan-hier", leaves, cats)
+
+
+@given('a hierarchy with a "Financial Data" parent over four leaves and an "Internal Non-Sensitive" sibling')
+def step_loan_hierarchy(context):
+    from atelier.classify.belief import FrameOfDiscernment
+    context.loan_cs = _build_loan_hierarchy()
+    context.loan_frame = FrameOfDiscernment(context.loan_cs)
+
+
+@given('cosine top-1 is "Salary" at sim {top1:g} with three siblings within "Financial Data" at sim {sim_low:g}-{sim_high:g}')
+def step_cosine_within_subtree(context, top1, sim_low, sim_high):
+    context.loan_sims = {
+        "0.1": 0.20,
+        "1.1.1.1.1": float(top1),     # Salary
+        "1.1.1.1.2": float(sim_high), # Bonus
+        "1.1.1.1.3": float(sim_low),  # Stock
+        "1.1.1.1.4": (float(sim_low) + float(sim_high)) / 2.0,  # FinDoc
+    }
+
+
+@when("I convert similarities to mass with hierarchical aggregation")
+def step_convert_with_hierarchical(context):
+    from atelier.classify.mass_functions import cosine_to_mass
+    context.loan_cosine_mass = cosine_to_mass(
+        context.loan_sims, context.loan_frame, discount=0.30,
+    )
+
+
+@then('the "{label}" internal node carries non-zero mass')
+def step_internal_node_has_mass(context, label):
+    matches = [
+        (fe, m) for fe, m in context.loan_cosine_mass.masses.items()
+        if fe.label == label and len(fe.codes) > 1
+    ]
+    assert matches, f"No internal-node focal element with label {label!r} carries mass"
+    fe, m = matches[0]
+    assert m > 1e-9, f"Internal node {label!r} has effectively zero mass: {m}"
+
+
+@then('belief at "{label_a}" exceeds belief at "{label_b}"')
+def step_belief_exceeds(context, label_a, label_b):
+    cs = context.loan_cs
+    frame = context.loan_frame
+    code_a = next(c.code for c in cs.all_categories if c.label == label_a)
+    code_b = next(c.code for c in cs.all_categories if c.label == label_b)
+    fe_a = frame.internal_nodes.get(code_a) or frame.singletons.get(code_a)
+    fe_b = frame.internal_nodes.get(code_b) or frame.singletons.get(code_b)
+    bel_a = context.loan_cosine_mass.belief(fe_a)
+    bel_b = context.loan_cosine_mass.belief(fe_b)
+    assert bel_a > bel_b, f"Bel({label_a})={bel_a:.3f} not > Bel({label_b})={bel_b:.3f}"
+
+
+@given('a HierarchicalClassification where the LLM voted "{llm_code}" but cosine localizes to "Financial Data"')
+def step_hc_llm_vs_cosine(context, llm_code):
+    from atelier.classify.belief import FrameOfDiscernment, HierarchicalClassification
+    from atelier.classify.mass_functions import cosine_to_mass, llm_to_mass
+    cs = _build_loan_hierarchy()
+    frame = FrameOfDiscernment(cs)
+    sims = {
+        "0.1": 0.20,
+        "1.1.1.1.1": 0.50,
+        "1.1.1.1.2": 0.48,
+        "1.1.1.1.3": 0.46,
+        "1.1.1.1.4": 0.47,
+    }
+    cosine_m = cosine_to_mass(sims, frame, discount=0.30)
+    llm_m = llm_to_mass(llm_code, 0.92, [], frame, discount=0.10)
+    context.loan_hc = HierarchicalClassification.from_combined_evidence(
+        source_masses={"cosine": cosine_m, "llm": llm_m},
+        frame=frame, category_set=cs,
+    )
+
+
+@when("I compute cautious_code at threshold {threshold:g}")
+def step_compute_cautious(context, threshold):
+    context.loan_cautious = context.loan_hc.cautious_code(float(threshold))
+
+
+@when("I list cross_subtree_belief at threshold {threshold:g}")
+def step_compute_cross_subtree(context, threshold):
+    context.loan_cross = context.loan_hc.cross_subtree_belief(float(threshold))
+
+
+@then('cross_subtree_belief includes "{label}" as an internal-node entry')
+def step_cross_includes_internal(context, label):
+    matches = [r for r in context.loan_cross if r["label"] == label and r["kind"] == "internal"]
+    assert matches, (
+        f"cross_subtree_belief does not include {label!r} as internal-node entry; "
+        f"got: {context.loan_cross}"
+    )
+
+
+@then('cross_subtree_belief includes "{label}" as a leaf entry')
+def step_cross_includes_leaf(context, label):
+    matches = [r for r in context.loan_cross if r["label"] == label and r["kind"] == "leaf"]
+    assert matches, (
+        f"cross_subtree_belief does not include {label!r} as leaf entry; "
+        f"got: {context.loan_cross}"
+    )
+
+
 # ── Universal vocabulary provenance guard ───────────────────────
 
 
