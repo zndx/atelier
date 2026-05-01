@@ -352,7 +352,7 @@ class AtelierConfig:
     classify_llm_max_retries: int = 3
     classify_llm_disable_reasoning: bool = False
     classify_llm_reasoning_budget: int = 8192
-    classify_llm_discount: float = 0.10
+    classify_llm_discount: float = 0.15
     # DST fusion strategy: "dempster" (default, normalizing) or "yager"
     # (redirect conflict to Θ).  Yager preserves epistemic honesty under
     # high conflict at the cost of higher ignorance mass.
@@ -380,7 +380,7 @@ class AtelierConfig:
     # frontier-SVM filter at ml_train lines 118-127); per Shafer 1976
     # §11.3 + Denoeux 2008, non-distinct evidence requires substantial
     # discount to avoid double-counting under Dempster's rule.
-    classify_discount_cosine: float = 0.30
+    classify_discount_cosine: float = 0.20
     classify_discount_svm: float = 0.55
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70

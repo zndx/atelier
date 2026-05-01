@@ -1439,7 +1439,7 @@ def _classify_column(
     llm_code: str | None = None,
     llm_confidence: float = 0.0,
     llm_alternatives: list[dict] | None = None,
-    llm_discount: float = 0.10,
+    llm_discount: float = 0.15,
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",

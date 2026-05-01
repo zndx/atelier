@@ -147,7 +147,7 @@ class BootstrapConfig:
     # blackholed endpoint where attempts pile up without calls, this is
     # the gate that stops the retry storm.
     max_total_llm_attempts: int = 10000
-    llm_discount: float = 0.10
+    llm_discount: float = 0.15
     frontier_svm_retrain: bool = True
     frontier_svm_min_labels: int = 20
     # Belief-gap convergence (primary convergence criteria)

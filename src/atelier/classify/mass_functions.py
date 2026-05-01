@@ -44,7 +44,7 @@ class DiscountConfig:
     for the full rationale.
     """
 
-    cosine: float = 0.30
+    cosine: float = 0.20
     svm: float = 0.55
     pattern_theta: float = 0.25
     name_match_exact: float = 0.70
@@ -911,14 +911,17 @@ def llm_to_mass(
     confidence: float,
     alternatives: list[dict],
     frame: FrameOfDiscernment,
-    discount: float = 0.10,
+    discount: float = 0.15,
 ) -> BeliefAssignment:
     """Convert LLM classification to a mass function.
 
     The primary prediction receives confidence-proportional mass.
     Alternatives distribute remaining evidence mass.  Low discount
-    (0.10 vs cosine's 0.30) because frontier LLM predictions are
-    well-informed and typically well-calibrated.
+    (0.15 vs cosine's 0.20) because frontier LLM predictions are
+    well-informed and typically well-calibrated, but the LLM signal
+    informs multiple downstream metrics (CatBoost fit-to-LLM,
+    frontier-SVM trained on LLM labels) and a slight bump avoids
+    over-amplifying a non-distinct cluster.
 
     When the LLM returns a parent code or near-miss code, coercion
     attempts to resolve it to a valid leaf singleton.  Unresolvable
@@ -1036,9 +1039,11 @@ def svm_to_mass(
     making it architecturally independent from the dense sentence-
     transformer embedding shared by cosine and CatBoost sources.
 
-    The discount is lower than cosine (0.30) because calibrated SVM
-    probabilities tend to be well-concentrated on the correct class
-    for short-text classification tasks.
+    The default discount in this signature reflects an unmodified
+    SVM in isolation; the production default for the *frontier* SVM
+    (trained on accumulated LLM labels) is calibrated higher in
+    ``DiscountConfig.svm`` to suppress non-distinct double-counting
+    against the LLM source.
 
     When the frame has confusable pairs and the top-2 singletons form
     a known pair with a close mass ratio, mass is redistributed to

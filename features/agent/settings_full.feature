@@ -52,7 +52,7 @@ Feature: Runtime overlay — full parameter surface
     # LLM & System tab
     Examples: LLM and System
       | key                             | value     |
-      | classify_llm_discount           | 0.15      |
+      | classify_llm_discount           | 0.18      |
       | classify_llm_max_tokens         | 16384     |
       | classify_llm_temperature        | 0.50      |
       | classify_llm_columns_per_call   | 100       |

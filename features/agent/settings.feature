@@ -17,9 +17,9 @@ Feature: Runtime config overlay for the settings page
 
   Scenario: Applying a valid float overlays the config
     Given the config overlay is empty
-    When I set overlay "classify_llm_discount" to 0.15
+    When I set overlay "classify_llm_discount" to 0.18
     And I apply the overlay to a loaded config
-    Then the resulting config has classify_llm_discount equal to 0.15
+    Then the resulting config has classify_llm_discount equal to 0.18
 
   Scenario: Unknown keys are rejected
     Given the config overlay is empty
