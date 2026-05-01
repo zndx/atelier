@@ -283,51 +283,36 @@ def build_category_table(category_set) -> str:
     return "\n".join(lines)
 
 
-def _category_min_rating(cat) -> int | None:
-    """Lowest sensitivity rating across roles; None if no usable rating.
-
-    The customer-vocab convention is "lower number = more sensitive"
-    on a per-role rating dict.  ``"N/A"`` values are skipped.  Returns
-    ``None`` when the category has no rating dict or no numeric
-    entries — caller should fall through to path conventions
-    (``ICE.SENSITIVE.*`` etc.) when this is None across a vocabulary.
-    """
-    sens = getattr(cat, "sensitivity", None)
-    if not sens:
-        return None
-    vals: list[int] = []
-    for v in sens.values():
-        if v == "N/A" or v is None:
-            continue
-        try:
-            vals.append(int(v))
-        except (TypeError, ValueError):
-            continue
-    return min(vals) if vals else None
-
-
 def _sensitive_subtree_summary(category_set) -> str:
-    """Identify high-sensitivity / catch-all subtrees in *category_set*.
+    """Identify the publicly-grounded sensitivity structure when present.
 
     Returns a compact Markdown summary the LLM can use to locate the
-    right sensitive parent code when no leaf is a clean fit.  Three
-    branches:
+    right sensitive parent code when no leaf is a clean fit — but
+    *only* when the loaded vocabulary uses Atelier's own
+    publicly-grounded ICE conventions (``ICE.SENSITIVE.*`` /
+    ``ICE.NONSENSITIVE.*``).  Returns ``""`` for every other shape.
 
-    1. **Sensitivity ratings present** (customer vocabs): tier each
-       category by ``min_rating`` (≤1 high, ==2 moderate, ≥3 low).
-       Find each tier's most-shallow ancestor by walking
-       ``parent_code`` chains; pick exemplars by abbrev-presence
-       preferred, then label-length.  Catch-all = low-tier root with
-       largest descendant set, biased toward labels containing
-       "non-sensitive".
-    2. **Path conventions only** (universal vocab): detect by code
-       prefix ``ICE.SENSITIVE`` / ``ICE.NONSENSITIVE``; emit roots +
-       3 abbreviated leaf exemplars under SENSITIVE.
-    3. **Neither signal**: return ``""`` so the prompt block degrades
-       to the generic Type-II preamble naming no specific codes.
+    The framework deliberately makes **no assumptions about
+    arbitrary taxonomies**.  Customer / domain vocabularies arrive
+    with widely-varying sensitivity encodings — numeric ratings of
+    different scales, string labels, hierarchical conventions
+    derived from the customer's compliance regime, or no
+    sensitivity signal at all.  Inferring a "sensitivity map" from
+    an unfamiliar schema would either fabricate misleading
+    structure (e.g. picking a placeholder ancestor label as a
+    "subtree root") or leak customer-specific encoding into the
+    prompt that we can't verify is publicly grounded.
 
-    Output capped at ~6 lines so the prompt budget stays bounded.
-    See ``docs/src/architecture/dst-evidence-independence.md``.
+    For non-ICE vocabularies the LLM still has: (a) the full
+    markdown category table at the top of the system prompt,
+    (b) per-column ontology priors for any column where pattern
+    detection fires, (c) the fixed cost-asymmetry preamble with
+    the decision rule.  That's sufficient to navigate the
+    customer's own taxonomy without the framework guessing at its
+    structure.
+
+    See ``docs/src/architecture/dst-evidence-independence.md`` and
+    ``src/atelier/classify/fixtures/PROVENANCE.md``.
     """
     cats = getattr(category_set, "all_categories", None)
     if not cats:
@@ -335,143 +320,40 @@ def _sensitive_subtree_summary(category_set) -> str:
     if not cats:
         return ""
 
-    by_code = {c.code: c for c in cats}
-    has_ratings = any(_category_min_rating(c) is not None for c in cats)
-
-    def _root_of_tier(tier_codes: set[str]) -> str | None:
-        """Most-shallow ancestor that contains ≥70% of tier_codes.
-
-        Customer vocabularies often have sensitive codes scattered
-        across multiple branches with no single tier-only-walk root;
-        we want an honest "majority coverage" ancestor (e.g. the
-        Personal Data parent that contains most of the sensitive
-        leaves) rather than an arbitrary tier-only sentinel.
-
-        Counts tier members covered by each candidate ancestor (any
-        code in ``by_code`` whose descendant set includes that
-        ancestor's code-path prefix), picks the most-shallow whose
-        coverage fraction meets the threshold.
-        """
-        if not tier_codes:
-            return None
-        total = len(tier_codes)
-        candidates: list[tuple[str, int, int]] = []  # (code, depth, coverage)
-        for cand_code in by_code:
-            covered = sum(
-                1 for tc in tier_codes
-                if tc == cand_code or tc.startswith(cand_code + ".")
-            )
-            if covered / total >= 0.70:
-                candidates.append((cand_code, cand_code.count("."), covered))
-        if not candidates:
-            # No single ancestor covers the majority — return the
-            # shallowest tier member as a representative.
-            return min(tier_codes, key=lambda c: (c.count("."), c))
-        # Most-shallow (smallest depth) wins; tie-break by larger
-        # coverage, then by code lexicographic order for determinism.
-        candidates.sort(key=lambda t: (t[1], -t[2], t[0]))
-        return candidates[0][0]
-
-    def _exemplars(tier_codes: set[str], n: int = 3) -> list[str]:
-        members = [by_code[c] for c in tier_codes if c in by_code]
-        members.sort(
-            key=lambda c: (
-                0 if getattr(c, "abbrev", "") else 1,
-                len(c.label or ""),
-            )
-        )
-        out: list[str] = []
-        for m in members:
-            label = getattr(m, "abbrev", "") or m.label or m.code
-            if label not in out:
-                out.append(label)
-            if len(out) >= n:
-                break
-        return out
-
-    if has_ratings:
-        # Branch A — customer vocabs with per-role sensitivity ratings.
-        tiers: dict[str, set[str]] = {"high": set(), "moderate": set(), "low": set()}
-        for c in cats:
-            r = _category_min_rating(c)
-            if r is None:
-                continue
-            if r <= 1:
-                tiers["high"].add(c.code)
-            elif r == 2:
-                tiers["moderate"].add(c.code)
-            else:
-                tiers["low"].add(c.code)
-
-        lines: list[str] = ["**Vocabulary sensitivity map (computed for this run):**"]
-        for tier_name in ("high", "moderate"):
-            if not tiers[tier_name]:
-                continue
-            root = _root_of_tier(tiers[tier_name])
-            if root is None:
-                continue
-            root_cat = by_code.get(root)
-            root_label = root_cat.label if root_cat else root
-            ex = _exemplars(tiers[tier_name])
-            ex_str = ", ".join(ex)
-            display = "High-sensitivity" if tier_name == "high" else "Moderate-sensitivity"
-            lines.append(
-                f"- {display} subtree: rooted at `{root}` {root_label} — "
-                f"{len(tiers[tier_name])} codes including {ex_str}."
-            )
-        if tiers["low"]:
-            # Catch-all = low-tier code with largest descendant set,
-            # biased toward labels containing "non-sensitive".
-            candidates: list[tuple[str, int, int]] = []
-            for c in cats:
-                if c.code not in tiers["low"]:
-                    continue
-                desc_count = sum(
-                    1 for other in cats
-                    if other.code != c.code and other.code.startswith(c.code + ".")
-                )
-                non_sens_bias = 1 if "non-sensitive" in (c.label or "").lower() else 0
-                candidates.append((c.code, desc_count, non_sens_bias))
-            if candidates:
-                candidates.sort(key=lambda t: (-t[2], -t[1], t[0]))
-                catch_all_code = candidates[0][0]
-                catch_all_cat = by_code.get(catch_all_code)
-                catch_all_label = catch_all_cat.label if catch_all_cat else catch_all_code
-                lines.append(
-                    f"- Non-sensitive catch-all: `{catch_all_code}` {catch_all_label}."
-                )
-        if len(lines) > 1:
-            return "\n".join(lines)
-
-    # Branch B — universal vocab with ICE.SENSITIVE / ICE.NONSENSITIVE paths.
     has_ice_paths = any(
         c.code.startswith("ICE.SENSITIVE") or c.code.startswith("ICE.NONSENSITIVE")
         for c in cats
     )
-    if has_ice_paths:
-        lines = ["**Vocabulary sensitivity map (computed for this run):**"]
-        sensitive_codes = {c.code for c in cats if c.code.startswith("ICE.SENSITIVE")}
-        nonsens_codes = {c.code for c in cats if c.code.startswith("ICE.NONSENSITIVE")}
-        if sensitive_codes:
-            ex = _exemplars(sensitive_codes)
-            ex_str = ", ".join(ex)
-            lines.append(
-                f"- High-sensitivity subtree: rooted at `ICE.SENSITIVE` Sensitive Data — "
-                f"{len(sensitive_codes)} codes including {ex_str}."
-            )
-        if nonsens_codes:
-            # Pick the most-shallow code in the non-sensitive subtree.
-            shortest = sorted(nonsens_codes, key=lambda c: (c.count("."), c))[0]
-            label_cat = by_code.get(shortest)
-            label = label_cat.label if label_cat else shortest
-            lines.append(
-                f"- Non-sensitive catch-all: `{shortest}` {label}."
-            )
-        if len(lines) > 1:
-            return "\n".join(lines)
+    if not has_ice_paths:
+        return ""
 
-    # Branch C — neither signal; let the prompt's generic Type-II
-    # preamble stand alone without naming codes that may not exist.
+    by_code = {c.code: c for c in cats}
+    sensitive_codes = {c.code for c in cats if c.code.startswith("ICE.SENSITIVE")}
+    nonsens_codes = {c.code for c in cats if c.code.startswith("ICE.NONSENSITIVE")}
+
+    lines: list[str] = ["**Vocabulary sensitivity map (computed for this run):**"]
+    if sensitive_codes:
+        # Pick up to three publicly-grounded leaf exemplars carrying
+        # an abbrev (e.g. SSN, PAN, EMAIL) — every retained leaf
+        # abbrev in the universal vocabulary traces to a public
+        # source per fixtures/PROVENANCE.md.
+        members = [by_code[c] for c in sensitive_codes if c in by_code]
+        members = [m for m in members if getattr(m, "abbrev", "")]
+        members.sort(key=lambda c: (len(c.label or ""), c.code))
+        exemplars = [m.abbrev for m in members[:3]]
+        ex_str = ", ".join(exemplars) if exemplars else "no abbreviated leaves"
+        lines.append(
+            f"- High-sensitivity subtree: rooted at `ICE.SENSITIVE` Sensitive Data — "
+            f"{len(sensitive_codes)} codes including {ex_str}."
+        )
+    if nonsens_codes:
+        shortest = sorted(nonsens_codes, key=lambda c: (c.count("."), c))[0]
+        label_cat = by_code.get(shortest)
+        label = label_cat.label if label_cat else shortest
+        lines.append(f"- Non-sensitive catch-all: `{shortest}` {label}.")
+
+    if len(lines) > 1:
+        return "\n".join(lines)
     return ""
 
 

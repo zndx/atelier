@@ -549,22 +549,40 @@ via a Governance Cost Model section in the system prompt
   prefer the closest sensitive parent code over the non-
   sensitive catch-all.
 
-- **Vocabulary-aware sensitivity map.**
-  `_sensitive_subtree_summary(category_set)` walks the loaded
-  vocab at prompt-build time and identifies the high-sensitivity
-  subtree root (and moderate / non-sensitive catch-all) using
-  one of three branches:
-  * **Customer vocabularies** with per-role sensitivity ratings:
-    tier each category by `min_rating := min(int(v) for v in
-    sensitivity.values() if v != "N/A")` (`≤1` high, `==2`
-    moderate, `≥3` low); find each tier's majority-coverage
-    ancestor (the most-shallow code that contains ≥70% of tier
-    members as descendants).
-  * **Universal vocabulary** with `ICE.SENSITIVE.*` /
-    `ICE.NONSENSITIVE.*` path conventions: detect by code
-    prefix.
-  * **Neither signal**: empty summary, prompt block degrades to
-    the generic preamble naming no specific codes.
+- **Vocabulary-aware sensitivity map (ICE-only).**
+  `_sensitive_subtree_summary(category_set)` activates only on
+  Atelier's own publicly-grounded ICE conventions
+  (`ICE.SENSITIVE.*` / `ICE.NONSENSITIVE.*`). When the loaded
+  vocabulary uses these path conventions, the helper emits a
+  Markdown summary naming the sensitive root, the catch-all, and
+  up to three publicly-grounded leaf abbreviations (per
+  `src/atelier/classify/fixtures/PROVENANCE.md`). For every
+  other shape — customer vocabularies, future taxonomies,
+  arbitrary domain extensions — the helper returns `""` and the
+  prompt block degrades to the generic preamble naming no
+  specific codes.
+
+  The framework deliberately makes **no assumptions about
+  arbitrary taxonomies**. Customer / domain vocabularies arrive
+  with widely-varying sensitivity encodings: numeric ratings of
+  different scales, string labels, hierarchical conventions
+  derived from the customer's compliance regime, or no
+  sensitivity signal at all. Inferring a "sensitivity map" from
+  an unfamiliar schema would either fabricate misleading
+  structure (e.g. picking a placeholder ancestor as a "subtree
+  root") or leak customer-specific encoding into the prompt that
+  we can't verify is publicly grounded. The narrow ICE-only
+  activation is honest: it tells the LLM what the framework
+  knows and stays silent where it doesn't.
+
+  For non-ICE vocabularies the LLM still has: (a) the full
+  markdown category table at the top of the system prompt,
+  (b) per-column ontology priors for any column where pattern
+  detection fires (each prior names a publicly-grounded ICE
+  concept the LLM can translate to the customer's frame),
+  (c) the fixed cost-asymmetry preamble with the decision rule.
+  That is sufficient to navigate any taxonomy without the
+  framework guessing at its sensitivity structure.
 
 - **Honest confidence calibration.** Asks the LLM symmetrically
   to lower confidence on sensitive-leaning non-sensitive picks
