@@ -432,6 +432,37 @@ def _seed_classify_data_source() -> None:
         _log.warning("Classify data source seed failed: %s", exc)
 
 
+def _last_user_selected_source_id() -> str | None:
+    """Return the source_id of the most recent FSM run, or None.
+
+    Captures the user's last expressed classification intent: every
+    manual ``/api/fsm/start`` call records its ``source_id`` on the
+    FSM run row, so the most-recent run reflects whichever source the
+    operator last asked the pipeline to classify.
+
+    Used by :func:`_maybe_auto_start_classify` so an AMP/app restart
+    picks up the user's current configuration rather than dredging up
+    the deployment-time ``ATELIER_CLASSIFY_*`` env defaults.
+
+    Returns the most recent non-null ``source_id`` from
+    ``AtelierDao.list_fsm_runs()`` (which is ordered by
+    ``started_at`` desc — see ``db/dao.py:list_fsm_runs``).  Returns
+    ``None`` on initial-deploy (no prior runs), DAO unavailable
+    (no Postgres / PGlite yet attached), or any error path —
+    callers fall back to env-driven defaults.
+    """
+    try:
+        from atelier.db.dao import AtelierDao
+        runs = AtelierDao().list_fsm_runs()
+    except Exception:
+        return None
+    for run in runs:
+        sid = run.get("source_id")
+        if sid:
+            return sid
+    return None
+
+
 def _maybe_auto_start_classify() -> None:
     """Kick off a classification run on boot when configured.
 
@@ -441,6 +472,19 @@ def _maybe_auto_start_classify() -> None:
     with the underlying Bedrock/Anthropic exception in its ``error``
     field.  An honest failure visible in the Status panel is a better
     operator signal than a "skipped" log line that might go unnoticed.
+
+    Source-of-truth precedence on auto-start:
+
+      1. **Last user-selected source** — the ``source_id`` of the
+         most recent FSM run, if any.  This captures whatever the
+         operator last picked via the Status / Data Platform UI; an
+         AMP restart that re-fires auto-start should honor the
+         user's current configuration rather than regress to the
+         deployment-time env defaults.
+
+      2. **Env-driven default** — ``ATELIER_CLASSIFY_CONNECTION`` +
+         ``ATELIER_CLASSIFY_DATABASE``, used only when there are no
+         prior runs (initial deploy) or when DAO lookup fails.
 
     The pipeline's LLM backends set explicit boto3 timeouts
     (connect=15s, read=180s) so a cold-boot egress blackhole surfaces
@@ -461,6 +505,18 @@ def _maybe_auto_start_classify() -> None:
     cfg = load_config()
     if not getattr(cfg, "classify_auto_start", False):
         return
+
+    # Prefer the user's last-selected source over env defaults so a
+    # restart honors the operator's current configuration.
+    last_source_id = _last_user_selected_source_id()
+    if last_source_id:
+        result = fsm_start(source_id=last_source_id)
+        _log.info(
+            "Classify auto-start dispatched (last user-selected): %s → %s",
+            last_source_id, result,
+        )
+        return
+
     connection = (getattr(cfg, "classify_connection_name", "") or "").strip()
     database = (getattr(cfg, "classify_database", "") or "").strip()
     if not connection or not database:
@@ -471,7 +527,10 @@ def _maybe_auto_start_classify() -> None:
 
     source_id = _classify_source_id(connection, database)
     result = fsm_start(source_id=source_id)
-    _log.info("Classify auto-start dispatched: %s → %s", source_id, result)
+    _log.info(
+        "Classify auto-start dispatched (env default — no prior runs): %s → %s",
+        source_id, result,
+    )
 
 
 def _discover_and_register_hive_sources() -> None:

@@ -93,3 +93,31 @@ def step_fsm_called_with(context, source_id):
     assert context.autostart_calls[0]["source_id"] == source_id, (
         context.autostart_calls
     )
+
+
+@given('the most recent FSM run has source_id "{source_id}"')
+def step_last_run_source(context, source_id):
+    """Stub _last_user_selected_source_id to return the given source_id.
+
+    The real helper queries ``AtelierDao.list_fsm_runs()`` for the
+    most-recent non-null source_id; for unit-style coverage we
+    bypass the DAO and inject the value directly so the scenario
+    exercises the resolution branch in
+    ``_maybe_auto_start_classify`` without needing a live DB.
+    """
+    from atelier import gateway
+    prior = gateway._last_user_selected_source_id
+    gateway._last_user_selected_source_id = lambda: source_id  # type: ignore[assignment]
+    context.add_cleanup(_restore_last_user_selected, gateway, prior)
+
+
+@given("there are no prior FSM runs")
+def step_no_prior_runs(context):
+    from atelier import gateway
+    prior = gateway._last_user_selected_source_id
+    gateway._last_user_selected_source_id = lambda: None  # type: ignore[assignment]
+    context.add_cleanup(_restore_last_user_selected, gateway, prior)
+
+
+def _restore_last_user_selected(gateway_mod, prior) -> None:
+    gateway_mod._last_user_selected_source_id = prior  # type: ignore[assignment]
