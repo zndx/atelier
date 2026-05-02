@@ -1,19 +1,128 @@
-<!--
-Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
-This file contains material proprietary to Cloudera, Inc., and is provided
-to authorized licensees solely for use in connection with the Cloudera AI
-(CAI) Application from which it was obtained.  It may not be copied,
-modified, redistributed, or used in any other manner without the express
-written consent of Cloudera, Inc.
--->
-
 # Atelier Changelog
 
 All notable changes to this project are recorded here.  The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this
 project adheres to a relaxed semver (pre-1.0 minor bumps may carry breaking
 changes; the upgrade notes call them out).
+
+---
+
+## v0.4.0-rc1 — 2026-04-28
+
+First release candidate for `v0.4.0`.  Bumps `v0.3.0-rc1` after CAI
+soak surfaced a substantive line of algorithmic work that warrants a
+new minor rather than an `rc2`.  Carries the entire algorithmic
+engine reconciled from the `rch/deploy` CAI workspace branch on top
+of the `v0.3.0-rc1` UX surface, plus the rc1-soak production fixes
+from `deploy/v0.3.0-rc1`.
+
+### Headline — algorithmic engine
+
+- **DST as iterative refinement** — bootstrap loop reframed as
+  fixed-point iteration with explicit numerical-methods primitives
+  (Banach 1922, Saad 2003 §4.1, Robbins-Monro 1951, Brandt 1977
+  multigrid, Smets 1993).  Documented in
+  [`docs/src/architecture/dst-evidence-independence.md`](docs/src/architecture/dst-evidence-independence.md)
+  (689 lines).
+- **Unified residual norm + contraction rate** — L2 combination of
+  four normalized components (mean(gap)/gap_threshold,
+  frac_unclear/clarity_target, mean(K)/k_threshold, frac(indep-tier
+  disagreement)).  `bootstrap.residual_norm` and
+  `bootstrap.contraction_rate` surface in `IterationMetrics` and
+  `iteration_history`.
+- **Hierarchical cosine mass + cross-subtree cautious_code** (Shafer
+  §3, Smets §6) — when the LLM votes confidently in one subtree and
+  no leaf decisively fits in the cosine-favored subtree, the system
+  surfaces an honest "subtree X is the right place but no leaf fits"
+  promotion via Smets least-commitment.
+- **Parent-aware DST frame** — the LLM is free to vote at any
+  hierarchy level; the DST frame honors internal-node codes; the
+  headline picker treats every node as a tag candidate; parents
+  render as first-class taxonomy rows.
+- **Cosine reliability shaping (Haenni-Hartmann)** — margin-aware
+  mass allocation; the cosine source's reliability scales with the
+  top-1 vs top-2 margin instead of a fixed discount.
+- **Ontology priors** — public substrate threaded through embedding
+  text + LLM prompt + SAGE feature.
+- **Governance cost model** — Type-II-aversion in the LLM system
+  prompt; ICE-only sensitivity map (drop schema-assuming Branch A);
+  invocative-rubric replaces prescriptive-checklist phrasing.
+- **Discount calibration**: cosine 0.30 → 0.20, llm 0.10 → 0.15;
+  SVM discount default 0.55 (Denoeux 2008 non-distinct-evidence
+  framing — the incremental SVM trains on LLM labels).
+- **Indep-tier revisit gate** — fires an LLM revisit when
+  `{cosine, pattern, name_match}` agree on a code at meaningful
+  consensus mass that disagrees with the LLM, even when DST K
+  doesn't trip.
+
+### Headline — operations & UX
+
+- **Nautilus mid-run pipeline watcher** — daemon thread polls FSM +
+  `BootstrapState.batch_audit`, fires structured `InterventionRecord`
+  via callback when the run stalls, sweeps too long, or accumulates
+  failures.  Pairs with halving retry (per-batch) and supervisor
+  overwatch (post-run).  See
+  [`docs/src/architecture/nautilus.md`](docs/src/architecture/nautilus.md).
+- **start-app.sh self-heal on PGlite OOM** — Node `--max-old-space-
+  size=8192` (was the implicit ~4 GB default that OOM-killed under
+  thousand-column runs).  Backgrounds gRPC + uvicorn with `wait -n`;
+  exits with diagnostics on critical-child death so
+  `scripts/startup_app.py` restarts the stack.
+- **Atlas taxonomy CLI** + `just sync-taxonomy` recipe.
+- **Snapshot orchestration framework** — `scripts/snap_*.py`:
+  concurrent per-table subagent fan-out against Bedrock Sonnet,
+  manifest-driven resumability.
+- **Bootstrap-secrets shell-quoting** + **SOPS decryption format
+  fix** for `.env.cai.enc`.
+- **Settings UI captions** — per-choice `captions` dict for
+  `review_backend` and `shap_method`.
+
+### Pipeline & classification
+
+- `cautious_code` filters to threshold-cleared rows only.
+- Persistent state file for auto-start source resolution.
+- Customer-derived encoding scrub from universal vocabularies +
+  provenance audit.
+
+### BDD coverage added
+
+- `features/agent/evidence_independence.feature` (317 lines)
+- `features/agent/governance_cost_model.feature` (85 lines)
+- `features/agent/fusion_strategy.feature` (22 lines)
+- `features/gateway/auto_start.feature` (43 lines)
+
+### Database
+
+- No new migrations.  All schema work from v0.3.0-rc1 carries through.
+
+### Known regressions (re-introduce before v0.4.0 GA)
+
+- **Throttle-aware retry** — trunk's `state.throttle_count` +
+  `ThrottledError` handling (commit `fd39ebb`) was dropped during
+  the bootstrap.py reconciliation in favor of rch/deploy's algo
+  base.  The `sweep_throttled` UI progress field is no longer
+  populated (Status.tsx gracefully treats it as 0).  Re-port the
+  throttle handling on top of rch/deploy's bootstrap.py before
+  promoting to GA.
+
+### Lineage notes
+
+- 25 algorithmic-engine commits originally authored as
+  `Test005 user005` (CAI workspace identity) rewritten to
+  `Ryan Hill <rch@zndx.org>` with `Co-Authored-By: Claude` trailer.
+- 5 cherry-picked soak-fix commits from `deploy/v0.3.0-rc1`
+  similarly rewritten.
+
+### Upgrade notes (v0.3.0 → v0.4.0)
+
+1. No new database migrations.
+2. **SVM discount default** is now `0.55` (was `0.20`) per Denoeux
+   2008 non-distinct-evidence framing.  Operators with overlay
+   overrides should re-validate.
+3. **Discount recalibration**: cosine `0.30 → 0.20`, llm
+   `0.10 → 0.15`.
+4. UI rebuild: `just build-ui`.
+5. Re-port throttle-aware retry before GA (see Known regressions).
 
 ---
 
