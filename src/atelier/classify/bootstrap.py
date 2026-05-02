@@ -11,17 +11,13 @@ Three phases:
 
   Phase 2 — ML validation:
     Run the full 6-source DST pipeline with the LLM result included.
-    Belief-gap (Pl − Bel) measures how tightly evidence supports the
-    predicted code; DST conflict K is a diagnostic for source
-    disagreement (high K = sources disagree on the leaf category).
+    DST conflict K identifies columns where ML evidence disagrees with
+    the LLM label.
 
   Phase 3 — Targeted revisit:
-    Re-send disagreement and high-gap columns to the LLM with enriched
-    ML context (prediction, belief interval, confusable pair).  Iterate
-    on this shrinking set until the mean belief gap drops below
-    ``gap_threshold`` (primary criterion), the gap plateaus, or budget
-    is exhausted.  K is tracked alongside as a diagnostic, not as the
-    convergence signal.
+    Re-send only high-K disagreement columns to the LLM with enriched ML
+    context (prediction, belief interval, confusable pair).  Iterate on this
+    shrinking set until K converges or budget is exhausted.
 
 Ported from signals/src/sigint/bootstrap_agent.py, adapted for atelier's
 FSM, HOCON config, and classification pipeline.
@@ -30,7 +26,7 @@ FSM, HOCON config, and classification pipeline.
 from __future__ import annotations
 
 import logging
-import random
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -82,69 +78,23 @@ _FATAL_MSG_SUBSTRINGS: tuple[str, ...] = (
 )
 
 
-_THROTTLE_CLASS_NAMES: frozenset[str] = frozenset({
-    # llm_backend.ThrottledError — Bedrock + OpenAI-compat backends raise
-    # this when their inner backoff loop exhausts on a throttling code.
-    "ThrottledError",
-    # anthropic SDK rate-limit class (Anthropic backends don't manually
-    # exhaust retries; the SDK does, then raises this).
-    "RateLimitError",
-    # boto-level direct surfacing (defensive — usually wrapped before
-    # reaching here, but if a backend raises raw, classify it).
-    "ThrottlingException",
-    "TooManyRequestsException",
-})
-
-_THROTTLE_MSG_SUBSTRINGS: tuple[str, ...] = (
-    "rate limit",
-    "rate_limit",
-    "ratelimit",
-    "throttling",
-    "throttled",
-    "too many requests",
-    "tps quota",
-    "tpm quota",
-)
-
-# Per-call-site cap on throttle-and-retry-at-same-size attempts before
-# falling through to halving.  5 × exponential-with-jitter (capped at
-# 60s per sleep) gives the backend up to a few minutes of recovery
-# window per call without burning the budget on a permanently-degraded
-# endpoint.
-_THROTTLE_MAX_ATTEMPTS: int = 5
-
-
 def _classify_error(exc: Exception) -> str:
-    """Return ``"fatal"`` | ``"throttle"`` | ``"recoverable"`` for an LLM error.
+    """Return ``"fatal"`` or ``"recoverable"`` for an LLM call exception.
 
-    - **Fatal**: auth, permission, invariant violations.  Halving cannot
-      repair these; the sweep aborts immediately.
-    - **Throttle**: rate-limit signals (HTTP 429, ``ThrottledError``,
-      ``RateLimitError``, ``ThrottlingException``).  The outer halving
-      loop **sleeps with jitter at the same batch size** instead of
-      halving — halving under throttling multiplies concurrent calls at
-      smaller sizes, making throttling worse.
-    - **Recoverable**: everything else (timeouts, 5xx other than 503,
-      JSON parse issues, connection resets).  Halve and retry down to
-      ``min_columns_per_call``.
-
-    The classification is checked class-name-first (cheap, deterministic)
-    before falling through to message-substring detection (covers cases
-    where exception types are wrapped or messages carry the signal but
-    the type is generic).
+    Fatal errors abort the sweep immediately — halving a batch cannot
+    repair auth problems or a wrong model ID, and silently retrying
+    would waste compute budget while producing a false "partial
+    coverage" result.  Everything else (timeouts, 5xx, JSON parse
+    issues, rate limits, connection resets) halves and retries down
+    to the configured ``min_columns_per_call`` (default 1).
     """
     cls_name = type(exc).__name__
     if cls_name in _FATAL_CLASS_NAMES:
         return "fatal"
-    if cls_name in _THROTTLE_CLASS_NAMES:
-        return "throttle"
     msg = str(exc).lower()
     for marker in _FATAL_MSG_SUBSTRINGS:
         if marker in msg:
             return "fatal"
-    for marker in _THROTTLE_MSG_SUBSTRINGS:
-        if marker in msg:
-            return "throttle"
     return "recoverable"
 
 
@@ -177,16 +127,6 @@ class BootstrapConfig:
     """Bootstrap convergence configuration."""
 
     max_iterations: int = 5
-    # Floor — forces at least this many iterations even when the loop's
-    # disagreement criterion returns an empty set on the first pass.
-    # Project directive: iteration is part of the algorithm.  An
-    # early-exit without any revisit on iteration 1 produces output the
-    # same size as the algorithm-as-designed but with fundamentally
-    # different semantics — we haven't actually exercised the iterative
-    # DST-fusion component.  The invariant ``min_iterations >= 2`` is
-    # enforced at pipeline entry, mirroring the ``max_iterations >= 2``
-    # rule codified in 0c0170f.
-    min_iterations: int = 2
     k_threshold: float = 0.2
     coverage_target: float = 1.0
     confidence_floor: float = 0.5
@@ -207,38 +147,29 @@ class BootstrapConfig:
     # blackholed endpoint where attempts pile up without calls, this is
     # the gate that stops the retry storm.
     max_total_llm_attempts: int = 10000
-    llm_discount: float = 0.10
+    llm_discount: float = 0.15
     frontier_svm_retrain: bool = True
     frontier_svm_min_labels: int = 20
     # Belief-gap convergence (primary convergence criteria)
     gap_threshold: float = 0.15
     clarity_target: float = 0.10
-    # Minimum belief mass for a prediction to be considered "settled".
-    # 0.50 (coin-flip) is too permissive — it treats barely-one-option-
-    # is-leading as adequate evidence for a terminal classification.
-    # 0.80 means the winning code must hold the majority of the mass
-    # function before the loop stops revisiting it.  Tuned upward
-    # alongside min_iterations to make the revisit pass substantive.
-    bel_floor: float = 0.80
-    # Wall-clock deadline for the LLM sweep (seconds).
-    # 0 = disabled (the default).  Healthy sweeps on large corpora
-    # routinely exceed 30 minutes — a 9782-column synth run at a
-    # legitimate ~33s/batch Bedrock latency takes ~2 hours — so a
-    # wall-clock cap is not a good default brake.  The fast-fail
-    # protection against a blackholed endpoint comes from
-    # ``max_consecutive_halve_failures`` (LS-4, ~2 min trip time) and
-    # the ``max_total_llm_attempts`` backstop; the deadline is kept as
-    # an opt-in ceiling for operators who have a known corpus size
-    # and want a hard wall.  Set to a positive number of seconds
-    # (HOCON: ``classify.bootstrap.sweep_deadline_s``, env:
-    # ``ATELIER_BOOTSTRAP_SWEEP_DEADLINE_S``) to enable.
+    bel_floor: float = 0.50
+    # Minimum independent-tier consensus mass required to fire a revisit
+    # on the basis of indep-tier vs LLM disagreement.  Below this floor
+    # the cosine/pattern/name_match signal is too diffuse to act on
+    # alone (the existing high-K branch still fires when relevant).
+    indep_revisit_mass_threshold: float = 0.45
+    # Wall-clock deadline for the LLM sweep.  ``0`` (default) disables
+    # the brake — the attempts cap and consecutive-failure breaker cover
+    # the dead-endpoint case, and a healthy-but-slow sweep (large vocab
+    # + Bedrock latency) should not be guillotined by a fixed clock.
+    # Set a positive value in HOCON / Settings to re-enable as a hard
+    # ceiling; a ``SweepDeadlineError`` is raised on overrun.
     sweep_deadline_s: float = 0.0
     # Stop halving after this many consecutive recoverable failures in
     # a row — at that point the endpoint is effectively dead and each
     # further retry just compounds the outage.  Counts failures at any
     # depth (a halved_on_error at depth 3 increments; a success resets).
-    # This is the primary fast-fail for a blackholed endpoint (~2 min
-    # on a 15s connect-timeout), independent of sweep_deadline_s.
     max_consecutive_halve_failures: int = 8
 
 
@@ -247,7 +178,6 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
     max_calls = cfg.classify_bootstrap_max_total_llm_calls
     return BootstrapConfig(
         max_iterations=cfg.classify_bootstrap_max_iterations,
-        min_iterations=getattr(cfg, "classify_bootstrap_min_iterations", 2),
         k_threshold=cfg.classify_bootstrap_k_threshold,
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,
@@ -257,7 +187,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
             cfg, "classify_bootstrap_max_total_llm_attempts", 2 * max_calls,
         ),
         sweep_deadline_s=getattr(
-            cfg, "classify_bootstrap_sweep_deadline_s", 1800.0,
+            cfg, "classify_bootstrap_sweep_deadline_s", 0.0,
         ),
         max_consecutive_halve_failures=getattr(
             cfg, "classify_bootstrap_max_consecutive_halve_failures", 8,
@@ -268,12 +198,30 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         gap_threshold=cfg.classify_bootstrap_gap_threshold,
         clarity_target=cfg.classify_bootstrap_clarity_target,
         bel_floor=cfg.classify_bootstrap_bel_floor,
+        indep_revisit_mass_threshold=getattr(
+            cfg, "classify_bootstrap_indep_revisit_mass_threshold", 0.45,
+        ),
     )
 
 
 @dataclass
 class IterationMetrics:
-    """Metrics captured at each bootstrap iteration."""
+    """Metrics captured at each bootstrap iteration.
+
+    The bootstrap loop is iterative refinement on a belief-assignment
+    vector B over columns: B_{n+1} = T(B_n), where T composes the
+    LLM sweep, ML validation, DST fusion, and targeted revisit on
+    disagreement.  Per Saad 2003 §4.1 (*Iterative Methods for Sparse
+    Linear Systems*), an iterative method's primary diagnostic is
+    its **residual norm** ``‖r(B)‖`` — a scalar measure of distance
+    from the fixed point — and the **contraction factor** ``ρ_n =
+    ‖r_{n+1}‖ / ‖r_n‖``, which distinguishes contractive (ρ < 1,
+    converging) from stalled (ρ → 1) from diverging (ρ > 1) regimes.
+
+    ``residual_norm`` and ``contraction_rate`` here implement that
+    diagnostic for Atelier's pipeline.  See
+    ``docs/src/architecture/dst-evidence-independence.md``.
+    """
 
     iteration: int
     mean_k: float
@@ -289,6 +237,48 @@ class IterationMetrics:
     mean_gap: float = 0.0        # mean(Pl - Bel) for predicted categories
     mean_bel: float = 0.0        # mean belief for predicted categories
     frac_unclear: float = 0.0    # fraction of columns needing clarification
+    # Numerical-methods convergence diagnostics.  ``residual_norm`` is
+    # a unified scalar combining gap, K, frac_unclear, and indep-tier
+    # disagreement (each normalized so 1.0 means "at threshold" and 0
+    # means "fully converged").  ``contraction_rate`` is ρ_n =
+    # residual_norm / prior_residual_norm; <1 means converging, →1
+    # stalled, >1 diverging (Saad 2003 §4.1).
+    residual_norm: float = 0.0
+    contraction_rate: float = 0.0
+    indep_tier_disagreement_frac: float = 0.0
+
+
+@dataclass
+class ColumnResidualSnapshot:
+    """Per-column residual at one iteration of the bootstrap loop.
+
+    Captured by ``record_iteration_metrics`` after each iteration's
+    ML validation completes, so the snapshot reflects the post-
+    iteration state.  Together with the corpus-wide
+    ``IterationMetrics``, snapshots form the column-major view that
+    operators / overwatch / future acceleration schemes consume.
+
+    The corpus-wide ``IterationMetrics`` is time-major (one row per
+    iteration with aggregates across columns).  ``column_history``
+    on ``BootstrapState`` is column-major (one list per column with
+    snapshots across iterations).  Both views are needed: corpus
+    aggregates drive the headline convergence loop; per-column
+    trajectories let operators see which specific columns are
+    converging vs stalling — and let future acceleration schemes
+    (bandit revisit ordering, Aitken Δ² early-stop, per-column
+    Anderson on oscillating populations) operate on real per-column
+    data.
+    """
+
+    iteration: int
+    gap: float                  # Pl − Bel for the predicted code
+    bel: float
+    K: float                    # ml_conflict (fused conflict)
+    indep_top1_code: str | None
+    indep_top1_mass: float
+    label: str | None           # state.labels[name] at snapshot time
+    label_source: str | None    # "llm" | "llm_revisit" | "propagated"
+    revisited: bool             # True iff this iteration's _llm_revisit touched it
 
 
 @dataclass
@@ -325,6 +315,13 @@ class BootstrapState:
     ml_uncertainty: dict[str, float] = field(default_factory=dict)
     ml_belief: dict[str, float] = field(default_factory=dict)
     ml_plausibility: dict[str, float] = field(default_factory=dict)
+    # Independent-tier consensus (cosine + pattern + name_match) per
+    # column.  Populated alongside ml_prediction in _run_ml_validation.
+    # The revisit gate compares these against the LLM vote without the
+    # tautological inclusion of LLM-derivative ML sources.
+    independent_top1: dict[str, str] = field(default_factory=dict)
+    independent_top1_mass: dict[str, float] = field(default_factory=dict)
+    independent_top1_conflict: dict[str, float] = field(default_factory=dict)
     llm_calls_total: int = 0
     # Every entry into ``_classify_batch_with_retry`` increments this —
     # success, halve, or failed-at-min.  ``llm_calls_total`` only moves on
@@ -339,12 +336,6 @@ class BootstrapState:
     # success; LS-4 circuit breaker raises FatalLLMError when it reaches
     # ``cfg.max_consecutive_halve_failures``.
     consecutive_halve_failures: int = 0
-    # Throttle telemetry — incremented every time a backend raises
-    # ``ThrottledError`` (or equivalent) and the outer retry loop
-    # sleeps-at-same-size rather than halving.  Surfaced to the FSM
-    # progress dict and the Status UI so operators can see when the
-    # backend is rate-limiting them rather than failing.
-    throttle_count: int = 0
     tokens_input: int = 0
     tokens_output: int = 0
     iteration_metrics: list[IterationMetrics] = field(default_factory=list)
@@ -363,14 +354,6 @@ class BootstrapState:
     agent_reasoning: list[str] = field(default_factory=list)
     agent_turns: int = 0
     agent_converged_reason: str | None = None
-    # Structured tag corresponding to one of the convergence_reason
-    # enum values (iterative_convergence, no_revisit_candidates,
-    # gap_threshold_met, plateau, budget_exhausted, agent_convergence).
-    # Populated by the declare_converged tool's convergence_kind
-    # parameter so the structured tag and the prose reason stay
-    # decoupled — Status UI keys on the tag, full prose lands in
-    # convergence_reason_detail.
-    agent_converged_tag: str | None = None
     # Monte Carlo sampling metadata
     propagated_count: int = 0
     escalated_count: int = 0
@@ -381,9 +364,15 @@ class BootstrapState:
     # LLM truncation tracking
     truncation_count: int = 0
     effective_batch_size: int = 50
-    # Incremental SVM retraining state (filename retained: svm_frontier.pkl)
+    # Frontier SVM retraining state
     svm_retrain_count: int = 0
     svm_frontier_path: str | None = None
+    # Per-column residual trajectory.  Appended in
+    # ``record_iteration_metrics`` after each iteration's ML
+    # validation; column-major view of the convergence behaviour.
+    # See ``ColumnResidualSnapshot`` and
+    # docs/src/architecture/dst-evidence-independence.md.
+    column_history: dict[str, list[ColumnResidualSnapshot]] = field(default_factory=dict)
 
 
 # ── Phase helpers ────────────────────────────────────────────────
@@ -488,16 +477,13 @@ def _classify_batch_with_retry(
     if state.cancelled:
         return []
 
-    # LS-3 — wall-clock deadline.  Only enforced when the operator has
-    # set a positive sweep_deadline_s.  Default is 0 (disabled) because
-    # LS-4 (consecutive-failure breaker) already catches the blackhole
-    # scenario in ~2 min without requiring a wall-clock guess at the
-    # right corpus size.
-    if (
-        cfg is not None
-        and cfg.sweep_deadline_s > 0
-        and state.sweep_started_at > 0
-    ):
+    # LS-3 — wall-clock deadline.  Bounded so a blackholed endpoint with
+    # a 15s connect-timeout can't recurse through ~1 hour of retries.
+    # ``sweep_deadline_s <= 0`` disables the wall-clock brake; the
+    # attempts cap (LS-2) and consecutive-failure breaker (LS-4) remain
+    # as the fast brakes on a truly dead endpoint.  Disabled is the
+    # default so a slow-but-healthy Bedrock sweep isn't guillotined.
+    if cfg is not None and cfg.sweep_deadline_s > 0 and state.sweep_started_at > 0:
         elapsed = time.time() - state.sweep_started_at
         if elapsed > cfg.sweep_deadline_s:
             _record("deadline_exceeded")
@@ -562,55 +548,6 @@ def _classify_batch_with_retry(
             raise FatalLLMError(
                 f"LLM backend reported unrecoverable error ({type(exc).__name__}): {exc}"
             ) from exc
-
-        # Throttle — sleep with jitter and retry at SAME batch size.
-        # Halving under throttling makes throttling worse (more concurrent
-        # calls at smaller sizes); the right move is to give the backend
-        # time to drain its rate-limit window and try again unchanged.
-        # Capped at ``_THROTTLE_MAX_ATTEMPTS`` per call site to prevent
-        # unbounded sleep loops on a permanently-degraded endpoint.
-        if kind == "throttle":
-            state.throttle_count += 1
-            _record("throttled", exc)
-            attempts_so_far = sum(
-                1 for ba in state.batch_audit
-                if ba.batch_index == batch_index and ba.status == "throttled"
-            )
-            if attempts_so_far <= _THROTTLE_MAX_ATTEMPTS:
-                # Honor backend retry-after hint when present; otherwise
-                # exponential with jitter capped at 60s.
-                hint = getattr(exc, "retry_after_s", None)
-                if hint and hint > 0:
-                    sleep_s = min(60.0, float(hint))
-                else:
-                    base = min(60.0, 2.0 ** attempts_so_far)
-                    sleep_s = base + random.uniform(0.0, base * 0.5)
-                _beat(f"sweep_throttled_d{_depth}")
-                logger.warning(
-                    "LLM throttled (attempt %d/%d) — sleeping %.1fs and "
-                    "retrying at SAME batch size (n=%d): %s",
-                    attempts_so_far, _THROTTLE_MAX_ATTEMPTS, sleep_s, n, exc,
-                )
-                time.sleep(sleep_s)
-                # Recurse at same size (not halved); _depth unchanged.
-                return _classify_batch_with_retry(
-                    backend, chunk_samples, system_prompt, state,
-                    revisit_context=revisit_context,
-                    table_name=table_name,
-                    min_batch=min_batch,
-                    _depth=_depth,
-                    _parent_index=batch_index,
-                    heartbeat=heartbeat,
-                    cfg=cfg,
-                )
-            # Exhausted throttle attempts — fall through to recoverable
-            # halving so the request can still complete with degraded
-            # throughput rather than fail outright.
-            logger.warning(
-                "LLM throttle attempts exhausted (%d) — falling back to "
-                "halving retry (n=%d): %s",
-                _THROTTLE_MAX_ATTEMPTS, n, exc,
-            )
 
         # Recoverable: halve if possible, else record per-column failure.
         if n <= min_batch:
@@ -990,24 +927,78 @@ def _run_ml_validation(
             state.ml_belief[name] = result["belief"]
             state.ml_plausibility[name] = result["plausibility"]
 
+        indep_code = result.get("independent_top1_code")
+        if indep_code:
+            state.independent_top1[name] = indep_code
+            state.independent_top1_mass[name] = float(
+                result.get("independent_top1_mass", 0.0) or 0.0,
+            )
+            state.independent_top1_conflict[name] = float(
+                result.get("independent_top1_conflict", 0.0) or 0.0,
+            )
+
 
 def _identify_disagreements(
     state: BootstrapState,
     column_names: list[str],
     cfg: BootstrapConfig,
 ) -> list[str]:
-    """Find columns where LLM and ML disagree AND K is high."""
-    disagreements = []
+    """Find columns that warrant an LLM revisit.
+
+    A revisit fires when *either*:
+
+    1. The independent-tier consensus (cosine + pattern + name_match)
+       has a top-1 prediction at meaningful mass (≥
+       ``indep_revisit_mass_threshold``) that disagrees with the LLM
+       vote.  This branch matters because the LLM-derivative ML
+       sources (CatBoost-fit-to-LLM, frontier SVM) cannot, by
+       construction, contradict the LLM — see Shafer 1976 §11.3 on
+       reliability discounting and Denoeux 2008 on non-distinct
+       evidence.  The fully-fused ``ml_prediction`` therefore tracks
+       the LLM whenever the LLM is loud, masking genuine
+       independent-source disagreement.  Comparing LLM against the
+       ``{cosine, pattern, name_match}`` consensus restores a real
+       cross-source disagreement test.
+
+    2. K is high *and* the fused prediction differs from LLM.  This
+       is the legacy gate, retained as a safety net for cases where
+       the independent consensus is diffuse but conflict is
+       diagnostically high (typical when the LLM is over-confident
+       on a code the ML cluster scattered against).
+
+    Indep-tier disagreement is prioritized in the returned ordering
+    because it carries the strongest soundness signal.
+    """
+    disagreements: list[tuple[str, int, float]] = []
     for name in column_names:
         llm_code = state.labels.get(name)
         ml_code = state.ml_prediction.get(name)
-        k = state.ml_conflict.get(name, 0)
+        k = state.ml_conflict.get(name, 0.0)
+        indep_code = state.independent_top1.get(name)
+        indep_mass = state.independent_top1_mass.get(name, 0.0)
 
-        if llm_code and ml_code and llm_code != ml_code and k > cfg.k_threshold:
-            disagreements.append(name)
+        fire_indep = bool(
+            llm_code
+            and indep_code
+            and indep_code != llm_code
+            and indep_mass >= cfg.indep_revisit_mass_threshold
+        )
+        fire_high_k = bool(
+            llm_code
+            and ml_code
+            and llm_code != ml_code
+            and k > cfg.k_threshold
+        )
 
-    disagreements.sort(key=lambda n: -state.ml_conflict.get(n, 0))
-    return disagreements
+        if fire_indep:
+            # Tier 0: indep-tier disagreement at meaningful mass.
+            disagreements.append((name, 0, -indep_mass))
+        elif fire_high_k:
+            # Tier 1: high-K legacy safety net.
+            disagreements.append((name, 1, -k))
+
+    disagreements.sort(key=lambda entry: (entry[1], entry[2]))
+    return [name for name, _, _ in disagreements]
 
 
 def _llm_revisit(
@@ -1045,6 +1036,18 @@ def _llm_revisit(
                 col.values, col.column_type, pattern_signals,
             )
 
+        # Independent-tier consensus and label, when present, surface
+        # the LLM-independent counter-evidence the gate fired on so the
+        # revisit prompt can reason against it explicitly.
+        indep_code = state.independent_top1.get(name, "")
+        indep_label = ""
+        if indep_code:
+            indep_cat = (
+                category_set.by_code.get(indep_code)
+                or category_set.all_by_code.get(indep_code)
+            )
+            indep_label = indep_cat.label if indep_cat else indep_code
+
         revisit_context[name] = {
             "ml_prediction": ml_label or ml_code,
             "belief": 0.0,
@@ -1056,6 +1059,11 @@ def _llm_revisit(
             "previous": {
                 "code": llm_code,
                 "confidence": state.confidence.get(name, 0),
+            },
+            "independent_consensus": {
+                "code": indep_code,
+                "label": indep_label,
+                "mass": round(state.independent_top1_mass.get(name, 0.0), 4),
             },
         }
 
@@ -1214,8 +1222,38 @@ def record_iteration_metrics(
     state: BootstrapState,
     column_names: list[str],
     disagreement_count: int,
+    cfg: BootstrapConfig | None = None,
+    revisited_this_iter: set[str] | None = None,
 ) -> IterationMetrics:
-    """Capture metrics for the current iteration."""
+    """Capture metrics for the current iteration.
+
+    Appends one ``ColumnResidualSnapshot`` per labeled column to
+    ``state.column_history`` so the column-major trajectory view
+    stays in sync with the time-major ``IterationMetrics`` aggregate.
+    Columns absent from ``state.labels`` are skipped (symmetric with
+    ``_mean_gap`` / ``_frac_needing_clarification``).
+
+    Args:
+        revisited_this_iter: Names of columns whose label was
+            re-evaluated by ``_llm_revisit`` during the iteration.
+            Surfaced on each snapshot so downstream analysis (per-
+            column ρ, bandit ordering, Aitken early-stop) can
+            distinguish "settled spontaneously" from "settled after
+            revisit".  Optional; defaults to no columns flagged.
+    """
+    # Compute the unified residual + cross-source disagreement
+    # fraction.  When cfg is provided (the production path), these
+    # become first-class diagnostics tracking convergence per Saad
+    # 2003 §4.1.  Falls back gracefully when cfg is omitted (legacy
+    # callers / tests).
+    r_norm = 0.0
+    indep_frac = 0.0
+    if cfg is not None:
+        r_norm = round(residual_norm(state, column_names, cfg), 4)
+        indep_frac = round(
+            _indep_tier_disagreement_frac(state, column_names, cfg), 4,
+        )
+
     metrics = IterationMetrics(
         iteration=state.iteration,
         mean_k=round(_mean_k(state, column_names), 4),
@@ -1228,13 +1266,48 @@ def record_iteration_metrics(
         frac_unclear=round(_frac_needing_clarification(
             state, column_names,
         ), 4),
+        residual_norm=r_norm,
+        indep_tier_disagreement_frac=indep_frac,
     )
     state.iteration_metrics.append(metrics)
+    # Contraction rate needs the just-appended row, so compute after.
+    metrics.contraction_rate = round(contraction_rate(state), 4)
+
+    # Per-column trajectory append.  One snapshot per labeled column
+    # per iteration; column-major view that complements the time-
+    # major IterationMetrics.  Foundation for per-column ρ, bandit
+    # ordering, Aitken early-stop (Phase B) and possible Anderson on
+    # oscillating populations (Phase C).
+    revisited_set = revisited_this_iter or set()
+    for name in column_names:
+        if name not in state.labels:
+            continue
+        snap = ColumnResidualSnapshot(
+            iteration=state.iteration,
+            gap=round(
+                state.ml_plausibility.get(name, 1.0)
+                - state.ml_belief.get(name, 0.0), 4,
+            ),
+            bel=round(state.ml_belief.get(name, 0.0), 4),
+            K=round(state.ml_conflict.get(name, 0.0), 4),
+            indep_top1_code=state.independent_top1.get(name),
+            indep_top1_mass=round(
+                state.independent_top1_mass.get(name, 0.0), 4,
+            ),
+            label=state.labels.get(name),
+            label_source=state.label_source.get(name),
+            revisited=(name in revisited_set),
+        )
+        state.column_history.setdefault(name, []).append(snap)
+
     logger.info(
         "Iteration %d: mean_K=%.4f mean_gap=%.4f mean_bel=%.4f "
-        "unclear=%.1f%% disagreements=%d coverage=%.1f%%",
+        "unclear=%.1f%% disagreements=%d coverage=%.1f%% "
+        "‖r‖=%.3f ρ=%.3f indep_disagree=%.1f%%",
         metrics.iteration, metrics.mean_k, metrics.mean_gap, metrics.mean_bel,
         metrics.frac_unclear * 100, metrics.disagreements, metrics.coverage * 100,
+        metrics.residual_norm, metrics.contraction_rate,
+        metrics.indep_tier_disagreement_frac * 100,
     )
     return metrics
 
@@ -1249,6 +1322,144 @@ def k_convergence_rate(state: BootstrapState) -> float:
     if len(metrics) < 2:
         return 0.0
     return (metrics[-1].mean_k - metrics[0].mean_k) / (len(metrics) - 1)
+
+
+def _indep_tier_disagreement_frac(
+    state: BootstrapState,
+    column_names: list[str],
+    cfg: BootstrapConfig,
+) -> float:
+    """Fraction of labeled columns where indep-tier consensus
+    disagrees with the LLM at meaningful mass.
+
+    A column contributes to this residual when:
+      - LLM and indep-tier top-1 disagree, AND
+      - indep-tier top-1 mass ≥ ``cfg.indep_revisit_mass_threshold``.
+
+    This is the cross-source soundness component of the unified
+    residual — it measures the fraction of columns where the
+    publicly-grounded sources (cosine, pattern, name_match) are
+    at odds with the LLM-derivative cluster.
+    """
+    labeled = [n for n in column_names if n in state.labels]
+    if not labeled:
+        return 0.0
+    threshold = cfg.indep_revisit_mass_threshold
+    bad = 0
+    for name in labeled:
+        llm_code = state.labels.get(name)
+        indep_code = state.independent_top1.get(name)
+        indep_mass = state.independent_top1_mass.get(name, 0.0)
+        if (
+            llm_code and indep_code
+            and indep_code != llm_code
+            and indep_mass >= threshold
+        ):
+            bad += 1
+    return bad / len(labeled)
+
+
+def residual_norm(
+    state: BootstrapState,
+    column_names: list[str],
+    cfg: BootstrapConfig,
+) -> float:
+    """Unified residual norm ``‖r(B)‖`` for the bootstrap iteration.
+
+    The bootstrap loop is iterative refinement on a belief-assignment
+    vector B; the residual is a scalar measure of distance from
+    convergence (Saad 2003 §4.1).  This implementation combines four
+    normalized components, each scaled so 1.0 means "at convergence
+    threshold" and 0 means "fully converged":
+
+      r_gap = mean(Pl - Bel) / gap_threshold
+      r_unclear = frac_unclear / clarity_target
+      r_K = mean(K) / k_threshold
+      r_indep = frac(indep-tier disagreement at meaningful mass)
+
+    Combined via L2 norm (root-mean-square) so any single component
+    going large dominates while many small components don't add up
+    spuriously:  ``r = sqrt((r_gap^2 + r_unclear^2 + r_K^2 + r_indep^2) / 4)``
+
+    A residual_norm of 1.0 means "at convergence threshold across the
+    board"; values <1 are converged, >1 are not.  Tracking the
+    residual across iterations exposes the contraction factor ρ_n =
+    r_n / r_{n-1} — see ``contraction_rate``.
+    """
+    if not column_names:
+        return 0.0
+
+    # Each component normalized to its convergence threshold.
+    gap = _mean_gap(state, column_names)
+    r_gap = gap / cfg.gap_threshold if cfg.gap_threshold > 0 else gap
+
+    frac_unc = _frac_needing_clarification(
+        state, column_names,
+        gap_threshold=cfg.gap_threshold, bel_floor=cfg.bel_floor,
+    )
+    r_unclear = (
+        frac_unc / cfg.clarity_target if cfg.clarity_target > 0 else frac_unc
+    )
+
+    mean_k = _mean_k(state, column_names)
+    r_k = mean_k / cfg.k_threshold if cfg.k_threshold > 0 else mean_k
+
+    r_indep = _indep_tier_disagreement_frac(state, column_names, cfg)
+
+    components = [r_gap, r_unclear, r_k, r_indep]
+    sq = sum(c * c for c in components) / len(components)
+    return math.sqrt(sq)
+
+
+def contraction_rate(state: BootstrapState) -> float:
+    """Per-iteration contraction factor ρ_n = ‖r_{n+1}‖ / ‖r_n‖.
+
+    Following Saad 2003 §4.1, the contraction factor is the
+    headline diagnostic for any iterative method:
+
+      * ρ < 1: converging — successive iterations reduce residual.
+      * ρ → 1: stalled — iterations not making progress.
+      * ρ > 1: diverging — iterations growing residual.
+
+    For a linear contraction, ρ is constant and equals the
+    asymptotic convergence rate.  For nonlinear iterations, ρ is
+    typically estimated empirically per-step (this function).
+
+    Returns 0.0 if fewer than two iterations have been recorded
+    or the prior residual is zero (avoid division-by-zero).
+    """
+    metrics = state.iteration_metrics
+    if len(metrics) < 2:
+        return 0.0
+    prev = metrics[-2].residual_norm
+    curr = metrics[-1].residual_norm
+    if prev <= 1e-12:
+        return 0.0
+    return curr / prev
+
+
+def column_contraction(state: BootstrapState, name: str) -> float | None:
+    """Per-column contraction factor ρ_col over the column's trajectory.
+
+    Returns ``residual_now / residual_prev`` using the column's gap as
+    residual (falls back to K when the prior gap is zero).  ``None``
+    when fewer than two snapshots exist for the column.
+
+    Mirrors :func:`contraction_rate` at the column level: ρ_col < 1
+    means the column is converging, ρ_col → 1 stalled, ρ_col > 1
+    diverging.  Per-column ρ is what bandit-style revisit ordering
+    and Aitken Δ² early-stop (Phase B) consume — Phase A delivers
+    the helper, but does not yet act on it.
+    """
+    hist = state.column_history.get(name, [])
+    if len(hist) < 2:
+        return None
+    prev, curr = hist[-2], hist[-1]
+    if prev.gap > 1e-9:
+        return curr.gap / prev.gap
+    if prev.K > 1e-9:
+        return curr.K / prev.K
+    return None
 
 
 def gap_convergence_rate(state: BootstrapState) -> float:

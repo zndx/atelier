@@ -9,11 +9,14 @@ name matching (M0), LLM classification (M1), CatBoost (M2), SVM (M2).
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from dataclasses import dataclass
 
 from atelier.classify.belief import BeliefAssignment, FocalElement, FrameOfDiscernment
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -22,19 +25,36 @@ class DiscountConfig:
 
     Each value controls how much evidence mass the corresponding source
     allocates to Theta (total ignorance).  Higher = more conservative.
+
+    Discount calibration follows Shafer's reliability operator (1976,
+    §11.3): ``m'(A) = α·m(A); m'(Θ) = α·m(Θ) + (1-α)`` for source
+    reliability α = 1 - discount.  When evidence sources are *non-
+    distinct* — the LLM-derivative case described by Denoeux 2008 —
+    Dempster's rule double-counts overlapping mass.  The principled
+    response is a substantial discount on derivative sources so the
+    fused belief reflects the underlying independent signal rather
+    than amplified self-agreement.
+
+    In this pipeline ``catboost_*`` and ``svm`` ride on labels that
+    are deterministic transforms of the LLM sweep (see
+    ``ml_train.fit_catboost_to_llm_labels`` and the frontier-SVM
+    label filter at ``ml_train`` lines 118-127), so their defaults
+    are calibrated above the genuinely independent ``cosine``
+    discount.  See ``docs/src/architecture/dst-evidence-independence.md``
+    for the full rationale.
     """
 
-    cosine: float = 0.30
-    svm: float = 0.20
+    cosine: float = 0.20
+    svm: float = 0.55
     pattern_theta: float = 0.25
     name_match_exact: float = 0.70
     name_match_code: float = 0.50
     name_match_alias: float = 0.50
     name_match_overlap: float = 0.30
-    catboost_base: float = 0.10
+    catboost_base: float = 0.55
     catboost_variance_scale: float = 1.6
-    catboost_max: float = 0.50
-    catboost_fallback: float = 0.15
+    catboost_max: float = 0.75
+    catboost_fallback: float = 0.55
     confusable_ratio_threshold: float = 3.0
 
     @classmethod
@@ -115,38 +135,249 @@ def _redistribute_confusable_mass(
 # ── Cosine similarity ────────────────────────────────────────────────
 
 
+def _cosine_reliability(
+    top1_sim: float,
+    top2_sim: float | None,
+    *,
+    floor: float = 0.10,
+    ceiling: float = 0.70,
+    tau_abs: float = 0.40,
+    sigma_abs: float = 0.10,
+    sigma_marg: float = 0.05,
+    w_abs: float = 0.6,
+    w_marg: float = 0.4,
+) -> float:
+    """Reliability factor α(s₁, s₂) for the cosine source.
+
+    Implements Haenni & Hartmann 2006, *Modeling Partially Reliable
+    Information Sources: A General Approach Based on Dempster-Shafer
+    Theory* (Information Fusion 7(4), 361-379, §3): a source's
+    reliability is an observable function of source-quality
+    indicators, and the contributed mass is bounded by α with
+    ``(1 - α)`` allocated to ignorance.
+
+    Two quality indicators here:
+
+    * ``α_abs`` — sigmoid of the top-1 absolute similarity centered
+      at ``tau_abs``.  Encodes "is cosine matching anything strongly,
+      or just noise?"  Below ~0.30 absolute similarity is noise on
+      sentence-transformer embeddings; above ~0.50 is a clear match.
+    * ``α_marg`` — tanh of the top-1/top-2 margin scaled by
+      ``sigma_marg``.  Encodes "is the top-1 a decisive winner, or
+      ambiguous among similar candidates?"  A margin of 0.10 yields
+      ~0.96; a margin of 0.005 yields ~0.10.
+
+    Weighted blend, then clamped to ``[floor, ceiling]``.  The
+    ``ceiling`` corresponds to the legacy static-discount behavior
+    (1 - 0.30 = 0.70 evidence mass): under sharp signal we recover
+    the prior allocation; under diffuse signal we allocate close to
+    ``floor`` to cosine and the rest to Θ.
+    """
+    alpha_abs = 1.0 / (1.0 + math.exp(-(top1_sim - tau_abs) / sigma_abs))
+    if top2_sim is not None:
+        margin = max(0.0, top1_sim - top2_sim)
+        alpha_marg = math.tanh(margin / sigma_marg)
+    else:
+        alpha_marg = 1.0
+    alpha = w_abs * alpha_abs + w_marg * alpha_marg
+    return max(floor, min(ceiling, alpha))
+
+
+def _margin_weight(
+    top1_sim: float,
+    top2_sim: float | None,
+    *,
+    sigma_marg: float = 0.05,
+) -> float:
+    """Fraction of cosine evidence mass to concentrate on top-1.
+
+    Margin-aware mass allocation addresses the softmax-compression
+    pathology on large vocabularies: a sharp top-1 with a clear
+    top-1/top-2 margin should carry weight on top-1 alone rather
+    than dilute across hundreds of softmax-flattened siblings.
+    Returns ``tanh((s₁ - s₂) / σ_marg)`` clamped to ``[0, 1]``.
+
+    When the margin is wide, almost all evidence mass concentrates
+    on top-1 (mass = α * margin_weight); the residual ``α * (1 -
+    margin_weight)`` follows the softmax distribution across all
+    candidates.  When the margin is narrow, the formula reduces to
+    classical softmax allocation across the candidate set.
+
+    Complements ``_cosine_reliability``: α gates *how much* mass
+    cosine contributes; this gates *how concentrated* that mass is.
+    """
+    if top2_sim is None:
+        return 1.0
+    margin = max(0.0, top1_sim - top2_sim)
+    return math.tanh(margin / sigma_marg)
+
+
+def _significant_subtree(
+    top1_code: str,
+    softmax_probs: dict[str, float],
+    frame: FrameOfDiscernment,
+    *,
+    concentration_threshold: float = 0.50,
+) -> tuple[FocalElement | None, float]:
+    """Find the most-specific internal node containing *top1_code* whose
+    descendant leaves capture ≥ ``concentration_threshold`` of the
+    softmax probability mass.
+
+    Used by ``cosine_to_mass`` to redirect residual evidence mass to a
+    subtree-level internal node when cosine has clear localization to
+    a subtree but ambiguity within it.  When the most-specific such
+    internal node exists, ``(focal_element, concentration_fraction)``
+    is returned; otherwise ``(None, 0.0)``.
+
+    Hierarchical Dempster-Shafer (Shafer 1976 §3, Smets 1990 §6 on
+    refinement) — internal-node focal elements represent
+    disjunctions; mass on a disjunction means "the answer is
+    somewhere in this set" without committing to a specific
+    element.  Without this aggregation step, cosine evidence
+    distributed across leaves of a common ancestor gets
+    structurally lost when fused via Dempster's rule against a
+    confident LLM vote in a different subtree (the loan-amount-as-
+    non-sensitive failure mode).
+
+    Walking from the top-1 leaf upward (rather than requiring every
+    top-K candidate to share an LCA) tolerates outliers — a small
+    amount of probability leaking outside the subtree doesn't void
+    the aggregation, as long as the *bulk* of the mass remains
+    inside.
+    """
+    if top1_code not in frame.singletons:
+        return None, 0.0
+
+    # Candidate internal nodes are those whose descendant set
+    # contains top1_code.  The frame already exposes them; pick the
+    # most-specific (smallest descendant set) whose subtree
+    # concentration meets the threshold.
+    candidates: list[tuple[FocalElement, float, int]] = []
+    for code, fe in frame.internal_nodes.items():
+        if top1_code not in fe.codes:
+            continue
+        concentration = sum(
+            prob for c, prob in softmax_probs.items() if c in fe.codes
+        )
+        if concentration >= concentration_threshold:
+            candidates.append((fe, concentration, len(fe.codes)))
+
+    if not candidates:
+        return None, 0.0
+
+    # Most-specific = smallest descendant set.  Tie-break by higher
+    # concentration, then by deterministic frozen-set ordering.
+    candidates.sort(
+        key=lambda c: (c[2], -c[1], tuple(sorted(c[0].codes)))
+    )
+    return candidates[0][0], candidates[0][1]
+
+
 def cosine_to_mass(
     similarities: dict[str, float],
     frame: FrameOfDiscernment,
     discount: float = 0.3,
+    *,
+    reliability_floor: float = 0.10,
 ) -> BeliefAssignment:
     """Convert cosine similarities to a mass function.
 
-    Applies softmax to similarities, then discounts by *discount* so
-    a fraction of mass goes to Theta (total ignorance).
+    Applies reliability-shaped allocation per Haenni & Hartmann 2006
+    (see ``_cosine_reliability``): the source-reliability factor α
+    is computed dynamically from top-1 absolute similarity and
+    top-1/top-2 margin, replacing the static ``1 - discount``
+    evidence allocation.  ``discount`` is reinterpreted here as the
+    *complement of the reliability ceiling* — under sharp cosine
+    signal we recover the prior behavior (α ≈ 1 - discount); under
+    diffuse signal we allocate close to ``reliability_floor`` to
+    cosine and the remainder to Θ.
+
+    The α-bounded evidence mass is then split via margin-aware
+    allocation (``_margin_weight``): a sharp top-1 with a clear
+    top-1/top-2 margin concentrates mass on top-1 directly rather
+    than diluting through softmax over hundreds of siblings (the
+    pathology that motivated this change — see
+    ``docs/src/architecture/dst-evidence-independence.md``).
+
+    Args:
+        similarities: ``{code: cosine_similarity}`` over candidate
+            codes.  Values are raw cosines (typically 0-1 range for
+            sentence-transformer embeddings).
+        frame: The frame of discernment.
+        discount: Complement of the reliability ceiling
+            (``ceiling = 1 - discount``).  Default 0.30 preserves
+            the legacy maximum-mass behavior under sharp signal.
+        reliability_floor: Minimum reliability under any conditions.
+            Default 0.10 keeps cosine contributing some signal even
+            when noisy.
     """
     if not similarities:
         return frame.vacuous()
 
-    max_sim = max(similarities.values())
-    exp_sims = {
-        code: math.exp(sim - max_sim)
-        for code, sim in similarities.items()
-        if code in frame.singletons
-    }
+    # Restrict to codes that are real singletons in the frame.
+    in_frame = {code: sim for code, sim in similarities.items()
+                if code in frame.singletons}
+    if not in_frame:
+        return frame.vacuous()
+
+    sorted_sims = sorted(in_frame.values(), reverse=True)
+    top1 = sorted_sims[0]
+    top2 = sorted_sims[1] if len(sorted_sims) > 1 else None
+
+    # α — Haenni-Hartmann reliability bounded by [floor, ceiling].
+    alpha = _cosine_reliability(
+        top1, top2, floor=reliability_floor, ceiling=1.0 - discount,
+    )
+    # Margin weight — fraction of α to concentrate on top-1.
+    margin_w = _margin_weight(top1, top2)
+
+    # Softmax distribution across all in-frame singletons (used for
+    # the residual mass when margin is narrow, and for ranking when
+    # we need the top-1 code identity).
+    max_sim = top1
+    exp_sims = {code: math.exp(sim - max_sim) for code, sim in in_frame.items()}
     total_exp = sum(exp_sims.values())
     if total_exp <= 0:
         return frame.vacuous()
+    softmax_probs = {code: ev / total_exp for code, ev in exp_sims.items()}
 
+    # Identify the top-1 code (deterministic tie-break by code id).
+    top1_code = max(in_frame.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+    # Margin-aware allocation:
+    #   m(top1) = α * margin_w   (concentrated on the decisive winner)
+    #   m(rest)  = α * (1 - margin_w)  → split between LCA internal
+    #     node (when top-K share an ancestor) and per-leaf softmax.
     masses: dict[FocalElement, float] = {}
-    evidence_mass = 1.0 - discount
-    for code, exp_val in exp_sims.items():
-        prob = exp_val / total_exp
-        mass = prob * evidence_mass
-        if mass > 1e-15:
-            masses[frame.singleton(code)] = mass
+    top1_share = alpha * margin_w
+    residual = alpha * (1.0 - margin_w)
 
-    masses[frame.theta] = discount
+    # Hierarchical aggregation: walk up from the top-1 leaf, find
+    # the most-specific internal node whose descendants capture a
+    # significant fraction of softmax mass, and redirect that
+    # in-subtree residual to the internal-node focal element.  This
+    # gives Dempster fusion an honest disjunctive signal ("the
+    # answer is somewhere in subtree X") rather than diffuse leaf
+    # mass that gets lost when the LLM votes confidently in a
+    # different subtree.  See _significant_subtree.
+    subtree_fe, lca_concentration = _significant_subtree(
+        top1_code, softmax_probs, frame,
+    )
+
+    lca_share = residual * lca_concentration
+    leaf_residual = residual - lca_share
+
+    for code, prob in softmax_probs.items():
+        m = leaf_residual * prob
+        if code == top1_code:
+            m += top1_share
+        if m > 1e-15:
+            masses[frame.singleton(code)] = m
+
+    if subtree_fe is not None and lca_share > 1e-15:
+        masses[subtree_fe] = masses.get(subtree_fe, 0.0) + lca_share
+
+    masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)
     return BeliefAssignment(masses=masses)
 
@@ -221,6 +452,223 @@ _QUARANTINED_PATTERN_MAP: dict[str, str] = {
     "license_plate_pattern": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ID",
     "eth_address_pattern": "ICE.SENSITIVE.TECHNICAL.DEVID",
 }
+
+
+def _normalize_token(value: str) -> str:
+    """Lowercase + strip non-alphanumerics for alias comparison."""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+# ── Ontology priors ─────────────────────────────────────────────────
+
+
+_ONTOLOGY_BY_CODE_CACHE: dict[str, dict] | None = None
+_ONTOLOGY_PATH_CACHE: dict[str, list[str]] = {}
+
+
+def _load_universal_ontology() -> dict[str, dict]:
+    """Load + index ``universal_vocabulary.json`` by code, lazily.
+
+    Returns a flat ``{code: entry}`` map.  Cached at module level so
+    every per-column ontology lookup is an O(1) dict hit after first
+    call.
+    """
+    global _ONTOLOGY_BY_CODE_CACHE
+    if _ONTOLOGY_BY_CODE_CACHE is not None:
+        return _ONTOLOGY_BY_CODE_CACHE
+
+    import json
+    from pathlib import Path
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    path = fixtures_dir / "universal_vocabulary.json"
+    try:
+        with open(path) as f:
+            records = json.load(f)
+    except Exception as exc:
+        logger.warning("Failed to load universal vocabulary for ontology priors: %s", exc)
+        _ONTOLOGY_BY_CODE_CACHE = {}
+        return _ONTOLOGY_BY_CODE_CACHE
+
+    indexed: dict[str, dict] = {r["code"]: r for r in records if r.get("code")}
+    _ONTOLOGY_BY_CODE_CACHE = indexed
+    return indexed
+
+
+def _ontology_path_labels(code: str) -> list[str]:
+    """Walk parent_code chain to the root, returning labels root→leaf.
+
+    Uses the universal vocabulary's parent_code field to reconstruct
+    the ontological path (e.g. ``["Sensitive Data", "Personally
+    Identifiable Data", "Financial Data", "Payment Data", "Transaction
+    Amount"]``).  Cached per code.
+    """
+    if code in _ONTOLOGY_PATH_CACHE:
+        return _ONTOLOGY_PATH_CACHE[code]
+
+    by_code = _load_universal_ontology()
+    labels: list[str] = []
+    current = code
+    seen: set[str] = set()
+    while current and current not in seen:
+        seen.add(current)
+        entry = by_code.get(current)
+        if not entry:
+            break
+        labels.insert(0, entry.get("label") or current)
+        current = entry.get("parent_code") or ""
+    _ONTOLOGY_PATH_CACHE[code] = labels
+    return labels
+
+
+def lookup_pattern_ontology(
+    pattern: str,
+    pattern_category_map: dict[str, str] | None = None,
+) -> dict | None:
+    """Return canonical ICE.* metadata for a fired pattern, or None.
+
+    Used as a publicly-grounded semantic prior fed into:
+
+    * the column embedding text (so cosine sees ontology terms an
+      embedding model recognizes from training, not just the regex
+      name — see ``ColumnFeatures.to_embedding_text``);
+    * the first-pass LLM user prompt (so the LLM has a translation
+      anchor when the user vocabulary lacks a direct equivalent of
+      the detected pattern — He et al. 2023, ontology alignment via
+      LLMs);
+    * SAGE/SHAP attribution (as the ``ontology_priors`` ablatable
+      feature, distinct from raw embedding text).
+
+    The returned dict carries label, description, common_names, the
+    full ontological path (root→leaf), and the canonical code itself.
+    Every element traces to a public source — see
+    ``src/atelier/classify/fixtures/PROVENANCE.md``.
+
+    Returns ``None`` when the pattern has no entry in the pattern map
+    or when the target code is missing from the universal vocabulary
+    (defensive — both should be invariants).
+    """
+    if pattern_category_map is None:
+        pattern_category_map = DEFAULT_PATTERN_MAP
+
+    target_code = pattern_category_map.get(pattern)
+    if not target_code:
+        return None
+
+    by_code = _load_universal_ontology()
+    entry = by_code.get(target_code)
+    if not entry:
+        return None
+
+    return {
+        "pattern": pattern,
+        "code": target_code,
+        "label": entry.get("label") or "",
+        "description": entry.get("description") or "",
+        "common_names": entry.get("common_names") or "",
+        "path": _ontology_path_labels(target_code),
+    }
+
+
+def resolve_pattern_map(
+    default_map: dict[str, str],
+    category_set,
+) -> dict[str, str]:
+    """Resolve canonical ICE.* pattern targets against the active vocabulary.
+
+    The default map at ``DEFAULT_PATTERN_MAP`` references canonical
+    BFO/Common-Core mnemonic codes (``ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT``
+    etc.).  When the user-selected vocabulary uses a different code
+    convention — e.g. dotted-numeric ``1.1.1.2.5.1`` — every pattern
+    target falls outside ``frame.singletons`` and ``pattern_to_mass``
+    silently returns vacuous mass, disabling the entire pattern source
+    with no operator-visible warning.
+
+    This resolver maps each ICE.* target through three fallback layers
+    against ``category_set``:
+
+    1. **Direct hit**: target exists in ``category_set.all_by_code``.
+    2. **By abbrev**: leaf mnemonic (the suffix after the last ``.``)
+       matches a category's ``abbrev`` field.
+    3. **By common-name alias**: leaf mnemonic appears in a category's
+       ``common_names`` field after token normalization.
+
+    On a miss we log a single ``WARNING`` and drop the entry so the
+    pattern source contributes nothing for that pattern (preserving the
+    pre-resolver fail-safe semantics) instead of pointing at a
+    nonexistent code.
+
+    Returns a new ``{pattern_name: resolved_code}`` map containing only
+    patterns whose target was successfully resolved.
+
+    Args:
+        default_map: pattern-name → canonical-target-code mapping.
+        category_set: ``HierarchicalCategorySet`` describing the active
+            vocabulary; uses ``all_by_code``, ``by_abbrev``, and
+            ``all_categories``.
+
+    Notes:
+        Resolver runs once per pipeline run (called from
+        ``_classify_column``).  The deeper BFO/Common-Core ontology
+        mapping that this shim approximates remains future work.
+    """
+    if not default_map:
+        return {}
+
+    all_by_code = getattr(category_set, "all_by_code", {}) or {}
+    by_abbrev = getattr(category_set, "by_abbrev", {}) or {}
+    all_categories = getattr(category_set, "all_categories", []) or []
+
+    resolved: dict[str, str] = {}
+    misses: list[tuple[str, str]] = []
+
+    for pattern, target in default_map.items():
+        if not target:
+            continue
+
+        if target in all_by_code:
+            resolved[pattern] = target
+            continue
+
+        leaf = target.rsplit(".", 1)[-1]
+        leaf_norm = _normalize_token(leaf)
+        if not leaf_norm:
+            misses.append((pattern, target))
+            continue
+
+        abbrev_hit = by_abbrev.get(leaf) or by_abbrev.get(leaf.upper())
+        if abbrev_hit is not None:
+            resolved[pattern] = abbrev_hit.code
+            continue
+
+        alias_hit = None
+        for cat in all_categories:
+            common = getattr(cat, "common_names", "") or ""
+            if not common:
+                continue
+            tokens = re.split(r"[|,;/]+", common)
+            for tok in tokens:
+                if _normalize_token(tok) == leaf_norm:
+                    alias_hit = cat
+                    break
+            if alias_hit is not None:
+                break
+
+        if alias_hit is not None:
+            resolved[pattern] = alias_hit.code
+            continue
+
+        misses.append((pattern, target))
+
+    if misses:
+        miss_summary = ", ".join(f"{p}->{t}" for p, t in misses)
+        logger.warning(
+            "Pattern source: %d target(s) not in active vocabulary; "
+            "patterns disabled for this run: %s",
+            len(misses), miss_summary,
+        )
+
+    return resolved
 
 
 def pattern_to_mass(
@@ -474,14 +922,17 @@ def llm_to_mass(
     confidence: float,
     alternatives: list[dict],
     frame: FrameOfDiscernment,
-    discount: float = 0.10,
+    discount: float = 0.15,
 ) -> BeliefAssignment:
     """Convert LLM classification to a mass function.
 
     The primary prediction receives confidence-proportional mass.
     Alternatives distribute remaining evidence mass.  Low discount
-    (0.10 vs cosine's 0.30) because frontier LLM predictions are
-    well-informed and typically well-calibrated.
+    (0.15 vs cosine's 0.20) because frontier LLM predictions are
+    well-informed and typically well-calibrated, but the LLM signal
+    informs multiple downstream metrics (CatBoost fit-to-LLM,
+    frontier-SVM trained on LLM labels) and a slight bump avoids
+    over-amplifying a non-distinct cluster.
 
     When the LLM returns a parent code or near-miss code, coercion
     attempts to resolve it to a valid leaf singleton.  Unresolvable
@@ -497,12 +948,11 @@ def llm_to_mass(
     if not category_code:
         return frame.vacuous()
 
-    # Coerce non-singleton codes (parent codes, near-misses) to valid leaves
-    resolved = _coerce_to_singleton(category_code, frame)
-    if resolved is None:
+    primary_fe = _resolve_to_focal_element(category_code, frame)
+    if primary_fe is None:
         import logging
         logging.getLogger(__name__).debug(
-            "LLM code %r not in frame singletons and unresolvable — vacuous",
+            "LLM code %r not in frame and unresolvable — vacuous",
             category_code,
         )
         return frame.vacuous()
@@ -512,9 +962,13 @@ def llm_to_mass(
 
     # Primary prediction
     primary_mass = confidence * evidence_mass
-    masses[frame.singleton(resolved)] = primary_mass
+    masses[primary_fe] = primary_mass
 
-    # Distribute remaining evidence to alternatives (also coerced)
+    # Distribute remaining evidence to alternatives (parent or leaf level —
+    # whichever the LLM voted at).  Parent-level alternatives become
+    # internal-node focal elements directly; Dempster's rule combines
+    # internal-node and leaf focal elements natively (parent = union of
+    # leaf descendants).
     remaining = evidence_mass - primary_mass
     if remaining > 1e-15 and alternatives:
         alt_total = sum(a.get("confidence", 0.0) for a in alternatives)
@@ -522,18 +976,68 @@ def llm_to_mass(
             for alt in alternatives:
                 alt_code = alt.get("code", "")
                 alt_conf = alt.get("confidence", 0.0)
-                alt_resolved = _coerce_to_singleton(alt_code, frame) if alt_code else None
-                if alt_resolved and alt_conf > 0:
+                alt_fe = (
+                    _resolve_to_focal_element(alt_code, frame) if alt_code else None
+                )
+                if alt_fe is not None and alt_conf > 0:
                     alt_mass = (alt_conf / alt_total) * remaining
                     if alt_mass > 1e-15:
-                        fe = frame.singleton(alt_resolved)
-                        masses[fe] = masses.get(fe, 0.0) + alt_mass
+                        masses[alt_fe] = masses.get(alt_fe, 0.0) + alt_mass
 
     # Theta gets discount + any unallocated evidence
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
     masses = _redistribute_confusable_mass(masses, frame)
     return BeliefAssignment(masses=masses)
+
+
+def _resolve_to_focal_element(
+    code: str,
+    frame: FrameOfDiscernment,
+) -> FocalElement | None:
+    """Resolve an LLM-emitted code to a frame focal element.
+
+    Atlas-style governance treats every node in the taxonomy as a
+    first-class tagging target, so a parent-level vote is a real
+    answer — not a leaf-resolution failure.  We honor that here:
+
+      1. Code is a leaf singleton → singleton focal element.
+      2. Code is an internal node (parent) with a curated focal
+         element in the frame → internal-node focal element
+         (the union of its leaf descendants).  Mass attached
+         here flows naturally through Dempster's rule against
+         leaf-level evidence; ``cross_subtree_belief`` and
+         ``cautious_promoted_code`` already aggregate up the
+         hierarchy and will see this directly.
+      3. Internal node with a single leaf descendant → coerce to
+         the leaf (degenerate parent — the parent and its only
+         leaf are semantically identical).
+      4. Prefix matching for near-miss leaves: a code that is a
+         strict prefix of exactly one singleton resolves to that
+         singleton (e.g.  ``ICE.SENSITIVE.PID.IDENTITY.GOVID`` →
+         ``ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN`` when SSN is the
+         only descendant in the frame).
+
+    Returns ``None`` for unresolvable / ambiguous codes.
+    """
+    if code in frame.singletons:
+        return frame.singletons[code]
+
+    if code in frame.internal_nodes:
+        fe = frame.internal_nodes[code]
+        if len(fe.codes) == 1:
+            leaf = next(iter(fe.codes))
+            if leaf in frame.singletons:
+                return frame.singletons[leaf]
+        return fe
+
+    # Prefix-match near-miss leaves
+    prefix = code + "."
+    matches = [s for s in frame.singletons if s.startswith(prefix)]
+    if len(matches) == 1:
+        return frame.singletons[matches[0]]
+
+    return None
 
 
 # ── ML classifiers (CatBoost + SVM) ─────────────────────────────────
@@ -599,9 +1103,11 @@ def svm_to_mass(
     making it architecturally independent from the dense sentence-
     transformer embedding shared by cosine and CatBoost sources.
 
-    The discount is lower than cosine (0.30) because calibrated SVM
-    probabilities tend to be well-concentrated on the correct class
-    for short-text classification tasks.
+    The default discount in this signature reflects an unmodified
+    SVM in isolation; the production default for the *frontier* SVM
+    (trained on accumulated LLM labels) is calibrated higher in
+    ``DiscountConfig.svm`` to suppress non-distinct double-counting
+    against the LLM source.
 
     When the frame has confusable pairs and the top-2 singletons form
     a known pair with a close mass ratio, mass is redistributed to

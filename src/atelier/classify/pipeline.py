@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,17 +29,20 @@ from typing import Any
 from atelier.classify.belief import (
     FrameOfDiscernment,
     HierarchicalClassification,
+    combine_multiple,
 )
 from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
 from atelier.classify.mass_functions import (
+    DEFAULT_PATTERN_MAP,
     DiscountConfig,
     catboost_to_mass,
     cosine_to_mass,
     llm_to_mass,
     name_match_to_mass,
     pattern_to_mass,
+    resolve_pattern_map,
     svm_to_mass,
 )
 from atelier.classify.sampler import (
@@ -734,12 +739,12 @@ def run_classification_pipeline(
             should_stop_early,
         )
         from atelier.classify.llm_backend import (
-            build_category_table,
+            build_category_tree,
             build_system_prompt,
         )
 
         boot_cfg = bootstrap_config_from_cfg(cfg)
-        category_table = build_category_table(category_set)
+        category_table = build_category_tree(category_set)
         system_prompt = build_system_prompt(category_table, category_set=category_set)
 
         # Wire config → ml_inference model paths
@@ -828,19 +833,19 @@ def run_classification_pipeline(
         # one whose thread has died silently (observed in the wild:
         # Bedrock TCP connection hung with no timeout, gateway thread
         # entered LLM_SWEEP and never emitted another progress update).
+        #
         # The raw heartbeat dict from bootstrap._llm_sweep uses
-        # ``columns_labeled`` / ``llm_calls_total``; the Status UI
+        # ``columns_labeled`` / ``llm_calls_total``; the UI (Status.tsx)
         # expects ``llm_labeled`` / ``llm_calls``.  Remap here so the
-        # card's existing fields update during the sweep instead of
-        # freezing on the pre-sweep values.  ``sweep_*`` fields surface
-        # sub-phase detail (batches, elapsed, batch size, truncations,
-        # failures) the operator needs to tell a running sweep apart
-        # from a stalled one.
-        import time as _stime
+        # Status card's existing fields light up during the sweep
+        # instead of freezing on the pre-sweep values.  Additional
+        # ``sweep_*`` fields surface sub-phase detail (batches, elapsed,
+        # batch size, truncations, failures) the operator needs to tell
+        # a running sweep apart from a stalled one.
         def _sweep_progress(p: dict) -> None:
             try:
-                sweep_started = state.sweep_started_at or _stime.time()
-                elapsed_s = round(_stime.time() - sweep_started, 1)
+                sweep_started = state.sweep_started_at or time.time()
+                elapsed_s = round(time.time() - sweep_started, 1)
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "columns_total": total_columns,
                     "mc_frontier": len(sweep_columns),
@@ -850,7 +855,6 @@ def run_classification_pipeline(
                     "sweep_batches": p.get("batches_attempted", 0),
                     "sweep_truncations": p.get("truncation_count", 0),
                     "sweep_failed": p.get("failed_columns", 0),
-                    "sweep_throttled": state.throttle_count,
                     "sweep_elapsed_s": elapsed_s,
                     "sweep_batch_size": state.effective_batch_size,
                 })
@@ -928,8 +932,12 @@ def run_classification_pipeline(
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
-        # Record iteration-0 metrics from initial ML validation
-        record_iteration_metrics(state, column_names, len(disagreements))
+        # Record iteration-0 metrics from initial ML validation.
+        # No revisits at iteration 0; pass an empty revisited set.
+        record_iteration_metrics(
+            state, column_names, len(disagreements), boot_cfg,
+            revisited_this_iter=set(),
+        )
 
         # Convergence reason carried through both loop flavours and into
         # the final run summary.  Surfaces "how" the run ended to the UI
@@ -1104,6 +1112,14 @@ def run_classification_pipeline(
                     "mean_k": round(mean_k, 4),
                 })
 
+                # Snapshot the columns that will be revisited THIS
+                # iteration so the per-column trajectory append (in
+                # record_iteration_metrics below) can mark them
+                # ``revisited=True``.  Captured before _llm_revisit
+                # mutates state.labels and before disagreements is
+                # re-computed for the next iteration.
+                revisited_this_iter: set[str] = set(disagreements)
+
                 _llm_revisit(
                     state, boot_cfg, llm_backend, system_prompt,
                     disagreements, samples_by_name, column_table, category_set,
@@ -1160,7 +1176,10 @@ def run_classification_pipeline(
                             escalated,
                         )
 
-                record_iteration_metrics(state, column_names, len(disagreements))
+                record_iteration_metrics(
+                    state, column_names, len(disagreements), boot_cfg,
+                    revisited_this_iter=revisited_this_iter,
+                )
 
             # Loop exited without hitting one of the named break paths —
             # we ran the full max_iterations budget.  Flag that honestly
@@ -1325,6 +1344,22 @@ def run_classification_pipeline(
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
         eval_report.write_json(results_dir / "evaluation_report.json")
+
+        # Per-column residual trajectories — column-major view of the
+        # bootstrap loop's convergence behaviour, complementary to the
+        # time-major iteration_history in classifications.  Used for
+        # offline analysis (Phase B/C acceleration backtest), operator
+        # post-mortem on stuck columns, and audit.  See
+        # docs/src/architecture/dst-evidence-independence.md.
+        from dataclasses import asdict as _dc_asdict
+        trajectories_path = results_dir / "column_trajectories.json"
+        trajectories_payload = {
+            name: [_dc_asdict(snap) for snap in hist]
+            for name, hist in state.column_history.items()
+        }
+        trajectories_path.write_text(
+            json.dumps(trajectories_payload, indent=2, default=str) + "\n",
+        )
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
@@ -1510,6 +1545,43 @@ def run_classification_pipeline(
             pass
 
 
+_HIVE_DB_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _parse_hive_vocab_uri(vocab_uri: str) -> tuple[str, str]:
+    """Parse a hive-style ``vocab_uri`` into ``(database, table)``.
+
+    The only accepted shape is ``{db}.annotations`` where ``db`` is a
+    Hive identifier (alnum + underscore, leading letter).  All other
+    shapes raise ``ValueError`` so the calling pipeline surfaces a real
+    cause to the operator instead of silently routing to the wrong
+    database — historically this manifested as runs falling back to the
+    16-leaf universal vocabulary while the user's selection was ignored.
+    """
+    if not vocab_uri or not vocab_uri.strip():
+        raise ValueError(
+            "vocab_uri is empty; expected \"{db}.annotations\""
+        )
+    parts = vocab_uri.split(".")
+    if len(parts) != 2 or not parts[0]:
+        raise ValueError(
+            f"vocab_uri={vocab_uri!r} does not match expected "
+            f"\"{{db}}.annotations\" form"
+        )
+    database, table = parts
+    if table != "annotations":
+        raise ValueError(
+            f"vocab_uri={vocab_uri!r}: table must be 'annotations', "
+            f"got {table!r}"
+        )
+    if not _HIVE_DB_IDENT_RE.match(database):
+        raise ValueError(
+            f"vocab_uri={vocab_uri!r}: unsafe database identifier "
+            f"{database!r} (expected alnum + underscore, leading letter)"
+        )
+    return database, table
+
+
 def _load_vocabulary(
     cfg,
     build_dir: Path,
@@ -1565,22 +1637,31 @@ def _load_vocabulary(
                     f"Filesystem vocab_uri={vocab_uri!r} points at a missing file"
                 )
 
-        domain_cs = _load_domain_annotations(cfg, build_dir, connection_name)
-        if domain_cs is not None and len(domain_cs.categories) > 0:
-            if not isinstance(domain_cs, HierarchicalCategorySet):
-                domain_cs = HierarchicalCategorySet(
-                    name=domain_cs.name,
-                    categories=list(domain_cs.categories),
-                )
-            log.info(
-                "Loaded domain vocabulary: %d leaf categories (vocab_uri=%s)",
-                len(domain_cs.categories), vocab_uri,
+        try:
+            db_from_uri, _ = _parse_hive_vocab_uri(vocab_uri)
+            domain_cs = _load_domain_annotations(
+                cfg, build_dir, connection_name, database=db_from_uri,
             )
-            return domain_cs
-        raise RuntimeError(
-            f"Could not load domain annotations from vocab_uri={vocab_uri!r} "
-            f"via connection {connection_name!r}"
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not load domain annotations from vocab_uri={vocab_uri!r} "
+                f"via connection {connection_name!r}"
+            ) from exc
+        if domain_cs is None or len(domain_cs.categories) == 0:
+            raise RuntimeError(
+                f"Domain annotations from vocab_uri={vocab_uri!r} returned "
+                f"0 categories via connection {connection_name!r}"
+            )
+        if not isinstance(domain_cs, HierarchicalCategorySet):
+            domain_cs = HierarchicalCategorySet(
+                name=domain_cs.name,
+                categories=list(domain_cs.categories),
+            )
+        log.info(
+            "Loaded domain vocabulary: %d leaf categories (vocab_uri=%s)",
+            len(domain_cs.categories), vocab_uri,
         )
+        return domain_cs
 
     # Env-default Hive: when the operator set ATELIER_CLASSIFY_CONNECTION
     # + ATELIER_CLASSIFY_DATABASE but no explicit vocab_uri was threaded
@@ -1618,37 +1699,56 @@ def _load_vocabulary(
     return universal
 
 
-def _load_domain_annotations(cfg, build_dir: Path, connection_name):
+def _load_domain_annotations(
+    cfg,
+    build_dir: Path,
+    connection_name,
+    *,
+    database: str,
+):
     """Load domain-specific annotations from cache or hive.
 
-    Returns a CategorySet of domain terms, or None if unavailable.
+    Returns a CategorySet of domain terms, or ``None`` if hive returns an
+    empty annotations table.  Hive load failures are *not* caught here —
+    callers wrap them with chained context (the user-facing vocab_uri),
+    so the operator sees the real cause instead of a silent fallback.
+
+    Cache is keyed by ``{connection_name}__{database}.json`` to prevent
+    cross-source poisoning when an operator switches between data
+    sources within the same project ``build/`` tree.
     """
     log = logging.getLogger(__name__)
     cache_dir = build_dir / "data" / "annotations"
-    cache_path = cache_dir / "annotations.json"
+    cache_path = cache_dir / f"{connection_name}__{database}.json"
 
-    # Try cached first — but reject empty caches (poisoned by prior failures)
     if cache_path.exists():
         cs = load_annotations_from_json(cache_path, hierarchical=True)
         if len(cs.categories) > 0:
-            log.info("Loaded %d domain categories from cache %s", len(cs.categories), cache_path)
+            log.info(
+                "Loaded %d domain categories from cache %s",
+                len(cs.categories), cache_path,
+            )
             return cs
-        log.warning("Cache %s contains 0 categories — treating as corrupt, will re-fetch", cache_path)
+        log.warning(
+            "Cache %s contains 0 categories — treating as corrupt, will re-fetch",
+            cache_path,
+        )
         cache_path.unlink()
 
-    # Try hive
-    try:
-        cs = load_annotations_from_hive(cfg, connection_name)
-        if len(cs.categories) == 0:
-            log.warning("Hive returned 0 domain categories — skipping domain layer")
-            return None
-        log.info("Loaded %d domain categories from hive", len(cs.categories))
-        save_annotations_json(cs, cache_path)
-        return cs
-    except Exception as exc:
-        log.warning("Failed to load domain annotations from hive: %s", exc)
-
-    return None
+    cs = load_annotations_from_hive(cfg, connection_name, database)
+    if len(cs.categories) == 0:
+        log.warning(
+            "Hive returned 0 domain categories from %s.annotations via %s "
+            "— skipping domain layer",
+            database, connection_name,
+        )
+        return None
+    log.info(
+        "Loaded %d domain categories from hive (%s.annotations via %s)",
+        len(cs.categories), database, connection_name,
+    )
+    save_annotations_json(cs, cache_path)
+    return cs
 
 
 # ── Confusable pairs ──────────────────────────────────────────────
@@ -1677,6 +1777,29 @@ def _build_confusable_pairs(
     ]
 
 
+# Sources whose evidence is genuinely independent of the LLM sweep.
+# Used to compute a separate "independent-tier consensus" alongside
+# the full fusion so the bootstrap revisit gate can detect when the
+# LLM disagrees with the union of LLM-independent signals (cosine,
+# pattern, name_match) — see Shafer 1976 §11.3 reliability discount
+# and Denoeux 2008 on non-distinct evidence.  CatBoost (fit_to_llm)
+# and the frontier SVM ride on LLM labels and would tautologically
+# reinforce a wrong LLM vote, so they are deliberately excluded.
+INDEPENDENT_TIER: frozenset[str] = frozenset({"cosine", "pattern", "name_match"})
+
+
+def _resolved_pattern_map_for(category_set: HierarchicalCategorySet) -> dict[str, str]:
+    """Return the pattern-target map resolved against *category_set*, cached."""
+    cached = getattr(category_set, "_resolved_pattern_map", None)
+    if cached is None:
+        cached = resolve_pattern_map(DEFAULT_PATTERN_MAP, category_set)
+        try:
+            category_set._resolved_pattern_map = cached  # type: ignore[attr-defined]
+        except AttributeError:
+            return cached
+    return cached
+
+
 def _classify_column(
     col: ColumnSample,
     category_set: HierarchicalCategorySet,
@@ -1685,7 +1808,7 @@ def _classify_column(
     llm_code: str | None = None,
     llm_confidence: float = 0.0,
     llm_alternatives: list[dict] | None = None,
-    llm_discount: float = 0.10,
+    llm_discount: float = 0.15,
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
@@ -1696,6 +1819,15 @@ def _classify_column(
     cosine similarity, LLM, CatBoost, SVM.  The pipeline always
     supplies LLM evidence; llm_code may be None only for offline
     use cases such as seed data preparation.
+
+    In addition to the full Dempster fusion, computes an
+    *independent-tier consensus* over ``{cosine, pattern, name_match}``
+    — the subset of sources that does not derive from the LLM sweep —
+    and exposes its top-1 singleton in the result dict.  The bootstrap
+    revisit gate at ``_identify_disagreements`` consults this signal so
+    cosine/pattern disagreement with LLM can trigger a revisit even
+    when the fully-fused prediction (which includes LLM mass) happens
+    to match LLM.  See ``docs/src/architecture/dst-evidence-independence.md``.
     """
     if discounts is None:
         discounts = DiscountConfig()
@@ -1725,9 +1857,12 @@ def _classify_column(
     if not _is_vacuous(name_mass):
         source_masses["name_match"] = name_mass
 
-    # 2. Pattern detection
+    # 2. Pattern detection (target codes resolved against the active vocab
+    # so non-ICE vocabularies don't silently disable the entire source).
+    resolved_pattern_map = _resolved_pattern_map_for(category_set)
     pattern_mass = pattern_to_mass(
         features.pattern_signals, frame,
+        pattern_category_map=resolved_pattern_map,
         theta_mass=discounts.pattern_theta,
     )
     if not _is_vacuous(pattern_mass):
@@ -1788,6 +1923,30 @@ def _classify_column(
     if not source_masses:
         return _empty_classification(col, features)
 
+    # Independent-tier consensus over LLM-independent sources only.
+    # Used by the bootstrap revisit gate to detect "LLM disagrees with
+    # the union of cosine/pattern/name_match" — a condition that the
+    # fully-fused prediction can mask whenever LLM-derivative ML
+    # sources amplify the LLM vote (Shafer 1976 §11.3, Denoeux 2008).
+    indep_top1_code: str | None = None
+    indep_top1_mass: float = 0.0
+    indep_top1_conflict: float = 0.0
+    indep_assignments = [
+        source_masses[name] for name in INDEPENDENT_TIER if name in source_masses
+    ]
+    if indep_assignments:
+        try:
+            indep_combined, indep_top1_conflict = combine_multiple(
+                indep_assignments, strategy="dempster",
+            )
+            indep_top = indep_combined.most_committed_singleton()
+            if indep_top is not None:
+                indep_top1_code, indep_top1_mass = indep_top
+        except ValueError:
+            # Total conflict (K=1) collapses Dempster — leave consensus
+            # empty; the high-K branch of the revisit gate still fires.
+            pass
+
     hc = HierarchicalClassification.from_combined_evidence(
         source_masses=source_masses,
         frame=frame,
@@ -1820,8 +1979,33 @@ def _classify_column(
         "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
+        # Canonical ICE.* metadata for fired patterns — feeds cosine
+        # via the augmented embedding text and the LLM prompt at
+        # first pass.  Surfaced here so SAGE/SHAP attribution can
+        # treat ontology priors as a discrete feature distinct from
+        # raw embedding text.  Universal-substrate codes; never
+        # returned as classification targets.
+        "ontology_priors": list(features.ontology_priors),
         "belief_path": belief_path,
         "cautious_code": hc.cautious_code(0.7),
+        # Codes anywhere in the hierarchy (leaf or internal node)
+        # whose belief meets the threshold — surfaces cross-subtree
+        # disagreement that ``belief_path`` (confined to the
+        # predicted leaf's ancestor chain) cannot show.  When cosine
+        # evidence localizes to a subtree the LLM did not pick, the
+        # subtree's internal-node parent appears here with its
+        # belief mass, even when the predicted leaf sits elsewhere.
+        # See docs/src/architecture/dst-evidence-independence.md.
+        "cross_subtree_belief": hc.cross_subtree_belief(),
+        # Smets' least-commitment promotion — when the predicted
+        # leaf is below the commit threshold AND the system flags
+        # ``needs_clarification``, this field carries the more-
+        # general code where evidence IS unambiguous.  ``predicted_code``
+        # retains its leaf-argmax semantics for backward
+        # compatibility with Atlas governance sync; operators
+        # consult ``cautious_promoted_code`` when the prediction is
+        # flagged as uncertain.
+        "cautious_promoted_code": hc.cautious_promoted_code(),
         # Curated reference (per-column answer key for accuracy checks)
         # attached at sample-load time by the source loader.  The code
         # is a reference for accuracy checking, not a published
@@ -1847,6 +2031,12 @@ def _classify_column(
         # LLM didn't see this column (e.g. batch truncation).
         "llm_code": llm_code,
         "llm_confidence": float(llm_confidence or 0.0),
+        # Independent-tier consensus (cosine + pattern + name_match,
+        # excluding LLM-derivative sources).  Drives the revisit gate
+        # at ``_identify_disagreements``.
+        "independent_top1_code": indep_top1_code,
+        "independent_top1_mass": round(indep_top1_mass, 4),
+        "independent_top1_conflict": round(indep_top1_conflict, 4),
     }
 
 
@@ -1869,6 +2059,7 @@ def _empty_classification(col, features) -> dict[str, Any]:
         "evidence_sources": {},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
+        "ontology_priors": list(features.ontology_priors),
         "reference_code": col.reference_code,
         "reference_label": "",
         "matches_reference": None,

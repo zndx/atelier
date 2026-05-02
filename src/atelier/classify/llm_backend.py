@@ -298,9 +298,10 @@ def config_from_atelier(cfg) -> LLMBackendConfig:
 def build_category_table(category_set) -> str:
     """Build a markdown table of leaf categories for the system prompt.
 
-    Includes common_names aliases so the LLM can match column names like
-    ``payment_card_number`` to the PAN category even when the label is
-    "Primary Account Number".
+    Retained for callers that want a flat leaf-only rendering.  The
+    pipeline has switched to ``build_category_tree`` which renders
+    parents as first-class rows so the LLM can vote at any level of
+    the hierarchy that the evidence supports.
     """
     lines = [
         "| Code | Label | Aliases | Description |",
@@ -313,49 +314,356 @@ def build_category_table(category_set) -> str:
     return "\n".join(lines)
 
 
+def _format_sensitivity_dict(sens) -> str:
+    """Render a sensitivity dict as ``role=value`` pairs, in a stable order.
+
+    The shape is whatever the customer's annotations table carries —
+    typically per-data-subject-role ratings — so we render verbatim
+    rather than interpreting numeric scales.  The LLM uses its own
+    knowledge of governance rating conventions to read it.
+    """
+    if not isinstance(sens, dict) or not sens:
+        return ""
+    preferred = ("non_corp", "emp_contractor", "individual", "corp")
+    items: list[tuple[str, str]] = []
+    for key in preferred:
+        if key in sens and str(sens[key]).strip():
+            items.append((key, str(sens[key]).strip()))
+    for key, value in sens.items():
+        if key in preferred:
+            continue
+        sval = str(value).strip()
+        if sval:
+            items.append((key, sval))
+    return ", ".join(f"{k}={v}" for k, v in items)
+
+
+def _depth_for(cat) -> int:
+    """Return the indent depth for a category — root nodes at 0."""
+    code = cat.code or ""
+    if not code:
+        return 0
+    return code.count(".")
+
+
+def build_category_tree(category_set) -> str:
+    """Render the full taxonomy tree (leaves + parents) for the system prompt.
+
+    Every node — leaf or internal — is a first-class tagging target
+    in Atlas-style governance, and the customer's curators tag every
+    level (``Financial Data`` parent, ``Salary`` leaf) with their own
+    short codes, sensitivity ratings, and aliases.  Rendering only
+    leaves discards the parent-level information *and* implicitly
+    forbids the LLM from voting at the level its evidence actually
+    supports.  This tree-form rendering shows parents alongside
+    leaves so the LLM can pick the most-specific defensible level.
+
+    Falls back to ``build_category_table`` when the category_set is
+    not hierarchical.
+    """
+    cats = getattr(category_set, "all_categories", None)
+    if not cats:
+        return build_category_table(category_set)
+
+    leaf_codes = getattr(category_set, "leaf_codes", None)
+    if leaf_codes is None:
+        leaf_codes = frozenset(c.code for c in category_set.categories)
+
+    sorted_cats = sorted(cats, key=lambda c: c.code or "")
+
+    lines: list[str] = []
+    for cat in sorted_cats:
+        depth = _depth_for(cat)
+        indent = "  " * depth
+        is_leaf = cat.code in leaf_codes
+
+        parts: list[str] = [f"`{cat.code}` **{cat.label}**"]
+
+        abbrev = (getattr(cat, "abbrev", "") or "").strip()
+        if abbrev:
+            parts.append(f"[{abbrev}]")
+
+        sens_str = _format_sensitivity_dict(getattr(cat, "sensitivity", None))
+        if sens_str:
+            parts.append(f"sens: {sens_str}")
+
+        aliases = (getattr(cat, "common_names", "") or "").strip()
+        if aliases:
+            parts.append(f"aliases: {aliases[:60]}")
+
+        desc = (cat.description or "").strip()
+        if desc:
+            parts.append(desc[:80])
+
+        marker = "-" if is_leaf else "▸"
+        lines.append(f"{indent}{marker} " + " · ".join(parts))
+
+        # Specifics live in embedding_text for cosine; surface a short
+        # tail to the LLM only when it's clearly an example payload
+        # rather than a verbatim duplicate of label/description.
+        embedding_text = (getattr(cat, "embedding_text", "") or "").strip()
+        if is_leaf and embedding_text:
+            tail = embedding_text.split(" | ")[-1].strip()
+            if (
+                tail
+                and tail.lower() != cat.label.lower()
+                and tail.lower() != desc.lower()
+                and tail.lower() != aliases.lower()
+                and len(tail) >= 16
+            ):
+                lines.append(f"{indent}    e.g., {tail[:120]}")
+
+    return "\n".join(lines)
+
+
+def _sensitive_subtree_summary(category_set) -> str:
+    """Markdown summary of the sensitivity structure, ICE conventions only.
+
+    When the loaded vocabulary uses Atelier's publicly-grounded
+    ``ICE.SENSITIVE.*`` / ``ICE.NONSENSITIVE.*`` paths, return a
+    compact Markdown block naming the high-sensitivity subtree
+    root, the catch-all, and a few publicly-grounded leaf
+    abbreviations (per ``fixtures/PROVENANCE.md``).  Return ``""``
+    for every other vocabulary shape so the prompt stays silent
+    where we can't verify the sensitivity encoding is publicly
+    grounded.
+
+    See ``docs/src/architecture/dst-evidence-independence.md``.
+    """
+    cats = getattr(category_set, "all_categories", None)
+    if not cats:
+        cats = getattr(category_set, "categories", None)
+    if not cats:
+        return ""
+
+    has_ice_paths = any(
+        c.code.startswith("ICE.SENSITIVE") or c.code.startswith("ICE.NONSENSITIVE")
+        for c in cats
+    )
+    if not has_ice_paths:
+        return ""
+
+    by_code = {c.code: c for c in cats}
+    sensitive_codes = {c.code for c in cats if c.code.startswith("ICE.SENSITIVE")}
+    nonsens_codes = {c.code for c in cats if c.code.startswith("ICE.NONSENSITIVE")}
+
+    lines: list[str] = ["**Vocabulary sensitivity map (computed for this run):**"]
+    if sensitive_codes:
+        # Pick up to three publicly-grounded leaf exemplars carrying
+        # an abbrev (e.g. SSN, PAN, EMAIL) — every retained leaf
+        # abbrev in the universal vocabulary traces to a public
+        # source per fixtures/PROVENANCE.md.
+        members = [by_code[c] for c in sensitive_codes if c in by_code]
+        members = [m for m in members if getattr(m, "abbrev", "")]
+        members.sort(key=lambda c: (len(c.label or ""), c.code))
+        exemplars = [m.abbrev for m in members[:3]]
+        ex_str = ", ".join(exemplars) if exemplars else "no abbreviated leaves"
+        lines.append(
+            f"- High-sensitivity subtree: rooted at `ICE.SENSITIVE` Sensitive Data — "
+            f"{len(sensitive_codes)} codes including {ex_str}."
+        )
+    if nonsens_codes:
+        shortest = sorted(nonsens_codes, key=lambda c: (c.count("."), c))[0]
+        label_cat = by_code.get(shortest)
+        label = label_cat.label if label_cat else shortest
+        lines.append(f"- Non-sensitive catch-all: `{shortest}` {label}.")
+
+    if len(lines) > 1:
+        return "\n".join(lines)
+    return ""
+
+
+_GOVERNANCE_PERSPECTIVE_TEXT = (
+    "## Sensitivity classification perspective\n"
+    "\n"
+    "You're operating in the same problem-space as the BFO and CCO "
+    "information-content-entity ontologies you know well, and the "
+    "privacy regimes (GDPR, HIPAA, PCI DSS) those ontologies overlap "
+    "with. Treat each of the customer's categories as their own "
+    "refinement of those publicly-grounded concepts, and pick "
+    "whichever of their codes best matches the canonical sensitivity "
+    "concept you'd otherwise assign — Personally Identifiable "
+    "Information, Financial Information, Technical Identifier, "
+    "Biometric, and so on.\n"
+    "\n"
+    "A practical asymmetry: in governance, calling sensitive data "
+    "non-sensitive is a larger error than the reverse. When concrete "
+    "signals — patterns detected on the values, PII-laden sibling "
+    "columns, monetary or identifier value formats, an ontology prior "
+    "pointing sensitive — converge on a sensitive interpretation, "
+    "lean that way even when no leaf is a clean match. Pick the most "
+    "specific sensitive parent you can defend rather than dropping "
+    "the column into a generic non-sensitive bucket. When signals are "
+    "genuinely absent (operational metadata, surrogate keys, "
+    "timestamps, status enums), non-sensitive is the correct call — "
+    "don't reach for sensitive just because of the asymmetry.\n"
+    "\n"
+    "Calibrate confidence to what you actually saw, not to this "
+    "asymmetry."
+)
+
+
+def _governance_cost_model_block(summary: str) -> str:
+    """Compose the sensitivity-classification perspective section.
+
+    Invokes the LLM's existing knowledge of BFO/CCO and the
+    privacy-regime conventions (GDPR Art. 25, HIPAA Safe Harbor,
+    PCI DSS) and frames the classification task as mapping the
+    customer's taxonomy onto those publicly-grounded concepts.
+    Cost-sensitive classification (Elkan 2001, *The Foundations
+    of Cost-Sensitive Learning*) is invoked as a "practical
+    asymmetry" rather than a hard rule — modern LLMs respond
+    better to collaborative framing than to prescriptive
+    checklists.
+
+    Appends the per-run sensitivity hierarchy when
+    ``_sensitive_subtree_summary`` produces one (ICE-conventions
+    only); falls back silently otherwise.
+    """
+    if summary:
+        return (
+            f"{_GOVERNANCE_PERSPECTIVE_TEXT}\n"
+            "\n"
+            "For reference, this vocabulary's sensitivity hierarchy:\n"
+            "\n"
+            f"{summary}"
+        )
+    return _GOVERNANCE_PERSPECTIVE_TEXT
+
+
 def build_system_prompt(category_table: str, category_set=None) -> str:
     """Build the bootstrap classification system prompt.
 
     When *category_set* is provided, the response-format example uses real
     codes from the loaded vocabulary so the LLM doesn't hallucinate codes
     from a different naming convention (e.g. ICE.* vs numeric dot-codes).
+    The Governance Cost Model section is also vocabulary-aware: when the
+    vocab carries sensitivity ratings or ICE.* path conventions, the
+    block names the high-sensitivity subtree and catch-all so the LLM
+    can locate the right sensitive parent under uncertainty.
     """
-    # Pick two real codes for the example (primary + alternative)
-    example_code = "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN"
-    example_alt = "ICE.SENSITIVE.PID.IDENTITY.NAME.FULLNAME"
-    if category_set is not None and hasattr(category_set, "categories"):
-        cats = category_set.categories
-        if len(cats) >= 2:
-            example_code = cats[0].code
-            example_alt = cats[1].code
-        elif len(cats) == 1:
-            example_code = cats[0].code
-            example_alt = cats[0].code
+    # Pick a leaf and a parent for the response-format examples so the
+    # contract demonstrates that both levels of specificity are valid
+    # answers — Atlas-style governance treats every node as a
+    # first-class tagging target.
+    example_leaf = "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN"
+    example_parent = "ICE.SENSITIVE.PID.IDENTITY.GOVID"
+    if category_set is not None:
+        leaves = list(getattr(category_set, "categories", []) or [])
+        if leaves:
+            example_leaf = leaves[0].code
+        parents: list = []
+        leaf_codes = getattr(category_set, "leaf_codes", None)
+        all_cats = getattr(category_set, "all_categories", None)
+        if all_cats and leaf_codes is not None:
+            parents = [c for c in all_cats if c.code not in leaf_codes]
+        if parents:
+            example_parent = parents[0].code
+        elif len(leaves) >= 2:
+            example_parent = leaves[1].code
+
+    sensitivity_summary = _sensitive_subtree_summary(category_set)
+    governance_block = _governance_cost_model_block(sensitivity_summary)
 
     return (
         "You are a data governance classification engine. Your task is to "
         "classify database columns into taxonomy categories based on column "
         "name, data type, sample values, and sibling context.\n"
         "\n"
-        "## Categories\n"
+        "## Taxonomy\n"
+        "\n"
+        "Every node — parent or leaf — is a valid classification target. "
+        "Indentation shows hierarchy; ``▸`` marks a parent (internal node), "
+        "``-`` marks a leaf. Each row may carry the customer's own short "
+        "code in brackets, sensitivity-by-role ratings (``sens:``), aliases, "
+        "and a definition. Treat the metadata as the customer's stated "
+        "intent — usually reliable, but cross-check against the column "
+        "you're classifying.\n"
         "\n"
         f"{category_table}\n"
         "\n"
         "## Instructions\n"
         "\n"
-        "- Classify each column into exactly ONE leaf category from the table above.\n"
-        "- Use the exact Code value from the Categories table.\n"
+        "- Classify each column into exactly ONE category from the taxonomy "
+        "above — pick the most specific level you can defend. If the "
+        "evidence supports a leaf, name the leaf. If the evidence only "
+        "supports a parent (e.g. 'this is financial something' but you "
+        "can't tell which financial leaf), name the parent. Lower "
+        "confidence should track decreasing specificity, not climb to "
+        "compensate for it.\n"
+        "- Use the exact Code value as it appears in the taxonomy.\n"
         "- Consider column name, data type, sample values, and sibling columns.\n"
         "- If no category fits, set category_code to null.\n"
         "- Provide confidence 0.0–1.0 and brief evidence.\n"
-        "- For each column, list up to 3 alternative categories with confidence.\n"
+        "- For each column, list up to 3 alternative categories with confidence. "
+        "Alternatives may be at any level — leaves, parents, or a mix.\n"
         "- Respond with ONLY a JSON array, no markdown fencing.\n"
+        "\n"
+        f"{governance_block}\n"
         "\n"
         "## Response Format\n"
         "\n"
-        f'[{{"column_name": "ssn", "category_code": "{example_code}", "confidence": 0.95, '
-        f'"evidence": "SSN pattern", "alternatives": [{{"code": "{example_alt}", "confidence": 0.03}}]}}]'
+        f'[{{"column_name": "ssn", "category_code": "{example_leaf}", "confidence": 0.95, '
+        f'"evidence": "SSN pattern", "alternatives": [{{"code": "{example_parent}", "confidence": 0.03}}]}},\n'
+        f' {{"column_name": "amount_field", "category_code": "{example_parent}", "confidence": 0.65, '
+        f'"evidence": "monetary values, parent-level — no specific financial leaf is a clean match", "alternatives": []}}]'
     )
+
+
+def _ontology_priors_for_sample(sample) -> list[dict]:
+    """Detect patterns + look up canonical ICE.* metadata for one sample.
+
+    Surfaced to the LLM as a publicly-grounded semantic anchor on
+    every batch, not just on revisit — when the user vocabulary
+    doesn't carry an exact match for a detected pattern, the LLM can
+    still translate from the canonical ontology label/description to
+    the closest fit in the user's frame (He et al. 2023, *Exploring
+    Large Language Models for Ontology Alignment*).  See
+    ``mass_functions.lookup_pattern_ontology``.
+    """
+    values = getattr(sample, "values", None) or []
+    if not values:
+        return []
+    try:
+        from atelier.classify.features import detect_patterns
+        from atelier.classify.mass_functions import lookup_pattern_ontology
+    except Exception:
+        return []
+    patterns = detect_patterns(values)
+    priors: list[dict] = []
+    for pattern_name, fraction in (patterns or {}).items():
+        prior = lookup_pattern_ontology(pattern_name)
+        if prior is None:
+            continue
+        prior = dict(prior)
+        prior["match_fraction"] = float(fraction)
+        priors.append(prior)
+    return priors
+
+
+def _render_ontology_priors(priors: list[dict]) -> list[str]:
+    """Render ontology priors as compact prompt lines."""
+    if not priors:
+        return []
+    rendered: list[str] = []
+    for prior in priors:
+        label = prior.get("label", "")
+        desc = prior.get("description", "")
+        aliases = prior.get("common_names", "")
+        path = prior.get("path", []) or []
+        path_render = " → ".join(p for p in path if p != "Information Content Entity")
+        bits: list[str] = []
+        if label:
+            bits.append(label)
+        if desc:
+            bits.append(desc)
+        if aliases:
+            bits.append(f"aliases: {aliases}")
+        if path_render:
+            bits.append(f"path: {path_render}")
+        if bits:
+            rendered.append("- " + "; ".join(bits))
+    return rendered
 
 
 def build_batch_user_prompt(
@@ -390,6 +698,20 @@ def build_batch_user_prompt(
         if sample.siblings:
             lines.append(f"Siblings: {sample.siblings}")
 
+        # Pattern-detected ontology priors — canonical metadata from
+        # Atelier's BFO/IAO-grounded universal vocabulary.  Fed to
+        # the LLM on every batch (sweep + revisit) so it has a
+        # publicly-grounded translation anchor when the user
+        # vocabulary doesn't carry an exact equivalent of the
+        # detected pattern.  Choose the closest fit from the user's
+        # own taxonomy; the canonical ICE.* code itself is NEVER a
+        # valid classification target.
+        priors = _ontology_priors_for_sample(sample)
+        rendered_priors = _render_ontology_priors(priors)
+        if rendered_priors:
+            lines.append("Pattern-detected ontology priors (from Atelier's universal taxonomy — translate to the closest fit in the candidate vocabulary):")
+            lines.extend(rendered_priors)
+
         if revisit:
             ml_pred = revisit.get("ml_prediction", "")
             bel = revisit.get("belief", 0.0)
@@ -402,6 +724,13 @@ def build_batch_user_prompt(
                 prev = revisit["previous"]
                 lines.append(
                     f"Your previous: {prev.get('code', '?')} (conf={prev.get('confidence', 0):.2f})"
+                )
+            indep = revisit.get("independent_consensus") or {}
+            if indep.get("code"):
+                lines.append(
+                    f"Independent-tier consensus (cosine + pattern + name_match, "
+                    f"excluding LLM-derivative ML): {indep.get('label') or indep['code']} "
+                    f"(mass={indep.get('mass', 0):.2f})"
                 )
 
         parts.append("\n".join(lines))

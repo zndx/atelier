@@ -36,7 +36,10 @@ class ReferenceCategory:
         notation: SKOS-style classification code — carries the numeric dot-notation
               as queryable metadata, not structural identity.  May be empty for
               universal vocabulary terms that have no legacy numeric mapping.
-        abbrev: Formal short code / mnemonic ("EMAIL", "PAN", "C_NOS").
+        abbrev: Formal short code / mnemonic for a leaf term ("EMAIL",
+              "PAN", "TXNAMT", "BAN", "SSN").  Parent / class nodes in
+              shipped Atelier vocabularies carry no abbrev — see
+              ``src/atelier/classify/fixtures/PROVENANCE.md``.
         taxonomy: Namespace discriminator ("universal", "annotations", domain name).
         parent_code: Explicit parent in the hierarchy.  When present, tree
               construction uses this directly instead of re-deriving from code.

@@ -16,7 +16,7 @@ Feature: Adaptive Settings focus computation
     And the overwatch focus is empty
 
   Scenario: Small float drift below 10% threshold is not flagged
-    Given a settings snapshot where classify_llm_discount is 0.105 (default 0.10)
+    Given a settings snapshot where classify_llm_discount is 0.157 (default 0.15)
     When I compute focus for that run
     Then the deterministic focus does not include "classify_llm_discount"
 

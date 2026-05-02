@@ -278,3 +278,59 @@ def step_incremental_svm_valid(context):
     assert abs(total - 1.0) < 0.01, (
         f"SVM probabilities sum to {total:.4f}, expected ~1.0"
     )
+
+
+# ── Indep-tier disagreement gate ────────────────────────────────
+
+
+@given('a BootstrapState with LLM "{llm_code}" and indep-tier consensus "{indep_code}" at mass {mass:g}')
+def step_state_with_indep(context, llm_code, indep_code, mass):
+    from atelier.classify.bootstrap import BootstrapState
+    state = BootstrapState()
+    state.labels["col"] = llm_code
+    state.independent_top1["col"] = indep_code
+    state.independent_top1_mass["col"] = float(mass)
+    context.bootstrap_state = state
+
+
+@given('a BootstrapState with LLM "{llm_code}" and no indep-tier consensus')
+def step_state_no_indep(context, llm_code):
+    from atelier.classify.bootstrap import BootstrapState
+    state = BootstrapState()
+    state.labels["col"] = llm_code
+    context.bootstrap_state = state
+
+
+@given('the fused ml_prediction also equals "{ml_code}" with conflict K={k:g}')
+def step_state_fused_match(context, ml_code, k):
+    context.bootstrap_state.ml_prediction["col"] = ml_code
+    context.bootstrap_state.ml_conflict["col"] = float(k)
+
+
+@given('the fused ml_prediction equals "{ml_code}" with conflict K={k:g}')
+def step_state_fused_diff(context, ml_code, k):
+    context.bootstrap_state.ml_prediction["col"] = ml_code
+    context.bootstrap_state.ml_conflict["col"] = float(k)
+
+
+@when("I call _identify_disagreements with k_threshold {k:g} and indep_revisit_mass_threshold {indep:g}")
+def step_call_identify(context, k, indep):
+    from atelier.classify.bootstrap import BootstrapConfig, _identify_disagreements
+    cfg = BootstrapConfig(k_threshold=float(k), indep_revisit_mass_threshold=float(indep))
+    context.disagreements = _identify_disagreements(
+        context.bootstrap_state, ["col"], cfg,
+    )
+
+
+@then("the column should appear in the disagreements list")
+def step_in_disagreements(context):
+    assert "col" in context.disagreements, (
+        f"Expected 'col' in disagreements, got {context.disagreements}"
+    )
+
+
+@then("the column should not appear in the disagreements list")
+def step_not_in_disagreements(context):
+    assert "col" not in context.disagreements, (
+        f"Did not expect 'col' in disagreements, got {context.disagreements}"
+    )

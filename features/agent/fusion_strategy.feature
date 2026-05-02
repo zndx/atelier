@@ -26,3 +26,25 @@ Feature: DST fusion strategy — Dempster vs Yager
     Given three mass functions
     When I call combine_multiple with strategy "yager" and no theta
     Then a ValueError is raised
+
+  Scenario: Raised derivative discount suppresses LLM-amplification
+    # Two sources agreeing on the same code (LLM vote + LLM-derivative
+    # CatBoost vote) used to inflate fused belief because their low
+    # discounts let nearly all mass land on the singleton.  Per Shafer
+    # 1976 §11.3 + Denoeux 2008 the principled response under non-
+    # distinct evidence is a substantial discount on the derivative
+    # source — the fused Bel falls below the pre-calibration value.
+    Given an LLM mass and a CatBoost mass both supporting the same code
+    When I fuse them with the pre-calibration catboost discount 0.10
+    And I fuse them with the post-calibration catboost discount 0.55
+    Then the post-calibration belief is strictly less than the pre-calibration belief
+
+  Scenario: most_committed_singleton picks argmax over singleton focal elements
+    Given a belief assignment with mass {0.6 on "A", 0.25 on "B", 0.15 on theta}
+    When I call most_committed_singleton on it
+    Then the result is "A" with mass 0.6
+
+  Scenario: most_committed_singleton returns None for vacuous mass
+    Given a vacuous belief assignment
+    When I call most_committed_singleton on it
+    Then the result is None

@@ -464,6 +464,121 @@ def _seed_classify_data_source() -> None:
         _log.warning("Classify data source seed failed: %s", exc)
 
 
+def _active_source_state_path() -> "Path":
+    """Return the path of the persistent last-active-source state file.
+
+    Lives at ``build/state/last_active_source.txt`` under the project's
+    build directory — on CAI ``/home/cdsw/build/...`` is part of the
+    user's persistent home volume, so the file survives container
+    restarts.  Independent of DAO availability and PGlite container
+    ephemerality.
+    """
+    from pathlib import Path
+    project_root = Path(__file__).resolve().parent.parent.parent
+    return project_root / "build" / "state" / "last_active_source.txt"
+
+
+def _persist_active_source_id(source_id: str | None) -> None:
+    """Write *source_id* to the persistent state file.
+
+    Called from :func:`fsm_start` after a successful dispatch so the
+    user's last expressed classification intent survives DAO outages
+    and container restarts.  Failures are logged at DEBUG and
+    swallowed — persistence is best-effort, never blocks dispatch.
+    """
+    if not source_id:
+        return
+    try:
+        path = _active_source_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source_id.strip() + "\n")
+        _log.debug("Persisted last-active source_id %r → %s", source_id, path)
+    except Exception as exc:
+        _log.debug("Failed to persist active source_id: %s", exc)
+
+
+def _read_persisted_source_id() -> str | None:
+    """Read the persisted last-active source_id, or None.
+
+    Read in :func:`_last_user_selected_source_id` before the DAO
+    query so the auto-start path works even when the FSM runs
+    table is empty / unreachable (PGlite ephemeral or DAO not yet
+    attached at lifespan startup).
+    """
+    try:
+        path = _active_source_state_path()
+        if not path.exists():
+            return None
+        content = path.read_text().strip()
+        return content or None
+    except Exception as exc:
+        _log.debug("Failed to read persisted active source_id: %s", exc)
+        return None
+
+
+def _last_user_selected_source_id() -> str | None:
+    """Return the source_id of the user's last-expressed classification intent.
+
+    Two-step resolution, ordered by reliability:
+
+    1. **Persistent state file**
+       (``build/state/last_active_source.txt``) — written by
+       :func:`fsm_start` on every successful dispatch, so the
+       user's last selection survives DAO unavailability, PGlite
+       ephemerality, and container restarts.  Read first because
+       it's the most authoritative signal of *recent intent*.
+
+    2. **DAO FSM-runs query** —
+       ``AtelierDao.list_fsm_runs()`` (ordered by ``started_at``
+       desc, see ``db/dao.py:list_fsm_runs``).  Falls back to this
+       when the state file is missing — e.g. initial deploy of a
+       newer binary onto an environment that previously ran an
+       older binary without the persistence path.
+
+    Returns ``None`` only when both signals fail; callers fall
+    back to env-driven defaults.  Logs at INFO on resolution and
+    at WARNING on full fallback so AMP operator logs reveal which
+    path fired without source-tree introspection.
+    """
+    persisted = _read_persisted_source_id()
+    if persisted:
+        _log.info(
+            "Auto-start: resolved last user-selected source_id from state file: %s",
+            persisted,
+        )
+        return persisted
+
+    try:
+        from atelier.db.dao import AtelierDao
+        runs = AtelierDao().list_fsm_runs()
+    except Exception as exc:
+        _log.warning(
+            "Auto-start: state file empty AND DAO unreachable (%s: %s) — "
+            "falling back to env-driven defaults.  Subsequent manual "
+            "/api/fsm/start calls will populate the state file.",
+            type(exc).__name__, exc,
+        )
+        return None
+
+    for run in runs:
+        sid = run.get("source_id")
+        if sid:
+            _log.info(
+                "Auto-start: resolved last user-selected source_id from "
+                "FSM run history: %s (run %s)",
+                sid, str(run.get("id", ""))[:8],
+            )
+            return sid
+
+    _log.warning(
+        "Auto-start: state file empty AND DAO has no runs with a "
+        "source_id (saw %d run(s)) — falling back to env-driven "
+        "defaults.",
+        len(runs),
+    )
+    return None
+
+
 def _maybe_auto_start_classify() -> None:
     """Kick off a classification run on boot when configured.
 
@@ -473,6 +588,19 @@ def _maybe_auto_start_classify() -> None:
     with the underlying Bedrock/Anthropic exception in its ``error``
     field.  An honest failure visible in the Status panel is a better
     operator signal than a "skipped" log line that might go unnoticed.
+
+    Source-of-truth precedence on auto-start:
+
+      1. **Last user-selected source** — the ``source_id`` of the
+         most recent FSM run, if any.  This captures whatever the
+         operator last picked via the Status / Data Platform UI; an
+         AMP restart that re-fires auto-start should honor the
+         user's current configuration rather than regress to the
+         deployment-time env defaults.
+
+      2. **Env-driven default** — ``ATELIER_CLASSIFY_CONNECTION`` +
+         ``ATELIER_CLASSIFY_DATABASE``, used only when there are no
+         prior runs (initial deploy) or when DAO lookup fails.
 
     The pipeline's LLM backends set explicit boto3 timeouts
     (connect=15s, read=180s) so a cold-boot egress blackhole surfaces
@@ -493,6 +621,18 @@ def _maybe_auto_start_classify() -> None:
     cfg = load_config()
     if not getattr(cfg, "classify_auto_start", False):
         return
+
+    # Prefer the user's last-selected source over env defaults so a
+    # restart honors the operator's current configuration.
+    last_source_id = _last_user_selected_source_id()
+    if last_source_id:
+        result = fsm_start(source_id=last_source_id)
+        _log.info(
+            "Classify auto-start dispatched (last user-selected): %s → %s",
+            last_source_id, result,
+        )
+        return
+
     connection = (getattr(cfg, "classify_connection_name", "") or "").strip()
     database = (getattr(cfg, "classify_database", "") or "").strip()
     if not connection or not database:
@@ -503,7 +643,10 @@ def _maybe_auto_start_classify() -> None:
 
     source_id = _classify_source_id(connection, database)
     result = fsm_start(source_id=source_id)
-    _log.info("Classify auto-start dispatched: %s → %s", source_id, result)
+    _log.info(
+        "Classify auto-start dispatched (env default — no prior runs): %s → %s",
+        source_id, result,
+    )
 
 
 def _discover_and_register_hive_sources() -> None:
@@ -2132,6 +2275,12 @@ def fsm_start(source_id: str | None = None):
 
         t = threading.Thread(target=_background, daemon=True)
         t.start()
+
+        # Persist the user's expressed classification intent so an
+        # AMP/app restart's auto-start can honor it without depending
+        # on DAO availability or PGlite ephemerality.  See
+        # ``_last_user_selected_source_id`` for the read path.
+        _persist_active_source_id(source_id)
 
         # Attach nautilus once the pipeline has claimed its run_id.
         # The pipeline calls fsm.start_run() very early; poll briefly
