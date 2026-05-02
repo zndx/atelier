@@ -11,17 +11,15 @@
 - [gRPC & Gateway](./architecture/grpc.md)
 - [Keystone Agents](./architecture/agents.md)
 - [Classification Pipeline](./architecture/classification.md)
-<<<<<<< HEAD
 - [DST Evidence Independence](./architecture/dst-evidence-independence.md)
-=======
 - [Nautilus Mid-Run Watcher](./architecture/nautilus.md)
->>>>>>> 15a5a98 (docs(architecture): nautilus mid-run pipeline watcher)
 - [Monte Carlo Sampling](./architecture/monte-carlo.md)
 - [GPU Acceleration](./architecture/gpu.md)
 - [Synthetic Data & Training](./architecture/synth.md)
 - [Embeddings](./architecture/embeddings.md)
 - [Data Sources & Versioning](./architecture/data-sources.md)
 - [ML Artifacts & Extend Classification](./architecture/ml-artifacts.md)
+- [Deployment: Unseen Ontology, Known Schema (Roadmap)](./architecture/deployment-ontology-agnosticism.md)
 - [Pareto Capability Evolution (Roadmap)](./architecture/pareto-capability-evolution.md)
 - [Proposed Integrations](./architecture/integrations.md)
 
