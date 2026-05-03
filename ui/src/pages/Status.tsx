@@ -570,21 +570,59 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             {String(progress.llm_labeled)}
           </Descriptions.Item>
         )}
-        {progress.mean_k != null && (
-          <Descriptions.Item label="Mean K (conflict)">
-            {Number(progress.mean_k).toFixed(3)}
-          </Descriptions.Item>
-        )}
-        {progress.disagreements != null && (
-          <Descriptions.Item label="Disagreements">
-            {String(progress.disagreements)}
-          </Descriptions.Item>
-        )}
         {progress.iteration != null && (
           <Descriptions.Item label="Iteration">
             {String(progress.iteration)}
           </Descriptions.Item>
         )}
+        {/* ── Tier 1: convergence (primary stopping criterion) ──
+            Mean Gap is the actual gate; Trend Ratio is the
+            iteration-to-iteration ρ over the gap (the honest
+            single-criterion contraction).  Color thresholds reference
+            the operator-configured gap_threshold so a tightened policy
+            re-colors the live tag without a code change. */}
+        {progress.mean_gap != null && (
+          <Descriptions.Item label="Mean Gap (Pl − Bel)">
+            <Tag
+              color={
+                progress.gap_threshold != null &&
+                Number(progress.mean_gap) <= Number(progress.gap_threshold)
+                  ? "green"
+                  : progress.gap_threshold != null &&
+                      Number(progress.mean_gap) <=
+                        Number(progress.gap_threshold) * 1.5
+                    ? "orange"
+                    : "red"
+              }
+            >
+              {Number(progress.mean_gap).toFixed(3)}
+            </Tag>
+            {progress.gap_threshold != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                target ≤ {Number(progress.gap_threshold).toFixed(2)}
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.gap_contraction_rate != null &&
+          Number(progress.gap_contraction_rate) > 0 && (
+            <Descriptions.Item label="Trend Ratio">
+              <Tag
+                color={
+                  Number(progress.gap_contraction_rate) < 0.7
+                    ? "green"
+                    : Number(progress.gap_contraction_rate) < 0.95
+                      ? "orange"
+                      : "red"
+                }
+              >
+                {Number(progress.gap_contraction_rate).toFixed(2)}
+              </Tag>
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                gapₙ / gapₙ₋₁ — &lt;1 tightening, →1 stalled
+              </Text>
+            </Descriptions.Item>
+          )}
         {progress.columns_classified != null && (
           <Descriptions.Item label="Classified">
             {String(progress.columns_classified)}
@@ -597,6 +635,11 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             </Tag>
           </Descriptions.Item>
         )}
+        {/* ── Tier 2: thesis core ──
+            LLM-Fit Labels renders f directly (the LLM-labeled fraction
+            in the operator's thesis); Revisit Queue is the
+            next-iteration LLM workload, surfaced as both count (LLM
+            budget) and fraction (scale-invariant thesis load). */}
         {progress.bootstrap_coverage != null && (
           <Descriptions.Item label="Coverage">
             <Tag color={Number(progress.bootstrap_coverage) >= 0.95 ? "green" : "orange"}>
@@ -617,6 +660,85 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             >
               {(Number(progress.llm_coverage) * 100).toFixed(1)}%
             </Tag>
+          </Descriptions.Item>
+        )}
+        {progress.llm_fit_labels != null && (
+          <Descriptions.Item label="LLM-Fit Labels (f)">
+            {String(progress.llm_fit_labels)}
+            {progress.llm_fit_fraction != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                f = {(Number(progress.llm_fit_fraction) * 100).toFixed(1)}%
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.disagreements_count != null && (
+          <Descriptions.Item label="Revisit Queue">
+            {String(progress.disagreements_count)}
+            {progress.disagreements_frac != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                ({(Number(progress.disagreements_frac) * 100).toFixed(1)}% of corpus)
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {/* ── Tier 3: prediction strength + evidence conflict ──
+            Clarity = 1 − frac_unclear (fraction of cols clear of the
+            gap/bel thresholds); K is evidence-conflict — the signal
+            that distinguishes "LLM right, done" from "indep tier knows
+            something the LLM is missing."  Both load-bearing under
+            the operator's thesis even though K no longer gates
+            convergence directly. */}
+        {progress.mean_bel != null && (
+          <Descriptions.Item label="Mean Belief">
+            <Tag
+              color={
+                progress.bel_floor != null &&
+                Number(progress.mean_bel) >= Number(progress.bel_floor)
+                  ? "green"
+                  : "orange"
+              }
+            >
+              {Number(progress.mean_bel).toFixed(3)}
+            </Tag>
+            {progress.bel_floor != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                floor ≥ {Number(progress.bel_floor).toFixed(2)}
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.clarity != null && (
+          <Descriptions.Item label="Clarity">
+            <Tag
+              color={
+                progress.clarity_target != null &&
+                Number(progress.clarity) >= 1 - Number(progress.clarity_target)
+                  ? "green"
+                  : progress.clarity_target != null &&
+                      Number(progress.clarity) >=
+                        1 - Number(progress.clarity_target) * 1.2
+                    ? "orange"
+                    : "red"
+              }
+            >
+              {(Number(progress.clarity) * 100).toFixed(1)}%
+            </Tag>
+            {progress.clarity_target != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                target ≥ {((1 - Number(progress.clarity_target)) * 100).toFixed(0)}%
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.mean_k != null && (
+          <Descriptions.Item label="Evidence Conflict (K)">
+            {Number(progress.mean_k).toFixed(3)}
+          </Descriptions.Item>
+        )}
+        {progress.indep_tier_disagreement_frac != null && (
+          <Descriptions.Item label="Indep-Tier Disagreement">
+            {(Number(progress.indep_tier_disagreement_frac) * 100).toFixed(1)}%
           </Descriptions.Item>
         )}
         {progress.llm_agreement != null && (

@@ -254,8 +254,17 @@ class IterationMetrics:
     # means "fully converged").  ``contraction_rate`` is ρ_n =
     # residual_norm / prior_residual_norm; <1 means converging, →1
     # stalled, >1 diverging (Saad 2003 §4.1).
+    #
+    # ``gap_contraction_rate`` is the analogous ratio over the
+    # single-criterion mean-gap signal: mean_gap_n / mean_gap_{n-1}.
+    # This is what the live Status UI surfaces as "Trend Ratio" — the
+    # honest contraction over the actual stopping criterion, in
+    # contrast to the composite ``contraction_rate`` (a ratio over the
+    # 4-component heuristic ``residual_norm`` retained here for
+    # back-compat with column_trajectories.json analysis).
     residual_norm: float = 0.0
     contraction_rate: float = 0.0
+    gap_contraction_rate: float = 0.0
     indep_tier_disagreement_frac: float = 0.0
 
 
@@ -1281,8 +1290,9 @@ def record_iteration_metrics(
         indep_tier_disagreement_frac=indep_frac,
     )
     state.iteration_metrics.append(metrics)
-    # Contraction rate needs the just-appended row, so compute after.
+    # Contraction rate(s) need the just-appended row, so compute after.
     metrics.contraction_rate = round(contraction_rate(state), 4)
+    metrics.gap_contraction_rate = round(gap_contraction_rate(state), 4)
 
     # Per-column trajectory append.  One snapshot per labeled column
     # per iteration; column-major view that complements the time-
@@ -1444,6 +1454,34 @@ def contraction_rate(state: BootstrapState) -> float:
         return 0.0
     prev = metrics[-2].residual_norm
     curr = metrics[-1].residual_norm
+    if prev <= 1e-12:
+        return 0.0
+    return curr / prev
+
+
+def gap_contraction_rate(state: BootstrapState) -> float:
+    """Per-iteration contraction ratio over the mean-gap signal.
+
+    Honest single-criterion analogue of ``contraction_rate`` over the
+    actual stopping criterion ``mean_gap`` (the loop converges when
+    ``mean_gap < gap_threshold``, not when the heuristic
+    ``residual_norm`` composite drops). Same semantics as
+    ``contraction_rate``: <1 = tightening predictions, →1 = stalled,
+    >1 = drifting wider.
+
+    Surfaced as "Trend Ratio" on the live Status page; the composite
+    ``contraction_rate`` is retained for column_trajectories.json
+    analysis but not promoted to the dashboard.
+
+    Returns 0.0 if fewer than two iterations have been recorded or
+    the prior gap is below 1e-12 (avoid divide-by-zero on a corpus
+    that converges to zero in a single step — vanishingly rare).
+    """
+    metrics = state.iteration_metrics
+    if len(metrics) < 2:
+        return 0.0
+    prev = metrics[-2].mean_gap
+    curr = metrics[-1].mean_gap
     if prev <= 1e-12:
         return 0.0
     return curr / prev

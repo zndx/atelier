@@ -85,6 +85,60 @@ _NON_DATA_TABLE_NAMES: frozenset[str] = frozenset({
 })
 
 
+def _convergence_progress(
+    state,
+    column_names: list[str],
+    disagreements,
+    boot_cfg,
+) -> dict:
+    """Build the iteration-boundary FSM progress payload.
+
+    Surfaces the thesis-aligned signals the live Status page renders
+    (``mean_gap``, ``mean_bel``, ``clarity``, ``gap_contraction_rate``,
+    revisit-queue count + fraction, LLM-fit count + fraction *f*) plus
+    the reference thresholds the UI needs to color-code them.
+
+    The composite ``residual_norm`` and its associated
+    ``contraction_rate`` (which is a ratio over the heuristic
+    composite, not over the actual stopping criterion ``mean_gap``)
+    are deliberately NOT surfaced here — see
+    ``.claude/plans/how-about-extend-the-golden-sedgewick.md`` for the
+    design rationale.  They remain in ``IterationMetrics`` and
+    ``column_trajectories.json`` for post-run analysis.
+
+    The latest ``IterationMetrics`` snapshot is read from
+    ``state.iteration_metrics[-1]`` when present; before the first
+    iteration completes (e.g. agent-convergence entry) the snapshot
+    keys are omitted and the UI falls back to the pre-iteration view.
+    """
+    n_cols = max(1, len(column_names))
+    n_disagree = len(disagreements) if disagreements is not None else 0
+    payload: dict = {
+        # Reference thresholds for UI color-coding.
+        "gap_threshold": boot_cfg.gap_threshold,
+        "bel_floor": boot_cfg.bel_floor,
+        "clarity_target": boot_cfg.clarity_target,
+        # Thesis core: the LLM-labeled fraction *f* in the operator's
+        # thesis, rendered explicitly.
+        "llm_fit_labels": len(state.labels),
+        "llm_fit_fraction": round(len(state.labels) / n_cols, 4),
+        # Revisit queue: count is the LLM budget for the next iteration;
+        # fraction is the thesis-relevant scale-invariant view.
+        "disagreements_count": n_disagree,
+        "disagreements_frac": round(n_disagree / n_cols, 4),
+    }
+    if state.iteration_metrics:
+        m = state.iteration_metrics[-1]
+        payload.update({
+            "mean_gap": m.mean_gap,
+            "mean_bel": m.mean_bel,
+            "clarity": round(1.0 - m.frac_unclear, 4),
+            "gap_contraction_rate": m.gap_contraction_rate,
+            "indep_tier_disagreement_frac": m.indep_tier_disagreement_frac,
+        })
+    return payload
+
+
 def _filter_classifiable_tables(
     samples: list[TableSample],
     vocab_uri: str | None,
@@ -964,8 +1018,10 @@ def run_classification_pipeline(
             logger.info("Using agent-driven convergence loop")
             fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                 "phase": "agent_convergence",
-                "disagreements": len(disagreements),
                 "mean_k": round(mean_k, 4),
+                **_convergence_progress(
+                    state, column_names, disagreements, boot_cfg,
+                ),
             })
             run_agent_loop(
                 state, cfg, boot_cfg, llm_backend, system_prompt,
@@ -1116,8 +1172,10 @@ def run_classification_pipeline(
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "phase": "revisit",
                     "iteration": iteration,
-                    "disagreements": len(disagreements),
                     "mean_k": round(mean_k, 4),
+                    **_convergence_progress(
+                        state, column_names, disagreements, boot_cfg,
+                    ),
                 })
 
                 # Snapshot the columns that will be revisited THIS
@@ -1235,6 +1293,9 @@ def run_classification_pipeline(
             "converged": converged,
             "mean_k": round(mean_k, 4),
             "coverage": round(coverage, 4),
+            **_convergence_progress(
+                state, column_names, disagreements, boot_cfg,
+            ),
         })
 
         classifications: list[dict[str, Any]] = []
@@ -1344,6 +1405,21 @@ def run_classification_pipeline(
                 "disagreements": m.disagreements,
                 "coverage": m.coverage,
                 "llm_calls": m.llm_calls,
+                # Belief-gap convergence (added 2026-05-03 — see plan
+                # how-about-extend-the-golden-sedgewick.md).  Time-major
+                # trajectory needed for thesis-defense plots; the older
+                # column_trajectories.json is column-major and doesn't
+                # substitute.
+                "mean_gap": m.mean_gap,
+                "mean_bel": m.mean_bel,
+                "frac_unclear": m.frac_unclear,
+                "gap_contraction_rate": m.gap_contraction_rate,
+                "indep_tier_disagreement_frac": m.indep_tier_disagreement_frac,
+                # Composite scalar retained for back-compat — see
+                # ``residual_norm`` docstring for why it isn't promoted
+                # to the live dashboard.
+                "residual_norm": m.residual_norm,
+                "contraction_rate": m.contraction_rate,
             }
             for m in state.iteration_metrics
         ]
