@@ -135,6 +135,20 @@ class BootstrapConfig:
     """Bootstrap convergence configuration."""
 
     max_iterations: int = 5
+    # Floor — forces at least this many iterations even when the loop's
+    # disagreement criterion returns an empty set on the first pass.
+    # Project directive: iteration is part of the algorithm.  An
+    # early-exit without any revisit on iteration 1 produces output the
+    # same size as the algorithm-as-designed but with fundamentally
+    # different semantics — we haven't actually exercised the iterative
+    # DST-fusion component.  The invariant ``min_iterations >= 2`` is
+    # enforced at pipeline entry, mirroring the ``max_iterations >= 2``
+    # rule codified in 0c0170f.  Restored 2026-05-03 after merge 81f37b4
+    # dropped both the field and the factory wiring while pipeline.py
+    # kept reading ``boot_cfg.min_iterations`` at six call sites — a
+    # latent bug that fired on run eeb797e0 with AttributeError once
+    # the loop crossed the (undefined) threshold.
+    min_iterations: int = 2
     k_threshold: float = 0.2
     coverage_target: float = 1.0
     confidence_floor: float = 0.5
@@ -189,6 +203,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
     max_calls = cfg.classify_bootstrap_max_total_llm_calls
     return BootstrapConfig(
         max_iterations=cfg.classify_bootstrap_max_iterations,
+        min_iterations=getattr(cfg, "classify_bootstrap_min_iterations", 2),
         k_threshold=cfg.classify_bootstrap_k_threshold,
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,
