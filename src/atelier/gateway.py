@@ -2182,9 +2182,10 @@ def fsm_start(source_id: str | None = None):
         from atelier.classify import get_fsm
         from atelier.classify.pipeline import run_classification_pipeline
         from atelier.config import load_config
+        from atelier.db.dao import AtelierDao
 
         cfg = load_config()
-        fsm = get_fsm()
+        fsm = get_fsm(dao=AtelierDao())
 
         # Check if already running
         current = fsm.get_status()
@@ -2380,7 +2381,7 @@ def fsm_extend(body: dict):
             )
 
         cfg = load_config()
-        fsm = get_fsm()
+        fsm = get_fsm(dao=dao)
 
         # Refuse to spawn while another run is in flight — the FSM
         # singleton can only carry one run at a time.  Status codes

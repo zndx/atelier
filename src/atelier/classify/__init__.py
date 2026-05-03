@@ -38,10 +38,19 @@ _fsm: AgentFSM | None = None
 
 
 def get_fsm(dao=None) -> AgentFSM:
-    """Return the module-level FSM singleton."""
+    """Return the module-level FSM singleton.
+
+    When *dao* is provided and the singleton was previously created
+    without one, late-bind the DAO so that subsequent ``_persist()``
+    and ``_load()`` calls hit the database.  This fixes the race
+    where the gateway (no DAO) creates the singleton before the gRPC
+    service (with DAO) gets a chance to.
+    """
     global _fsm
     if _fsm is None:
         _fsm = AgentFSM(dao=dao)
+    elif dao is not None and _fsm._dao is None:
+        _fsm._dao = dao
     return _fsm
 
 
