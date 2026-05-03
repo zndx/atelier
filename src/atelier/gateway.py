@@ -1609,8 +1609,12 @@ def list_data_platforms():
         cfg = load_config()
         platforms: list[dict] = []
 
-        # Hive connections
+        # ── Hive connections (HOCON config list) ──
+        # These are connection *names* from ATELIER_DATA_CONNECTIONS — they
+        # may or may not have a corresponding DB row yet.
+        hocon_hive_names: set[str] = set()
         for name in list_connections(cfg):
+            hocon_hive_names.add(name)
             platforms.append({
                 "id": name,
                 "kind": "hive",
@@ -1622,12 +1626,16 @@ def list_data_platforms():
                 "column_count": None,
             })
 
-        # Filesystem sources (non-archived only)
+        # ── DB-registered sources (non-archived) ──
+        # Includes *both* filesystem mounts and hive sources seeded from
+        # ATELIER_CLASSIFY_CONNECTION or auto-discovered at startup.
+        # De-duplicate hive entries that already appeared via the HOCON
+        # config list above (keyed on source_id).
         dao = AtelierDao()
         with dao.get_session() as session:
             rows = (
                 session.query(DataSource)
-                .filter_by(source_type="filesystem", is_archived=False)
+                .filter_by(is_archived=False)
                 .order_by(DataSource.id)
                 .all()
             )
@@ -1638,20 +1646,40 @@ def list_data_platforms():
                         meta = _json.loads(r.source_metadata) or {}
                     except Exception:
                         meta = {}
-                # Strip file:// scheme for the mount display string.
-                mount = None
-                if r.source_uri and r.source_uri.startswith("file://"):
-                    mount = r.source_uri[len("file://"):]
-                platforms.append({
-                    "id": r.id,
-                    "kind": "filesystem",
-                    "label": f"Filesystem: {r.display_name}",
-                    "source_uri": r.source_uri or "",
-                    "vocab_uri": r.vocab_uri or "",
-                    "mount": mount,
-                    "table_count": meta.get("table_count"),
-                    "column_count": meta.get("column_count"),
-                })
+
+                if r.source_type == "hive":
+                    # Skip if already surfaced via the HOCON config list.
+                    # HOCON entries use the bare connection name as id;
+                    # DB-seeded entries use "connection/database".  Check
+                    # both the full id and the connection component.
+                    conn = meta.get("connection", "")
+                    if r.id in hocon_hive_names or conn in hocon_hive_names:
+                        continue
+                    platforms.append({
+                        "id": r.id,
+                        "kind": "hive",
+                        "label": r.display_name or f"Hive: {r.id}",
+                        "source_uri": r.source_uri or "",
+                        "vocab_uri": r.vocab_uri or "",
+                        "mount": None,
+                        "table_count": meta.get("table_count"),
+                        "column_count": meta.get("column_count"),
+                    })
+                else:
+                    # Filesystem source
+                    mount = None
+                    if r.source_uri and r.source_uri.startswith("file://"):
+                        mount = r.source_uri[len("file://"):]
+                    platforms.append({
+                        "id": r.id,
+                        "kind": "filesystem",
+                        "label": f"Filesystem: {r.display_name}",
+                        "source_uri": r.source_uri or "",
+                        "vocab_uri": r.vocab_uri or "",
+                        "mount": mount,
+                        "table_count": meta.get("table_count"),
+                        "column_count": meta.get("column_count"),
+                    })
 
         return {"platforms": platforms}
     except Exception as exc:
