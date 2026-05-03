@@ -158,10 +158,13 @@ class BootstrapConfig:
     llm_discount: float = 0.15
     frontier_svm_retrain: bool = True
     frontier_svm_min_labels: int = 20
-    # Belief-gap convergence (primary convergence criteria)
-    gap_threshold: float = 0.15
-    clarity_target: float = 0.10
-    bel_floor: float = 0.50
+    # Belief-gap convergence (primary convergence criteria).
+    # Defaults mirror config/base.conf — recalibrated 2026-05-03 for
+    # the parent-aware DST frame (parent focal elements widen leaf
+    # Pl-Bel intervals, so the leaf-only-tuned values were too tight).
+    gap_threshold: float = 0.18
+    clarity_target: float = 0.25
+    bel_floor: float = 0.45
     # Minimum independent-tier consensus mass required to fire a revisit
     # on the basis of indep-tier vs LLM disagreement.  Below this floor
     # the cosine/pattern/name_match signal is too diffuse to act on

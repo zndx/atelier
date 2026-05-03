@@ -387,7 +387,7 @@ class AtelierConfig:
     # Cautious-code review — agent-mediated backoff for over-specified
     # predictions.  See atelier.classify.cautious_review.
     classify_cautious_review_enabled: bool = True
-    classify_cautious_review_bel_threshold: float = 0.85
+    classify_cautious_review_bel_threshold: float = 0.80
     classify_cautious_review_backend: str = "default"
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
@@ -397,10 +397,12 @@ class AtelierConfig:
     classify_bootstrap_max_consecutive_halve_failures: int = 8
     classify_bootstrap_frontier_svm_retrain: bool = True
     classify_bootstrap_frontier_svm_min_labels: int = 20
-    # Belief-gap convergence
-    classify_bootstrap_gap_threshold: float = 0.15
-    classify_bootstrap_clarity_target: float = 0.20
-    classify_bootstrap_bel_floor: float = 0.50
+    # Belief-gap convergence — defaults mirror config/base.conf.
+    # Recalibrated 2026-05-03 for the parent-aware DST frame; see the
+    # comment in base.conf for the per-knob rationale.
+    classify_bootstrap_gap_threshold: float = 0.18
+    classify_bootstrap_clarity_target: float = 0.25
+    classify_bootstrap_bel_floor: float = 0.45
     classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
 
     # DST discount factors.  The catboost_*/svm defaults are calibrated
@@ -456,7 +458,7 @@ class AtelierConfig:
     mc_sample_fraction: float = 1.00
     mc_min_per_stratum: int = 3
     mc_max_frontier_columns: int = 500
-    mc_propagation_threshold: float = 0.85
+    mc_propagation_threshold: float = 0.80
     mc_propagation_discount: float = 0.30
 
     # Row-level Monte Carlo
