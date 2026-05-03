@@ -1371,7 +1371,10 @@ def run_classification_pipeline(
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
-        # Auto-register as a dataset so the Embeddings page is populated
+        # Auto-register as a dataset so the Embeddings page is populated.
+        # Failure here leaves a `register_error.json` sidecar in the
+        # results directory so an operator can spot the orphan run and
+        # backfill via scripts/backfill_dataset.py without re-running.
         if parquet_path:
             try:
                 from atelier.db.dao import AtelierDao
@@ -1397,12 +1400,15 @@ def run_classification_pipeline(
                 if source_id:
                     dao.set_active_version(source_id, run_id)
             except Exception as e:
-                logger.warning("Failed to register dataset: %s", e)
+                logger.exception("Failed to register dataset for run %s", run_id)
+                _write_register_error(
+                    results_dir, "dataset", run_id, source_id, e,
+                )
 
         # Register the ML artifact set so an Extend Classification run
         # can replay the trained models on new data.  Non-fatal — a
         # failure here just means Extend is unavailable for this run
-        # until backfilled (see dao.backfill in M4).
+        # until backfilled via scripts/backfill_dataset.py.
         try:
             from atelier.classify.artifact_set import build_artifact_set_record
             from atelier.db.dao import AtelierDao
@@ -1418,7 +1424,10 @@ def run_classification_pipeline(
                 AtelierDao().register_artifact_set(**spec)
                 logger.info("Registered ML artifact set: %s", run_id)
         except Exception as e:
-            logger.warning("Failed to register ML artifact set: %s", e)
+            logger.exception("Failed to register ML artifact set for run %s", run_id)
+            _write_register_error(
+                results_dir, "artifact_set", run_id, source_id, e,
+            )
 
         # ── Governance sync (Atlas) ──────────────────────────────────
         # When auto_sync is enabled and Atlas is configured, push the
@@ -2253,6 +2262,52 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
         "avg_conflict": round(avg_conflict, 4),
         "avg_uncertainty": round(avg_uncertainty, 4),
     }
+
+
+def _write_register_error(
+    results_dir: Path,
+    kind: str,
+    run_id: str,
+    source_id: str | None,
+    exc: BaseException,
+) -> None:
+    """Persist a registration failure as a sidecar in the run directory.
+
+    Both ``dao.upsert_dataset`` and ``dao.register_artifact_set`` are
+    non-fatal — the artifacts on disk are the source of truth and a
+    later backfill can repair the missing rows.  But the original code
+    swallowed the failure with a single warning line, so a transient
+    PGlite outage during a multi-hour run produced an orphan: parquet
+    on disk, no UI-visible dataset, no obvious signal.  This sidecar
+    makes the failure discoverable for both humans (read the file) and
+    tools (``scripts/backfill_dataset.py`` keys off it).
+    """
+    import traceback as _tb
+
+    path = results_dir / "register_error.json"
+    existing: list[dict] = []
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text())
+            if isinstance(loaded, list):
+                existing = loaded
+        except Exception:
+            pass
+    existing.append({
+        "kind": kind,
+        "run_id": run_id,
+        "source_id": source_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "error": f"{type(exc).__name__}: {exc}",
+        "traceback": _tb.format_exc(),
+    })
+    try:
+        path.write_text(json.dumps(existing, indent=2) + "\n")
+    except Exception:
+        # If we can't even write to results_dir, the operator already
+        # has bigger problems — the artifacts wouldn't have made it
+        # this far.  Don't mask the original exception.
+        logger.exception("Could not write register_error.json")
 
 
 def _write_parquet(
