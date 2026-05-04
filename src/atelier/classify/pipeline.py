@@ -1389,10 +1389,49 @@ def run_classification_pipeline(
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
-        # Auto-register as a dataset so the Embeddings page is populated.
-        # Failure here leaves a `register_error.json` sidecar in the
-        # results directory so an operator can spot the orphan run and
-        # backfill via scripts/backfill_dataset.py without re-running.
+        # Order matters here: the ``datasets`` table has a FK on
+        # ``artifact_set_id`` referencing ``ml_artifact_sets(id)``, so the
+        # artifact set must be registered BEFORE the dataset row tries to
+        # reference it.  Pre-2026-05-04 these blocks were inverted, which
+        # produced a silent FK violation on every classify run that
+        # trained ML artifacts (every run with f > 0).  See run b7e10711
+        # for the captured traceback in ``register_error.json``.
+
+        # 1. Register the ML artifact set so the dataset row's FK has a
+        #    target.  Non-fatal — a failure here means Extend is
+        #    unavailable for this run until backfilled via
+        #    scripts/backfill_dataset.py, AND the dataset row that
+        #    follows will fall back to ``artifact_set_id=None``.
+        artifact_set_registered = False
+        try:
+            from atelier.classify.artifact_set import build_artifact_set_record
+            from atelier.db.dao import AtelierDao
+            spec = build_artifact_set_record(
+                run_id=run_id,
+                results_dir=results_dir,
+                cfg=cfg,
+                n_columns=len(classifications),
+                source_id=source_id,
+                fsm_run_id=run_id,
+            )
+            if spec is not None:
+                AtelierDao().register_artifact_set(**spec)
+                artifact_set_registered = True
+                logger.info("Registered ML artifact set: %s", run_id)
+        except Exception as e:
+            logger.exception("Failed to register ML artifact set for run %s", run_id)
+            _write_register_error(
+                results_dir, "artifact_set", run_id, source_id, e,
+            )
+
+        # 2. Auto-register as a dataset so the Embeddings page is
+        #    populated.  When the artifact set wasn't registered (no
+        #    spec, or registration raised), pass ``artifact_set_id=None``
+        #    so the dataset row still lands — the Embeddings panel
+        #    surfaces the run even when Extend wiring is incomplete.
+        #    Any other failure here leaves a ``register_error.json``
+        #    sidecar so an operator can spot the orphan run and
+        #    backfill via scripts/backfill_dataset.py.
         if parquet_path:
             try:
                 from atelier.db.dao import AtelierDao
@@ -1411,7 +1450,7 @@ def run_classification_pipeline(
                     is_active=True,
                     summary=f"{len(all_samples)} tables, {len(classifications)} columns",
                     fsm_run_id=run_id,
-                    artifact_set_id=run_id,    # this run produced its own artifact set
+                    artifact_set_id=run_id if artifact_set_registered else None,
                     parent_dataset_id=None,    # classify runs have no parent
                     run_kind="classify",
                 )
@@ -1422,30 +1461,6 @@ def run_classification_pipeline(
                 _write_register_error(
                     results_dir, "dataset", run_id, source_id, e,
                 )
-
-        # Register the ML artifact set so an Extend Classification run
-        # can replay the trained models on new data.  Non-fatal — a
-        # failure here just means Extend is unavailable for this run
-        # until backfilled via scripts/backfill_dataset.py.
-        try:
-            from atelier.classify.artifact_set import build_artifact_set_record
-            from atelier.db.dao import AtelierDao
-            spec = build_artifact_set_record(
-                run_id=run_id,
-                results_dir=results_dir,
-                cfg=cfg,
-                n_columns=len(classifications),
-                source_id=source_id,
-                fsm_run_id=run_id,
-            )
-            if spec is not None:
-                AtelierDao().register_artifact_set(**spec)
-                logger.info("Registered ML artifact set: %s", run_id)
-        except Exception as e:
-            logger.exception("Failed to register ML artifact set for run %s", run_id)
-            _write_register_error(
-                results_dir, "artifact_set", run_id, source_id, e,
-            )
 
         # ── Governance sync (Atlas) ──────────────────────────────────
         # When auto_sync is enabled and Atlas is configured, push the

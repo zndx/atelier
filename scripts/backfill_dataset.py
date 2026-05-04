@@ -97,7 +97,7 @@ def main() -> int:
         "is_active": True,
         "summary": f"{len(classifications)} columns (backfilled)",
         "fsm_run_id": args.run_id,
-        "artifact_set_id": args.run_id,
+        "artifact_set_id": None,    # resolved below after artifact-set register
         "parent_dataset_id": None,
         "run_kind": "classify",
     }
@@ -110,18 +110,13 @@ def main() -> int:
 
     dao = AtelierDao()
 
-    if source_id:
-        dataset_payload["version_number"] = dao.next_version_number(source_id)
-    else:
-        dataset_payload["version_number"] = 1
-
-    dao.upsert_dataset(**dataset_payload)
-    if source_id:
-        dao.set_active_version(source_id, args.run_id)
-    print(f"✓ dataset {args.run_id} upserted (source_id={source_id!r})")
-
-    # Artifact set — only if the catboost classes sidecar exists.  The
-    # builder returns None for runs that didn't train ML artifacts.
+    # Order matters: ``datasets.artifact_set_id`` is a FK to
+    # ``ml_artifact_sets(id)``.  Register the artifact set first so the
+    # dataset row's FK has a target; if registration fails or there's
+    # no artifact set to register, leave ``artifact_set_id=None`` and
+    # the dataset still lands (Extend wiring incomplete but Embeddings
+    # panel surfaces the run).
+    artifact_set_registered = False
     try:
         from atelier.classify.artifact_set import build_artifact_set_record
         from atelier.config import load_config
@@ -138,11 +133,39 @@ def main() -> int:
         if spec is None:
             print("• no ML artifact set to register (no catboost classes sidecar)")
         else:
-            dao.register_artifact_set(**spec)
-            print(f"✓ artifact set {args.run_id} registered")
+            try:
+                dao.register_artifact_set(**spec)
+                artifact_set_registered = True
+                print(f"✓ artifact set {args.run_id} registered")
+            except Exception as exc:
+                # Already-registered case is benign — the FK target
+                # exists, which is what we need.
+                msg = str(exc).lower()
+                if "duplicate" in msg or "unique" in msg or "already exists" in msg:
+                    artifact_set_registered = True
+                    print(f"• artifact set {args.run_id} already registered — proceeding")
+                else:
+                    raise
     except Exception as exc:
         print(f"! artifact set registration failed: {exc}", file=sys.stderr)
-        return 2
+        # Continue anyway — dataset will land with artifact_set_id=None.
+
+    if artifact_set_registered:
+        dataset_payload["artifact_set_id"] = args.run_id
+
+    if source_id:
+        dataset_payload["version_number"] = dao.next_version_number(source_id)
+    else:
+        dataset_payload["version_number"] = 1
+
+    dao.upsert_dataset(**dataset_payload)
+    if source_id:
+        dao.set_active_version(source_id, args.run_id)
+    print(
+        f"✓ dataset {args.run_id} upserted "
+        f"(source_id={source_id!r}, artifact_set_id="
+        f"{dataset_payload['artifact_set_id']!r})"
+    )
 
     # Mark the sidecar resolved (don't delete — keep audit trail).
     err_path = results_dir / "register_error.json"
