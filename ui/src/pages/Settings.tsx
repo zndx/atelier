@@ -25,10 +25,11 @@ import {
 import {
   ArrowRightOutlined,
   CompassOutlined,
+  LoadingOutlined,
   ReloadOutlined,
   RocketOutlined,
-  SaveOutlined,
   ThunderboltOutlined,
+  UndoOutlined,
 } from "@ant-design/icons";
 import { useDataset } from "../contexts/DatasetContext";
 
@@ -208,20 +209,47 @@ type ControlCardProps = {
   paramKey: string;
   meta: ParamMeta;
   current: ParamValue;
-  pending: boolean;
+  baseline: ParamValue;
   session: boolean;
-  onChange: (key: string, value: ParamValue) => void;
+  inflight: boolean;
+  /** Slider drag — local visual update, no PATCH yet. */
+  onPreview: (key: string, value: ParamValue) => void;
+  /** Final value commit — triggers PATCH to apply to the session overlay. */
+  onCommit: (key: string, value: ParamValue) => void;
+  /** Revert to the value present at page load. */
+  onUndo: (key: string) => void;
 };
 
-function ControlCard({ paramKey, meta, current, pending, session, onChange }: ControlCardProps) {
+function ControlCard({
+  paramKey,
+  meta,
+  current,
+  baseline,
+  session,
+  inflight,
+  onPreview,
+  onCommit,
+  onUndo,
+}: ControlCardProps) {
+  const modified = baseline !== undefined && !sameValue(current, baseline);
   const header = (
     <Space>
       <Text strong>{meta.label}</Text>
       <Text code style={{ fontSize: 11 }}>
         {meta.hocon_path}
       </Text>
-      {pending && <Tag color="blue">pending</Tag>}
-      {!pending && session && <Tag color="geekblue">session</Tag>}
+      {inflight && <LoadingOutlined style={{ color: "#1677ff" }} />}
+      {!inflight && session && <Tag color="geekblue">session</Tag>}
+      {modified && (
+        <Button
+          size="small"
+          type="link"
+          icon={<UndoOutlined />}
+          onClick={() => onUndo(paramKey)}
+        >
+          Undo
+        </Button>
+      )}
     </Space>
   );
 
@@ -240,7 +268,7 @@ function ControlCard({ paramKey, meta, current, pending, session, onChange }: Co
           label: c.charAt(0).toUpperCase() + c.slice(1),
           value: c,
         }))}
-        onChange={(val) => onChange(paramKey, String(val))}
+        onChange={(val) => onCommit(paramKey, String(val))}
       />
     );
   } else if (meta.type === "switch") {
@@ -251,7 +279,7 @@ function ControlCard({ paramKey, meta, current, pending, session, onChange }: Co
     body = (
       <Switch
         checked={v}
-        onChange={(val) => onChange(paramKey, val)}
+        onChange={(val) => onCommit(paramKey, val)}
       />
     );
   } else if (meta.type === "int") {
@@ -273,7 +301,11 @@ function ControlCard({ paramKey, meta, current, pending, session, onChange }: Co
           max={meta.max}
           step={meta.step || 1}
           value={v}
-          onChange={(val) => onChange(paramKey, Number(val))}
+          // Drag: local-only update so the user sees the value
+          // tracking their cursor without firing a PATCH per tick.
+          onChange={(val) => onPreview(paramKey, Number(val))}
+          // Release: PATCH the committed value.
+          onChangeComplete={(val) => onCommit(paramKey, Number(val))}
           marks={{
             [meta.min]: String(meta.min),
             [meta.default]: { label: "default", style: { color: "#389e0d" } },
@@ -286,7 +318,7 @@ function ControlCard({ paramKey, meta, current, pending, session, onChange }: Co
           step={meta.step || 1}
           value={v}
           onChange={(val) => {
-            if (val != null) onChange(paramKey, Number(val));
+            if (val != null) onCommit(paramKey, Number(val));
           }}
           style={{ width: "100%" }}
         />
@@ -315,7 +347,8 @@ function ControlCard({ paramKey, meta, current, pending, session, onChange }: Co
           max={meta.max}
           step={meta.step}
           value={v}
-          onChange={(val) => onChange(paramKey, Number(val))}
+          onChange={(val) => onPreview(paramKey, Number(val))}
+          onChangeComplete={(val) => onCommit(paramKey, Number(val))}
           marks={{
             [meta.min]: String(meta.min),
             [meta.default]: { label: "default", style: { color: "#389e0d" } },
@@ -364,8 +397,18 @@ export default function Settings() {
   const [focus, setFocus] = useState<FocusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<Record<string, ParamValue>>({});
-  const [saving, setSaving] = useState(false);
+  // Snapshot of values at page load — the "logically settled" state
+  // each control's Undo button reverts to.  Captured once per load();
+  // never updated by mid-session edits.
+  const [baseline, setBaseline] = useState<Record<string, ParamValue>>({});
+  // Per-key in-flight tracker: rendered as a small spinner in the
+  // control's header while the PATCH propagates.
+  const [inflight, setInflight] = useState<Record<string, boolean>>({});
+  // Slider-drag preview values — local-only, cleared once the slider
+  // commits via onChangeComplete.  Letting the slider drag freely
+  // without firing a PATCH per tick.
+  const [draft, setDraft] = useState<Record<string, ParamValue>>({});
+  const [resetting, setResetting] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("convergence");
 
   const { activeSourceId, activeDatasetId } = useDataset();
@@ -377,7 +420,9 @@ export default function Settings() {
       .then((d: SettingsResponse | { error: string }) => {
         if ("error" in d) throw new Error(d.error);
         setData(d);
-        setPending({});
+        setBaseline({ ...d.values });
+        setDraft({});
+        setInflight({});
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
@@ -416,8 +461,11 @@ export default function Settings() {
 
   const effective = useMemo(() => {
     if (!data) return {} as Record<string, ParamValue>;
-    return { ...data.values, ...pending };
-  }, [data, pending]);
+    // Drag-in-progress slider values (``draft``) take precedence over
+    // the server's view (``data.values``) so the slider tracks the
+    // cursor without waiting for the PATCH that fires on release.
+    return { ...data.values, ...draft };
+  }, [data, draft]);
 
   /** Group parameter keys by tab assignment. */
   const byTab = useMemo(() => {
@@ -439,36 +487,64 @@ export default function Settings() {
     return out;
   }, [data]);
 
-  const dirty = Object.keys(pending).length > 0;
-
-  const handleChange = (key: string, value: ParamValue) => {
-    setPending((p) => ({ ...p, [key]: value }));
+  /** Slider-drag preview — local UI only, no server hit. */
+  const handlePreview = (key: string, value: ParamValue) => {
+    setDraft((d) => ({ ...d, [key]: value }));
   };
 
-  const save = async () => {
-    setSaving(true);
+  /** Final commit — optimistic local update + PATCH.  On failure
+   * the snapshot is reloaded from the server to roll back the
+   * optimism. */
+  const handleCommit = async (key: string, value: ParamValue) => {
+    if (!data) return;
+    // Optimistic: update data.values + ensure the key is recorded
+    // as a session overlay so the geekblue tag renders correctly.
+    setData((prev) => prev ? {
+      ...prev,
+      values: { ...prev.values, [key]: value },
+      overlay_keys: prev.overlay_keys.includes(key)
+        ? prev.overlay_keys
+        : [...prev.overlay_keys, key],
+    } : null);
+    // Slider drag is over — clear any preview for this key.
+    setDraft((d) => {
+      const next = { ...d };
+      delete next[key];
+      return next;
+    });
+    setInflight((i) => ({ ...i, [key]: true }));
     try {
       const r = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pending),
+        body: JSON.stringify({ [key]: value }),
       });
       const body = await r.json();
       if (!r.ok || body.error) {
-        message.error(body.error || `PATCH failed: ${r.status}`);
-      } else {
-        message.success("Settings applied — next pipeline run will use them.");
-        load();
+        message.error(body.error || `Update failed: ${r.status}`);
+        load(); // refresh from server to roll back optimism
       }
     } catch (e) {
       message.error(String(e));
+      load();
     } finally {
-      setSaving(false);
+      setInflight((i) => {
+        const next = { ...i };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  /** Revert a single control to the value present at page load. */
+  const handleUndo = (key: string) => {
+    if (key in baseline) {
+      handleCommit(key, baseline[key]);
     }
   };
 
   const reset = async () => {
-    setSaving(true);
+    setResetting(true);
     try {
       const r = await fetch("/api/settings/reset", { method: "POST" });
       const body = await r.json();
@@ -481,7 +557,7 @@ export default function Settings() {
     } catch (e) {
       message.error(String(e));
     } finally {
-      setSaving(false);
+      setResetting(false);
     }
   };
 
@@ -515,9 +591,12 @@ export default function Settings() {
             paramKey={key}
             meta={meta}
             current={effective[key]}
-            pending={key in pending}
-            session={!(key in pending) && data.overlay_keys.includes(key)}
-            onChange={handleChange}
+            baseline={baseline[key]}
+            session={data.overlay_keys.includes(key)}
+            inflight={Boolean(inflight[key])}
+            onPreview={handlePreview}
+            onCommit={handleCommit}
+            onUndo={handleUndo}
           />
         );
       })}
@@ -552,12 +631,15 @@ export default function Settings() {
         <Alert
           type="info"
           showIcon
-          message="Changes apply to the next pipeline run."
+          message="Changes apply immediately to the session overlay; the next pipeline run picks them up."
           description={
             <>
-              Session overlay only — values reset when the gateway restarts.
-              For permanent changes, edit <Text code>config/base.conf</Text> or
-              set the corresponding environment variable.
+              Each control commits as you change it; use the per-control
+              Undo button to revert to the value present at page load.
+              Session overlay only — values reset when the gateway
+              restarts.  For permanent changes, edit{" "}
+              <Text code>config/base.conf</Text> or set the corresponding
+              environment variable.
             </>
           }
         />
@@ -716,12 +798,12 @@ export default function Settings() {
                       paramKey={key}
                       meta={meta}
                       current={curVal}
-                      pending={key in pending}
-                      session={
-                        !(key in pending)
-                        && data.overlay_keys.includes(key)
-                      }
-                      onChange={handleChange}
+                      baseline={baseline[key]}
+                      session={data.overlay_keys.includes(key)}
+                      inflight={Boolean(inflight[key])}
+                      onPreview={handlePreview}
+                      onCommit={handleCommit}
+                      onUndo={handleUndo}
                     />
                   </div>
                 );
@@ -740,34 +822,18 @@ export default function Settings() {
         <Space
           style={{
             display: "flex",
-            justifyContent: "space-between",
+            justifyContent: "flex-start",
             padding: "8px 0 32px 0",
           }}
         >
           <Button
             icon={<ReloadOutlined />}
             onClick={reset}
-            disabled={saving || data.overlay_keys.length === 0}
+            loading={resetting}
+            disabled={resetting || data.overlay_keys.length === 0}
           >
             Reset to defaults
           </Button>
-          <Space>
-            <Button
-              onClick={() => setPending({})}
-              disabled={!dirty || saving}
-            >
-              Discard changes
-            </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              disabled={!dirty}
-              onClick={save}
-            >
-              Save
-            </Button>
-          </Space>
         </Space>
       </Space>
     </div>
