@@ -2297,16 +2297,29 @@ def fsm_start(source_id: str | None = None):
             try:
                 from atelier.db.dao import AtelierDao
                 src = AtelierDao().get_data_source(source_id)
-                if src:
-                    vocab_uri = src.get("vocab_uri") or vocab_uri
-                    # source_uri format: "{connection}/{database}"
-                    uri = src.get("source_uri", "")
-                    if "/" in uri:
-                        connection_name, database = uri.split("/", 1)
-                    elif uri:
-                        connection_name = uri
-            except Exception:
-                pass  # proceed without — pipeline will use env-var fallback
+            except Exception as exc:
+                logger.warning(
+                    "DAO lookup for source %r failed: %s — falling back to "
+                    "env-var defaults (connection=%r, database=%r)",
+                    source_id, exc, connection_name, database,
+                )
+                src = None
+            if src:
+                vocab_uri = src.get("vocab_uri") or vocab_uri
+                # source_uri format: "{connection}/{database}"
+                uri = src.get("source_uri", "")
+                if "/" in uri:
+                    connection_name, database = uri.split("/", 1)
+                elif uri:
+                    connection_name = uri
+            elif source_id:
+                # Operator explicitly selected a source that doesn't
+                # exist (or the DAO lookup failed).  Proceeding with
+                # env-var defaults would silently classify the wrong
+                # database — fail fast instead.
+                return {"started": False,
+                        "error": f"Data source {source_id!r} not found. "
+                        "Select a valid source or remove the source_id parameter."}
 
         nautilus_watcher = None
 

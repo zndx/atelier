@@ -133,8 +133,10 @@ interface FSMStatus {
   started_at?: string;
   updated_at?: string;
   progress?: Record<string, unknown>;
+  config?: Record<string, unknown>;
   error?: string | null;
   result_path?: string | null;
+  source_id?: string | null;
 }
 
 interface TerminalModelStats {
@@ -454,6 +456,17 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const isRunning = !["IDLE", "CONVERGED", "ERROR"].includes(state);
   const progress = fsm?.progress ?? {};
 
+  // When a run is active (or completed), show the source the run was
+  // started against (from the FSM record) — not the sidebar's active
+  // source, which the operator can change mid-run.  Fall back to the
+  // sidebar source only when IDLE (no prior run) so the operator sees
+  // what will be classified next.
+  const runSourceId = fsm?.source_id;
+  const runSource = runSourceId
+    ? sources.find((s) => s.id === runSourceId)
+    : null;
+  const displaySource = state === "IDLE" ? activeSource : (runSource ?? activeSource);
+
   // Refresh datasets + artifact sets when pipeline converges so the
   // new dataset and its produced artifact set both appear without a
   // manual click.  Extend runs also converge — same code path.
@@ -469,9 +482,13 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
       title="Classification Pipeline"
       extra={
         <Space>
-          {activeSource ? (
+          {displaySource ? (
             <Text type="secondary">
-              Source: <Text code>{activeSource.display_name}</Text>
+              Source: <Text code>{displaySource.display_name}</Text>
+            </Text>
+          ) : runSourceId ? (
+            <Text type="secondary">
+              Source: <Text code>{runSourceId}</Text>
             </Text>
           ) : (
             <Text type="secondary">No source selected</Text>
