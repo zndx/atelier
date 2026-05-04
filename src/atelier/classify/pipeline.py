@@ -818,6 +818,30 @@ def run_classification_pipeline(
 
         discounts = DiscountConfig.from_cfg(cfg)
 
+        # ── Ontology→user-taxonomy alignment for SVM evidence ──────
+        # The synth-trained SVM emits ICE.* (bundled-ontology) codes;
+        # without a per-vocabulary alignment, those predictions never
+        # appear as singletons in the user-taxonomy frame and the SVM
+        # contributes nothing.  Build the alignment once per (vocab,
+        # model) tuple and stash it on the run for the SVM evidence
+        # site to consume.  See ``ontology_alignment.py`` for the
+        # independence/discount rationale and known caveats.
+        from atelier.classify.ontology_alignment import build_alignment
+        try:
+            svm_alignment = build_alignment(
+                category_set=category_set,
+                llm_backend=llm_backend,
+                system_prompt=system_prompt,
+                model_name=getattr(cfg, "classify_subagent_model", None) or "unknown",
+            )
+        except Exception as exc:
+            logger.warning(
+                "ontology_alignment: build failed — proceeding without "
+                "(SVM evidence will be vacuous on user-taxonomy runs): %s",
+                exc,
+            )
+            svm_alignment = {}
+
         # Try sentence-transformers for cosine
         has_embeddings = False
         try:
@@ -1310,6 +1334,7 @@ def run_classification_pipeline(
                 use_cosine=has_embeddings,
                 discounts=discounts,
                 fusion_strategy=cfg.classify_fusion_strategy,
+                svm_alignment=svm_alignment,
             )
             classifications.append(result)
 
@@ -1905,6 +1930,7 @@ def _classify_column(
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
+    svm_alignment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -2001,10 +2027,20 @@ def _classify_column(
     except Exception as exc:
         logger.debug("CatBoost unavailable for %s: %s", col.name, exc)
 
-    # 6. SVM (if model available)
+    # 6. SVM (if model available).
+    # The synth-trained SVM emits ICE.* (bundled-ontology) codes; the
+    # per-vocabulary ``svm_alignment`` translates them into the user's
+    # taxonomy before svm_to_mass tests frame membership.  Without
+    # alignment (or on OOTB-sample runs where user vocab IS ICE.*), the
+    # translate_proba helper is an identity pass-through and the SVM
+    # behavior is unchanged from the pre-refactor path.  See
+    # ``ontology_alignment.py`` for the independence/discount caveats.
     try:
         from atelier.classify.ml_inference import predict_svm
+        from atelier.classify.ontology_alignment import translate_proba
         svm_proba = predict_svm(features)
+        if svm_proba:
+            svm_proba = translate_proba(svm_proba, svm_alignment)
         if svm_proba:
             svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
