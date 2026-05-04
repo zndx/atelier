@@ -398,7 +398,8 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const { activeSourceId, refreshDatasets, refreshArtifactSets } = useDataset();
+  const { activeSourceId, sources, refreshDatasets, refreshArtifactSets } = useDataset();
+  const activeSource = sources.find((s) => s.id === activeSourceId);
 
   const fetchFSM = () => {
     setFsmLoading(true);
@@ -468,6 +469,13 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
       title="Classification Pipeline"
       extra={
         <Space>
+          {activeSource ? (
+            <Text type="secondary">
+              Source: <Text code>{activeSource.display_name}</Text>
+            </Text>
+          ) : (
+            <Text type="secondary">No source selected</Text>
+          )}
           <Button
             icon={<ReloadOutlined />}
             onClick={fetchFSM}
