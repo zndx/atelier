@@ -408,8 +408,13 @@ def load_meta_tagging_source(
                 continue
             rows = list(reader)
 
-        # Strip "<table_name>." table-qualifier prefix on column names
-        # if the CSV encodes them (the UAT reference does).
+        # Strip the "<table_name>." prefix from CSV headers (the UAT
+        # reference encodes columns this way).  This is the same
+        # canonical-form normalization the Hive sampler does in
+        # ``sampler._strip_table_qualifier`` — see the
+        # ``ColumnSample`` class docstring for the bare-name invariant
+        # both boundaries enforce, and the table-theme contamination
+        # mode they defend against.
         qualifier = f"{table_name}."
         col_names = [
             (h[len(qualifier):] if h.startswith(qualifier) else h)

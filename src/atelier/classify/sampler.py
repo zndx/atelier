@@ -25,7 +25,29 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class ColumnSample:
-    """Sampled metadata for a single column."""
+    """Sampled metadata for a single column.
+
+    **Canonical-form invariant** (validated in ``__post_init__``):
+
+    - ``name`` is the bare column identifier — table-relative, free of
+      any ``f"{table_name}."`` prefix.  Cross-table identity is built
+      from ``table_name + name`` via the ``qualified_name`` property
+      and is what dict-keying paths (``samples_by_name``,
+      ``column_table``, ``state.labels`` and friends) use to avoid
+      collisions on common bare names like ``row_id`` (which appears
+      in many tables of any non-trivial corpus).
+    - ``siblings`` are likewise bare names.
+
+    Some raw sources (Hive ``SELECT * FROM db.tbl``, certain CSV
+    exports) return qualified column identifiers.  Normalize at the
+    source boundary — ``sample_table_metadata`` for Hive,
+    ``meta_tagging_source`` for CSV — before constructing.  Repeated
+    table-name prefixes corrupt embedding text by drowning the actual
+    column signal in table-theme noise (the LLM and the cosine
+    encoder both treat the table theme as the dominant signal and
+    mis-classify every column under that theme); the invariant here
+    guards that contamination vector at the data-model level.
+    """
 
     name: str
     column_type: str | None = None
@@ -38,6 +60,48 @@ class ColumnSample:
     siblings: list[str] = field(default_factory=list)
     reference_code: str | None = None  # Curated reference label (for validation)
     distinct_count: int | None = None  # True COUNT(DISTINCT) bounded by column_sample_limit
+
+    def __post_init__(self) -> None:
+        # The invariant only triggers when ``table_name`` is set.  Many
+        # tests and the OOTB flat-shape fixtures construct ColumnSample
+        # without a table_name — that's a degenerate but legitimate
+        # form (no cross-table context to disambiguate).  When
+        # table_name IS set, both ``name`` and every entry of
+        # ``siblings`` must be bare; otherwise the contamination
+        # vector documented in the class docstring re-opens.
+        if not self.table_name:
+            return
+        qualifier = f"{self.table_name}."
+        if self.name.startswith(qualifier):
+            raise ValueError(
+                f"ColumnSample.name={self.name!r} carries the "
+                f"table-name prefix {qualifier!r}; the canonical form "
+                f"is the bare column identifier (table context lives "
+                f"in ``table_name``).  Normalize at the source "
+                f"boundary — see the class docstring for why."
+            )
+        for sib in self.siblings:
+            if sib.startswith(qualifier):
+                raise ValueError(
+                    f"ColumnSample.siblings contains qualified name "
+                    f"{sib!r} for table_name={self.table_name!r}; "
+                    f"siblings must be bare names."
+                )
+
+    @property
+    def qualified_name(self) -> str:
+        """Cross-table identifier: ``f"{table_name}.{name}"``.
+
+        Use this — never bare ``name`` — for any dict keyed across
+        tables.  Bare names collide (``row_id`` is shared by 20+
+        tables in a typical hive corpus); the qualified form
+        disambiguates and round-trips cleanly through
+        ``column_table`` to recover ``table_name`` for batched LLM
+        prompts and result attribution.
+        """
+        if not self.table_name:
+            return self.name
+        return f"{self.table_name}.{self.name}"
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -267,6 +331,45 @@ def discover_tables(
     return [str(t) for t in tables]
 
 
+def _strip_table_qualifier(table_name: str, raw_columns: list[str]) -> list[str]:
+    """Normalize raw column identifiers to canonical bare form.
+
+    Hive's JDBC/Thrift driver returns ``df.columns`` qualified with
+    ``f"{table_name}."`` when the underlying query reads from
+    ``db.table``.  The qualifier is a serialization artifact — the
+    table context is already captured in ``ColumnSample.table_name``
+    — and if it leaks past the source boundary it contaminates the
+    embedding text the LLM and cosine encoder consume.  See the
+    ``ColumnSample`` class docstring for the contamination mode this
+    boundary normalization defends against.
+
+    Names that don't carry the prefix pass through unchanged.  Names
+    with an unexpected qualifier shape (e.g. ``db.table.col`` from
+    a future driver version) emit a warning and pass through; the
+    ``ColumnSample.__post_init__`` invariant will then trip on
+    construction, surfacing the regression loudly rather than
+    letting it silently re-corrupt the pipeline.
+    """
+    qualifier = f"{table_name}."
+    canonical: list[str] = []
+    for raw in raw_columns:
+        if raw.startswith(qualifier):
+            canonical.append(raw[len(qualifier):])
+        elif "." in raw:
+            log.warning(
+                "Hive sampler: column identifier %r carries an "
+                "unexpected qualifier shape (table_name=%r); leaving "
+                "unchanged.  The ColumnSample canonical-form invariant "
+                "will catch this on construction if it represents a "
+                "contamination vector.",
+                raw, table_name,
+            )
+            canonical.append(raw)
+        else:
+            canonical.append(raw)
+    return canonical
+
+
 def sample_table_metadata(
     cfg,
     table_name: str,
@@ -309,35 +412,66 @@ def sample_table_metadata(
         f"SELECT * FROM {database}.{table_name} LIMIT {sample_size}"
     )
 
-    column_names = list(df.columns)
+    # Hive's JDBC/Thrift driver returns ``df.columns`` qualified with
+    # ``f"{table_name}."`` when the query reads from ``db.table``.  The
+    # qualifier carries no semantic information that
+    # ``ColumnSample.table_name`` doesn't already capture, but if it
+    # leaks past this boundary it corrupts every downstream consumer
+    # that renders a column identifier into text — most damagingly
+    # the embedding text fed to the LLM and cosine encoder, where
+    # repeating ``"student enrollment"`` six times in
+    # ``"student enrollment.row id | siblings: student enrollment.f
+    # name, ..."`` makes the table theme dominate the actual values
+    # and produces table-wide misclassification (see
+    # ``ColumnSample`` docstring).  Normalize once, here, before any
+    # downstream reads.
+    raw_columns = list(df.columns)
+    column_names = _strip_table_qualifier(table_name, raw_columns)
+    raw_by_canonical = dict(zip(column_names, raw_columns))
 
-    # True cardinality: one query for all columns, bounded by limit
+    # True cardinality: one query for all columns, bounded by limit.
+    # Reference columns by their bare canonical name (the inner
+    # subquery's projection drops the qualifier), and use positional
+    # aliases (``c0, c1, ...``) for the outer projection so we can read
+    # the result back without depending on driver-specific output
+    # qualification.  Before the canonical-form fix this query failed
+    # silently with the Hive-qualified form ``COUNT(DISTINCT
+    # `student_enrollment.row_id`)`` and cardinality fell back to the
+    # sample-based count of 5 — which dropped one of the few features
+    # that could have outvoted the LLM/cosine on opaque-ID columns.
     distinct_counts: dict[str, int] = {}
     try:
         distinct_exprs = ", ".join(
-            f"COUNT(DISTINCT `{col}`) AS `distinct_{col}`"
-            for col in column_names
+            f"COUNT(DISTINCT `{canonical}`) AS c{i}"
+            for i, canonical in enumerate(column_names)
         )
         cardinality_df = conn.get_pandas_dataframe(
             f"SELECT {distinct_exprs} FROM "
             f"(SELECT * FROM {database}.{table_name} "
             f"LIMIT {column_sample_limit}) sub"
         )
-        for col in column_names:
-            distinct_counts[col] = int(cardinality_df[f"distinct_{col}"].iloc[0])
-    except Exception:
-        pass  # Fall back to sample-based cardinality in features
+        for i, canonical in enumerate(column_names):
+            distinct_counts[canonical] = int(cardinality_df.iloc[0, i])
+    except Exception as exc:
+        log.debug(
+            "Cardinality probe failed for %s.%s (%s); falling back to "
+            "sample-based cardinality.",
+            database, table_name, exc,
+        )
 
     columns = []
-    for col_name in column_names:
-        all_vals = [str(v) for v in df[col_name].dropna().tolist()]
+    for canonical in column_names:
+        # Pandas keeps values under whatever the driver returned; access
+        # by the raw key, store under the canonical one.
+        raw = raw_by_canonical[canonical]
+        all_vals = [str(v) for v in df[raw].dropna().tolist()]
         col_values = all_vals[:5]
-        null_count = int(df[col_name].isna().sum())
+        null_count = int(df[raw].isna().sum())
         total_count = len(df)
-        col_type = str(df[col_name].dtype)
+        col_type = str(df[raw].dtype)
 
         columns.append(ColumnSample(
-            name=col_name,
+            name=canonical,
             column_type=col_type,
             values=col_values,
             all_values=all_vals,
@@ -346,7 +480,7 @@ def sample_table_metadata(
             table_name=table_name,
             database=database,
             siblings=column_names,
-            distinct_count=distinct_counts.get(col_name),
+            distinct_count=distinct_counts.get(canonical),
         ))
 
     return TableSample(name=table_name, database=database, columns=columns)

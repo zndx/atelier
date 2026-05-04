@@ -476,7 +476,10 @@ def _classify_batch_with_retry(
     """
     n = len(chunk_samples)
     batch_index = len(state.batch_audit) if _batch_index is None else _batch_index
-    col_names = [s.name for s in chunk_samples]
+    # Qualified names so ``state.failed_columns`` and the
+    # ``state.batch_audit`` ``columns`` field match the cross-table
+    # keying used throughout state — see ``ColumnSample.qualified_name``.
+    col_names = [s.qualified_name for s in chunk_samples]
 
     def _beat(phase: str) -> None:
         if heartbeat is None:
@@ -606,7 +609,11 @@ def _classify_batch_with_retry(
                 break
             sub_context = None
             if revisit_context:
-                sub_names = [s.name for s in sub]
+                # ``revisit_context`` is keyed by qualified_name (built
+                # in ``_llm_revisit`` from the qualified ``chunk``);
+                # use the same keying here so the halved sub-batch
+                # carries its enrichment forward.
+                sub_names = [s.qualified_name for s in sub]
                 sub_context = {n2: revisit_context[n2] for n2 in sub_names if n2 in revisit_context}
             results.extend(_classify_batch_with_retry(
                 backend, sub, system_prompt, state,
@@ -653,7 +660,10 @@ def _classify_batch_with_retry(
             break
         sub_context = None
         if revisit_context:
-            sub_names = [s.name for s in sub]
+            # ``revisit_context`` is keyed by qualified_name; use the
+            # same keying when halving so each sub-batch carries its
+            # enrichment forward.
+            sub_names = [s.qualified_name for s in sub]
             sub_context = {n2: revisit_context[n2] for n2 in sub_names if n2 in revisit_context}
         results.extend(_classify_batch_with_retry(
             backend, sub, system_prompt, state,
@@ -800,9 +810,19 @@ def _llm_sweep(
 
             for c in classifications:
                 if c.category_code and c.confidence > 0:
-                    state.labels[c.column_name] = c.category_code
-                    state.confidence[c.column_name] = c.confidence
-                    state.label_source[c.column_name] = "llm"
+                    # The LLM echoes the bare column name from the
+                    # prompt (``sample.name``); state dicts are keyed
+                    # by the qualified form to disambiguate cross-
+                    # table identity.  ``tname`` holds the batch's
+                    # table — recover the qualified key directly
+                    # rather than introducing a per-call mapping.
+                    key = (
+                        f"{tname}.{c.column_name}"
+                        if tname else c.column_name
+                    )
+                    state.labels[key] = c.category_code
+                    state.confidence[key] = c.confidence
+                    state.label_source[key] = "llm"
 
             # Per-batch heartbeat — advances FSM.updated_at so operators
             # and watchdogs can tell a running sweep from a stalled one
@@ -892,9 +912,15 @@ def _llm_sweep(
                     raise
                 for c in classifications:
                     if c.category_code and c.confidence > 0:
-                        state.labels[c.column_name] = c.category_code
-                        state.confidence[c.column_name] = c.confidence
-                        state.label_source[c.column_name] = "llm"
+                        # LLM-echoed bare name → qualified state key,
+                        # same convention as the main sweep above.
+                        key = (
+                            f"{tname}.{c.column_name}"
+                            if tname else c.column_name
+                        )
+                        state.labels[key] = c.category_code
+                        state.confidence[key] = c.confidence
+                        state.label_source[key] = "llm"
 
         final_missing = [n for n in column_names if n not in state.labels]
         if final_missing:
@@ -1135,9 +1161,15 @@ def _llm_revisit(
 
             for c in classifications:
                 if c.category_code and c.confidence > 0:
-                    state.labels[c.column_name] = c.category_code
-                    state.confidence[c.column_name] = c.confidence
-                    state.label_source[c.column_name] = "llm_revisit"
+                    # LLM-echoed bare name → qualified state key, same
+                    # convention as ``_llm_sweep``.
+                    key = (
+                        f"{tname}.{c.column_name}"
+                        if tname else c.column_name
+                    )
+                    state.labels[key] = c.category_code
+                    state.confidence[key] = c.confidence
+                    state.label_source[key] = "llm_revisit"
 
 
 def _coverage(state: BootstrapState, column_names: list[str]) -> float:

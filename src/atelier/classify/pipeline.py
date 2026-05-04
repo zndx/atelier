@@ -724,18 +724,27 @@ def run_classification_pipeline(
                 "demonstration mode only; see Status page toggle)."
             )
 
-        # Flatten to column list with table mapping
+        # Flatten to column list with table mapping.  Cross-table dicts
+        # key on ``qualified_name`` (``f"{table_name}.{name}"``) — bare
+        # names collide across tables (a typical hive corpus has
+        # ``row_id`` in 20+ tables; bare keying would silently drop
+        # 19/20).  See ``ColumnSample.qualified_name``.  Downstream
+        # state dicts (``state.labels``, ``state.confidence``,
+        # ``column_table`` lookups in ``_llm_sweep`` /
+        # ``_llm_revisit``) inherit the same keying convention.
         all_columns: list[ColumnSample] = []
         column_table: dict[str, str] = {}
         for ts in all_samples:
             for col in ts.columns:
                 all_columns.append(col)
-                column_table[col.name] = ts.name
+                column_table[col.qualified_name] = ts.name
 
         total_columns = len(all_columns)
         logger.info("Sampled %d columns across %d tables", total_columns, len(all_samples))
 
-        samples_by_name: dict[str, ColumnSample] = {c.name: c for c in all_columns}
+        samples_by_name: dict[str, ColumnSample] = {
+            c.qualified_name: c for c in all_columns
+        }
         column_names = list(samples_by_name.keys())
 
         # ── Bootstrap config + LLM prompts ────────────────────────
@@ -1249,8 +1258,14 @@ def run_classification_pipeline(
 
         classifications: list[dict[str, Any]] = []
         for col in all_columns:
-            llm_code = state.labels.get(col.name)
-            llm_conf = state.confidence.get(col.name, 0.0)
+            # Cross-table state dicts are keyed by ``qualified_name``
+            # (see the keying note above where ``samples_by_name`` is
+            # built); ``col.name`` is the bare canonical column id and
+            # would silently miss every entry past the first cross-
+            # table collision.
+            qkey = col.qualified_name
+            llm_code = state.labels.get(qkey)
+            llm_conf = state.confidence.get(qkey, 0.0)
             result = _classify_column(
                 col, category_set, frame,
                 llm_code=llm_code,
