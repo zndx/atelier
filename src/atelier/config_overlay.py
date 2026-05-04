@@ -229,18 +229,6 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 0.45,
         "caption_template": "Trigger an LLM revisit when {{cosine, pattern, name_match}} agree on a code at ≥ {value} mass that disagrees with the LLM — lower = more revisits, higher = more conservative.",
     },
-    "classify_bootstrap_frontier_svm_retrain": {
-        "hocon_path": "classify.bootstrap.frontier_svm_retrain",
-        "label": "Incremental SVM Retrain",
-        "description": "Hot-swap the incremental SVM mid-loop as LLM labels accumulate",
-        "group": "convergence",
-        "type": "switch",
-        "default": True,
-        "captions": {
-            True: "Retrain the incremental SVM on accumulated LLM labels each iteration — adaptive, slower.",
-            False: "Freeze the incremental SVM after first fit — faster but stale for high-conflict corpora.",
-        },
-    },
     # ── Evidence & Fusion ─────────────────────────────────────────
     "classify_fusion_strategy": {
         "hocon_path": "classify.fusion_strategy",

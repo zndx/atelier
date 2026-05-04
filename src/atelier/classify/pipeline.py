@@ -270,55 +270,6 @@ def _install_fit_to_llm_catboost(
                            save_path, exc)
 
 
-def _maybe_retrain_svm(
-    state,
-    samples_by_name: dict[str, ColumnSample],
-    svm_frontier_path: Path,
-    boot_cfg,
-    cfg,
-    last_retrain_count: int,
-    min_new_labels: int = 10,
-) -> tuple[bool, int]:
-    """Retrain the incremental SVM on blended synth + frontier-tier labels.
-
-    Skips when the number of new oracle labels since the last retrain is
-    below ``min_new_labels``.  Returns (retrained, current_frontier_count).
-    """
-    from atelier.classify import ml_inference
-    from atelier.classify.ml_train import train_svm_on_frontier_labels
-
-    # Count frontier labels
-    frontier_count = sum(
-        1 for src in state.label_source.values()
-        if src in ("llm", "llm_revisit")
-    )
-
-    if frontier_count - last_retrain_count < min_new_labels:
-        return False, last_retrain_count
-
-    if frontier_count < boot_cfg.frontier_svm_min_labels:
-        return False, last_retrain_count
-
-    synth_dir = _PROJECT_ROOT / "build" / "data" / "synth"
-    result = train_svm_on_frontier_labels(
-        state, samples_by_name, svm_frontier_path,
-        synth_dir=synth_dir if synth_dir.exists() else None,
-        min_frontier_labels=boot_cfg.frontier_svm_min_labels,
-    )
-    if result is None:
-        return False, last_retrain_count
-
-    # Hot-swap: install the freshly-retrained SVM in place of whatever
-    # was loaded before.  Must NOT touch CatBoost state — the fit-to-LLM
-    # install happens earlier in the same run, and a blanket reset here
-    # would silently wipe it (classifications emitted with catboost=0
-    # evidence despite fit_to_llm=True).
-    from atelier.classify.svm_classifier import SVMClassifier
-    ml_inference.install_svm(SVMClassifier.load(svm_frontier_path))
-    logger.info("Incremental SVM hot-swapped: %s", svm_frontier_path)
-    return True, frontier_count
-
-
 def run_classification_pipeline(
     cfg,
     fsm: AgentFSM,
@@ -981,17 +932,6 @@ def run_classification_pipeline(
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
 
-        # ── Incremental SVM retrain #1: after first LLM sweep ───────
-        svm_retrained = False
-        svm_retrain_count = 0
-        svm_frontier_path = results_dir / "svm_frontier.pkl"
-        if boot_cfg.frontier_svm_retrain:
-            svm_retrained, svm_retrain_count = _maybe_retrain_svm(
-                state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
-                last_retrain_count=0,
-                min_new_labels=boot_cfg.frontier_svm_min_labels,
-            )
-
         # ── VALIDATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.VALIDATING, progress={
             "phase": "ml_validation",
@@ -1215,15 +1155,6 @@ def run_classification_pipeline(
                     disagreements, samples_by_name, column_table, category_set,
                 )
 
-                # ── Incremental SVM retrain #2: mid-loop ─────────
-                if boot_cfg.frontier_svm_retrain:
-                    retrained, svm_retrain_count = _maybe_retrain_svm(
-                        state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
-                        last_retrain_count=svm_retrain_count,
-                    )
-                    if retrained:
-                        svm_retrained = True
-
                 fsm.advance(run_id, FSMState.VALIDATING, progress={
                     "phase": "revalidation",
                     "iteration": iteration,
@@ -1301,16 +1232,6 @@ def run_classification_pipeline(
             convergence_reason = (
                 "coverage_and_gap_met" if converged else "unknown"
             )
-
-        # ── Incremental SVM retrain #3: final (only if not converged)
-        if boot_cfg.frontier_svm_retrain and not converged:
-            retrained, svm_retrain_count = _maybe_retrain_svm(
-                state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
-                last_retrain_count=svm_retrain_count,
-                min_new_labels=1,
-            )
-            if retrained:
-                svm_retrained = True
 
         fsm.advance(run_id, FSMState.CLASSIFYING, progress={
             "phase": "final_classification",
@@ -1418,10 +1339,6 @@ def run_classification_pipeline(
         summary["mc_sample_fraction"] = (
             mc_plan.effective_sample_fraction if mc_plan else 1.0
         )
-        summary["svm_retrained_on_frontier"] = svm_retrained
-        if svm_retrained:
-            summary["svm_frontier_training_samples"] = svm_retrain_count
-            summary["svm_frontier_model_path"] = str(svm_frontier_path)
         summary["iteration_metrics"] = [
             {
                 "iteration": m.iteration,

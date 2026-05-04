@@ -170,8 +170,6 @@ class BootstrapConfig:
     # the gate that stops the retry storm.
     max_total_llm_attempts: int = 10000
     llm_discount: float = 0.15
-    frontier_svm_retrain: bool = True
-    frontier_svm_min_labels: int = 20
     # Belief-gap convergence (primary convergence criteria).
     # Defaults mirror config/base.conf — recalibrated 2026-05-03 for
     # the parent-aware DST frame (parent focal elements widen leaf
@@ -219,8 +217,6 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
             cfg, "classify_bootstrap_max_consecutive_halve_failures", 8,
         ),
         llm_discount=cfg.classify_llm_discount,
-        frontier_svm_retrain=cfg.classify_bootstrap_frontier_svm_retrain,
-        frontier_svm_min_labels=cfg.classify_bootstrap_frontier_svm_min_labels,
         gap_threshold=cfg.classify_bootstrap_gap_threshold,
         clarity_target=cfg.classify_bootstrap_clarity_target,
         bel_floor=cfg.classify_bootstrap_bel_floor,
@@ -399,9 +395,6 @@ class BootstrapState:
     # LLM truncation tracking
     truncation_count: int = 0
     effective_batch_size: int = 50
-    # Frontier SVM retraining state
-    svm_retrain_count: int = 0
-    svm_frontier_path: str | None = None
     # Per-column residual trajectory.  Appended in
     # ``record_iteration_metrics`` after each iteration's ML
     # validation; column-major view of the convergence behaviour.

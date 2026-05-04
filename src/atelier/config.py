@@ -149,8 +149,6 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.max_total_llm_attempts": ("classify_bootstrap_max_total_llm_attempts", int),
     "classify.bootstrap.sweep_deadline_s": ("classify_bootstrap_sweep_deadline_s", float),
     "classify.bootstrap.max_consecutive_halve_failures": ("classify_bootstrap_max_consecutive_halve_failures", int),
-    "classify.bootstrap.frontier_svm_retrain": ("classify_bootstrap_frontier_svm_retrain", bool),
-    "classify.bootstrap.frontier_svm_min_labels": ("classify_bootstrap_frontier_svm_min_labels", int),
     "classify.bootstrap.gap_threshold": ("classify_bootstrap_gap_threshold", float),
     "classify.bootstrap.clarity_target": ("classify_bootstrap_clarity_target", float),
     "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
@@ -395,8 +393,6 @@ class AtelierConfig:
     classify_bootstrap_max_total_llm_attempts: int = 10000
     classify_bootstrap_sweep_deadline_s: float = 0.0
     classify_bootstrap_max_consecutive_halve_failures: int = 8
-    classify_bootstrap_frontier_svm_retrain: bool = True
-    classify_bootstrap_frontier_svm_min_labels: int = 20
     # Belief-gap convergence — defaults mirror config/base.conf.
     # Recalibrated 2026-05-03 for the parent-aware DST frame; see the
     # comment in base.conf for the per-knob rationale.
