@@ -1437,6 +1437,13 @@ export default function Status() {
     error?: string;
   };
   const [platforms, setPlatforms] = useState<Platform[]>([]);
+  // Diagnostic state — surfaces whatever /api/data-platforms returned
+  // so an empty panel distinguishes "endpoint errored" from "endpoint
+  // returned no rows" from "request never completed".  Without this
+  // every failure mode collapsed to the generic "No data platforms
+  // registered" empty state, which hid real bugs.
+  const [platformsError, setPlatformsError] = useState<string | null>(null);
+  const [platformsLoading, setPlatformsLoading] = useState(false);
   // Selected platform id lives in the dataset context so it survives
   // in-app navigation.  Context exposes `string | null`; local code
   // reads it as `string | undefined` to keep antd's Select happy.
@@ -1465,15 +1472,18 @@ export default function Status() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    fetchStatus();
-    // Auto-fire credential validation on every /status visit — cheap
-    // probe ($0 vs ~$0.007 for the smoke test) so it's worth keeping
-    // current state on screen without a manual button press.
-    runCredentialCheck();
+  const fetchPlatforms = () => {
+    setPlatformsLoading(true);
+    setPlatformsError(null);
     fetch("/api/data-platforms")
-      .then((r) => r.json())
-      .then((data) => {
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok || (data && typeof data === "object" && "error" in data)) {
+          const msg = (data && data.error) || `HTTP ${r.status}`;
+          setPlatformsError(String(msg));
+          setPlatforms([]);
+          return;
+        }
         const list: Platform[] = Array.isArray(data?.platforms)
           ? data.platforms
           : [];
@@ -1486,7 +1496,20 @@ export default function Status() {
           setSelectedPlatformId(list[0].id);
         }
       })
-      .catch(() => setPlatforms([]));
+      .catch((e) => {
+        setPlatformsError(String(e));
+        setPlatforms([]);
+      })
+      .finally(() => setPlatformsLoading(false));
+  };
+
+  useEffect(() => {
+    fetchStatus();
+    // Auto-fire credential validation on every /status visit — cheap
+    // probe ($0 vs ~$0.007 for the smoke test) so it's worth keeping
+    // current state on screen without a manual button press.
+    runCredentialCheck();
+    fetchPlatforms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1911,6 +1934,15 @@ export default function Status() {
                   disabled={!platforms.length}
                   size="small"
                 />
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={fetchPlatforms}
+                  loading={platformsLoading}
+                  size="small"
+                  title="Re-fetch /api/data-platforms"
+                >
+                  Reload
+                </Button>
                 {selectedPlatform?.kind === "hive" && (
                   <Button
                     icon={<ReloadOutlined />}
@@ -1962,12 +1994,58 @@ export default function Status() {
                 that backs Hive sources.
               </Paragraph>
             )}
-            {platforms.length === 0 && (
-              <Text type="secondary">
-                No data platforms registered. Configure Hive via{" "}
-                <Text code>ATELIER_DATA_CONNECTIONS</Text> or mount a local
-                directory via <Text code>ATELIER_META_TAGGING_DIR</Text>.
-              </Text>
+            {platformsError && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="Failed to load data platforms"
+                description={
+                  <Space direction="vertical" size={4}>
+                    <Text code style={{ fontSize: 12 }}>
+                      GET /api/data-platforms — {platformsError}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      The Reload button above re-probes the endpoint.  If the
+                      error persists, check the gateway logs for{" "}
+                      <Text code>list_data_platforms failed</Text>.
+                    </Text>
+                  </Space>
+                }
+              />
+            )}
+            {!platformsError && platforms.length === 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="No data platforms returned"
+                description={
+                  <Space direction="vertical" size={4}>
+                    <Text>
+                      The endpoint succeeded but returned an empty list.
+                      Other panels (Classification Pipeline, ML Artifacts)
+                      may be reading from{" "}
+                      <Text code>/api/data-sources</Text> directly, so a
+                      mismatch here points at{" "}
+                      <Text code>list_data_platforms</Text>'s consolidator
+                      logic rather than the underlying DB.
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Configure Hive via{" "}
+                      <Text code>ATELIER_DATA_CONNECTIONS</Text> or mount a
+                      local directory via{" "}
+                      <Text code>ATELIER_META_TAGGING_DIR</Text> if neither
+                      is set.  Otherwise paste this in the Application pod's
+                      terminal to compare endpoints:
+                    </Text>
+                    <Text code style={{ fontSize: 12, whiteSpace: "pre" }}>
+                      {"curl -s http://127.0.0.1:8090/api/data-platforms | python3 -m json.tool\n"}
+                      {"curl -s http://127.0.0.1:8090/api/data-sources   | python3 -m json.tool\n"}
+                      {"curl -s http://127.0.0.1:8090/api/data-connections | python3 -m json.tool"}
+                    </Text>
+                  </Space>
+                }
+              />
             )}
             {selectedPlatform?.kind === "hive" && refreshResult && !refreshResult.ok && (
               <Text type="danger">{refreshResult.error}</Text>
