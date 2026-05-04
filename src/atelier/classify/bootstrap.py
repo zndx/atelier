@@ -978,15 +978,17 @@ def _identify_disagreements(
     1. The independent-tier consensus (cosine + pattern + name_match)
        has a top-1 prediction at meaningful mass (≥
        ``indep_revisit_mass_threshold``) that disagrees with the LLM
-       vote.  This branch matters because the LLM-derivative ML
-       sources (CatBoost-fit-to-LLM, frontier SVM) cannot, by
-       construction, contradict the LLM — see Shafer 1976 §11.3 on
-       reliability discounting and Denoeux 2008 on non-distinct
-       evidence.  The fully-fused ``ml_prediction`` therefore tracks
-       the LLM whenever the LLM is loud, masking genuine
-       independent-source disagreement.  Comparing LLM against the
-       ``{cosine, pattern, name_match}`` consensus restores a real
-       cross-source disagreement test.
+       vote.  This branch matters because the non-distinct ML
+       sources (CatBoost-fit-to-LLM strongly, the LLM-aligned SVM
+       weakly) cannot reliably contradict the LLM — see Shafer 1976
+       §11.3 on reliability discounting and Denoeux 2008 on
+       non-distinct evidence; the SVM's vocab-level alignment
+       dependency is documented in ``ontology_alignment.py``.  The
+       fully-fused ``ml_prediction`` therefore tracks the LLM
+       whenever the LLM is loud, masking genuine independent-source
+       disagreement.  Comparing LLM against the ``{cosine, pattern,
+       name_match}`` consensus restores a real cross-source
+       disagreement test.
 
     2. K is high *and* the fused prediction differs from LLM.  This
        is the legacy gate, retained as a safety net for cases where

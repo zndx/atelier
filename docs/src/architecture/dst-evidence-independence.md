@@ -100,27 +100,44 @@ evidence sources:
    and the user-vocabulary embedding.
 4. `llm` — Claude Opus first-pass classification.
 5. `catboost` — CatBoost classifier.
-6. `svm` — frontier SVM classifier.
+6. `svm` — synth-trained TF-IDF + LinearSVC classifier with an
+   LLM-mediated ICE → user-taxonomy alignment applied at inference
+   time.
 
 The first three are genuinely independent of the LLM: their evidence
 arises from the column's name, value patterns, and semantic embedding
-comparison against the vocabulary. The last three are *not*
-independent in the current architecture:
+comparison against the vocabulary. The remaining sources have a
+mixed independence profile:
 
 - **`catboost`** is trained in `fit_to_llm` mode (default true) on
   `(embedding_text, llm_code)` pairs from the current run's LLM
   sweep. See `ml_train.fit_catboost_to_llm_labels` and
   `pipeline._install_fit_to_llm_catboost`. The fitted model is, by
   construction, an explainability surface over the LLM's labels —
-  not a competing classifier.
-- **`svm` (frontier)** is hot-swapped during the bootstrap loop on
-  labels filtered to `label_source in ("llm", "llm_revisit")` (see
-  `ml_train` ~line 118). Its training set is exclusively LLM output.
+  not a competing classifier. **Strongly non-distinct** with the
+  LLM source under Denoeux 2008 (per-column shared label
+  provenance).
+- **`svm`** is trained once on the synthetic corpus
+  (`scripts/generate_synth_source.py` → `ml_train.train_svm`),
+  with TF-IDF char-3-6gram + word-1-2gram features and labels keyed
+  on the bundled-ontology ICE.* leaves from
+  `synth_generators.GENERATORS`. At pipeline runtime, predictions
+  are translated into the user taxonomy via the cached alignment in
+  `classify.ontology_alignment` (one LLM call per (vocab, model)
+  tuple, results cached on disk). **Weakly non-distinct** with the
+  LLM source — the shared knowledge is vocabulary-level (the
+  alignment table) rather than column-level (the M9 frontier-SVM
+  regime, since excised — see commits 8627c2c, 5199379, cc59d01).
+  See the `ontology_alignment.py` module docstring for the full
+  independence argument and known caveats; future work to push this
+  back below cosine is a BM25 + transformer-reranker alignment that
+  removes the LLM from the mapping path entirely.
 
-Treating LLM, CatBoost(LLM), and SVM(LLM) as three independent
-sources and combining them via Dempster's rule double- and
-triple-counts the LLM atom. The pre-2026-04-30 discount schedule
-made this worse: `llm=0.10`, `catboost=0.10`, `svm=0.20`, vs
+Treating LLM and CatBoost(LLM) as fully-independent sources and
+combining them via Dempster's rule double-counts the LLM atom; the
+SVM evidence sits between fully independent and fully derivative.
+The pre-2026-04-30 discount schedule made the legacy three-way
+overlap worse: `llm=0.10`, `catboost=0.10`, `svm=0.20`, vs
 `cosine=0.30`. The genuinely independent semantic source was
 *more* discounted than the two derivative ones, mathematically
 suppressing it whenever the LLM was loud.
@@ -161,20 +178,24 @@ the principled response under classical Dempster fusion.
 The current defaults (`config/base.conf:341+`) place CatBoost and
 SVM **above** the cosine discount:
 
-| Source       | Discount | Rationale                                  |
-|--------------|----------|--------------------------------------------|
-| `cosine`     | 0.30     | independent of LLM; semantic prior         |
-| `pattern`    | 0.25     | independent; deterministic regex evidence  |
-| `name_match` | 0.30–0.70 | independent; lexical match against vocab  |
-| `llm`        | 0.10     | original; first-pass label                 |
-| `catboost`   | **0.55** | **derivative** (`fit_to_llm`)              |
-| `svm`        | **0.55** | **derivative** (frontier-LLM-trained)      |
-| `catboost_max` | 0.75   | variance ceiling; maintains headroom       |
+| Source       | Discount | Rationale                                                                            |
+|--------------|----------|--------------------------------------------------------------------------------------|
+| `cosine`     | 0.20     | independent of LLM; semantic prior                                                   |
+| `pattern`    | 0.25     | independent; deterministic regex evidence                                            |
+| `name_match` | 0.30–0.70 | independent; lexical match against vocab                                            |
+| `llm`        | 0.15     | original; first-pass label                                                           |
+| `catboost`   | **0.55** | **strongly non-distinct** (`fit_to_llm`, per-column LLM labels)                      |
+| `svm`        | **0.30** | **weakly non-distinct** (vocab-level via `ontology_alignment`; was 0.55 under M9)    |
+| `catboost_max` | 0.75   | variance ceiling; maintains headroom                                                 |
 
 Operators can dial these via the Settings page when retraining
-CatBoost/SVM on labels independent of the current LLM sweep (e.g.
+CatBoost on labels independent of the current LLM sweep (e.g.
 synth-only training); the metadata in `config_overlay.SETTINGS_METADATA`
-exposes the full range.
+exposes the full range.  The SVM discount is the trickier one to
+move: lowering it below `cosine` requires switching the alignment
+to a path that doesn't share an LLM with the runtime sweep
+(BM25 + reranker is the future-work plan; see
+`ontology_alignment.py` module docstring).
 
 ### 2. Independent-tier consensus + revisit gate
 

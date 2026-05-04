@@ -162,17 +162,19 @@ frontier labels, and declares convergence when diminishing returns are
 reached. The **programmatic** variant uses gap + coverage thresholds
 for environments where tool-use isn't available.
 
-### Incremental SVM Training
+### SVM with Vocabulary Alignment
 
-After the first LLM sweep, the SVM is **retrained on blended synthetic +
-frontier-tier labels** — high-quality classifications from the frontier
-model on the stratified importance sample. Synthetic data provides
-vocabulary breadth (all categories); frontier-tier labels provide
-corpus-specific depth. The incremental SVM is hot-swapped progressively
-across convergence iterations, carrying corpus-specific signal into each
-validation pass. DST independence is preserved: the SVM trains on
-frontier-tier (Opus) labels while the LLM mass function in fusion uses
-the subagent model (Sonnet/Haiku).
+The SVM is trained **once** on the synthetic corpus with TF-IDF
+features and labels keyed on the bundled-ontology ICE.* leaves.  At
+runtime, predictions are translated into the user's taxonomy via a
+cached LLM-mediated alignment (`atelier.classify.ontology_alignment`)
+so the SVM contributes user-taxonomy evidence even when the operator's
+vocabulary is completely disjoint from ICE.*.  The alignment is
+weakly non-distinct evidence under Denoeux 2008 — vocabulary-level
+shared error with the runtime LLM rather than per-column shared
+labels — and the discount calibration carries the residual.  See
+[DST Evidence Independence](./architecture/dst-evidence-independence.md)
+for the full design rationale and the BM25-reranker future-work plan.
 
 ## Scale
 
@@ -218,7 +220,7 @@ just up               # Start gRPC + gateway + Vite dev server
 - **[Classification Pipeline](./architecture/classification.md)** — DST methodology, evidence sources, bootstrap convergence
 - **[Monte Carlo Sampling](./architecture/monte-carlo.md)** — Stratified sampling for scale
 - **[GPU Acceleration](./architecture/gpu.md)** — CUDA detection and batch encoding
-- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, incremental SVM retraining, CatBoost + SVM
+- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, ontology-aligned SVM, CatBoost fit-to-LLM
 - **[Embeddings](./architecture/embeddings.md)** — Interactive parquet visualization
 - **[Data Sources](./architecture/data-sources.md)** — Source-aware versioning, OOTB sample, Hive auto-discovery
 - **[BDD Scenarios](./scenarios/overview.md)** — 141 scenarios across 4 domains

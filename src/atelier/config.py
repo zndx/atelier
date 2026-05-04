@@ -401,12 +401,18 @@ class AtelierConfig:
     classify_bootstrap_bel_floor: float = 0.45
     classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
 
-    # DST discount factors.  The catboost_*/svm defaults are calibrated
-    # above the cosine discount because those sources are LLM-derivative
-    # in this pipeline (see ml_train.fit_catboost_to_llm_labels and the
-    # frontier-SVM filter at ml_train lines 118-127); per Shafer 1976
-    # §11.3 + Denoeux 2008, non-distinct evidence requires substantial
-    # discount to avoid double-counting under Dempster's rule.
+    # DST discount factors.  ``catboost_*`` defaults are calibrated
+    # well above the cosine discount because that source is LLM-
+    # derivative at the per-column level (``fit_to_llm`` mode trains
+    # on the live run's LLM labels — see
+    # ml_train.fit_catboost_to_llm_labels).  ``svm`` sits between
+    # fully-independent and CatBoost: features are independent (TF-IDF)
+    # and labels come from the synth generators, but the prediction-
+    # to-frame-element mapping passes through the LLM-mediated
+    # alignment in classify.ontology_alignment.  Per Shafer 1976
+    # §11.3 + Denoeux 2008, non-distinct evidence requires a
+    # discount to avoid double-counting under Dempster's rule; the
+    # current SVM default reflects the weakly-non-distinct regime.
     classify_discount_cosine: float = 0.20
     classify_discount_svm: float = 0.30
     classify_discount_pattern_theta: float = 0.25

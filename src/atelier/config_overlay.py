@@ -648,7 +648,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.30,
         "step": 0.01,
         "default": 0.15,
-        "caption_template": "Reserve {value_pct}% of LLM mass as ignorance — lower = trust the LLM's self-confidence, raise when you're seeing confident-but-wrong predictions or when LLM-derivative sources (CatBoost fit-to-LLM, frontier SVM) are amplifying its vote.",
+        "caption_template": "Reserve {value_pct}% of LLM mass as ignorance — lower = trust the LLM's self-confidence, raise when you're seeing confident-but-wrong predictions or when LLM-derivative sources (CatBoost fit-to-LLM, SVM via the ontology→user-vocab alignment) are amplifying its vote.",
     },
     "classify_llm_max_tokens": {
         "hocon_path": "classify.llm.max_tokens",

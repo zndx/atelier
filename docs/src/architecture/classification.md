@@ -143,78 +143,47 @@ Key implementation details:
   feature importance
 - **`is_fitted`** property for safe state checking before prediction
 
-#### Incremental SVM Training (M9)
+#### SVM Training (synth-only) and Vocabulary Alignment
 
-> **Terminology note.**  The SVM trained here is the *incremental SVM*
-> in active-learning nomenclature — it is retrained as new oracle
-> labels accumulate during the bootstrap loop.  The labels feeding it
-> come from the *frontier-tier* (Opus-class) LLM that runs the sweep
-> and revisit, so "frontier" still appears below as a label-source
-> qualifier.  The word "frontier" *as a noun* is reserved for the
-> Pareto frontier of pipeline configurations — see
-> [Pareto Capability Evolution](./pareto-capability-evolution.md).
+The SVM is trained **once** on the synthetic corpus (see
+[synth.md](./synth.md)) using TF-IDF char-3-6gram + word-1-2gram
+features and labels keyed on bundled-ontology ICE.* leaves from
+`synth_generators.GENERATORS`.  At pipeline runtime, the ICE.*
+predictions are translated into the user's taxonomy via the cached
+LLM-mediated alignment in `atelier.classify.ontology_alignment`.
 
-The Monte Carlo sampling architecture enables a stronger training signal for
-the SVM without breaking independence. After the bootstrap LLM sweep, the
-SVM is **retrained on blended synth + frontier-tier labels** — high-quality
-classifications from the Opus-tier model on the stratified importance sample.
+The translation step is what restored the SVM as useful evidence for
+non-OOTB user vocabularies — pre-alignment, the SVM emitted ICE
+codes that didn't appear in the user-taxonomy frame and silently
+contributed nothing.  See `ontology_alignment.py` module docstring
+for the independence rationale and known caveats.
 
-```
-_llm_sweep() → frontier columns get Opus labels
-     ↓
-  RETRAIN #1: Blend synth data + frontier-tier labels
-  Incremental SVM hot-swapped before first ML validation
-     ↓
-_run_ml_validation() — uses incremental SVM
-     ↓
-  Convergence loop:
-    Agent path: agent calls retrain_svm tool when it judges
-                enough new labels have accumulated
-    Programmatic path: retrain after each revisit iteration
-                       that adds ≥10 new frontier-tier labels
-     ↓
-  RETRAIN #3 (final): Only if NOT converged
-     ↓
-  CLASSIFYING — final pass uses best available SVM
-```
-
-**Blending** ensures categories not in the frontier sample still have
-coverage from synth data (broad vocabulary), while corpus-specific patterns
-dominate via frontier-tier signal (depth).
-
-**Independence is preserved** because:
-- Training signal: Opus (frontier model, used in LLM sweep)
-- Bulk LLM source in DST fusion: Sonnet/Haiku (subagent model)
-- SVM feature space: sparse TF-IDF (orthogonal to all other sources)
-
-The three independence axes:
-1. Different models at training time (Opus) vs. fusion time (Sonnet/Haiku)
-2. Different feature spaces (sparse TF-IDF vs. semantic LLM reasoning)
-3. Different inductive biases (maximum-margin classifier vs. autoregressive LM)
-
-The incremental SVM becomes the **transmission mechanism** for
-frontier-tier-quality signal — MC sampling bounds the Opus cost; the
-SVM amortizes Opus's accuracy across the entire table-space.
-
-##### Configuration
-
-```hocon
-classify.bootstrap {
-  frontier_svm_retrain = true    # Enable/disable frontier retraining
-  frontier_svm_min_labels = 20   # Minimum frontier labels to trigger retrain
-}
-```
+> **Historical note (2026-05-04 refactor).**  Earlier revisions of
+> this design ran a mid-loop `train_svm_on_frontier_labels` that
+> retrained the SVM on live LLM labels and hot-swapped the result
+> into the active model slot — labelled "M9 frontier-SVM
+> retraining" in commit history.  That path was excised on
+> 2026-05-04 (commits 8627c2c, 5199379, cc59d01) for source-
+> independence reasons: the per-column LLM label copying made the
+> SVM strongly non-distinct with the LLM source under Denoeux 2008,
+> and the docstring's "different models for training vs. fusion"
+> defense only held on multi-backend deployments.  The current
+> design preserves the SVM's TF-IDF independence at the feature
+> and label level; the only LLM dependency is the per-vocabulary
+> alignment table.
 
 ##### Implementation
 
-- `train_svm_on_frontier_labels()` in `ml_train.py` — collects
-  frontier-tier labels (`label_source in ("llm", "llm_revisit")`),
-  blends with synth data, trains the incremental `SVMClassifier`,
-  saves to `results_dir/svm_frontier.pkl`
-- `_maybe_retrain_svm()` in `pipeline.py` — encapsulates retrain + hot-swap
-  via `ml_inference.reset()` + `configure_paths()`
-- Three call sites in pipeline: post-sweep, iterative, final (if not converged)
-- Agent tool `retrain_svm` for agent-driven convergence path
+- `train_svm()` in `ml_train.py` — synth-only training, persists to
+  `build/models/svm.pkl` (label space: ICE.* leaves)
+- `ontology_alignment.build_alignment()` — once-per-(vocab, model)
+  ICE → user-code mapping via the existing LLM backend; cached at
+  `build/cache/alignment/<sha256>.json`
+- `ontology_alignment.translate_proba()` — applied at the SVM
+  evidence site in `pipeline._classify_column` before
+  `mass_functions.svm_to_mass`
+- Discount: `classify.discounts.svm = 0.30` (was 0.55 in M9 era)
+  reflects the weakly-non-distinct regime.
 
 ### Dempster's Rule of Combination
 

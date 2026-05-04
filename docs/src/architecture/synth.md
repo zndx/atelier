@@ -113,69 +113,47 @@ class probabilities but per-class variance estimates. High variance
 translates to a higher DST discount factor — uncertain ML predictions
 carry less evidential weight in the fusion.
 
-## Incremental SVM Training (M9)
+## SVM Training (synth-only, with vocab alignment at inference)
 
-> The SVM trained here is the *incremental SVM* in active-learning
-> nomenclature — retrained as new oracle labels accumulate.  The
-> labels themselves come from the *frontier-tier* (Opus-class) LLM,
-> so "frontier" appears below as a label-source qualifier.  See
-> [Pareto Capability Evolution](./pareto-capability-evolution.md) for
-> the broader context of why we reserved "frontier" as a noun for the
-> Pareto sense going forward.
-
-After the bootstrap LLM sweep, the pipeline has high-quality
-frontier-tier labels from the Opus-class model.
-`train_svm_on_frontier_labels()` **blends** these with synthetic data
-and retrains the incremental SVM progressively:
+The SVM is trained **once** on the synthetic corpus
+(`scripts/generate_synth_source.py` → `ml_train.train_svm`), with
+TF-IDF char-3-6gram + word-1-2gram features and labels keyed on the
+bundled-ontology ICE.* leaves from `synth_generators.GENERATORS`.
+At pipeline runtime, the ICE.* predictions are translated into the
+user's taxonomy via the cached LLM-mediated alignment in
+`atelier.classify.ontology_alignment` (one LLM call per
+(vocabulary, model) tuple; result cached on disk under
+`build/cache/alignment/`).
 
 ```
-synth_*.csv + frontier-tier LLM labels
+data/synth/*.csv  +  ICE.* reference labels
         ↓
-  train_svm_on_frontier_labels()
+   train_svm()  (sklearn LinearSVC + TfidfVectorizer)
         ↓
-  ┌──────────────────────────────────────────┐
-  │  Synth texts  +  Frontier-tier texts     │
-  │  (vocabulary   (corpus-specific          │
-  │   coverage)     signal)                  │
-  └──────────────┬───────────────────────────┘
-                 ↓
-         SVMClassifier.fit()
-                 ↓
-         svm_frontier.pkl    ← filename retained for backward compat
+   build/models/svm.pkl   (label space: ICE.* leaves)
+
+────────  pipeline runtime  ──────────────────────
+
+   svm.predict_proba(text)  →  {ICE.X: p, ICE.Y: q, ...}
+        ↓
+   translate_proba(proba, alignment)   ← from ontology_alignment
+        ↓
+   {user_code_A: p+q, user_code_B: r, ...}
+        ↓
+   svm_to_mass(...)  →  BeliefAssignment in user-taxonomy frame
 ```
 
-### Three-Phase Progressive Retraining
-
-1. **Post-sweep** (always): After the first LLM sweep labels frontier columns,
-   retrain immediately so the SVM carries corpus-specific signal into the
-   first ML validation pass.
-
-2. **Mid-loop** (during convergence): In the programmatic loop, retrain
-   after each revisit iteration that adds ≥10 new frontier-tier labels.
-   In the agent-driven loop, the agent calls `retrain_svm` when it judges
-   enough new labels have accumulated.
-
-3. **Final** (only if not converged): Last-resort retrain with all accumulated
-   labels before the final classification pass. Skipped when already converged
-   (the last iteration's model is already in use).
-
-### Why Blend Synth + Frontier-tier Labels
-
-- **Synth data**: Covers all vocabulary categories — ensures the SVM can
-  classify categories not present in the live sample
-- **Frontier-tier labels**: Corpus-specific patterns — column names, value
-  formats, and type distributions that synth generators can't capture
-- **Together**: Breadth from synth, depth from frontier-tier signal
-
-### Hot-Swap Mechanism
-
-After retraining, the incremental SVM is hot-swapped via:
-1. `ml_inference.reset()` — clears cached models and paths
-2. `ml_inference.configure_paths(svm_path=..., catboost_path=...)` — points
-   the lazy-loader at the freshly-retrained model
-
-The model file lives at `results_dir/svm_frontier.pkl` (run-specific),
-preserving `build/models/svm.pkl` as the synth-trained fallback.
+> **Historical note** — earlier revisions of this design ran a
+> mid-loop `train_svm_on_frontier_labels` that retrained the SVM on
+> live LLM labels and hot-swapped the result into the active model
+> slot.  That path was excised on 2026-05-04 (commits 8627c2c,
+> 5199379, cc59d01) for the source-independence reasons documented
+> in `ontology_alignment.py`.  The current design preserves the
+> SVM's TF-IDF independence at the feature and label level; the
+> only LLM dependency is the per-vocabulary alignment table, which
+> is vocabulary-level rather than column-level shared error.  See
+> `ontology_alignment.py` module docstring for the full independence
+> argument and the BM25-reranker future-work plan.
 
 ## Train-Eval Cycle
 
@@ -236,7 +214,7 @@ Set to `false` on CAI if background threads cause runtime issues.
 | `synth_generators.py` | 316+ hand-coded value generators |
 | `synth_registry.py` | Three-layer registry: hand-coded > template > inferred |
 | `synth.py` | Synthetic data generation with diverse column names |
-| `ml_train.py` | Training orchestrator: synth-only CatBoost + incremental SVM (synth + frontier-tier labels) |
+| `ml_train.py` | Training orchestrator: synth-only CatBoost + synth-only SVM (ICE.* labels) |
 | `catboost_classifier.py` | CatBoost with virtual ensemble uncertainty |
 | `svm_classifier.py` | Pipeline+FeatureUnion: dual TF-IDF + LinearSVC + Platt scaling (signals) |
 | `train_eval_cycle.py` | Generate → train → classify → evaluate loop |

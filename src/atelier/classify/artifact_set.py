@@ -10,7 +10,7 @@
 
 An ML Artifact Set is the bundle of trained-model files produced by an
 Atelier classify run: the CatBoost classifier (.cbm + .classes.json),
-the optional incremental SVM classifier (.pkl + .classes.json), the
+the optional SVM classifier (.pkl + .classes.json), the
 fitted UMAP projection (.pkl), and metadata that lets a downstream
 Extend Classification run replay the model on new data without
 re-running the full pipeline.

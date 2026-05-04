@@ -1817,9 +1817,23 @@ def _build_confusable_pairs(
 # the full fusion so the bootstrap revisit gate can detect when the
 # LLM disagrees with the union of LLM-independent signals (cosine,
 # pattern, name_match) — see Shafer 1976 §11.3 reliability discount
-# and Denoeux 2008 on non-distinct evidence.  CatBoost (fit_to_llm)
-# and the frontier SVM ride on LLM labels and would tautologically
-# reinforce a wrong LLM vote, so they are deliberately excluded.
+# and Denoeux 2008 on non-distinct evidence.
+#
+# CatBoost (``fit_to_llm``) is excluded because its labels are the
+# LLM's labels by construction — it cannot tautologically contradict
+# the source it was trained on.
+#
+# SVM is excluded as a conservative call: its features and training
+# labels are independent of the LLM, but the per-vocabulary ICE→user-
+# code alignment in ``classify.ontology_alignment`` does pass through
+# the LLM at vocab-load time.  A contradicting SVM vote could in
+# principle be confounded by an alignment error that the LLM would
+# also commit on the live sweep.  Membership in this tier is meant
+# to be the strict "no shared knowledge with the runtime LLM at all"
+# set; SVM's weak vocab-level dependency keeps it out for now.
+# Future work to admit SVM here cleanly: switch the alignment to a
+# BM25 + transformer-reranker path that doesn't share an LLM with
+# the runtime sweep — see ``ontology_alignment.py`` module docstring.
 INDEPENDENT_TIER: frozenset[str] = frozenset({"cosine", "pattern", "name_match"})
 
 

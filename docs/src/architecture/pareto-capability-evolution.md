@@ -61,17 +61,19 @@ Atelier pipeline:
 | Labeled pool (T_K) | Synth corpus + curated reference + accumulated LLM labels |
 | Unlabeled pool (T_U) | Discovered source columns awaiting classification |
 | Query strategy | Belief-gap-driven revisit selection (largest `Pl − Bel`) |
-| Query-by-committee | Disagreement between CatBoost and the incremental SVM |
+| Query-by-committee | Disagreement between CatBoost-fit-to-LLM and the synth-trained SVM (via the ICE→user alignment) |
 | Pool vs. stream | Pool-based — Monte Carlo stratification picks each batch |
 | Stopping criterion | `mean_gap < gap_threshold` OR `max_iterations` reached |
 | Cold-start mitigation | Synth pre-training + pattern evidence on first sweep |
 
-The classifier today called the *frontier SVM* (`ml_train.py:81-176`,
-trained at `pipeline.py:898, 1113, 1197`) is canonical AL: it
-incorporates new oracle labels each round and contributes a second
-view to the next revisit decision.  Reframing it as the **incremental
-SVM** would honor the AL terminology and free "frontier" for the
-Pareto sense used below — see *What this retires*.
+The active-learning incorporation of new oracle labels is
+concentrated in the ``catboost`` source (``fit_to_llm`` mode trains
+on the live LLM labels mid-run).  The SVM was previously also part
+of this active-learning loop via the M9 ``frontier_svm`` retrain,
+but that path was excised on 2026-05-04 (commits 8627c2c, 5199379,
+cc59d01) for the independence reasons documented in
+``ontology_alignment.py``.  The SVM now contributes a label-stable
+TF-IDF view that complements the live-LLM-aligned CatBoost view.
 
 ### Automatic Prompt Optimization — APO and GEPA
 
@@ -214,13 +216,14 @@ happened to find an early local optimum.
 
 ## What this retires
 
-- **"Frontier SVM" terminology**.  The SVM is incrementally retrained
-  during AL — that is the *incremental SVM* in standard nomenclature.
-  The word "frontier" is reserved for the Pareto frontier of pipeline
-  configurations going forward.  The rename is cosmetic at first
-  (UI tooltips, docstrings, log lines); on-disk filenames like
-  `svm_frontier.pkl` may stay for backward compatibility through the
-  artifact-set schema.
+- **"Frontier SVM" terminology** *and the M9 retrain it described*.
+  The mid-loop ``train_svm_on_frontier_labels`` retrain that gave the
+  "frontier SVM" its name was excised on 2026-05-04 (commits 8627c2c,
+  5199379, cc59d01) for the source-independence reasons documented
+  in `ontology_alignment.py`.  The SVM is now trained once on synth
+  with ICE.* labels and translated into the user vocabulary at
+  inference time via the LLM-mediated alignment.  "Frontier" the
+  word is freed for the Pareto sense used elsewhere in this doc.
 - **Single-config tuning by hand**.  Today operators tweak `base.conf`
   or the runtime overlay and re-run.  The capstone replaces that loop
   with population-based search; the overlay UI surfaces *frontier

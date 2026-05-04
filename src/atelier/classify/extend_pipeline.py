@@ -9,13 +9,13 @@
 """Extend Classification — streamlined inference pipeline.
 
 Consumes an existing :class:`MLArtifactSet` (CatBoost classifier, optional
-incremental SVM classifier, optional fitted UMAP projection) and applies it
-to a data source's columns to produce a NEW dataset.  Skips the heavy
-training-time machinery of :func:`run_classification_pipeline`:
+SVM classifier, optional fitted UMAP projection) and applies it to a data
+source's columns to produce a NEW dataset.  Skips the heavy training-time
+machinery of :func:`run_classification_pipeline`:
 
 - no LLM sweep, no DST evidence fusion, no iterative revisit loop;
 - no agent-driven convergence;
-- no fit-to-LLM CatBoost retrain or incremental SVM hot-swap;
+- no fit-to-LLM CatBoost retrain;
 - no SAGE permutation importance.
 
 What it keeps:

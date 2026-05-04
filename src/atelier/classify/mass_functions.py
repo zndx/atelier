@@ -43,13 +43,20 @@ class DiscountConfig:
     fused belief reflects the underlying independent signal rather
     than amplified self-agreement.
 
-    In this pipeline ``catboost_*`` and ``svm`` ride on labels that
-    are deterministic transforms of the LLM sweep (see
-    ``ml_train.fit_catboost_to_llm_labels`` and the frontier-SVM
-    label filter at ``ml_train`` lines 118-127), so their defaults
-    are calibrated above the genuinely independent ``cosine``
-    discount.  See ``docs/src/architecture/dst-evidence-independence.md``
-    for the full rationale.
+    In this pipeline ``catboost_*`` rides on labels that are
+    deterministic transforms of the LLM sweep (see
+    ``ml_train.fit_catboost_to_llm_labels``), so its default is
+    calibrated above the genuinely independent ``cosine`` discount.
+
+    ``svm`` is a more nuanced case as of 2026-05-04: features are
+    independent (TF-IDF), training labels are independent (synth-
+    generator-keyed ICE.* leaves), and only the prediction-to-frame-
+    element mapping passes through the LLM-mediated alignment in
+    ``classify.ontology_alignment``.  Its default sits between the
+    fully-independent sources and CatBoost; see ``ontology_alignment.py``
+    module docstring + ``dst-evidence-independence.md`` for the full
+    rationale and the BM25-reranker future-work plan that would
+    eliminate the residual LLM dependency.
     """
 
     cosine: float = 0.20
@@ -936,11 +943,10 @@ def llm_to_mass(
 
     The primary prediction receives confidence-proportional mass.
     Alternatives distribute remaining evidence mass.  Low discount
-    (0.15 vs cosine's 0.20) because frontier LLM predictions are
-    well-informed and typically well-calibrated, but the LLM signal
-    informs multiple downstream metrics (CatBoost fit-to-LLM,
-    frontier-SVM trained on LLM labels) and a slight bump avoids
-    over-amplifying a non-distinct cluster.
+    (0.15 vs cosine's 0.20) because the runtime LLM is well-informed
+    and typically well-calibrated, but its signal informs CatBoost
+    via fit-to-LLM training and the SVM via the ontology→user-vocab
+    alignment, so a slight bump avoids over-amplifying that cluster.
 
     When the LLM returns a parent code or near-miss code, coercion
     attempts to resolve it to a valid leaf singleton.  Unresolvable
@@ -1112,10 +1118,15 @@ def svm_to_mass(
     transformer embedding shared by cosine and CatBoost sources.
 
     The default discount in this signature reflects an unmodified
-    SVM in isolation; the production default for the *frontier* SVM
-    (trained on accumulated LLM labels) is calibrated higher in
-    ``DiscountConfig.svm`` to suppress non-distinct double-counting
-    against the LLM source.
+    SVM in pure isolation — TF-IDF features, ICE-keyed labels, and
+    no shared knowledge with any other source.  The production
+    default in ``DiscountConfig.svm`` (currently 0.30) is slightly
+    higher to carry the residual vocabulary-level dependency
+    introduced by the LLM-mediated ICE → user-taxonomy alignment in
+    ``classify.ontology_alignment``.  Returning to this signature's
+    0.20 default would require switching the alignment to a path
+    that doesn't share an LLM with the runtime sweep — see
+    ``ontology_alignment.py`` for the BM25-reranker future-work plan.
 
     When the frame has confusable pairs and the top-2 singletons form
     a known pair with a close mass ratio, mass is redistributed to
