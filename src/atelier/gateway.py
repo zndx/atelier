@@ -68,6 +68,15 @@ async def _lifespan(app: FastAPI):
             await asyncio.to_thread(_seed_classify_data_source)
         except Exception as exc:
             _log.warning("Classify data source seeding skipped: %s", exc)
+        # Reconcile DB against ``build/results/`` BEFORE auto-start so
+        # any orphaned runs (DB writes that failed mid-pipeline) become
+        # visible in the UI alongside the new run that auto-start
+        # produces.  Idempotent — runs already represented in the DB
+        # cost one read each.
+        try:
+            await asyncio.to_thread(_sync_orphaned_runs)
+        except Exception as exc:
+            _log.warning("Run-state sync skipped: %s", exc)
         try:
             await asyncio.to_thread(_maybe_auto_start_classify)
         except Exception as exc:
@@ -585,6 +594,38 @@ def _last_user_selected_source_id() -> str | None:
         len(runs),
     )
     return None
+
+
+def _sync_orphaned_runs() -> None:
+    """Reconcile DB rows against ``build/results/`` at gateway startup.
+
+    Idempotent — see ``atelier.db.sync.sync_filesystem_to_db``.  When
+    a previous run's DB writes failed mid-pipeline (transient PGlite
+    hiccup, FK ordering bug, etc.), this picks up the orphaned
+    artifacts on disk and registers whatever rows are missing so the
+    UI shows the run.  Runs already represented in the DB pay one
+    read per row and are reported as ``already_registered``.
+    """
+    from atelier.db.sync import sync_filesystem_to_db
+    results_root = _project_root / "build" / "results"
+    if not results_root.is_dir():
+        return
+    report = sync_filesystem_to_db(results_root)
+    _log.info(report.summary_line())
+    for outcome in report.outcomes:
+        if outcome.artifact_set == "registered" or outcome.dataset == "registered":
+            _log.info(
+                "sync: %s — artifact_set=%s dataset=%s source_id=%s%s",
+                outcome.run_id, outcome.artifact_set, outcome.dataset,
+                outcome.source_id,
+                f" ({outcome.note})" if outcome.note else "",
+            )
+        elif outcome.artifact_set == "error" or outcome.dataset == "error":
+            _log.warning(
+                "sync: %s — artifact_set=%s dataset=%s%s",
+                outcome.run_id, outcome.artifact_set, outcome.dataset,
+                f" ({outcome.note})" if outcome.note else "",
+            )
 
 
 def _maybe_auto_start_classify() -> None:

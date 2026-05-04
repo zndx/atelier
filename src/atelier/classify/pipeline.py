@@ -455,12 +455,16 @@ def run_classification_pipeline(
 
     # Persist the settings-at-start so the UI can show historical vs
     # current in the adaptive focus section even for past runs.
+    # ``source_id`` is included so the post-run reconcile pass
+    # (``atelier.db.sync.sync_filesystem_to_db``) can register the
+    # dataset row against the correct source without operator input.
     try:
         from atelier.config_overlay import snapshot as _settings_snapshot
         snapshot_path = results_dir / "settings_snapshot.json"
         snap = {
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "source_id": source_id,
             **_settings_snapshot(cfg),
         }
         snapshot_path.write_text(json.dumps(snap, indent=2, default=str) + "\n")

@@ -7,22 +7,27 @@
 # modified, redistributed, or used in any other manner without the express
 # written consent of Cloudera, Inc.
 
-"""Backfill DB rows for a classify run whose post-pipeline registration failed.
+"""CLI seam over ``atelier.db.sync.sync_filesystem_to_db``.
 
-Re-runs ``dao.upsert_dataset`` and ``dao.register_artifact_set`` from the
-artifacts on disk, so a run that reached CONVERGED but failed its DB
-write (e.g. transient PGlite outage during a multi-hour bootstrap) becomes
-visible in the Embeddings page and usable as an Extend Classification base.
+The Atelier gateway runs the same reconcile pass automatically at
+lifespan startup (see ``_sync_orphaned_runs`` in ``gateway.py``), so
+operator-driven backfill is no longer the primary path.  This script
+exists for two cases the auto-sync can't cover:
 
-Run inside the Atelier Application pod (where ``ATELIER_DB_URL`` resolves):
+  1. Forcing a specific source_id when the snapshot doesn't carry one
+     (early runs from before the snapshot field landed) and the
+     ``ml_artifact_sets`` row's source_id is wrong.
+  2. Reconciling a single run on demand without restarting the AMP.
+
+Run inside the Atelier Application pod (where ``ATELIER_DB_URL`` is
+exported by ``bin/start-app.sh``):
 
     python scripts/backfill_dataset.py <run_id>
-    python scripts/backfill_dataset.py <run_id> --source-id impala-poc/foo
-    python scripts/backfill_dataset.py <run_id> --results-dir build/results
+    python scripts/backfill_dataset.py <run_id> --source-id hive-poc/default
+    python scripts/backfill_dataset.py --all                # whole tree
+    python scripts/backfill_dataset.py <run_id> --dry-run
 
-Without ``--source-id``, falls back to ``build/state/last_active_source.txt``
-which the gateway maintains per source switch.  Pass ``--dry-run`` to print
-the upsert payload without touching the DB.
+The legacy single-run, source-id-required form is preserved.
 """
 
 from __future__ import annotations
@@ -33,148 +38,76 @@ import sys
 from pathlib import Path
 
 
-def _load_classifications(results_dir: Path) -> list[dict]:
-    p = results_dir / "classifications.json"
-    if not p.exists():
-        sys.exit(f"error: {p} not found — cannot backfill without classifications")
-    return json.loads(p.read_text())
-
-
-def _resolve_source_id(explicit: str | None) -> str | None:
-    if explicit:
-        return explicit
-    state_file = Path("build/state/last_active_source.txt")
-    if state_file.exists():
-        val = state_file.read_text().strip()
-        return val or None
-    return None
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("run_id", help="Run id (matches build/results/<run_id>/)")
     ap.add_argument(
-        "--source-id",
-        default=None,
-        help="Data source id; defaults to build/state/last_active_source.txt",
+        "run_id", nargs="?",
+        help="Run id to reconcile.  Omit with --all to scan the whole tree.",
     )
     ap.add_argument(
-        "--results-dir",
-        default="build/results",
-        help="Base results directory (default: build/results)",
+        "--all", action="store_true",
+        help="Reconcile every run under the results directory.",
     )
     ap.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the upsert payload but do not touch the DB",
+        "--source-id", default=None,
+        help="Force this source_id (otherwise resolved from settings_snapshot.json or the artifact set row).",
+    )
+    ap.add_argument(
+        "--results-dir", default="build/results",
+        help="Base results directory (default: build/results).",
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true",
+        help="Print the resolution plan without touching the DB.",
     )
     args = ap.parse_args()
 
-    results_dir = Path(args.results_dir) / args.run_id
-    if not results_dir.is_dir():
-        sys.exit(f"error: {results_dir} is not a directory")
+    if args.all and args.run_id:
+        ap.error("pass --all OR a run_id, not both")
+    if not args.all and not args.run_id:
+        ap.error("pass a run_id or --all")
 
-    parquet_path = results_dir / "atelier_embeddings.parquet"
-    if not parquet_path.exists():
-        sys.exit(f"error: {parquet_path} not found — pipeline did not finish")
-
-    classifications = _load_classifications(results_dir)
-    source_id = _resolve_source_id(args.source_id)
-    if not source_id:
-        print(
-            "warning: no source_id resolved — dataset row will be unattached "
-            "(use --source-id to bind it)",
-            file=sys.stderr,
-        )
-
-    dataset_payload = {
-        "dataset_id": args.run_id,
-        "name": f"Classification {args.run_id[:8]}",
-        "parquet_path": str(parquet_path),
-        "description": f"{len(classifications)} columns classified",
-        "row_count": len(classifications),
-        "source_id": source_id,
-        "is_active": True,
-        "summary": f"{len(classifications)} columns (backfilled)",
-        "fsm_run_id": args.run_id,
-        "artifact_set_id": None,    # resolved below after artifact-set register
-        "parent_dataset_id": None,
-        "run_kind": "classify",
-    }
+    results_root = Path(args.results_dir)
+    if not results_root.is_dir():
+        sys.exit(f"error: {results_root} is not a directory")
 
     if args.dry_run:
-        print(json.dumps({"dataset_upsert": dataset_payload}, indent=2))
+        target = "all runs" if args.all else args.run_id
+        print(json.dumps({
+            "dry_run": True,
+            "target": target,
+            "results_root": str(results_root),
+            "source_id_override": args.source_id,
+            "hint": "auto-sync runs at gateway startup; this CLI is for explicit one-off reconciles",
+        }, indent=2))
         return 0
 
-    from atelier.db.dao import AtelierDao
+    from atelier.db.sync import sync_filesystem_to_db
 
-    dao = AtelierDao()
-
-    # Order matters: ``datasets.artifact_set_id`` is a FK to
-    # ``ml_artifact_sets(id)``.  Register the artifact set first so the
-    # dataset row's FK has a target; if registration fails or there's
-    # no artifact set to register, leave ``artifact_set_id=None`` and
-    # the dataset still lands (Extend wiring incomplete but Embeddings
-    # panel surfaces the run).
-    artifact_set_registered = False
-    try:
-        from atelier.classify.artifact_set import build_artifact_set_record
-        from atelier.config import load_config
-
-        cfg = load_config()
-        spec = build_artifact_set_record(
-            run_id=args.run_id,
-            results_dir=results_dir,
-            cfg=cfg,
-            n_columns=len(classifications),
-            source_id=source_id,
-            fsm_run_id=args.run_id,
-        )
-        if spec is None:
-            print("• no ML artifact set to register (no catboost classes sidecar)")
-        else:
-            try:
-                dao.register_artifact_set(**spec)
-                artifact_set_registered = True
-                print(f"✓ artifact set {args.run_id} registered")
-            except Exception as exc:
-                # Already-registered case is benign — the FK target
-                # exists, which is what we need.
-                msg = str(exc).lower()
-                if "duplicate" in msg or "unique" in msg or "already exists" in msg:
-                    artifact_set_registered = True
-                    print(f"• artifact set {args.run_id} already registered — proceeding")
-                else:
-                    raise
-    except Exception as exc:
-        print(f"! artifact set registration failed: {exc}", file=sys.stderr)
-        # Continue anyway — dataset will land with artifact_set_id=None.
-
-    if artifact_set_registered:
-        dataset_payload["artifact_set_id"] = args.run_id
-
-    if source_id:
-        dataset_payload["version_number"] = dao.next_version_number(source_id)
-    else:
-        dataset_payload["version_number"] = 1
-
-    dao.upsert_dataset(**dataset_payload)
-    if source_id:
-        dao.set_active_version(source_id, args.run_id)
-    print(
-        f"✓ dataset {args.run_id} upserted "
-        f"(source_id={source_id!r}, artifact_set_id="
-        f"{dataset_payload['artifact_set_id']!r})"
+    report = sync_filesystem_to_db(
+        results_root,
+        source_id_override=args.source_id,
+        only_run_id=args.run_id if not args.all else None,
     )
 
-    # Mark the sidecar resolved (don't delete — keep audit trail).
-    err_path = results_dir / "register_error.json"
-    if err_path.exists():
-        resolved = err_path.with_suffix(".json.resolved")
-        err_path.rename(resolved)
-        print(f"• moved register_error.json → {resolved.name}")
+    print(report.summary_line())
+    for outcome in report.outcomes:
+        marker = (
+            "✓" if (outcome.artifact_set == "registered"
+                    or outcome.dataset == "registered")
+            else "·" if outcome.artifact_set == "already_registered"
+                       and outcome.dataset == "already_registered"
+            else "!"
+        )
+        print(
+            f"  {marker} {outcome.run_id}  "
+            f"artifact_set={outcome.artifact_set:<20} "
+            f"dataset={outcome.dataset:<20} "
+            f"source_id={outcome.source_id!r}"
+            + (f"  -- {outcome.note}" if outcome.note else "")
+        )
 
-    return 0
+    return 2 if report.errors else 0
 
 
 if __name__ == "__main__":
