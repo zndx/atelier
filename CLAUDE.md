@@ -198,9 +198,12 @@ Terminology (Atlas Lexicon — use in UI / docs): **entities** (not rows),
 
 - **Overwatch** (`src/atelier/overwatch/agent.py`) — single-turn Opus
   analysis that writes `build/results/{run_id}/overwatch.md` with
-  pipeline recommendations. **Requires direct Anthropic API** — not
-  Bedrock. Gated by `cfg.has_overwatch`. Triggered at the end of a
-  pipeline run when `overwatch.enabled = true`.
+  pipeline recommendations. Follows the Web Terminal Agent's selected
+  model (direct Anthropic API or Bedrock) — single source of truth so
+  operators have one provider knob instead of two.  Gated by
+  `cfg.has_overwatch` (which is now `overwatch.enabled AND any WTA
+  catalog entry is runnable`). Triggered at the end of a pipeline run
+  when `overwatch.enabled = true`.
 - **Governance** (`src/atelier/governance/`) — optional Atlas sync
   (taxonomy → classification types; results → entity tags). Gated by
   `cfg.governance_auto_sync && cfg.has_atlas`. Knox-proxied Atlas auth
@@ -289,11 +292,16 @@ for full design notes.
 
 ## Model Defaults
 
-`agents.model` and `overwatch.model` in `config/base.conf` track the
-latest Opus on the Anthropic direct API (currently `claude-opus-4-7`).
-Bedrock deployments override via `ATELIER_AGENT_MODEL` with a Bedrock
-ARN — Bedrock lags direct-API releases, so the two are not kept in
+`agents.model` in `config/base.conf` tracks the latest Opus on the
+Anthropic direct API (currently `claude-opus-4-7`).  Bedrock
+deployments override via `ATELIER_AGENT_MODEL` with a Bedrock ARN —
+Bedrock lags direct-API releases, so the two are not kept in
 lockstep.
+
+Overwatch has no separate model setting — it follows whatever the
+operator selects in the Web Terminal Agent picker (which itself
+defaults to `cfg.agent_model`).  This keeps provider+model selection
+to a single, intuitive knob.
 
 ## Branch Convention
 

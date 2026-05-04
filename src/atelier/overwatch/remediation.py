@@ -46,7 +46,9 @@ PROVIDER_AFFECTING_KEYS: frozenset[str] = frozenset({
     # classifier, but overwatch-initiated changes here would also
     # violate the scaffolding/classifier separation.
     "agent_model",
-    "overwatch_model",
+    # Note: overwatch_model is no longer a config field — Overwatch
+    # follows the WTA selection.  Keeping the WTA selection out of
+    # remediation overlays preserves operator-only control.
 })
 
 

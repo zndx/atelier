@@ -86,6 +86,28 @@ interface StatusResponse {
   connected: boolean;
 }
 
+// Mirrors bin/pglite-supervisor.sh state file + the gateway's
+// /api/pglite/status response.  ``managed=false`` means pglite isn't
+// the active backend (external Postgres or no supervisor) — UI hides
+// the chip entirely in that case.
+interface PGliteSupervisorState {
+  managed: boolean;
+  state?: "starting" | "running" | "backoff" | "circuit_broken" | "stopped";
+  pid?: number | null;
+  supervisor_pid?: number | null;
+  started_at?: number | null;
+  last_exit_code?: number | null;
+  consecutive_failures?: number;
+  restart_count?: number;
+  backoff_until?: number | null;
+  circuit_broken?: boolean;
+  port?: number;
+  updated_at?: number;
+  probe?: { listening: boolean; error: string | null };
+  reason?: string;
+  error?: string;
+}
+
 interface ProviderResult {
   provider: string;
   valid: boolean;
@@ -1405,6 +1427,116 @@ function StatusBadge({ ok }: { ok: boolean }) {
   );
 }
 
+// Live countdown to a future epoch-seconds timestamp.  Re-renders
+// every second while ``until`` is in the future; collapses to "now"
+// once the deadline has passed.  Used by the supervisor chip + the
+// CAI Data Platform restart button to surface the backoff window.
+function CountdownText({ until }: { until: number | null | undefined }) {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!until) return;
+    const id = setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => clearInterval(id);
+  }, [until]);
+  if (!until) return null;
+  const remaining = Math.max(0, Math.ceil(until - now));
+  if (remaining === 0) return <Text type="secondary">restarting…</Text>;
+  return <Text type="secondary">retry in {remaining}s</Text>;
+}
+
+function PGliteStatusChip({
+  state,
+  onRestart,
+  restarting,
+}: {
+  state: PGliteSupervisorState | null;
+  onRestart: () => void;
+  restarting: boolean;
+}) {
+  if (!state || state.managed === false) return null;
+
+  const probeOk = state.probe?.listening === true;
+  const phase = state.state ?? "running";
+
+  // Color logic: the chip reflects what the operator should *do*.
+  // Green = healthy.  Orange = transient/recovering (no action).
+  // Red = stuck (action: click Restart).
+  let color: "green" | "orange" | "red" | "blue" = "blue";
+  let label: string = phase;
+  if (phase === "running" && probeOk) {
+    color = "green";
+    label = "running";
+  } else if (phase === "running" && !probeOk) {
+    // Process alive but socket not reachable — usually a brief
+    // hand-off during a restart that the probe caught mid-flight.
+    color = "orange";
+    label = "probe failing";
+  } else if (phase === "starting") {
+    color = "blue";
+    label = "starting";
+  } else if (phase === "backoff") {
+    color = "orange";
+    label = "restarting";
+  } else if (phase === "circuit_broken") {
+    color = "red";
+    label = "circuit broken";
+  } else if (phase === "stopped") {
+    color = "red";
+    label = "stopped";
+  }
+
+  const tooltip = (
+    <Space direction="vertical" size={2} style={{ fontSize: 12 }}>
+      <Text style={{ color: "white" }}>State: {phase}</Text>
+      {state.pid != null && <Text style={{ color: "white" }}>Child PID: {state.pid}</Text>}
+      {state.restart_count != null && (
+        <Text style={{ color: "white" }}>Restarts: {state.restart_count}</Text>
+      )}
+      {state.consecutive_failures != null && state.consecutive_failures > 0 && (
+        <Text style={{ color: "white" }}>
+          Consecutive failures: {state.consecutive_failures}
+        </Text>
+      )}
+      {state.last_exit_code != null && (
+        <Text style={{ color: "white" }}>Last exit: {state.last_exit_code}</Text>
+      )}
+      {state.started_at != null && (
+        <Text style={{ color: "white" }}>
+          Started: {formatAgo(state.started_at * 1000)}
+        </Text>
+      )}
+      {state.probe?.error && (
+        <Text style={{ color: "white" }}>Probe error: {state.probe.error}</Text>
+      )}
+    </Space>
+  );
+
+  return (
+    <Space size={6}>
+      <Tooltip title={tooltip}>
+        <Tag color={color} style={{ cursor: "help", margin: 0 }}>
+          {label}
+        </Tag>
+      </Tooltip>
+      {phase === "backoff" && state.backoff_until != null && (
+        <CountdownText until={state.backoff_until} />
+      )}
+      {phase === "circuit_broken" && (
+        <Button
+          size="small"
+          danger
+          icon={<ReloadOutlined />}
+          loading={restarting}
+          onClick={onRestart}
+          title="Touch the supervisor restart sentinel — clears the circuit and respawns pglite immediately."
+        >
+          Restart
+        </Button>
+      )}
+    </Space>
+  );
+}
+
 export default function Status() {
   // Status-page selection state (platform, smoke result) lives in
   // DatasetContext so it survives in-app navigation.  activeSourceId
@@ -1421,6 +1553,12 @@ export default function Status() {
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // PGlite supervisor health.  Polled every 5s — the chip + restart
+  // button on the CAI Data Platform panel both read from this single
+  // source so they never disagree about phase/backoff/circuit-broken.
+  const [pglite, setPglite] = useState<PGliteSupervisorState | null>(null);
+  const [pgliteRestarting, setPgliteRestarting] = useState(false);
 
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
   const [credLoading, setCredLoading] = useState(false);
@@ -1489,6 +1627,32 @@ export default function Status() {
       .finally(() => setLoading(false));
   };
 
+  const fetchPglite = () => {
+    fetch("/api/pglite/status")
+      .then((r) => r.json())
+      .then((data: PGliteSupervisorState) => setPglite(data))
+      .catch(() => setPglite(null));
+  };
+
+  const restartPglite = () => {
+    setPgliteRestarting(true);
+    fetch("/api/pglite/restart", { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.ok) {
+          message.success("PGlite restart requested — supervisor will respawn the process.");
+          // Optimistic refresh; the watch loop polls every 2s on the
+          // supervisor side, so by the next /api/pglite/status tick we
+          // should see state=starting → state=running.
+          setTimeout(fetchPglite, 1500);
+        } else {
+          message.error(data?.error ?? "Restart failed");
+        }
+      })
+      .catch((e) => message.error(`Restart failed: ${e}`))
+      .finally(() => setPgliteRestarting(false));
+  };
+
   const fetchPlatforms = () => {
     setPlatformsLoading(true);
     setPlatformsError(null);
@@ -1527,6 +1691,13 @@ export default function Status() {
     // current state on screen without a manual button press.
     runCredentialCheck();
     fetchPlatforms();
+    fetchPglite();
+    // Poll supervisor health while the page is mounted.  5s is a
+    // good compromise: faster than the 2s supervisor watch loop so
+    // backoff transitions aren't visibly stale, slow enough to not
+    // burn CPU on a panel the operator may leave open.
+    const id = setInterval(fetchPglite, 5000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1732,7 +1903,14 @@ export default function Status() {
                   </Tag>
                 </Descriptions.Item>
                 <Descriptions.Item label="Database">
-                  <Text code>{status.config.db_url_masked}</Text>
+                  <Space size={8} wrap>
+                    <Text code>{status.config.db_url_masked}</Text>
+                    <PGliteStatusChip
+                      state={pglite}
+                      onRestart={restartPglite}
+                      restarting={pgliteRestarting}
+                    />
+                  </Space>
                 </Descriptions.Item>
                 <Descriptions.Item label="Qdrant">
                   <Text code>
@@ -2018,7 +2196,7 @@ export default function Status() {
                 style={{ marginBottom: 12 }}
                 message="Failed to load data platforms"
                 description={
-                  <Space direction="vertical" size={4}>
+                  <Space direction="vertical" size={6}>
                     <Text code style={{ fontSize: 12 }}>
                       GET /api/data-platforms — {platformsError}
                     </Text>
@@ -2027,6 +2205,52 @@ export default function Status() {
                       error persists, check the gateway logs for{" "}
                       <Text code>list_data_platforms failed</Text>.
                     </Text>
+                    {/* When pglite is the active backend and the supervisor
+                        reports anything other than a clean running state,
+                        offer a one-click respawn — most "Failed to load data
+                        platforms" errors trace back to a transient pglite
+                        blip.  The button is disabled (with a countdown)
+                        while the supervisor is already in backoff so the
+                        operator doesn't click repeatedly during automatic
+                        recovery. */}
+                    {pglite?.managed && pglite.state !== "running" && (
+                      <Space size={6} wrap>
+                        <Button
+                          size="small"
+                          danger
+                          icon={<ReloadOutlined />}
+                          loading={pgliteRestarting}
+                          disabled={
+                            pgliteRestarting ||
+                            pglite.state === "starting" ||
+                            (pglite.state === "backoff" &&
+                              !!pglite.backoff_until &&
+                              pglite.backoff_until > Date.now() / 1000)
+                          }
+                          onClick={restartPglite}
+                          title={
+                            pglite.state === "circuit_broken"
+                              ? "Supervisor is in circuit-broken state — click to clear and respawn."
+                              : pglite.state === "backoff"
+                              ? "Supervisor is already retrying; the countdown shows the next attempt."
+                              : "Touch the supervisor restart sentinel to respawn pglite immediately."
+                          }
+                        >
+                          Restart database
+                        </Button>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          supervisor: {pglite.state}
+                        </Text>
+                        {pglite.state === "backoff" && (
+                          <CountdownText until={pglite.backoff_until} />
+                        )}
+                        {pglite.state === "starting" && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            supervisor restarting it now…
+                          </Text>
+                        )}
+                      </Space>
+                    )}
                   </Space>
                 }
               />

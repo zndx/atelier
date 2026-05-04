@@ -16,9 +16,41 @@ Base.metadata.create_all() — run ``just migrate`` instead.
 """
 
 from contextlib import contextmanager
+import re
+import time
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+
+# Patterns that indicate a transient TCP-level disconnect from the
+# database server.  These are the symptoms we observe when PGlite is
+# briefly unavailable: during a supervisor respawn, when the
+# socket-server's accept queue saturates and hangs up new sockets, or
+# when a pooled connection turns out to be dead after pool_pre_ping
+# has already fired (e.g. server closed it between ping and use).
+#
+# Matched case-insensitively against ``str(exc)``.  Keep the patterns
+# specific — we don't want to retry on real query errors that happen
+# to mention "connection".
+_DISCONNECT_PATTERNS = re.compile(
+    r"(server closed the connection unexpectedly"
+    r"|connection refused"
+    r"|connection reset by peer"
+    r"|connection (?:is )?closed"
+    r"|terminating connection due to server shutdown"
+    r"|could not connect to server"
+    r"|broken pipe"
+    r"|EOF detected)",
+    re.IGNORECASE,
+)
+
+
+def _is_disconnect_error(exc: BaseException) -> bool:
+    """True if ``exc`` looks like a transient TCP-level DB disconnect."""
+    if not isinstance(exc, OperationalError):
+        return False
+    return bool(_DISCONNECT_PATTERNS.search(str(exc)))
 
 # Default engine settings for PGlite resilience. Callers can override
 # individual keys via engine_args (e.g. tests may set pool_size=1).
@@ -87,6 +119,38 @@ class AtelierDao:
             raise
         finally:
             session.close()
+
+    def run_with_retry(self, op, *, max_attempts: int = 2, backoff: float = 0.25):
+        """Run ``op(session)`` with a single retry on transient disconnects.
+
+        Wraps ``get_session()`` plus a guard for the well-known PGlite
+        failure modes (server hung up, connect refused, etc — see
+        ``_DISCONNECT_PATTERNS``).  On a matching error we dispose the
+        SQLAlchemy pool (so the next attempt opens a fresh TCP socket
+        rather than reusing one the server may already have closed) and
+        retry once.  Non-disconnect errors propagate immediately.
+
+        Use for read-only or idempotent work — write operations that
+        can't tolerate accidental replay should keep using
+        ``get_session()`` directly so the caller controls retry policy.
+        """
+        last_exc: BaseException | None = None
+        for attempt in range(max_attempts):
+            try:
+                with self.get_session() as session:
+                    return op(session)
+            except OperationalError as exc:
+                if not _is_disconnect_error(exc) or attempt + 1 >= max_attempts:
+                    raise
+                last_exc = exc
+                # Pool may hold sockets pointing at a server that's gone
+                # away; drop them so the retry opens a fresh connection.
+                self.engine.dispose()
+                time.sleep(backoff)
+        # Defensive — loop always either returns or raises.
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("run_with_retry exhausted without result or error")
 
     # ── Data source operations ────────────────────────────────────
 

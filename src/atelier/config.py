@@ -90,7 +90,6 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # Overwatch
     "overwatch.enabled": ("overwatch_enabled", bool),
     "overwatch.autonomy": ("overwatch_autonomy", str),
-    "overwatch.model": ("overwatch_model", str),
     "overwatch.github_app_id": ("overwatch_github_app_id", str),
     "overwatch.github_private_key_path": ("overwatch_github_private_key_path", str),
     "overwatch.github_repo": ("overwatch_github_repo", str),
@@ -509,7 +508,6 @@ class AtelierConfig:
     # Overwatch
     overwatch_enabled: bool = True
     overwatch_autonomy: str = "propose"
-    overwatch_model: str = "claude-opus-4-7"
     overwatch_github_app_id: str = ""
     overwatch_github_private_key_path: str = ""
     overwatch_github_repo: str = ""
@@ -525,13 +523,37 @@ class AtelierConfig:
 
     @property
     def has_overwatch(self) -> bool:
-        """True only when overwatch is enabled AND Anthropic API is available.
+        """True when overwatch is enabled AND the Web Terminal Agent has a
+        runnable model.
 
-        Overwatch requires direct Anthropic API access for full Claude Code
-        capabilities (/fast, worktrees, subagents). Bedrock-only deployments
-        cannot activate overwatch.
+        Overwatch follows the WTA's selected model — operators configure
+        provider + model once and both surfaces pick it up.  When the WTA
+        can't run (no Anthropic key AND no Bedrock creds), Overwatch
+        also can't run; we deliberately do NOT silently fall back to a
+        weaker default since a half-functional Overwatch report would
+        do more harm than no report.
         """
-        return self.overwatch_enabled and self.has_anthropic
+        if not self.overwatch_enabled:
+            return False
+        # Same gate the WTA picker uses to decide if any catalog entry is
+        # available.  Importing here avoids a circular import at module
+        # load (terminal_catalog reads cfg).
+        #
+        # Fail-closed: if the catalog itself raises, we treat Overwatch
+        # as unavailable rather than falling back to a credential-only
+        # check.  The user-visible promise is "Overwatch runs whatever
+        # WTA is configured to run" — degrading silently to a path that
+        # WTA wouldn't accept would surprise reviewers and risk
+        # reputational harm.
+        try:
+            from atelier.terminal_catalog import available_models
+            return any(m.available for m in available_models(self))
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "has_overwatch: WTA catalog probe failed; reporting unavailable"
+            )
+            return False
 
     @property
     def has_atlas(self) -> bool:

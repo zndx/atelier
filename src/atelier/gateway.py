@@ -767,6 +767,89 @@ def health():
         return _error_envelope(f"gRPC health check failed: {exc}")
 
 
+# ── PGlite supervisor surfaces ────────────────────────────────────
+# bin/pglite-supervisor.sh respawns pglite when it dies and writes
+# state to .app/pglite-supervisor.state.  These endpoints expose that
+# state to the UI's Status panel + restart button.  When pglite is
+# *not* the active database (operator pointed ATELIER_DB_URL at an
+# external Postgres), the state file won't exist and we report
+# "unmanaged" so the UI hides the chip + button.
+
+_PGLITE_STATE_FILE = "/home/cdsw/.app/pglite-supervisor.state"
+_PGLITE_RESTART_SENTINEL = "/home/cdsw/.app/pglite-supervisor.restart"
+
+
+def _probe_pglite(port: int, timeout: float = 1.0) -> dict:
+    """Quick TCP probe.  Returns ``{listening, error}``."""
+    import socket
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+        s.close()
+        return {"listening": True, "error": None}
+    except Exception as exc:
+        return {"listening": False, "error": str(exc)}
+
+
+@app.get("/api/pglite/status")
+def pglite_status():
+    """Supervisor state + live TCP probe for the Status page chip.
+
+    Returns ``managed=False`` when pglite isn't the active backend
+    (external Postgres, sqlite tier-0 tests) so the UI knows to hide
+    the chip rather than showing a perpetually-unknown state.
+    """
+    import json
+    import os
+
+    if not os.path.exists(_PGLITE_STATE_FILE):
+        return {
+            "managed": False,
+            "reason": "no supervisor state file — pglite is not the active backend or the supervisor hasn't started yet",
+        }
+
+    try:
+        with open(_PGLITE_STATE_FILE) as f:
+            state = json.load(f)
+    except Exception as exc:
+        return _error_envelope(f"failed to read pglite supervisor state: {exc}")
+
+    port = int(state.get("port") or 5440)
+    probe = _probe_pglite(port)
+    state["managed"] = True
+    state["probe"] = probe
+    return state
+
+
+@app.post("/api/pglite/restart")
+def pglite_restart():
+    """Request an operator-initiated pglite restart.
+
+    Touches the sentinel the supervisor watches; the supervisor then
+    SIGTERMs the current child and respawns immediately (no backoff —
+    operator restart counts as healthy intent).  Idempotent — touching
+    the sentinel while the supervisor is already restarting is safe
+    and short-circuits the next watch-loop iteration.
+    """
+    import os
+    import time
+
+    if not os.path.exists(_PGLITE_STATE_FILE):
+        return _error_envelope(
+            "pglite is not under supervisor control — restart not available",
+            status=409,
+        )
+
+    # Touch the sentinel — create-or-update mtime.  The supervisor's
+    # watch loop polls mtime every ~2s.
+    try:
+        with open(_PGLITE_RESTART_SENTINEL, "a"):
+            os.utime(_PGLITE_RESTART_SENTINEL, (time.time(), time.time()))
+    except Exception as exc:
+        return _error_envelope(f"failed to touch restart sentinel: {exc}")
+
+    return {"ok": True, "requested_at": time.time()}
+
+
 @app.get("/api/agents")
 def list_agents():
     try:
@@ -1361,16 +1444,26 @@ def model_discovery():
 
 @app.get("/api/overwatch/status")
 def overwatch_status():
-    """Report overwatch configuration, readiness, and GitHub App health."""
+    """Report overwatch configuration, readiness, and GitHub App health.
+
+    ``model`` reflects the WTA's currently selected model_ref —
+    Overwatch follows that selection so reviewers/operators see a
+    single provider+model knob rather than an Overwatch-specific one.
+    """
     try:
         from atelier.config import load_config
+        from atelier.terminal_selection import active_model_ref, get_active
         cfg = load_config()
+        active_entry = get_active(cfg)
         result: dict = {
             "enabled": cfg.overwatch_enabled,
             "has_overwatch": cfg.has_overwatch,
             "has_anthropic": cfg.has_anthropic,
+            "has_bedrock": cfg.has_bedrock,
             "autonomy": cfg.overwatch_autonomy,
-            "model": cfg.overwatch_model,
+            "model": active_model_ref(cfg),
+            "model_source": "wta",
+            "wta_entry_id": active_entry.id if active_entry else None,
             "github_app": {"configured": False},
         }
         if cfg.overwatch_github_app_id:
@@ -1685,55 +1778,65 @@ def list_data_platforms():
         # ATELIER_CLASSIFY_CONNECTION or auto-discovered at startup.
         # De-duplicate hive entries that already appeared via the HOCON
         # config list above (keyed on source_id).
+        # Retry-on-disconnect — the Status page polls this endpoint and
+        # a single transient PGlite blip would otherwise surface as a
+        # hard 500 in the UI.
         dao = AtelierDao()
-        with dao.get_session() as session:
-            rows = (
-                session.query(DataSource)
-                .filter_by(is_archived=False)
-                .order_by(DataSource.id)
-                .all()
-            )
-            for r in rows:
-                meta = {}
-                if r.source_metadata:
-                    try:
-                        meta = _json.loads(r.source_metadata) or {}
-                    except Exception:
-                        meta = {}
+        # Materialise to dicts *inside* the session so we never touch
+        # detached ORM instances after run_with_retry closes the session.
+        rows = dao.run_with_retry(
+            lambda session: [
+                dao._source_to_dict(r)
+                for r in (
+                    session.query(DataSource)
+                    .filter_by(is_archived=False)
+                    .order_by(DataSource.id)
+                    .all()
+                )
+            ]
+        )
+        for r in rows:
+            meta = {}
+            if r.get("metadata"):
+                try:
+                    meta = _json.loads(r["metadata"]) or {}
+                except Exception:
+                    meta = {}
 
-                if r.source_type == "hive":
-                    # Skip if already surfaced via the HOCON config list.
-                    # HOCON entries use the bare connection name as id;
-                    # DB-seeded entries use "connection/database".  Check
-                    # both the full id and the connection component.
-                    conn = meta.get("connection", "")
-                    if r.id in hocon_hive_names or conn in hocon_hive_names:
-                        continue
-                    platforms.append({
-                        "id": r.id,
-                        "kind": "hive",
-                        "label": r.display_name or f"Hive: {r.id}",
-                        "source_uri": r.source_uri or "",
-                        "vocab_uri": r.vocab_uri or "",
-                        "mount": None,
-                        "table_count": meta.get("table_count"),
-                        "column_count": meta.get("column_count"),
-                    })
-                else:
-                    # Filesystem source
-                    mount = None
-                    if r.source_uri and r.source_uri.startswith("file://"):
-                        mount = r.source_uri[len("file://"):]
-                    platforms.append({
-                        "id": r.id,
-                        "kind": "filesystem",
-                        "label": f"Filesystem: {r.display_name}",
-                        "source_uri": r.source_uri or "",
-                        "vocab_uri": r.vocab_uri or "",
-                        "mount": mount,
-                        "table_count": meta.get("table_count"),
-                        "column_count": meta.get("column_count"),
-                    })
+            if r["source_type"] == "hive":
+                # Skip if already surfaced via the HOCON config list.
+                # HOCON entries use the bare connection name as id;
+                # DB-seeded entries use "connection/database".  Check
+                # both the full id and the connection component.
+                conn = meta.get("connection", "")
+                if r["id"] in hocon_hive_names or conn in hocon_hive_names:
+                    continue
+                platforms.append({
+                    "id": r["id"],
+                    "kind": "hive",
+                    "label": r["display_name"] or f"Hive: {r['id']}",
+                    "source_uri": r["source_uri"] or "",
+                    "vocab_uri": r.get("vocab_uri") or "",
+                    "mount": None,
+                    "table_count": meta.get("table_count"),
+                    "column_count": meta.get("column_count"),
+                })
+            else:
+                # Filesystem source
+                mount = None
+                source_uri = r["source_uri"] or ""
+                if source_uri.startswith("file://"):
+                    mount = source_uri[len("file://"):]
+                platforms.append({
+                    "id": r["id"],
+                    "kind": "filesystem",
+                    "label": f"Filesystem: {r['display_name']}",
+                    "source_uri": source_uri,
+                    "vocab_uri": r.get("vocab_uri") or "",
+                    "mount": mount,
+                    "table_count": meta.get("table_count"),
+                    "column_count": meta.get("column_count"),
+                })
 
         return {"platforms": platforms}
     except Exception as exc:

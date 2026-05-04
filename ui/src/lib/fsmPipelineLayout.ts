@@ -145,10 +145,10 @@ const SKILLS: SkillDef[] = [
     id: "overwatch",
     label: "Overwatch",
     description:
-      "Single-turn Opus analysis at run end; writes pipeline recommendations to overwatch.md.  Requires Anthropic-direct API access (not Bedrock).",
+      "Single-turn Opus analysis at run end; writes pipeline recommendations to overwatch.md.  Follows the Web Terminal Agent's selected model — direct Anthropic API or Bedrock, whichever the operator picked.",
     hostPhase: "CONVERGED",
     position: "above",
-    model: "Opus / Anthropic-direct",
+    model: "Follows Web Terminal Agent",
     activeStates: ["CONVERGED"],
     capabilityKey: "overwatch_enabled",
   },

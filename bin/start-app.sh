@@ -28,6 +28,9 @@ PORT=${1:-${CDSW_APP_PORT:-8090}}
 
 kill_stale_processes() {
     echo "Cleaning up stale processes..."
+    # Kill the supervisor first so it doesn't immediately respawn the
+    # pglite child we're about to kill.
+    pkill -f "pglite-supervisor.sh" 2>/dev/null || true
     pkill -f "pglite-server.mjs" 2>/dev/null || true
     pkill -f "qdrant/qdrant" 2>/dev/null || true
     pkill -f "atelier.server" 2>/dev/null || true
@@ -249,26 +252,32 @@ echo "Claude CLI: $(which claude 2>/dev/null && claude --version 2>/dev/null || 
 # Port 5440 avoids conflict with CAI's platform Postgres on 5432.
 if [ -z "$ATELIER_DB_URL" ] && [ -f scripts/pglite-server.mjs ]; then
   PGLITE_PORT=5440
-  echo "Starting PGlite on port $PGLITE_PORT..."
+  echo "Starting PGlite on port $PGLITE_PORT (under supervisor)..."
   mkdir -p .app/pgdata
-  # Bump V8's old-space heap.  PGlite + pgvector hold result sets and
+
+  # Launch the supervisor instead of node directly.  The supervisor
+  # respawns pglite with exponential backoff if it dies and publishes
+  # state to .app/pglite-supervisor.state for the gateway to read.
+  # Bump V8's old-space heap (PGlite + pgvector hold result sets and
   # index pages in the Node heap; the ~4 GB default cap is tight for
-  # runs that touch thousands of columns and the WASM allocator
-  # aborts (kernel/cgroup OOM-kill, no Node-level error trace) when
-  # it can't satisfy a request.  CAI hosts have plenty of headroom —
-  # override via PGLITE_NODE_MAX_OLD_SPACE_MB if needed.
-  NODE_MAX_OLD_SPACE_MB="${PGLITE_NODE_MAX_OLD_SPACE_MB:-8192}"
-  PGLITE_DATA_DIR=.app/pgdata PGLITE_PORT=$PGLITE_PORT \
-    node --max-old-space-size="$NODE_MAX_OLD_SPACE_MB" \
-      scripts/pglite-server.mjs > .app/pglite.log 2>&1 &
-  PGLITE_PID=$!
+  # large runs and the WASM allocator aborts under cgroup OOM with no
+  # Node-level trace) — override via PGLITE_NODE_MAX_OLD_SPACE_MB.
+  PGLITE_PORT="$PGLITE_PORT" \
+  PGLITE_DATA_DIR=.app/pgdata \
+  PGLITE_NODE_MAX_OLD_SPACE_MB="${PGLITE_NODE_MAX_OLD_SPACE_MB:-8192}" \
+  PGLITE_MAX_CONNECTIONS="${PGLITE_MAX_CONNECTIONS:-32}" \
+    bash bin/pglite-supervisor.sh > .app/pglite-supervisor.log 2>&1 &
+  PGLITE_SUPERVISOR_PID=$!
 
   wait_for_pglite "$PGLITE_PORT" 10 120
 
-  # Verify process is still alive after probe passed
-  if ! kill -0 "$PGLITE_PID" 2>/dev/null; then
-    echo "ERROR: PGlite process died during startup" >&2
-    cat .app/pglite.log >&2
+  # Verify supervisor is still alive after probe passed (the supervisor
+  # itself dying — distinct from a child crash it would normally
+  # recover from — is fatal during startup).
+  if ! kill -0 "$PGLITE_SUPERVISOR_PID" 2>/dev/null; then
+    echo "ERROR: PGlite supervisor died during startup" >&2
+    [ -f .app/pglite-supervisor.log ] && cat .app/pglite-supervisor.log >&2
+    [ -f .app/pglite.log ] && cat .app/pglite.log >&2
     exit 1
   fi
 
