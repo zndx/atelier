@@ -258,14 +258,14 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     "classify_discount_svm": {
         "hocon_path": "classify.discounts.svm",
         "label": "SVM Discount",
-        "description": "Mass allocated to ignorance from incremental SVM evidence",
+        "description": "Mass allocated to ignorance from SVM evidence",
         "group": "evidence",
         "type": "float",
         "min": 0.10,
         "max": 0.85,
         "step": 0.01,
-        "default": 0.55,
-        "caption_template": "Reserve {value_pct}% of SVM mass as ignorance — the incremental SVM trains on LLM labels (non-distinct evidence per Denoeux 2008), so the principled default is high; lower only when retraining on labels that are independent of the LLM sweep.",
+        "default": 0.30,
+        "caption_template": "Reserve {value_pct}% of SVM mass as ignorance — the synth-trained SVM uses TF-IDF features and ICE-keyed labels translated into the user taxonomy via the LLM-mediated alignment, making it weakly non-distinct evidence at the vocabulary level (Denoeux 2008). The 0.30 default reflects this regime; raise toward 0.55 if reverting to per-column LLM-derivative training.",
     },
     "classify_discount_pattern_theta": {
         "hocon_path": "classify.discounts.pattern_theta",

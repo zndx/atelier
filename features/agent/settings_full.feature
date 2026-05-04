@@ -77,7 +77,6 @@ Feature: Runtime overlay — full parameter surface
 
     Examples:
       | key                                       | value |
-      | classify_bootstrap_frontier_svm_retrain   | false |
       | row_mc_enabled                            | true  |
       | row_mc_adaptive_escalation                | false |
       | classify_sage_enabled                     | true  |

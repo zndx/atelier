@@ -408,7 +408,7 @@ class AtelierConfig:
     # §11.3 + Denoeux 2008, non-distinct evidence requires substantial
     # discount to avoid double-counting under Dempster's rule.
     classify_discount_cosine: float = 0.20
-    classify_discount_svm: float = 0.55
+    classify_discount_svm: float = 0.30
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
     classify_discount_name_match_code: float = 0.50
