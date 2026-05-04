@@ -68,28 +68,3 @@ ISO/IEC 29100, GDPR Art. 4(1), and standard data-governance literature.
 | `RECID` | `ICE.METADATA.RECID` | Universal database-engineering abbreviation for Record Identifier; standard primary-key convention. |
 | `STATUS` | `ICE.METADATA.STATUS` | Universal English term; standard form-field and HTTP-response convention (RFC 9110 §15). |
 
-## What was unwound (2026-04-30)
-
-- **13 `C_*`-prefixed abbrevs** — `C_NOS, C_SENS, C_PID, C_CI, C_ID,
-  C_PERSNAME, C_GOVID, C_FD, C_PAY, C_CARD, C_ACCT, C_TD, C_META`. The
-  `C_` prefix was a customer-internal class-namespacing convention
-  carried over from a deprecated `mock_annotations.json` fixture
-  (deleted in commit `df7f1af`, 2026-04-14, when the universal
-  vocabulary was introduced). Three of those abbrevs (`C_NOS, C_PID,
-  C_FD`) appeared verbatim in customer annotations tables we have
-  access to. The convention itself is the contamination — even the
-  non-overlapping `C_*` entries follow a customer-specific naming
-  pattern and have no public-ontology grounding.
-
-- **All 29 `notation` values** — numeric dotted codes in the customer's
-  encoding scheme (e.g. `1.1.3.1.2`). 19 of these collided verbatim
-  with customer code values, although they mapped to different
-  concepts. The `notation` field remains in the schema for
-  customer-supplied domain extensions (loaded from Hive at runtime),
-  where the field carries the customer's own code; the universal layer
-  has no public-source numeric encoding to populate it with.
-
-The `code` field (path strings like `ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT`)
-is not modified — paths are Atelier's original ontological structure
-composed from publicly-meaningful English partitions and BFO-grounded
-roots.
