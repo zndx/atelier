@@ -30,7 +30,16 @@ _DEFAULT_ENGINE_ARGS = {
     "pool_recycle": 300,
     "pool_size": 3,
     "max_overflow": 2,
-    "connect_args": {"connect_timeout": 10},
+    "connect_args": {
+        "connect_timeout": 10,
+        # PGlite doesn't support server-side prepared statement caching.
+        # psycopg3 enables it by default (prepare_threshold=5), which
+        # triggers ``DuplicatePreparedStatement: prepared statement
+        # "_pg3_0" already exists`` after a few operations.  Setting
+        # ``None`` disables prepared statements entirely (``0`` means
+        # "prepare on first use", which still breaks PGlite).
+        "prepare_threshold": None,
+    },
 }
 
 

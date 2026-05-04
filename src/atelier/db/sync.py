@@ -155,6 +155,33 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     ))
 
 
+def _ensure_fsm_run(run_id: str, dao: AtelierDao, source_id: str | None) -> None:
+    """Guarantee an ``fsm_runs`` row exists so FK-dependent inserts succeed.
+
+    ``ml_artifact_sets.fsm_run_id REFERENCES fsm_runs(id)`` — without a
+    target row, the artifact-set insert raises ``IntegrityError``.  When
+    reconciling an orphaned run the FSM row may never have been written
+    (PGlite was unreachable when the pipeline tried) so we insert a
+    synthetic CONVERGED row.  Idempotent — skips if the row exists.
+    """
+    existing = dao.get_fsm_run(run_id)
+    if existing is not None:
+        return
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    dao.upsert_fsm_run(
+        run_id=run_id,
+        state="CONVERGED",
+        started_at=now,
+        updated_at=now,
+        progress="",
+        error=None,
+        result_path=f"build/results/{run_id}",
+        source_id=source_id,
+    )
+    logger.info("sync: created synthetic fsm_runs row for %s", run_id)
+
+
 def _reconcile_run(
     run_dir: Path,
     dao: AtelierDao,
@@ -170,6 +197,23 @@ def _reconcile_run(
         outcome.note = "incomplete (missing parquet or classifications.json)"
         return outcome
 
+    # ── Step 0: ensure fsm_runs row exists (FK target) ────────────
+    # ml_artifact_sets.fsm_run_id REFERENCES fsm_runs(id) — the
+    # pipeline creates the fsm_runs row early, but if PGlite was
+    # unreachable at that point the row is missing and every
+    # downstream insert fails with IntegrityError.
+    source_id_early = _resolve_source_id(
+        run_dir, override=source_id_override, existing_artifact_set=None,
+    )
+    try:
+        _ensure_fsm_run(run_id, dao, source_id_early)
+    except Exception as exc:
+        if not _is_duplicate_key_error(exc):
+            outcome.artifact_set = "error"
+            outcome.note = f"fsm_run ensure: {type(exc).__name__}: {exc}"
+            logger.exception("sync: fsm_run ensure failed for %s", run_id)
+            return outcome
+
     # ── Step 1: artifact set ───────────────────────────────────────
     existing_as = dao.get_artifact_set(run_id)
     if existing_as is not None:
@@ -184,11 +228,7 @@ def _reconcile_run(
                 results_dir=run_dir,
                 cfg=cfg,
                 n_columns=_classification_count(run_dir),
-                source_id=_resolve_source_id(
-                    run_dir,
-                    override=source_id_override,
-                    existing_artifact_set=None,
-                ),
+                source_id=source_id_early,
                 fsm_run_id=run_id,
             )
             if spec is None:
