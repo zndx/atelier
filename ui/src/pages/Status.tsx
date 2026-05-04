@@ -1188,6 +1188,22 @@ function DataSourceCard() {
               render: (v: number) => <Text strong>v{v}</Text>,
             },
             {
+              title: "Run ID",
+              dataIndex: "fsm_run_id",
+              key: "run_id",
+              width: 110,
+              render: (run_id: string | null, record: { id: string }) => {
+                const id = run_id ?? record.id;
+                return run_id ? (
+                  <Link to={`/overwatch/${run_id}`}>
+                    <Text code>{id.slice(0, 8)}</Text>
+                  </Link>
+                ) : (
+                  <Text code type="secondary">{id.slice(0, 8)}</Text>
+                );
+              },
+            },
+            {
               title: "Columns",
               dataIndex: "row_count",
               key: "rows",
