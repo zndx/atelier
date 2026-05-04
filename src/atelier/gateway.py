@@ -1265,6 +1265,19 @@ def status():
         "qdrant_http_port": cfg.qdrant_http_port,
         "db_url_masked": db_masked,
         "model_discovery": model_discovery,
+        # Pipeline-stage capability flags consumed by the Workflows
+        # graph to decide which skill nodes are gated (absent /
+        # grayed) vs. attached (idle) vs. live (highlighted).
+        # ``has_overwatch`` already factors in the Anthropic-direct
+        # gate; the cautious_review and agent flags are read raw and
+        # the graph composes them with run state at render time.
+        "cautious_review_enabled": getattr(
+            cfg, "classify_cautious_review_enabled", False,
+        ),
+        "overwatch_enabled": getattr(cfg, "has_overwatch", False),
+        "classify_agent_enabled": getattr(
+            cfg, "classify_agent_enabled", False,
+        ),
     }
 
     # "connected" = gRPC reachable. gRPC is the only strict dealbreaker;
