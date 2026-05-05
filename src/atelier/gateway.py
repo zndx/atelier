@@ -945,6 +945,7 @@ def list_data_sources(include_archived: bool = False):
                 "source_uri": s.source_uri,
                 "display_name": s.display_name,
                 "vocabulary_mode": s.vocabulary_mode,
+                "vocab_uri": s.vocab_uri,
                 "created_at": s.created_at,
                 "metadata": s.metadata_json,
                 "is_archived": s.is_archived,
@@ -1130,6 +1131,151 @@ def artifact_set_compatibility(artifact_set_id: str, source_id: str):
         }
     except Exception as exc:
         return _error_envelope(f"artifact_set_compatibility failed: {exc}")
+
+
+@app.get("/api/artifact-sets/{artifact_set_id}/extend-scope")
+def artifact_set_extend_scope(artifact_set_id: str, source_id: str):
+    """Salient measures for the ML Artifacts panel.
+
+    Given an artifact set + a data source, report:
+
+    - what the artifact set bundles (CatBoost / SVM / UMAP, classes,
+      embedding model + dim, vocab signature);
+    - the producing dataset's training scope (tables/columns the
+      CatBoost was fit on);
+    - the source's *current* discovered scope (from its metadata —
+      ``table_count`` / ``column_count`` written at seed/discovery time);
+    - the delta — ``new_tables`` and ``new_columns`` the operator
+      could pick up with an Extend Classification run, without
+      re-training.
+
+    Vocab compatibility is included so the panel doesn't need a second
+    round-trip to ``/compatibility``.
+    """
+    try:
+        import json as _json
+        import re
+        from atelier.classify.artifact_set import check_compatibility
+        from atelier.classify.taxonomy import load_sample_vocabulary
+        from atelier.db.dao import AtelierDao
+        from atelier.db.model import Dataset
+
+        dao = AtelierDao()
+        artifact = dao.get_artifact_set(artifact_set_id)
+        if artifact is None:
+            return _error_envelope("Artifact set not found", status=404)
+
+        source = dao.get_data_source(source_id)
+        if source is None:
+            return _error_envelope("Data source not found", status=404)
+
+        # Source-side counts (from metadata stamped at seed/discovery).
+        source_meta: dict = {}
+        if source.get("metadata"):
+            try:
+                source_meta = _json.loads(source["metadata"]) or {}
+            except Exception:
+                source_meta = {}
+        source_table_count = source_meta.get("table_count")
+        source_column_count = source_meta.get("column_count")
+
+        # Producing dataset — the classify run whose output IS this
+        # artifact set.  Compared against the source's current scope to
+        # derive ``new_*``.  Look up by artifact_set_id (lineage column
+        # added 20260427) and fall back to fsm_run_id for older rows.
+        classified_column_count: int | None = None
+        classified_table_count: int | None = None
+        producing_dataset_id: str | None = None
+        with dao.get_session() as session:
+            ds = (
+                session.query(Dataset)
+                .filter_by(artifact_set_id=artifact_set_id, run_kind="classify")
+                .order_by(Dataset.created_at.desc())
+                .first()
+            )
+            if ds is None and artifact.get("fsm_run_id"):
+                ds = (
+                    session.query(Dataset)
+                    .filter_by(fsm_run_id=artifact["fsm_run_id"])
+                    .order_by(Dataset.created_at.desc())
+                    .first()
+                )
+            if ds is not None:
+                producing_dataset_id = ds.id
+                classified_column_count = int(ds.row_count or 0)
+                # Summary is a free-form string like "X tables, Y columns".
+                # Parse the leading integer out — best-effort.
+                if ds.summary:
+                    m = re.match(r"\s*(\d+)\s+tables?", ds.summary)
+                    if m:
+                        classified_table_count = int(m.group(1))
+
+        # Whether the artifact's training source matches the candidate.
+        # When False, every entity in the candidate is fair game for
+        # Extend (nothing has been classified there yet by this model).
+        same_source = artifact.get("source_id") == source_id
+
+        if same_source:
+            new_table_count = (
+                None
+                if source_table_count is None or classified_table_count is None
+                else max(0, source_table_count - classified_table_count)
+            )
+            new_column_count = (
+                None
+                if source_column_count is None or classified_column_count is None
+                else max(0, source_column_count - classified_column_count)
+            )
+        else:
+            new_table_count = source_table_count
+            new_column_count = source_column_count
+
+        # Vocab compatibility — same logic as the dedicated endpoint, kept
+        # here so the panel only needs one fetch.
+        artifact_classes = _json.loads(artifact["classes"])
+        if source_id in ("ootb-sample", "synthetic"):
+            cs = load_sample_vocabulary(hierarchical=True)
+            source_classes = [c.code for c in cs.categories]
+        else:
+            source_classes = artifact_classes
+        report = check_compatibility(artifact_classes, source_classes)
+
+        return {
+            "artifact_set_id": artifact_set_id,
+            "source_id": source_id,
+            "same_source": same_source,
+            "bundle": {
+                "catboost": bool(artifact.get("catboost_path")),
+                "svm": bool(artifact.get("svm_path")),
+                "umap": bool(artifact.get("umap_path")),
+            },
+            "classes_count": len(artifact_classes),
+            "embedding_model": artifact.get("embedding_model"),
+            "embedding_dim": artifact.get("embedding_dim"),
+            "vocab_signature": artifact.get("vocab_signature"),
+            "is_active": bool(artifact.get("is_active")),
+            "is_archived": bool(artifact.get("is_archived")),
+            "created_at": artifact.get("created_at"),
+            "summary": artifact.get("summary"),
+            "training_source_id": artifact.get("source_id"),
+            "fsm_run_id": artifact.get("fsm_run_id"),
+            "producing_dataset_id": producing_dataset_id,
+            "source_table_count": source_table_count,
+            "source_column_count": source_column_count,
+            "classified_table_count": classified_table_count,
+            "classified_column_count": classified_column_count,
+            "new_table_count": new_table_count,
+            "new_column_count": new_column_count,
+            "vocab_compatibility": {
+                "status": report.status,
+                "missing_codes": report.missing_codes,
+                "extra_codes": report.extra_codes,
+                "artifact_signature": report.artifact_signature,
+                "candidate_signature": report.candidate_signature,
+            },
+        }
+    except Exception as exc:
+        return _error_envelope(f"artifact_set_extend_scope failed: {exc}")
 
 
 # ── Archive / unarchive ──────────────────────────────────────────

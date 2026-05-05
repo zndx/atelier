@@ -54,6 +54,7 @@ message DataSource {
   string created_at = 6;
   string metadata_json = 7;         // JSON
   bool is_archived = 8;
+  string vocab_uri = 9;             // operator-assigned vocabulary URI (e.g. "default.annotations" or "file:///mnt/.../annotations.csv"); decoupled from source_uri so an operator can classify one database with another's annotations
 }
 
 message ListDataSourcesRequest {
