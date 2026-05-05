@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -185,38 +185,24 @@ class HierarchicalCategorySet(CategorySet):
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _build_parents(
-    leaf_rows: list[dict],
-    all_existing_codes: set[str] | None = None,
-) -> list[ReferenceCategory]:
-    """Build synthetic parent nodes for any missing intermediate levels.
+def _nearest_projected_ancestor(code: str, projected_codes: set[str]) -> str | None:
+    """Walk dot-notation prefixes up from ``code`` to the nearest projected ancestor.
 
-    Uses dot-separated codes (works for both numeric "1.1.1.1" and mnemonic
-    "ICE.SENSITIVE.PID.CONTACT.EMAIL") to infer intermediate parents that
-    aren't explicitly provided in the source records.
+    The customer's annotations are a *projection* of a larger ontology DAG,
+    so a leaf's structural parent (immediate dot-prefix) may not itself be
+    projected.  This helper returns the nearest *projected* ancestor — or
+    ``None`` when the chain hits the top of the DAG without finding one,
+    in which case ``code`` is a forest root in the projection.
     """
-    existing_codes: set[str] = all_existing_codes or set()
-    for row in leaf_rows:
-        existing_codes.add(row["code"])
-
-    parents: dict[str, ReferenceCategory] = {}
-
-    for row in leaf_rows:
-        parts = row["code"].split(".")
-        for depth in range(1, len(parts)):
-            parent_code = ".".join(parts[:depth])
-            if parent_code in existing_codes or parent_code in parents:
-                continue
-            grandparent = ".".join(parts[:depth - 1]) if depth > 1 else None
-            parents[parent_code] = ReferenceCategory(
-                code=parent_code,
-                label=f"Level{depth}_{parent_code}",
-                embedding_text=f"level {depth} category {parent_code}",
-                taxonomy=row.get("taxonomy", "annotations"),
-                parent_code=grandparent,
-            )
-
-    return list(parents.values())
+    if "." not in code:
+        return None
+    cur = code.rsplit(".", 1)[0]
+    while True:
+        if cur in projected_codes:
+            return cur
+        if "." not in cur:
+            return None
+        cur = cur.rsplit(".", 1)[0]
 
 
 # ── Hive loader ──────────────────────────────────────────────────────
@@ -286,6 +272,9 @@ def load_annotations_from_hive(
 # ── JSON loader ──────────────────────────────────────────────────────
 
 
+_SYNTHETIC_PARENT_LABEL_RE = re.compile(r"^Level\d+_")
+
+
 def load_annotations_from_json(
     path: str | Path,
     *,
@@ -295,10 +284,37 @@ def load_annotations_from_json(
 
     The JSON file is an array of objects with the same schema as the
     hive annotations table.
+
+    One-shot self-purge: caches written by older loader versions can
+    contain fabricated parent records (label matches ``Level{N}_X``).
+    The customer's projection is a slice of the ontology DAG, so those
+    records aren't real terms — drop them at read time so the runtime
+    taxonomy doesn't carry placeholders into DST, the picker, or the
+    operator-visible classification output.  The next save will write
+    a clean cache without them.
     """
+    import logging
+    log = logging.getLogger(__name__)
+
     path = Path(path)
     with open(path) as f:
         records = json.load(f)
+
+    poisoned = [
+        r for r in records
+        if _SYNTHETIC_PARENT_LABEL_RE.match(str(r.get("label") or ""))
+    ]
+    if poisoned:
+        log.warning(
+            "Filtered %d synthetic-parent placeholder(s) from cache %s "
+            "(codes=%s) — these were fabricated by an older loader; "
+            "next save will rewrite the cache without them.",
+            len(poisoned), path, [r.get("code") for r in poisoned],
+        )
+        records = [
+            r for r in records
+            if not _SYNTHETIC_PARENT_LABEL_RE.match(str(r.get("label") or ""))
+        ]
 
     return _build_category_set_from_records(records, hierarchical=hierarchical)
 
@@ -423,6 +439,69 @@ def _normalize_record(row: dict) -> dict:
     return normalized
 
 
+def _repair_csv_oversplit(row: dict) -> dict:
+    """Reassemble a CSV-quoted description that was split across columns.
+
+    Some customer ``annotations`` tables were ingested via a CSV path
+    that did not honor quoted fields, so a single ``"a, b, c, d"``
+    description got distributed across N adjacent columns: the first
+    fragment retains the leading ``"``, the last retains the trailing
+    ``"``, and the inner fragments are bare commas-removed slices.
+
+    This boundary-level normalization detects the pattern (description
+    starts with ``"``, a later column ends with ``"``) and stitches the
+    fragments back together, blanking the consumed columns.  Bounded
+    look-ahead (``MAX_LOOKAHEAD``) prevents runaway consumption when
+    the closing quote was lost entirely.
+
+    Idempotent: rows without leading-quote pass through unchanged.
+    """
+    MAX_LOOKAHEAD = 10
+
+    desc_key = "definition" if "definition" in row else (
+        "description" if "description" in row else None
+    )
+    if not desc_key:
+        return row
+    desc = str(row.get(desc_key) or "").strip()
+    if not desc.startswith('"'):
+        return row
+
+    keys = list(row.keys())
+    try:
+        start = keys.index(desc_key)
+    except ValueError:
+        return row
+    candidate_keys = keys[start + 1 : start + 1 + MAX_LOOKAHEAD]
+
+    closer_idx = -1
+    for i, k in enumerate(candidate_keys):
+        v = row.get(k)
+        if isinstance(v, str) and v.strip().endswith('"'):
+            closer_idx = i
+            break
+
+    out = dict(row)
+    if closer_idx < 0:
+        # No closer in sight — strip the orphan leading quote and stop.
+        out[desc_key] = desc.lstrip('"').strip()
+        return out
+
+    fragments: list[str] = [desc.lstrip('"').strip()]
+    for k in candidate_keys[: closer_idx + 1]:
+        v = str(row.get(k) or "").strip()
+        if not v:
+            continue
+        if v.endswith('"'):
+            v = v.rstrip('"').strip()
+        fragments.append(v)
+
+    out[desc_key] = ", ".join(p for p in fragments if p)
+    for k in candidate_keys[: closer_idx + 1]:
+        out[k] = ""
+    return out
+
+
 # ── Shared builder ───────────────────────────────────────────────────
 
 
@@ -449,7 +528,7 @@ def _build_category_set_from_records(
     - annotation: formal code / mnemonic
     - definition, common_names, specifics, sensitivity, deprecated
     """
-    records = [_normalize_record(r) for r in records]
+    records = [_repair_csv_oversplit(_normalize_record(r)) for r in records]
 
     # Accept both "code" and "id" as the identity field
     def _get_code(row: dict) -> str:
@@ -489,52 +568,54 @@ def _build_category_set_from_records(
         parts = code.rsplit(".", 1)
         return parts[0] if len(parts) > 1 else None
 
-    leaf_rows: list[dict] = []
-    refs: list[ReferenceCategory] = []
+    def _build_ref(row: dict, code: str, parent_code: str | None) -> ReferenceCategory:
+        """Construct a fully-populated ReferenceCategory from a raw record.
 
-    for row in records:
-        row_code = _get_code(row)
-        if not row_code:
-            continue
-        # Legacy filter: skip rows without digit-starting code in hive format
-        if not has_explicit_parents and not row_code[0].isdigit():
-            continue
-        if not _is_leaf(row_code):
-            continue
+        Used uniformly for leaves and internal nodes so non-leaves carry
+        the same description / common_names / specifics / sensitivity as
+        leaves.  The customer's projection is a slice of the ontology
+        DAG — every projected term is a first-class operator-visible
+        category and deserves the same metadata fidelity.
+        """
+        def _clean(v) -> str:
+            # Strip leading/trailing orphan quote chars left over from
+            # malformed CSV ingestion that ``_repair_csv_oversplit`` did
+            # not stitch back together (no closer found within the
+            # look-ahead window).
+            return str(v or "").strip().strip('"').strip()
 
-        # Read fields (support both formats)
-        ontology = str(row.get("ontology", "") or row.get("label", "")).strip()
-        annotation = str(row.get("annotation", "") or row.get("abbrev", "")).strip()
-        definition = str(row.get("definition", "") or row.get("description", "")).strip()
-        common_names = str(row.get("common_names", "")).strip()
-        specifics = str(row.get("specifics", "")).strip()
-        notation = str(row.get("notation", "")).strip()
-        taxonomy = str(row.get("taxonomy", "annotations")).strip()
+        ontology = _clean(row.get("ontology") or row.get("label"))
+        annotation = _clean(row.get("annotation") or row.get("abbrev"))
+        definition = _clean(row.get("definition") or row.get("description"))
+        common_names = _clean(row.get("common_names"))
+        specifics = _clean(row.get("specifics"))
+        notation = _clean(row.get("notation"))
+        taxonomy = _clean(row.get("taxonomy")) or "annotations"
 
         label = ontology or annotation
         formal_code = annotation
 
-        # Build embedding text
+        # Same rich embedding_text construction for leaves and internal
+        # nodes — ``Financial Data`` (an internal node) gets the full
+        # label + abbrev + description text it has in Hive, not just the
+        # bare label.  Fixes the parent-row impoverishment that biased
+        # cosine toward leaves with richer metadata.
         words_label = re.sub(
             r"[^a-z0-9 ]", "",
             label.lower().replace("/", " ").replace("(", "").replace(")", ""),
         ).strip()
-        parts = [words_label, label]
+        text_parts = [words_label, label]
         if formal_code and formal_code != label:
-            parts.append(formal_code)
+            text_parts.append(formal_code)
         if definition:
-            parts.append(definition)
+            text_parts.append(definition)
         if common_names:
-            parts.append(common_names)
+            text_parts.append(common_names)
         if specifics:
-            parts.append(specifics[:150])
-        embedding_text = " | ".join(parts)
+            text_parts.append(specifics[:150])
+        embedding_text = " | ".join(p for p in text_parts if p)
 
-        parent_code = _derive_parent(row_code, row)
-
-        # Sensitivity ratings per data subject role
-        # Handles both flat keys (from hive) and nested dict (from saved JSON)
-        sensitivity = {}
+        sensitivity: dict[str, str] = {}
         nested = row.get("sensitivity")
         if isinstance(nested, dict):
             sensitivity = nested
@@ -544,9 +625,8 @@ def _build_category_set_from_records(
                 if val:
                     sensitivity[role] = val
 
-        leaf_rows.append({"code": row_code, "taxonomy": taxonomy})
-        refs.append(ReferenceCategory(
-            code=row_code,
+        return ReferenceCategory(
+            code=code,
             label=label,
             embedding_text=embedding_text,
             abbrev=formal_code,
@@ -556,44 +636,51 @@ def _build_category_set_from_records(
             taxonomy=taxonomy,
             parent_code=parent_code,
             sensitivity=sensitivity or None,
-        ))
+        )
 
-    if not hierarchical:
-        return CategorySet(name="annotations", categories=refs)
-
-    # Build parent nodes from non-leaf rows in the source data
+    refs: list[ReferenceCategory] = []
     parent_refs: list[ReferenceCategory] = []
+
     for row in records:
         row_code = _get_code(row)
         if not row_code:
             continue
+        # Legacy filter: skip rows without digit-starting code in hive format
         if not has_explicit_parents and not row_code[0].isdigit():
             continue
-        if _is_leaf(row_code):
-            continue
 
-        ontology = str(row.get("ontology", "") or row.get("label", "")).strip()
-        annotation = str(row.get("annotation", "") or row.get("abbrev", "")).strip()
-        notation = str(row.get("notation", "")).strip()
-        taxonomy = str(row.get("taxonomy", "annotations")).strip()
-        label = ontology or annotation or f"Level_{row_code}"
         parent_code = _derive_parent(row_code, row)
-        parent_refs.append(ReferenceCategory(
-            code=row_code,
-            label=label,
-            embedding_text=label,
-            abbrev=annotation,
-            notation=notation,
-            taxonomy=taxonomy,
-            parent_code=parent_code,
-        ))
+        ref = _build_ref(row, row_code, parent_code)
+        if _is_leaf(row_code):
+            refs.append(ref)
+        else:
+            parent_refs.append(ref)
 
-    # Synthetic parents for any missing intermediate levels
-    existing_codes = {r.code for r in refs} | {r.code for r in parent_refs}
-    synthetic_parents = _build_parents(leaf_rows, all_existing_codes=existing_codes)
-    extra_parents = [p for p in synthetic_parents if p.code not in existing_codes]
+    if not hierarchical:
+        return CategorySet(name="annotations", categories=refs)
 
-    all_categories = refs + parent_refs + extra_parents
+    # Forest semantics — sanitize parent_code links so that any reference
+    # to a code outside the projection (the gaps that are inevitable in a
+    # DAG projection of an ontology) snaps to the nearest *projected*
+    # ancestor.  No synthetic parents are invented — codes whose chain
+    # has no projected ancestor become forest roots (parent_code=None).
+    projected_codes = {r.code for r in refs} | {r.code for r in parent_refs}
+
+    def _sanitize(items: list[ReferenceCategory]) -> list[ReferenceCategory]:
+        out: list[ReferenceCategory] = []
+        for r in items:
+            pc = r.parent_code
+            if pc is not None and pc not in projected_codes:
+                pc = _nearest_projected_ancestor(r.code, projected_codes)
+            if pc != r.parent_code:
+                out.append(replace(r, parent_code=pc))
+            else:
+                out.append(r)
+        return out
+
+    refs = _sanitize(refs)
+    parent_refs = _sanitize(parent_refs)
+    all_categories = refs + parent_refs
 
     return HierarchicalCategorySet(
         name="annotations",
