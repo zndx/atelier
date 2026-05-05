@@ -196,9 +196,19 @@ def _install_fit_to_llm_catboost(
     When ``save_path`` is provided, the trained CatBoost model is also
     persisted to disk (native ``.cbm`` format + sibling ``.classes.json``)
     so downstream consumers can replay inference without retraining.
-    This is the hook that makes ML-only reproducibility auditable from
-    a run directory alone — pair it with ``svm_frontier.pkl`` and the
-    full ML stack for a given run is on disk.
+    This is the hook that makes the LLM-trained CatBoost auditable from
+    the run directory alone.
+
+    Note: there is no per-run SVM analogue.  The M9 frontier-SVM
+    retrain (``train_svm_on_frontier_labels``) was excised in commit
+    5199379 because training the SVM on per-column LLM votes broke
+    Denoeux 2008 source-independence.  The active SVM is the
+    synth-trained classifier at ``build/models/svm.pkl`` (built by
+    ``scripts/train_classifiers.py`` against the bundled-ontology
+    synth corpus); per-vocabulary alignment happens at runtime via
+    ``ontology_alignment.translate_proba``.  Old run directories may
+    still carry a ``svm_frontier.pkl`` from before the excision —
+    those files are vestiges and are no longer produced.
     """
     min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
     if len(state.labels) < min_labels:

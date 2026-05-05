@@ -10,8 +10,7 @@
 
 An ML Artifact Set is the bundle of trained-model files produced by an
 Atelier classify run: the CatBoost classifier (.cbm + .classes.json),
-the optional SVM classifier (.pkl + .classes.json), the
-fitted UMAP projection (.pkl), and metadata that lets a downstream
+the fitted UMAP projection (.pkl), and metadata that lets a downstream
 Extend Classification run replay the model on new data without
 re-running the full pipeline.
 
@@ -20,10 +19,20 @@ The on-disk layout is fixed by :mod:`atelier.classify.pipeline`:
     build/results/{run_id}/
         catboost_fit_to_llm.cbm
         catboost_fit_to_llm.cbm.classes.json
-        svm_frontier.pkl                     (optional)
-        svm_frontier.pkl.classes.json        (optional)
         umap.pkl                             (added 20260427)
         settings_snapshot.json               (used for embedding model identity)
+        svm_frontier.pkl                     (LEGACY, optional)
+        svm_frontier.pkl.classes.json        (LEGACY, optional)
+
+The ``svm_frontier.pkl`` slot is a vestige: the M9 frontier-SVM
+retrain was excised in commit 5199379 because training the SVM on
+per-column LLM votes broke Denoeux 2008 source-independence.  No new
+run produces these files.  The reader paths below still detect them
+so artifact-set rows reconstructed for pre-excision runs continue to
+populate ``svm_path``; current and future runs leave ``has_svm =
+False`` here and rely on the synth-trained SVM at
+``build/models/svm.pkl`` plus runtime ICE.* → user-vocab alignment
+(``ontology_alignment.translate_proba``).
 
 This module is the single point of knowledge about that layout — when
 the pipeline writes new artifact files or the layout changes, only the
@@ -45,6 +54,12 @@ logger = logging.getLogger(__name__)
 # Filenames within a run's results dir.  Constants so the pipeline,
 # the DAO, and the Extend runner agree on what to write / read.
 CATBOOST_FILENAME = "catboost_fit_to_llm.cbm"
+# LEGACY: ``svm_frontier.pkl`` is no longer produced (M9 retrain
+# excised in 5199379 for Denoeux 2008 source-independence).  The
+# constant is retained so artifact-set rebuilds for pre-excision
+# runs still detect the legacy file; new runs leave it absent and
+# the alignment-based SVM evidence path at ``ontology_alignment.py``
+# uses the synth-trained model at ``build/models/svm.pkl`` instead.
 SVM_FILENAME = "svm_frontier.pkl"
 UMAP_FILENAME = "umap.pkl"
 
