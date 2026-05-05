@@ -6,26 +6,31 @@
 # modified, redistributed, or used in any other manner without the express
 # written consent of Cloudera, Inc.
 
-"""Ontology-to-taxonomy alignment for the SVM evidence path.
+"""Ontology-to-taxonomy alignment for the per-vocabulary SVM.
 
-The synth-trained SVM (``ml_train.train_svm``) produces predictions in
-**bundled-ontology** ICE.* code space (the keys of
-``synth_generators.GENERATORS``).  The pipeline at runtime fuses
-evidence in the **user-taxonomy** code space (whatever vocabulary the
-operator loaded — meta-tagging numeric dot codes, ICE.* itself for the
-OOTB sample, an enterprise schema, …).  Without a translator the
-SVM's predictions never appear as frame singletons (silently dropped
-in ``svm_to_mass``) and the SVM contributes nothing as evidence.
+The BFO/CCO synth corpus (``synth_generators.GENERATORS``) is keyed
+by ICE.* leaf codes.  The pipeline at runtime fuses evidence in the
+operator's **user-taxonomy** code space (numeric dot codes from a
+customer ``annotations`` table, ICE.* itself for the OOTB sample,
+an enterprise schema, …).  Bridging the two requires a mapping from
+each synth-generator's ICE leaf to the user code that best
+represents that concept in the operator's vocabulary.
 
-This module computes a per-vocabulary ICE.* → user-code alignment
-**once** per (ICE leaf set, user vocab, model) tuple, by reusing the
+This module computes that mapping — the alignment — by reusing the
 same ``LLMBackend.classify_batch`` interface the classifier already
 uses.  Each ICE leaf becomes a synthetic column sample (its
-generator's outputs are the values), and the LLM classifies the batch
-into the user vocabulary just as it would any real column.  Result is
-cached on disk, reloaded on subsequent runs, and consumed by
-``translate_proba`` at SVM-evidence-build time so the SVM finally
-contributes mass to user-taxonomy frame elements.
+generator's outputs are the values), and the LLM classifies the
+batch into the user vocabulary just as it would any real column.
+Result is cached on disk under a stable (ICE leaves, user codes,
+model) key, reloaded on subsequent vocab-loads.
+
+The alignment is consumed at **training time**, not runtime:
+``ml_train.train_svm_for_vocab`` projects the synth corpus's ICE
+labels through the alignment and trains a per-vocabulary SVM whose
+output classes ARE user codes.  Inference (``predict_svm`` →
+``svm_to_mass``) reads user-code-keyed proba directly, so there is
+no per-column translation step and no LLM in the SVM's classify-time
+critical path.
 
 ═══════════════════════════════════════════════════════════════════
 NOTE ON THEORETICAL RIGOR — please read before claiming independence
@@ -41,29 +46,30 @@ This alignment achieves *weakly non-distinct* evidence:
   • The SVM's **features** stay independent — TF-IDF char/word n-grams
     over column metadata, no embedding-stack dependency, no LLM
     column-vote dependency.
-  • The SVM's **training labels** stay independent of the live run's
-    LLM votes — labels come from the synth generators (each generator
-    is keyed on an ICE leaf code and emits values deterministically).
-  • The SVM's **prediction-to-frame-element mapping** is the only
-    place an LLM appears.  The same LLM that runs the live sweep is
-    used at vocab-load time to align ICE.* codes to user-taxonomy
-    codes.  If the LLM systematically misaligns ICE.X → user-Y when
-    user-Z is correct, the SVM (whose predictions get translated
-    through that misalignment) and the LLM (which would also tend
-    to vote user-Y for an ICE.X-shaped column on the live sweep)
-    will agree wrongly on those columns.
+  • The SVM's **training labels** are user codes derived from
+    (synth-generator-output, alignment[ICE]) pairs.  The alignment
+    LLM call happens once at vocab-load time, not per-column at
+    classify time.
+  • The SVM's **prediction-to-frame-element mapping** is now baked
+    into the model weights at training time.  If the LLM
+    systematically misaligns ICE.X → user-Y when user-Z is correct,
+    the SVM trained on that alignment will tend to predict user-Y
+    on ICE.X-shaped columns at inference, and so will the runtime
+    LLM sweep — they'll wrongly agree on those columns.
 
 That shared error mode is real but is **vocabulary-level, not
 column-level** — it doesn't grow with corpus size and it doesn't
 correlate with run-time evidence streams.  The discount calibration
-``classify.discounts.svm`` compensates; under this alignment design
-the correct value is materially lower than the M9-era 0.55 (which
+``classify.discounts.svm`` compensates; under this design the
+correct value is materially lower than the M9-era 0.55 (which
 compensated for *per-column* label-copying via the now-excised
 ``train_svm_on_frontier_labels`` retrain).
 
 Strict independence would require an alignment source that doesn't
 share weights or training data with the runtime LLM.  Future work:
 
+  • Overwatch as alignment mediator — review the proposed mapping
+    before training proceeds (Phase 2).
   • BM25 over (ICE labels + descriptions, user-vocab labels +
     descriptions) with a transformer reranker.  More plumbing,
     truly independent.
@@ -296,34 +302,3 @@ def _synth_generator_keys():
     """Lazy import to avoid circular module load at module-import time."""
     from atelier.classify.synth_generators import GENERATORS
     return GENERATORS.keys()
-
-
-def translate_proba(
-    proba: dict[str, float],
-    alignment: dict[str, str] | None,
-) -> dict[str, float]:
-    """Translate an ICE.*-keyed probability dict into user-taxonomy keys.
-
-    When multiple ICE codes map to the same user-taxonomy code, their
-    probabilities sum (correct under the projection — the user code is
-    the disjunction of the underlying ICE concepts).  ICE codes absent
-    from the alignment are dropped — an unmapped ICE prediction would
-    silently fall through ``svm_to_mass``'s frame check anyway, and
-    summing them under any aggregate user-code would inflate that
-    code's mass without justification.
-
-    Behavior preserved when ``alignment`` is None or empty: returns
-    the input unchanged.  Calling code therefore stays correct on
-    OOTB-sample runs where the user vocabulary IS the ICE ontology
-    (no translation needed) — the alignment for those runs ends up
-    as the identity, and translation is a no-op.
-    """
-    if not alignment:
-        return dict(proba)
-    out: dict[str, float] = {}
-    for code, prob in proba.items():
-        target = alignment.get(code)
-        if target is None:
-            continue
-        out[target] = out.get(target, 0.0) + float(prob)
-    return out

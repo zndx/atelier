@@ -280,6 +280,85 @@ def _install_fit_to_llm_catboost(
                            save_path, exc)
 
 
+def _ensure_per_vocab_svm(
+    cfg,
+    category_set: HierarchicalCategorySet,
+    alignment: dict[str, str],
+    *,
+    cache_dir: Path,
+    run_dir: Path,
+) -> Path:
+    """Cache-then-bundle the per-vocabulary SVM.
+
+    Pipeline counterpart to ``ml_train.train_svm_for_vocab``.  Walks
+    three steps:
+
+      1. Compute the vocab signature from ``category_set.leaf_codes``.
+      2. Cache lookup at ``cache_dir/{vocab_sig}.pkl``; train via
+         ``train_svm_for_vocab`` if absent.  The cache is keyed solely
+         by user-vocab leaves so multiple classify runs against the
+         same vocabulary share one trained model — alignment + train
+         is non-trivial work and re-doing it per run is wasteful.
+      3. Copy ``cache/<sig>.pkl`` (and the ``.classes.json`` sidecar)
+         into ``run_dir/svm.pkl`` so the run is self-contained for
+         reproducibility and Extend Classification reuse.
+
+    Finally, install the loaded model via ``ml_inference.install_svm``
+    so the rest of the pipeline's SVM evidence path (``predict_svm``)
+    uses the per-vocab model directly — no ``translate_proba`` step
+    needed at inference time.
+
+    Returns the run-dir path of the bundled SVM.  Raises on failure
+    (caller logs and continues — strict-mode landing is deferred).
+    """
+    from atelier.classify import ml_inference
+    from atelier.classify.artifact_set import compute_vocab_signature
+    from atelier.classify.ml_train import train_svm_for_vocab
+    from atelier.classify.svm_classifier import SVMClassifier
+
+    leaf_codes = sorted(getattr(category_set, "leaf_codes", set()))
+    if not leaf_codes:
+        raise ValueError(
+            "_ensure_per_vocab_svm: category_set has no leaf_codes — "
+            "cannot key cache or train"
+        )
+    vocab_sig = compute_vocab_signature(leaf_codes)
+
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{vocab_sig}.pkl"
+    cache_classes = cache_path.with_suffix(".classes.json")
+
+    if cache_path.is_file() and cache_classes.is_file():
+        logger.info(
+            "per-vocab SVM cache hit: %s (%d leaf codes)",
+            cache_path, len(leaf_codes),
+        )
+    else:
+        logger.info(
+            "per-vocab SVM cache miss: training for %d leaf codes "
+            "(%d alignment entries) → %s",
+            len(leaf_codes), len(alignment), cache_path,
+        )
+        train_svm_for_vocab(alignment, cache_path)
+
+    import shutil
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = run_dir / "svm.pkl"
+    bundle_classes = bundle_path.with_suffix(".classes.json")
+    shutil.copy2(cache_path, bundle_path)
+    shutil.copy2(cache_classes, bundle_classes)
+
+    model = SVMClassifier.load(bundle_path)
+    ml_inference.install_svm(model)
+    logger.info(
+        "per-vocab SVM bundled at %s and installed in-memory "
+        "(%d classes)", bundle_path, len(model._classes),
+    )
+    return bundle_path
+
+
 def run_classification_pipeline(
     cfg,
     fsm: AgentFSM,
@@ -792,14 +871,19 @@ def run_classification_pipeline(
 
         discounts = DiscountConfig.from_cfg(cfg)
 
-        # ── Ontology→user-taxonomy alignment for SVM evidence ──────
-        # The synth-trained SVM emits ICE.* (bundled-ontology) codes;
-        # without a per-vocabulary alignment, those predictions never
-        # appear as singletons in the user-taxonomy frame and the SVM
-        # contributes nothing.  Build the alignment once per (vocab,
-        # model) tuple and stash it on the run for the SVM evidence
-        # site to consume.  See ``ontology_alignment.py`` for the
-        # independence/discount rationale and known caveats.
+        # ── Per-vocabulary SVM (alignment → relabel → train → bundle) ──
+        # The BFO/CCO synth corpus is keyed by ICE.* leaves; the runtime
+        # frame is keyed by the operator's annotations vocabulary.  We
+        # build a one-time ICE.* → user-code alignment via the LLM, then
+        # train a per-vocab SVM whose labels ARE user codes — so at
+        # inference the predictions land directly in the user-taxonomy
+        # frame, no runtime translation needed.  Cache-then-bundle:
+        # train into ``build/cache/svm/{vocab_sig}.pkl`` and copy into
+        # ``build/results/{run_id}/svm.pkl`` so the run is reproducible
+        # on its own and Extend Classification picks up the bundled
+        # SVM/CatBoost pair without retraining.  See
+        # ``ontology_alignment.py`` for the independence/discount
+        # rationale.
         from atelier.classify.ontology_alignment import build_alignment
         try:
             svm_alignment = build_alignment(
@@ -811,10 +895,33 @@ def run_classification_pipeline(
         except Exception as exc:
             logger.warning(
                 "ontology_alignment: build failed — proceeding without "
-                "(SVM evidence will be vacuous on user-taxonomy runs): %s",
+                "(SVM evidence will be vacuous for this run): %s",
                 exc,
             )
             svm_alignment = {}
+
+        # Multi-run safety: clear any SVM that a prior pipeline run on
+        # this same process installed.  ``_ensure_per_vocab_svm``
+        # re-installs on success.  If it fails (or alignment is empty),
+        # the SVM source stays absent rather than carrying a stale
+        # prior-vocabulary model into the new frame.
+        ml_inference.reset_svm()
+
+        if svm_alignment:
+            try:
+                _ensure_per_vocab_svm(
+                    cfg, category_set, svm_alignment,
+                    cache_dir=build_dir / "cache" / "svm",
+                    run_dir=results_dir,
+                )
+            except Exception as exc:
+                # Don't make per-vocab SVM a hard prerequisite yet —
+                # the strict-mode tightening lands in a follow-up.  Log
+                # loudly so the missing source is visible in run logs.
+                logger.warning(
+                    "per-vocab SVM build failed — SVM evidence will be "
+                    "absent for this run: %s", exc,
+                )
 
         # Try sentence-transformers for cosine
         has_embeddings = False
@@ -1284,7 +1391,6 @@ def run_classification_pipeline(
                 use_cosine=has_embeddings,
                 discounts=discounts,
                 fusion_strategy=cfg.classify_fusion_strategy,
-                svm_alignment=svm_alignment,
             )
             classifications.append(result)
 
@@ -1942,7 +2048,6 @@ def _classify_column(
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
-    svm_alignment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -2040,19 +2145,17 @@ def _classify_column(
         logger.debug("CatBoost unavailable for %s: %s", col.name, exc)
 
     # 6. SVM (if model available).
-    # The synth-trained SVM emits ICE.* (bundled-ontology) codes; the
-    # per-vocabulary ``svm_alignment`` translates them into the user's
-    # taxonomy before svm_to_mass tests frame membership.  Without
-    # alignment (or on OOTB-sample runs where user vocab IS ICE.*), the
-    # translate_proba helper is an identity pass-through and the SVM
-    # behavior is unchanged from the pre-refactor path.  See
-    # ``ontology_alignment.py`` for the independence/discount caveats.
+    # The per-vocabulary SVM (trained at ``_load_vocabulary`` time via
+    # ``ml_train.train_svm_for_vocab`` against the BFO/CCO synth corpus
+    # relabeled through the ICE.* → user-code alignment) emits user
+    # codes natively, so ``svm_to_mass`` can test frame membership
+    # directly with no runtime translation step.  When the per-vocab
+    # SVM build failed earlier in the pipeline, ``predict_svm`` returns
+    # None and the SVM source is silently absent — strict-mode
+    # tightening is deferred per project plan.
     try:
         from atelier.classify.ml_inference import predict_svm
-        from atelier.classify.ontology_alignment import translate_proba
         svm_proba = predict_svm(features)
-        if svm_proba:
-            svm_proba = translate_proba(svm_proba, svm_alignment)
         if svm_proba:
             svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
