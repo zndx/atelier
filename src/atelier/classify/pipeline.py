@@ -1791,6 +1791,43 @@ def _load_domain_annotations(
     cache_path = cache_dir / f"{connection_name}__{database}.json"
 
     if cache_path.exists():
+        # Pre-flight staleness check.  Caches written by older loader
+        # versions contained synthetic-parent placeholders (label
+        # ``Level{N}_X``) — these signal a cache written by code that
+        # also dropped description / common_names on non-leaf rows.
+        # Treat as stale and re-fetch from Hive so the new loader
+        # populates the cache with the rich Hive metadata.  Caches
+        # written by the current loader carry no placeholders, so the
+        # check is idempotent: one AMP restart heals the cache, and
+        # subsequent restarts see no placeholder → stable cache load.
+        try:
+            import json as _json
+            import re as _re
+            with open(cache_path) as _f:
+                _raw = _json.load(_f)
+            _has_placeholder = any(
+                _re.match(r"^Level\d+_", str(r.get("label") or ""))
+                for r in _raw
+            )
+            # CSV-oversplit corruption: caches written before the
+            # _repair_csv_oversplit pass landed contain descriptions
+            # like ``"Unstructured`` (leading orphan quote).  Re-fetch
+            # so the loader runs reassembly against the full Hive row.
+            _has_oversplit = any(
+                str(r.get("description") or "").lstrip().startswith('"')
+                for r in _raw
+            )
+            if _has_placeholder or _has_oversplit:
+                log.warning(
+                    "Cache %s is stale (placeholder=%s, oversplit=%s) — "
+                    "re-fetching from Hive",
+                    cache_path, _has_placeholder, _has_oversplit,
+                )
+                cache_path.unlink()
+        except Exception as _exc:
+            log.warning("Cache staleness check failed (%s); proceeding with cache load", _exc)
+
+    if cache_path.exists():
         cs = load_annotations_from_json(cache_path, hierarchical=True)
         if len(cs.categories) > 0:
             log.info(
@@ -2470,6 +2507,10 @@ def _write_parquet(
             "predicted_code_pre_review": c.get("predicted_code_pre_review", ""),
             "review_decision": c.get("review_decision", ""),
             "review_rationale": c.get("review_rationale", ""),
+            # Populated only when review_decision == "reroute": the
+            # specific shortlist code the agent chose, distinct from
+            # the deterministic backoff target (cautious_code).
+            "review_chosen_code": c.get("review_chosen_code", ""),
         }
         # SHAP columns (present when SHAP analysis ran)
         for rank in range(1, 4):

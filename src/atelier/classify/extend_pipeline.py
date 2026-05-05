@@ -457,6 +457,7 @@ def run_extend_classification(
                 "predicted_code_pre_review": "",
                 "review_decision": "",
                 "review_rationale": "",
+                "review_chosen_code": "",
                 "svm_disagreement": svm_disagreement or "",
             })
 
@@ -713,6 +714,7 @@ def _write_extend_parquet(
             "predicted_code_pre_review": c.get("predicted_code_pre_review", ""),
             "review_decision": c.get("review_decision", ""),
             "review_rationale": c.get("review_rationale", ""),
+            "review_chosen_code": c.get("review_chosen_code", ""),
         }
         # SHAP columns left empty for Extend (we don't run SHAP at
         # inference time).  Populated by the Embeddings UI as "—".
