@@ -6,7 +6,7 @@
 // modified, redistributed, or used in any other manner without the express
 // written consent of Cloudera, Inc.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Badge,
@@ -15,6 +15,7 @@ import {
   Col,
   Descriptions,
   message,
+  Popconfirm,
   Progress,
   Radio,
   Row,
@@ -36,7 +37,7 @@ import {
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
-import { useDataset, type MLArtifactSet } from "../contexts/DatasetContext";
+import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -900,6 +901,53 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   );
 }
 
+// Shape returned by /api/artifact-sets/{id}/extend-scope.  Each field
+// the panel surfaces as a salient measure for the *selected* RunID.
+interface ExtendScope {
+  artifact_set_id: string;
+  source_id: string;
+  same_source: boolean;
+  bundle: { catboost: boolean; svm: boolean; umap: boolean };
+  classes_count: number;
+  embedding_model: string | null;
+  embedding_dim: number | null;
+  vocab_signature: string | null;
+  is_active: boolean;
+  is_archived: boolean;
+  created_at: string | null;
+  summary: string | null;
+  training_source_id: string | null;
+  fsm_run_id: string | null;
+  producing_dataset_id: string | null;
+  source_table_count: number | null;
+  source_column_count: number | null;
+  classified_table_count: number | null;
+  classified_column_count: number | null;
+  new_table_count: number | null;
+  new_column_count: number | null;
+  vocab_compatibility: {
+    status: "ok" | "superset" | "partial" | "disjoint";
+    missing_codes: string[];
+    extra_codes: string[];
+    artifact_signature: string;
+    candidate_signature: string;
+  };
+}
+
+const COMPAT_COLOR: Record<string, string> = {
+  ok: "green",
+  superset: "blue",
+  partial: "orange",
+  disjoint: "red",
+};
+
+const COMPAT_DESCRIPTION: Record<string, string> = {
+  ok: "Artifact vocab matches the source vocab exactly.",
+  superset: "Source vocab includes all artifact codes plus extras the model can't predict.",
+  partial: "Artifact has codes the source vocab doesn't define — Extend will still run, but predictions may emit unknown codes.",
+  disjoint: "No vocab overlap — almost certainly the wrong artifact for this source.",
+};
+
 function MLArtifactsCard() {
   const {
     activeSourceId,
@@ -907,32 +955,71 @@ function MLArtifactsCard() {
     datasets,
     activeDatasetId,
     artifactSets,
-    activeArtifactSetId,
     setActiveArtifactSetId,
     refreshArtifactSets,
   } = useDataset();
 
+  const [scope, setScope] = useState<ExtendScope | null>(null);
+  const [scopeLoading, setScopeLoading] = useState(false);
   const [extending, setExtending] = useState<boolean>(false);
-  const [archiving, setArchiving] = useState<string | null>(null);
 
   const activeSource = sources.find((s) => s.id === activeSourceId);
   const activeDataset = datasets.find((d) => d.id === activeDatasetId);
 
-  const archiveArtifact = async (id: string) => {
-    setArchiving(id);
-    try {
-      await fetch(`/api/artifact-sets/${encodeURIComponent(id)}/archive`, {
-        method: "POST",
-      });
-      await refreshArtifactSets();
-    } finally {
-      setArchiving(null);
+  // Resolve the artifact set to display.  Priority:
+  //   1. The artifact set the selected dataset CONSUMED (Extend runs)
+  //      OR PRODUCED (classify runs) — both stamp dataset.artifact_set_id.
+  //   2. Lineage fallback: match by fsm_run_id.
+  //   3. None — render an empty-state hint.
+  const targetArtifactSet = (() => {
+    if (!activeDataset) return null;
+    if (activeDataset.artifact_set_id) {
+      const m = artifactSets.find((a) => a.id === activeDataset.artifact_set_id);
+      if (m) return m;
     }
+    if (activeDataset.fsm_run_id) {
+      const m = artifactSets.find((a) => a.fsm_run_id === activeDataset.fsm_run_id);
+      if (m) return m;
+    }
+    return null;
+  })();
+
+  const fetchScope = useCallback(async () => {
+    if (!targetArtifactSet || !activeSourceId) {
+      setScope(null);
+      return;
+    }
+    setScopeLoading(true);
+    try {
+      const r = await fetch(
+        `/api/artifact-sets/${encodeURIComponent(targetArtifactSet.id)}/extend-scope?source_id=${encodeURIComponent(activeSourceId)}`,
+      );
+      const data = await r.json();
+      if (data.error) {
+        setScope(null);
+      } else {
+        setScope(data as ExtendScope);
+      }
+    } catch {
+      setScope(null);
+    } finally {
+      setScopeLoading(false);
+    }
+  }, [targetArtifactSet, activeSourceId]);
+
+  useEffect(() => {
+    fetchScope();
+  }, [fetchScope]);
+
+  const promote = async () => {
+    if (!targetArtifactSet) return;
+    await setActiveArtifactSetId(targetArtifactSet.id);
+    await fetchScope();
   };
 
   const startExtend = async () => {
-    if (!activeSourceId || !activeArtifactSetId) {
-      message.error("Select a data source and an artifact set first");
+    if (!activeSourceId || !targetArtifactSet) {
+      message.error("Select a data source and a Run ID with an artifact set first");
       return;
     }
     setExtending(true);
@@ -942,14 +1029,14 @@ function MLArtifactsCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_id: activeSourceId,
-          artifact_set_id: activeArtifactSetId,
+          artifact_set_id: targetArtifactSet.id,
           parent_dataset_id: activeDatasetId ?? null,
         }),
       });
       const data = await r.json();
       if (data.started) {
         message.success(
-          `Extend Classification started — using artifact ${activeArtifactSetId.slice(0, 8)}`,
+          `Extend Classification started — using artifact ${targetArtifactSet.id.slice(0, 8)}`,
         );
       } else {
         message.error(data.error || "Failed to start Extend Classification");
@@ -961,31 +1048,37 @@ function MLArtifactsCard() {
     }
   };
 
-  const canExtend = Boolean(
-    activeSourceId && activeArtifactSetId && activeDataset,
-  );
+  const canExtend = Boolean(activeSourceId && targetArtifactSet && activeDataset);
+
+  // Header label — mirrors the Classification Pipeline card's pattern of
+  // surfacing the source the *selected run* was about, not the sidebar's
+  // current source (which the operator may have changed).
+  const headerSummary = (() => {
+    if (!activeSource) return <Text type="secondary">No source selected</Text>;
+    if (!activeDataset) return (
+      <Text type="secondary">
+        Source: <Text code>{activeSource.display_name}</Text>
+      </Text>
+    );
+    return (
+      <Text type="secondary">
+        Source: <Text code>{activeSource.display_name}</Text>{" · "}
+        Run: <Text code>{(activeDataset.fsm_run_id ?? activeDataset.id).slice(0, 8)}</Text>
+        {" · "}v{activeDataset.version_number}
+      </Text>
+    );
+  })();
 
   return (
     <Card
       title="ML Artifacts"
       extra={
         <Space>
-          {activeSource ? (
-            <Text type="secondary">
-              Source: <Text code>{activeSource.display_name}</Text>
-              {activeDataset && (
-                <>
-                  {" · "}
-                  Dataset: <Text code>v{activeDataset.version_number}</Text>
-                </>
-              )}
-            </Text>
-          ) : (
-            <Text type="secondary">No source selected</Text>
-          )}
+          {headerSummary}
           <Button
             icon={<ReloadOutlined />}
-            onClick={refreshArtifactSets}
+            onClick={() => { refreshArtifactSets(); fetchScope(); }}
+            loading={scopeLoading}
             size="small"
           >
             Refresh
@@ -993,8 +1086,8 @@ function MLArtifactsCard() {
           <Tooltip
             title={
               !canExtend
-                ? "Select an active source, dataset, and artifact set to enable Extend"
-                : "Run a streamlined classification on the selected data source using the active artifact set (no LLM, no DST iteration)"
+                ? "Select a Run ID in Data Source whose run produced (or consumed) an artifact set."
+                : "Apply this run's CatBoost (and SVM/UMAP if bundled) to the selected source — skips the LLM sweep, DST iteration, and re-training."
             }
           >
             <Button
@@ -1011,129 +1104,225 @@ function MLArtifactsCard() {
         </Space>
       }
     >
-      {artifactSets.length === 0 ? (
+      {!activeDataset ? (
         <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          No artifact sets registered yet. Run the Classification Pipeline to
-          produce one — each completed classify run registers its trained
-          CatBoost / SVM / UMAP bundle here for re-use.
+          No Run ID selected. Pick a row in the Data Source panel — its
+          Run produces (or consumes) the artifact set displayed here.
+        </Paragraph>
+      ) : !targetArtifactSet ? (
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          The selected Run ({(activeDataset.fsm_run_id ?? activeDataset.id).slice(0, 8)})
+          has no registered artifact set.{" "}
+          {artifactSets.length === 0
+            ? "Run the Classification Pipeline to produce one — each completed classify run registers its trained CatBoost / SVM / UMAP bundle for re-use."
+            : "This is normal for legacy runs that pre-date artifact-set lineage."}
         </Paragraph>
       ) : (
-        <Table
-          size="small"
-          pagination={false}
-          rowKey="id"
-          dataSource={artifactSets}
-          onRow={(record) => ({
-            style: {
-              cursor: "pointer",
-              background: record.id === activeArtifactSetId ? "#e6f4ff" : undefined,
-            },
-            onClick: () => setActiveArtifactSetId(record.id),
-          })}
-          columns={[
-            {
-              title: "Active",
-              key: "active",
-              width: 70,
-              align: "center" as const,
-              render: (_: unknown, record: MLArtifactSet) => (
-                <Radio
-                  checked={record.is_active}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveArtifactSetId(record.id);
-                  }}
-                />
-              ),
-            },
-            {
-              title: "Run ID",
-              dataIndex: "fsm_run_id",
-              key: "run_id",
-              width: 110,
-              render: (run_id: string | null, record: MLArtifactSet) => {
-                const id = run_id ?? record.id;
-                return run_id ? (
-                  <Link to={`/overwatch/${run_id}`}>
-                    <Text code>{id.slice(0, 8)}</Text>
-                  </Link>
+        <>
+          <Descriptions column={2} size="small" bordered>
+            <Descriptions.Item label="Status">
+              <Space>
+                {targetArtifactSet.is_active ? (
+                  <Tag color="green">Active</Tag>
+                ) : targetArtifactSet.is_archived ? (
+                  <Tag>Archived</Tag>
                 ) : (
-                  <Text code type="secondary">{id.slice(0, 8)}</Text>
-                );
-              },
-            },
-            {
-              title: "Created",
-              dataIndex: "created_at",
-              key: "created",
-              render: (v: string) => {
-                if (!v) return "—";
+                  <Tag color="blue">Available</Tag>
+                )}
+                {!targetArtifactSet.is_active && !targetArtifactSet.is_archived && (
+                  <Button size="small" type="link" onClick={promote}>
+                    Make active
+                  </Button>
+                )}
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="Bundle">
+              <Space size={4}>
+                <Tooltip title="CatBoost classifier (always present in a registered set)">
+                  <Tag
+                    color={targetArtifactSet.catboost_path ? "blue" : "default"}
+                    style={{ margin: 0 }}
+                  >
+                    CB
+                  </Tag>
+                </Tooltip>
+                <Tooltip
+                  title={
+                    targetArtifactSet.svm_path
+                      ? "Incremental SVM bundled — second-look classifier"
+                      : "No SVM in this bundle"
+                  }
+                >
+                  <Tag
+                    color={targetArtifactSet.svm_path ? "blue" : "default"}
+                    style={{ margin: 0 }}
+                  >
+                    SVM
+                  </Tag>
+                </Tooltip>
+                <Tooltip
+                  title={
+                    targetArtifactSet.umap_path
+                      ? "UMAP projection bundled — Extend lands in same coordinate space"
+                      : "No UMAP — Extend re-fits a fresh projection"
+                  }
+                >
+                  <Tag
+                    color={targetArtifactSet.umap_path ? "blue" : "default"}
+                    style={{ margin: 0 }}
+                  >
+                    UMAP
+                  </Tag>
+                </Tooltip>
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="Run ID">
+              {targetArtifactSet.fsm_run_id ? (
+                <Link to={`/overwatch/${targetArtifactSet.fsm_run_id}`}>
+                  <Text code>{targetArtifactSet.fsm_run_id.slice(0, 8)}</Text>
+                </Link>
+              ) : (
+                <Text code type="secondary">
+                  {targetArtifactSet.id.slice(0, 8)}
+                </Text>
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="Created">
+              {targetArtifactSet.created_at ? (() => {
                 try {
-                  return new Date(v).toLocaleString();
+                  return new Date(targetArtifactSet.created_at).toLocaleString();
                 } catch {
-                  return v;
+                  return targetArtifactSet.created_at;
                 }
-              },
-            },
-            {
-              title: "Summary",
-              dataIndex: "summary",
-              key: "summary",
-              ellipsis: true,
-              render: (v: string | null) => v || "—",
-            },
-            {
-              title: "Models",
-              key: "models",
-              width: 130,
-              render: (_: unknown, record: MLArtifactSet) => (
-                <Space size={4}>
-                  <Tooltip title="CatBoost classifier">
-                    <Tag color={record.catboost_path ? "blue" : "default"} style={{ margin: 0 }}>
-                      CB
-                    </Tag>
-                  </Tooltip>
-                  <Tooltip title={record.svm_path ? "Incremental SVM" : "No SVM in this bundle"}>
-                    <Tag color={record.svm_path ? "blue" : "default"} style={{ margin: 0 }}>
-                      SVM
-                    </Tag>
-                  </Tooltip>
-                  <Tooltip
-                    title={
-                      record.umap_path
-                        ? "UMAP projection bundled — Extend lands in same coordinate space"
-                        : "No UMAP — Extend re-fits a fresh projection"
+              })() : "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="Classes">
+              {scope?.classes_count ?? "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="Embedding">
+              {scope?.embedding_model ? (
+                <>
+                  <Text code>{scope.embedding_model}</Text>
+                  {scope.embedding_dim != null && (
+                    <Text type="secondary" style={{ marginLeft: 6 }}>
+                      ({scope.embedding_dim}d)
+                    </Text>
+                  )}
+                </>
+              ) : (
+                "—"
+              )}
+            </Descriptions.Item>
+
+            {/* ── Training scope (what CatBoost was fit on) ── */}
+            {scope?.classified_column_count != null && (
+              <Descriptions.Item label="Trained On">
+                {scope.classified_column_count.toLocaleString()} columns
+                {scope.classified_table_count != null && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    across {scope.classified_table_count.toLocaleString()} tables
+                  </Text>
+                )}
+              </Descriptions.Item>
+            )}
+
+            {/* ── Source scope + delta — the "extend headroom" the user
+                wants to see for Extend Classification planning. ── */}
+            {scope?.source_column_count != null && (
+              <Descriptions.Item label="Source Scope">
+                {scope.source_column_count.toLocaleString()} columns
+                {scope.source_table_count != null && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    across {scope.source_table_count.toLocaleString()} tables
+                  </Text>
+                )}
+              </Descriptions.Item>
+            )}
+            {scope &&
+              (scope.new_column_count != null || scope.new_table_count != null) && (
+                <Descriptions.Item
+                  label={
+                    <Tooltip
+                      title={
+                        scope.same_source
+                          ? "Entities present in the source today that this artifact set hasn't classified yet — what an Extend run would target."
+                          : "Artifact was trained on a different source — Extend would classify the candidate source from scratch using this CatBoost."
+                      }
+                    >
+                      New Entities
+                    </Tooltip>
+                  }
+                >
+                  <Tag
+                    color={
+                      scope.new_column_count && scope.new_column_count > 0
+                        ? "purple"
+                        : "default"
                     }
                   >
-                    <Tag color={record.umap_path ? "blue" : "default"} style={{ margin: 0 }}>
-                      UMAP
-                    </Tag>
-                  </Tooltip>
-                </Space>
-              ),
-            },
-            {
-              title: "",
-              key: "actions",
-              width: 60,
-              render: (_: unknown, record: MLArtifactSet) => (
-                <Tooltip title="Archive (files on disk are kept)">
-                  <Button
-                    icon={<DeleteOutlined />}
-                    size="small"
-                    type="text"
-                    danger
-                    loading={archiving === record.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      archiveArtifact(record.id);
-                    }}
-                  />
+                    {scope.new_column_count != null
+                      ? `${scope.new_column_count.toLocaleString()} columns`
+                      : "—"}
+                  </Tag>
+                  {scope.new_table_count != null && scope.new_table_count > 0 && (
+                    <Text type="secondary" style={{ marginLeft: 6 }}>
+                      across {scope.new_table_count.toLocaleString()} new tables
+                    </Text>
+                  )}
+                  {!scope.same_source && (
+                    <Text type="secondary" style={{ marginLeft: 6 }}>
+                      (cross-source extend)
+                    </Text>
+                  )}
+                </Descriptions.Item>
+              )}
+
+            {/* ── Vocab compatibility — surfaced inline so the operator
+                sees the warning before clicking Extend. ── */}
+            {scope?.vocab_compatibility && (
+              <Descriptions.Item label="Vocab" span={2}>
+                <Tooltip
+                  title={
+                    COMPAT_DESCRIPTION[scope.vocab_compatibility.status] ??
+                    scope.vocab_compatibility.status
+                  }
+                >
+                  <Tag
+                    color={
+                      COMPAT_COLOR[scope.vocab_compatibility.status] ?? "default"
+                    }
+                  >
+                    {scope.vocab_compatibility.status}
+                  </Tag>
                 </Tooltip>
-              ),
-            },
-          ]}
-        />
+                {scope.vocab_compatibility.missing_codes.length > 0 && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    {scope.vocab_compatibility.missing_codes.length} artifact
+                    code{scope.vocab_compatibility.missing_codes.length === 1
+                      ? ""
+                      : "s"}{" "}
+                    not in source vocab
+                  </Text>
+                )}
+                {scope.vocab_compatibility.extra_codes.length > 0 && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    · {scope.vocab_compatibility.extra_codes.length} source
+                    code{scope.vocab_compatibility.extra_codes.length === 1
+                      ? ""
+                      : "s"}{" "}
+                    artifact can't predict
+                  </Text>
+                )}
+              </Descriptions.Item>
+            )}
+
+            {targetArtifactSet.summary && (
+              <Descriptions.Item label="Summary" span={2}>
+                {targetArtifactSet.summary}
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        </>
       )}
     </Card>
   );
@@ -1148,7 +1337,11 @@ function DataSourceCard() {
     datasets,
     activeDatasetId,
     setActiveDatasetId,
+    refreshDatasets,
+    refreshArtifactSets,
   } = useDataset();
+
+  const [archiving, setArchiving] = useState<string | null>(null);
 
   const activateVersion = (datasetId: string) => {
     fetch(`/api/datasets/${encodeURIComponent(datasetId)}/activate`, {
@@ -1157,6 +1350,36 @@ function DataSourceCard() {
       .then((r) => r.json())
       .then(() => setActiveDatasetId(datasetId))
       .catch(() => {});
+  };
+
+  // Archive both the dataset and its associated artifact set in one
+  // click.  Operators think of the row as "the run" — splitting these
+  // across two panels means an archive on one side leaves the other
+  // dangling and visible.  Files on disk are untouched (soft-delete).
+  const archiveRun = async (
+    datasetId: string,
+    artifactSetId: string | null | undefined,
+  ) => {
+    setArchiving(datasetId);
+    try {
+      const calls: Promise<unknown>[] = [
+        fetch(`/api/datasets/${encodeURIComponent(datasetId)}/archive`, {
+          method: "POST",
+        }),
+      ];
+      if (artifactSetId) {
+        calls.push(
+          fetch(
+            `/api/artifact-sets/${encodeURIComponent(artifactSetId)}/archive`,
+            { method: "POST" },
+          ),
+        );
+      }
+      await Promise.all(calls);
+      await Promise.all([refreshDatasets(), refreshArtifactSets()]);
+    } finally {
+      setArchiving(null);
+    }
   };
 
   return (
@@ -1271,16 +1494,43 @@ function DataSourceCard() {
             },
             {
               title: "",
-              key: "overwatch",
-              width: 90,
-              render: (_: unknown, record: any) =>
-                record.fsm_run_id ? (
-                  <Link to={`/overwatch/${record.fsm_run_id}`}>
-                    <Tag color="purple" style={{ cursor: "pointer", margin: 0 }}>
-                      Overwatch
-                    </Tag>
-                  </Link>
-                ) : null,
+              key: "actions",
+              width: 130,
+              render: (_: unknown, record: any) => (
+                <Space size={4} onClick={(e) => e.stopPropagation()}>
+                  {record.fsm_run_id && (
+                    <Link to={`/overwatch/${record.fsm_run_id}`}>
+                      <Tag color="purple" style={{ cursor: "pointer", margin: 0 }}>
+                        Overwatch
+                      </Tag>
+                    </Link>
+                  )}
+                  <Popconfirm
+                    title="Archive this run?"
+                    description={
+                      record.is_active
+                        ? "This is the active dataset — archiving hides both the dataset and its ML artifact bundle. Files on disk are kept."
+                        : "Archives both the dataset and its ML artifact bundle. Files on disk are kept."
+                    }
+                    okText="Archive"
+                    okButtonProps={{ danger: true }}
+                    cancelText="Cancel"
+                    onConfirm={() =>
+                      archiveRun(record.id, record.artifact_set_id)
+                    }
+                  >
+                    <Tooltip title="Archive run (dataset + ML artifacts)">
+                      <Button
+                        icon={<DeleteOutlined />}
+                        size="small"
+                        type="text"
+                        danger
+                        loading={archiving === record.id}
+                      />
+                    </Tooltip>
+                  </Popconfirm>
+                </Space>
+              ),
             },
           ]}
         />
@@ -1761,25 +2011,47 @@ export default function Status() {
   const runConnectionRefresh = () => {
     if (!selectedConn) return;
     setConnLoading(true);
-    fetch(`/api/data-connections/${encodeURIComponent(selectedConn)}/refresh`, {
-      method: "POST",
-    })
+    // Fetch the probe result and the persisted data-source rows in
+    // parallel.  The persisted rows are the source of truth for
+    // ``vocab_uri`` — without hydrating from them, every refresh would
+    // overwrite the operator's prior vocabulary assignment with a
+    // ``${dbName}.annotations`` default and the Select would silently
+    // drift away from the value PATCHed to the server.
+    const probe = fetch(
+      `/api/data-connections/${encodeURIComponent(selectedConn)}/refresh`,
+      { method: "POST" },
+    ).then((r) => r.json());
+    const sources = fetch("/api/data-sources")
       .then((r) => r.json())
-      .then((data: RefreshResult) => {
+      .catch(() => ({ sources: [] }));
+    Promise.all([probe, sources])
+      .then(([data, srcResp]: [RefreshResult, { sources?: Array<{ id: string; vocab_uri?: string }> }]) => {
         setRefreshResult(data);
-        if (data.ok && data.databases) {
-          // Auto-enable databases that have annotations; auto-select their vocab_uri
-          const enabled: Record<string, boolean> = {};
-          const vocabs: Record<string, string> = {};
-          for (const db of data.databases) {
-            enabled[db.name] = db.has_annotations;
-            if (db.has_annotations) {
-              vocabs[db.name] = `${db.name}.annotations`;
-            }
+        if (!data.ok || !data.databases) return;
+
+        const persistedByDb: Record<string, string> = {};
+        for (const s of srcResp.sources ?? []) {
+          // source_id format: "<connection>/<database>"
+          const [conn, dbName] = (s.id || "").split("/", 2);
+          if (conn === selectedConn && dbName) {
+            persistedByDb[dbName] = s.vocab_uri ?? "";
           }
-          setDbEnabled(enabled);
-          setDbVocabUri(vocabs);
         }
+
+        const enabled: Record<string, boolean> = {};
+        const vocabs: Record<string, string> = {};
+        for (const db of data.databases) {
+          // Enabled iff a non-archived row exists for this db.
+          enabled[db.name] = persistedByDb[db.name] !== undefined;
+          // Hydration order: persisted server value > auto-default.
+          if (persistedByDb[db.name] !== undefined) {
+            vocabs[db.name] = persistedByDb[db.name];
+          } else if (db.has_annotations) {
+            vocabs[db.name] = `${db.name}.annotations`;
+          }
+        }
+        setDbEnabled(enabled);
+        setDbVocabUri(vocabs);
       })
       .catch((e) =>
         setRefreshResult({
@@ -2367,14 +2639,18 @@ export default function Status() {
 
               const handleToggle = (dbName: string, checked: boolean) => {
                 setDbEnabled((prev) => ({ ...prev, [dbName]: checked }));
-                if (checked && !dbVocabUri[dbName]) {
-                  // Auto-pick own annotations if available
-                  const db = dbs.find((d) => d.name === dbName);
-                  if (db?.has_annotations) {
-                    setDbVocabUri((prev) => ({ ...prev, [dbName]: `${dbName}.annotations` }));
-                  }
+                // Compute the vocab_uri to send NOW — reading from the
+                // ``dbVocabUri`` state object alone races against the
+                // setDbVocabUri below (React batches updates), so on the
+                // first toggle-on the POST would otherwise carry an empty
+                // ``vocab_uri`` and the operator's default would not
+                // persist.
+                const db = dbs.find((d) => d.name === dbName);
+                let vocabForRequest = dbVocabUri[dbName] || "";
+                if (checked && !vocabForRequest && db?.has_annotations) {
+                  vocabForRequest = `${dbName}.annotations`;
+                  setDbVocabUri((prev) => ({ ...prev, [dbName]: vocabForRequest }));
                 }
-                // Create/archive data source
                 const sourceId = `${selectedConn}/${dbName}`;
                 if (checked) {
                   fetch("/api/data-sources", {
@@ -2384,13 +2660,31 @@ export default function Status() {
                       source_id: sourceId,
                       source_type: "hive",
                       display_name: `Hive: ${sourceId}`,
-                      vocab_uri: dbVocabUri[dbName] || "",
+                      vocab_uri: vocabForRequest,
                     }),
-                  }).catch(() => {});
+                  })
+                    .then((r) => r.json())
+                    .then((j) => {
+                      if (j?.error) {
+                        message.error(`Could not enable ${dbName}: ${j.error}`);
+                      }
+                    })
+                    .catch((e) =>
+                      message.error(`Could not enable ${dbName}: ${e}`),
+                    );
                 } else {
                   fetch(`/api/data-sources/${encodeURIComponent(sourceId)}/archive`, {
                     method: "POST",
-                  }).catch(() => {});
+                  })
+                    .then((r) => r.json())
+                    .then((j) => {
+                      if (j?.error) {
+                        message.error(`Could not disable ${dbName}: ${j.error}`);
+                      }
+                    })
+                    .catch((e) =>
+                      message.error(`Could not disable ${dbName}: ${e}`),
+                    );
                 }
               };
 
@@ -2401,7 +2695,20 @@ export default function Status() {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ vocab_uri: uri }),
-                }).catch(() => {});
+                })
+                  .then((r) => r.json())
+                  .then((j) => {
+                    if (j?.error) {
+                      message.error(`Could not save vocabulary for ${dbName}: ${j.error}`);
+                    } else {
+                      message.success(
+                        `Vocabulary for ${dbName} → ${uri || "(none)"}`,
+                      );
+                    }
+                  })
+                  .catch((e) =>
+                    message.error(`Could not save vocabulary for ${dbName}: ${e}`),
+                  );
               };
 
               return (
