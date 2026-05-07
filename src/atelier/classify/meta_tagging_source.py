@@ -132,16 +132,16 @@ def exclude_reference_columns(samples: list[TableSample]) -> list[TableSample]:
 
     Reference columns are synth-generator answer keys — they encode a
     paired natural-named column's reference code directly in their
-    name.  On production data the regex never matches, so this is a
-    no-op there.  On the UAT synth corpus this is the enforcement
-    point that prevents the LLM from being asked to classify answer
-    keys (and keeps them out of sibling contexts, which would leak
-    the code into other columns' embeddings).
+    name.  On the UAT synth corpus this is the enforcement point that
+    prevents the LLM from being asked to classify answer keys (and
+    keeps them out of sibling contexts, which would leak the code into
+    other columns' embeddings).
 
-    Applied uniformly after sample load regardless of loader (Hive
-    sampler, fixture loader, meta-tagging loader).  The meta-tagging
-    loader already filters internally, so calling this again is safe
-    (idempotent).
+    WARNING: the regex CAN match legitimate production column names
+    (e.g. ``var_01``, ``col_12``, ``val_33``).  Callers must NOT
+    apply this filter to Hive-sampled production data.  The pipeline
+    gates this via ``_samples_from_hive``; the meta-tagging loader
+    filters internally (safe — it only processes synth data).
     """
     cleaned: list[TableSample] = []
     for ts in samples:

@@ -938,6 +938,8 @@ def llm_to_mass(
     alternatives: list[dict],
     frame: FrameOfDiscernment,
     discount: float = 0.15,
+    *,
+    allow_annotation_fallback: bool = True,
 ) -> BeliefAssignment:
     """Convert LLM classification to a mass function.
 
@@ -962,7 +964,10 @@ def llm_to_mass(
     if not category_code:
         return frame.vacuous()
 
-    primary_fe = _resolve_to_focal_element(category_code, frame)
+    primary_fe = _resolve_to_focal_element(
+        category_code, frame,
+        allow_annotation_fallback=allow_annotation_fallback,
+    )
     if primary_fe is None:
         import logging
         logging.getLogger(__name__).debug(
@@ -991,7 +996,10 @@ def llm_to_mass(
                 alt_code = alt.get("code", "")
                 alt_conf = alt.get("confidence", 0.0)
                 alt_fe = (
-                    _resolve_to_focal_element(alt_code, frame) if alt_code else None
+                    _resolve_to_focal_element(
+                        alt_code, frame,
+                        allow_annotation_fallback=allow_annotation_fallback,
+                    ) if alt_code else None
                 )
                 if alt_fe is not None and alt_conf > 0:
                     alt_mass = (alt_conf / alt_total) * remaining
@@ -1008,6 +1016,8 @@ def llm_to_mass(
 def _resolve_to_focal_element(
     code: str,
     frame: FrameOfDiscernment,
+    *,
+    allow_annotation_fallback: bool = True,
 ) -> FocalElement | None:
     """Resolve an LLM-emitted code to a frame focal element.
 
@@ -1031,6 +1041,14 @@ def _resolve_to_focal_element(
          singleton (e.g.  ``ICE.SENSITIVE.PID.IDENTITY.GOVID`` →
          ``ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN`` when SSN is the
          only descendant in the frame).
+      5. Annotation-mnemonic fallback (R1): the LLM occasionally
+         emits the abbreviated mnemonic (``SSN``, ``EMAIL``,
+         ``NAMEFULL``) instead of a numeric dot-code.  When paths
+         1-4 fail and ``allow_annotation_fallback`` is True, look
+         the mnemonic up in the frame's category-set index and
+         resolve to that node's focal element.  Closes the
+         33%-of-corpus "evidence_sources.llm = {}" gap that the
+         strict numeric resolver previously left open.
 
     Returns ``None`` for unresolvable / ambiguous codes.
     """
@@ -1050,6 +1068,11 @@ def _resolve_to_focal_element(
     matches = [s for s in frame.singletons if s.startswith(prefix)]
     if len(matches) == 1:
         return frame.singletons[matches[0]]
+
+    if allow_annotation_fallback:
+        fe = frame.resolve_annotation(code)
+        if fe is not None:
+            return fe
 
     return None
 

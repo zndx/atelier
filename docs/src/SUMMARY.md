@@ -36,6 +36,7 @@ written consent of Cloudera, Inc.
 # Operations
 
 - [Encrypted Deployment Defaults](./operations/secrets.md)
+- [Embeddings Canvas — Reviewer's Guide](./operations/embeddings-reviewer-guide.md)
 
 # Scenarios
 

@@ -107,6 +107,15 @@ class HierarchicalCategorySet(CategorySet):
         return {c.code: c for c in self.all_categories}
 
     @cached_property
+    def all_by_abbrev(self) -> dict[str, ReferenceCategory]:
+        # Mnemonic → category over the full tree (leaves + internals).
+        # The leaf-only ``by_abbrev`` (inherited from CategorySet) misses
+        # parent-level mnemonics; this version is what
+        # ``_resolve_to_focal_element`` consults when the LLM emits an
+        # annotation string instead of a numeric dot-code.
+        return {c.abbrev: c for c in self.all_categories if c.abbrev}
+
+    @cached_property
     def parent(self) -> dict[str, str | None]:
         return {c.code: c.parent_code for c in self.all_categories}
 
@@ -784,7 +793,10 @@ def _canonical_label(label: str) -> str:
     return re.sub(r"[^a-z0-9]", "", label.lower().strip())
 
 
-def validate_taxonomy(category_set: CategorySet) -> list[TaxonomyFinding]:
+def validate_taxonomy(
+    category_set: CategorySet,
+    frame=None,  # FrameOfDiscernment | None — typed via duck-typing to avoid the import cycle
+) -> list[TaxonomyFinding]:
     """Return a list of vocabulary-quality findings (empty when clean).
 
     Detects:
@@ -799,6 +811,12 @@ def validate_taxonomy(category_set: CategorySet) -> list[TaxonomyFinding]:
       collides with another category's normalized label even though
       the source labels were distinct.  Subset of ``label_collision``;
       reported separately for clarity.
+    - **abbrev_unreachable_in_frame** *(R8 — only when ``frame`` is
+      supplied)* — an abbrev present in ``all_by_abbrev`` whose code
+      cannot be resolved by ``frame.resolve_annotation`` even after
+      the R7 walk-down/walk-up chain.  Surfaces genuine projection
+      gaps where the LLM may emit a code the active frame has no
+      path to.
 
     Returns a list (possibly empty) rather than raising.  Callers
     decide whether to log warnings, raise on findings, or aggregate
@@ -904,6 +922,36 @@ def validate_taxonomy(category_set: CategorySet) -> list[TaxonomyFinding]:
                         f"alias {alias!r} on {c.code} normalizes to {key!r}, "
                         f"which is also the normalized label of {other.code} "
                         f"({other.label!r}) — alias lookup will be shadowed"
+                    ),
+                ))
+
+    # R8 — abbrev unreachability in the active frame.  Only enumerated
+    # when a frame is supplied; this is post-projection (e.g., a vocab
+    # restriction may drop nodes the abbrev index still references).
+    # After R7, ``frame.resolve_annotation`` already walks down/up to
+    # find a covering FE, so a None here is a genuine "no path" signal
+    # the operator should reconcile in the source data, not a
+    # resolution-path bug.
+    if frame is not None:
+        idx = getattr(category_set, "all_by_abbrev", None) or {}
+        for abbrev, cat in sorted(idx.items()):
+            if not abbrev or not cat.code:
+                continue
+            try:
+                fe = frame.resolve_annotation(abbrev)
+            except Exception:  # defensive — never let a probe abort validation
+                fe = None
+            if fe is None:
+                findings.append(TaxonomyFinding(
+                    kind="abbrev_unreachable_in_frame",
+                    severity="warning",
+                    codes=(cat.code,),
+                    detail=(
+                        f"abbrev {abbrev!r} (code {cat.code!r}) cannot be "
+                        f"resolved by the active frame — neither a singleton, "
+                        f"a curated internal node, nor any walk-down/walk-up "
+                        f"path covers it.  LLM votes for {abbrev!r} will be "
+                        f"discarded; reconcile vocabulary projection."
                     ),
                 ))
 

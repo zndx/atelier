@@ -6,7 +6,7 @@
 // modified, redistributed, or used in any other manner without the express
 // written consent of Cloudera, Inc.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Badge,
@@ -423,7 +423,7 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const { activeSourceId, sources, refreshDatasets, refreshArtifactSets } = useDataset();
+  const { activeSourceId, setActiveSourceId, sources, refreshDatasets, refreshArtifactSets } = useDataset();
   const activeSource = sources.find((s) => s.id === activeSourceId);
 
   const fetchFSM = () => {
@@ -493,12 +493,34 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   // Refresh datasets + artifact sets when pipeline converges so the
   // new dataset and its produced artifact set both appear without a
   // manual click.  Extend runs also converge — same code path.
+  //
+  // When the converged run's source differs from the active sidebar
+  // source, switch to it so the new dataset shows in the Embeddings
+  // list without a manual source change.
+  //
+  // Fire once per converged run, keyed by ``fsm.id``: the prior version
+  // re-fired on every render while ``state === "CONVERGED"``, which
+  // would forcibly switch the source back if the operator manually
+  // changed it post-convergence.  ``handledRunRef`` records which run
+  // we already handled so the source-switch is a one-shot event.
+  const handledRunRef = useRef<string | null>(null);
+  const fsmRunId = fsm?.id ?? null;
   useEffect(() => {
-    if (state === "CONVERGED") {
+    if (state !== "CONVERGED") return;
+    if (!fsmRunId || handledRunRef.current === fsmRunId) return;
+    handledRunRef.current = fsmRunId;
+    if (runSourceId && runSourceId !== activeSourceId) {
+      // setActiveSourceId clears activeDatasetId and triggers
+      // refreshDatasets via the DatasetContext source-change effect.
+      setActiveSourceId(runSourceId);
+    } else {
       refreshDatasets();
-      refreshArtifactSets();
     }
-  }, [state, refreshDatasets, refreshArtifactSets]);
+    refreshArtifactSets();
+  }, [
+    state, fsmRunId, runSourceId, activeSourceId,
+    setActiveSourceId, refreshDatasets, refreshArtifactSets,
+  ]);
 
   return (
     <Card
@@ -1348,7 +1370,17 @@ function DataSourceCard() {
       method: "POST",
     })
       .then((r) => r.json())
-      .then(() => setActiveDatasetId(datasetId))
+      .then(() => {
+        // userPicked=true: this is an explicit operator activation,
+        // not an auto-promote.  Pins the choice so the auto-promote
+        // effect won't bounce back to the previously-active row before
+        // the next refreshDatasets settles is_active flags.
+        setActiveDatasetId(datasetId, { userPicked: true });
+        // Refresh so the local datasets list picks up the new
+        // is_active flags from the server, keeping the UI in sync
+        // without relying on a poll interval.
+        return refreshDatasets();
+      })
       .catch(() => {});
   };
 

@@ -142,6 +142,12 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.cautious_review.enabled": ("classify_cautious_review_enabled", bool),
     "classify.cautious_review.bel_threshold": ("classify_cautious_review_bel_threshold", float),
     "classify.cautious_review.backend": ("classify_cautious_review_backend", str),
+    "classify.cautious_review.shortlist_permissive": ("classify_cautious_review_shortlist_permissive", bool),
+    "classify.cautious_review.exclude_opaque_siblings": ("classify_cautious_review_exclude_opaque_siblings", bool),
+    "classify.cautious_review.stability_guard_enabled": ("classify_cautious_review_stability_guard_enabled", bool),
+    "classify.cautious_review.stability_guard_llm_conf": ("classify_cautious_review_stability_guard_llm_conf", float),
+    "classify.resolve_llm_annotation_mnemonic": ("classify_resolve_llm_annotation_mnemonic", bool),
+    "classify.exclude_temp_tables": ("classify_exclude_temp_tables", bool),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -386,6 +392,28 @@ class AtelierConfig:
     classify_cautious_review_enabled: bool = True
     classify_cautious_review_bel_threshold: float = 0.80
     classify_cautious_review_backend: str = "default"
+    # R2c: when the LLM emits a code outside the cross_subtree_belief
+    # shortlist but inside the runtime taxonomy, accept it instead of
+    # rejecting as a hallucination.  Closes 8/11 errored decisions in
+    # 8d67b1ed (audit_2026-05-06_a Finding 1, P1 split).
+    classify_cautious_review_shortlist_permissive: bool = True
+    # R3: drop opaque-named siblings (col_NN, var_NN, dim_NN) from
+    # cautious-review context to break the col_04 sibling-context-
+    # poisoning class (audit_2026-05-06_a Finding 3, P2).
+    classify_cautious_review_exclude_opaque_siblings: bool = True
+    # R2a: reject reroute when fusion + LLM already converged with
+    # high confidence (gaming_profiles.handle failure class —
+    # audit_2026-05-06_a Finding 1, P1).
+    classify_cautious_review_stability_guard_enabled: bool = True
+    classify_cautious_review_stability_guard_llm_conf: float = 0.80
+    # R1: annotation-mnemonic fallback in mass_functions
+    # (_resolve_to_focal_element).  Default on — strictly recovers LLM
+    # evidence for ~95 columns / 33% of corpus in 8d67b1ed (audit
+    # P0 expanded).  Toggle off only for ablation runs.
+    classify_resolve_llm_annotation_mnemonic: bool = True
+    # R6: skip Hive/Hue temp tables (``__tmp_*`` prefix) at discovery.
+    # 14 hallucinations from one such table in 8d67b1ed.
+    classify_exclude_temp_tables: bool = True
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000

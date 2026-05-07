@@ -142,6 +142,8 @@ def _convergence_progress(
 def _filter_classifiable_tables(
     samples: list[TableSample],
     vocab_uri: str | None,
+    *,
+    exclude_temp_tables: bool = True,
 ) -> list[TableSample]:
     """Drop tables that shouldn't be treated as data (vocab + test leftovers).
 
@@ -152,6 +154,12 @@ def _filter_classifiable_tables(
     vocab URI is e.g. ``"default.annotations"`` we want that specific
     table gone from classification even if it doesn't match the
     hard-coded list above.
+
+    R6 (audit_2026-05-06_a): when ``exclude_temp_tables`` is True
+    (default), drop tables whose name carries the Hive/Hue temp-table
+    prefix (``__tmp_*``, case-insensitive on either bare name or any
+    namespace component).  In 8d67b1ed a single ``hue__tmp_ecommerce_orders``
+    table contributed 14 of the run's annotation-hallucination cases.
     """
     skip = set(_NON_DATA_TABLE_NAMES)
     if vocab_uri:
@@ -164,17 +172,32 @@ def _filter_classifiable_tables(
         if bare:
             skip.add(bare.lower())
 
+    def _is_temp(name: str) -> bool:
+        if not exclude_temp_tables or not name:
+            return False
+        lower = name.lower()
+        return "__tmp_" in lower or lower.startswith("tmp_")
+
     kept: list[TableSample] = []
     dropped: list[str] = []
+    dropped_temp: list[str] = []
     for ts in samples:
         if ts.name.lower() in skip:
             dropped.append(ts.name)
+            continue
+        if _is_temp(ts.name):
+            dropped_temp.append(ts.name)
             continue
         kept.append(ts)
     if dropped:
         logger.info(
             "Excluded %d non-data tables from classification: %s",
             len(dropped), dropped,
+        )
+    if dropped_temp:
+        logger.info(
+            "Excluded %d Hive/Hue temp tables (R6, audit_2026-05-06_a): %s",
+            len(dropped_temp), dropped_temp,
         )
     return kept
 
@@ -598,12 +621,20 @@ def run_classification_pipeline(
         if not isinstance(category_set, HierarchicalCategorySet):
             raise RuntimeError("Expected HierarchicalCategorySet")
 
+        # Build the frame BEFORE validation so the validator can run
+        # the R8 ``abbrev_unreachable_in_frame`` check against the
+        # active frame's ``_singletons`` / ``_internal`` sets.
+        frame = FrameOfDiscernment(
+            category_set,
+            confusable_pairs=_build_confusable_pairs(category_set),
+        )
+
         # Vocabulary quality check — flags label collisions like
         # "Web Browser" / "WebBrowser" that cause non-deterministic
         # name-match resolution.  Warn-only by default; gated to
         # raise via classify.taxonomy.strict_validation = true.
         from atelier.classify.taxonomy import validate_taxonomy
-        taxonomy_findings = validate_taxonomy(category_set)
+        taxonomy_findings = validate_taxonomy(category_set, frame=frame)
         if taxonomy_findings:
             errors = [f for f in taxonomy_findings if f.severity == "error"]
             warnings = [f for f in taxonomy_findings if f.severity == "warning"]
@@ -676,16 +707,13 @@ def run_classification_pipeline(
                     f"Taxonomy has {len(errors)} structural error(s); first: {errors[0].detail}"
                 )
 
-        frame = FrameOfDiscernment(
-            category_set,
-            confusable_pairs=_build_confusable_pairs(category_set),
-        )
         fsm.advance(run_id, FSMState.DISCOVERING, progress={
             "categories_loaded": len(category_set.categories),
         })
 
         # ── DISCOVERING + SAMPLING ────────────────────────────────
         heartbeat_interval = float(getattr(cfg, "classify_phase_heartbeat_interval_s", 5.0))
+        _samples_from_hive = False
         if samples is not None:
             all_samples = samples
             fsm.advance(run_id, FSMState.SAMPLING, progress={
@@ -693,6 +721,7 @@ def run_classification_pipeline(
                 "injected": True,
             })
         else:
+            _samples_from_hive = True
             with phase_heartbeat(
                 fsm, run_id, FSMState.DISCOVERING,
                 interval_s=heartbeat_interval, label="discovering",
@@ -727,7 +756,10 @@ def run_classification_pipeline(
         # internal test leftovers).  The annotations table IS the vocab,
         # not data; classifying it pollutes the accuracy signal.
         tables_before_filter = len(all_samples)
-        all_samples = _filter_classifiable_tables(all_samples, vocab_uri)
+        all_samples = _filter_classifiable_tables(
+            all_samples, vocab_uri,
+            exclude_temp_tables=getattr(cfg, "classify_exclude_temp_tables", True),
+        )
         tables_after_filter = len(all_samples)
         # Advance the FSM with the post-filter count so the UI shows
         # tables that will ACTUALLY be classified, not the raw Hive
@@ -784,17 +816,22 @@ def run_classification_pipeline(
         # never be classified (trivial by name parse) or appear in
         # sibling contexts (would leak answers into other columns'
         # embeddings).  The meta-tagging loader filters internally;
-        # the Hive sampler does not.  Applying the filter here means
-        # every loader path ends up with reference columns excluded,
-        # with zero behavior change on production data (pattern doesn't
-        # match production column names).
+        # the Hive sampler does not.
+        #
+        # IMPORTANT: this filter is ONLY applied to injected samples
+        # (synth/fixture data).  Hive-sampled production tables
+        # legitimately contain columns like ``var_05``, ``col_12``,
+        # ``val_33`` that match the answer-key pattern but carry real
+        # business data (e.g. payment_instruments.var_01 through
+        # var_26).  The original assumption that "the pattern doesn't
+        # match production column names" was incorrect.
         #
         # Gated by ``classify_exclude_reference_columns`` so UAT
         # reviewers can demonstrate accuracy in both configurations
         # (the toggle lives on the Status page).  Default ON; flag
         # exists purely for the UAT synth corpus that motivated it
         # and will be removed once that dataset is retired.
-        if cfg.classify_exclude_reference_columns:
+        if cfg.classify_exclude_reference_columns and not _samples_from_hive:
             from atelier.classify.meta_tagging_source import exclude_reference_columns
             pre_filter_cols = sum(len(t.columns) for t in all_samples)
             all_samples = exclude_reference_columns(all_samples)
@@ -806,6 +843,13 @@ def run_classification_pipeline(
                     pre_filter_cols, post_filter_cols,
                     pre_filter_cols - post_filter_cols, len(all_samples),
                 )
+        elif _samples_from_hive:
+            logger.info(
+                "Reference-column exclusion SKIPPED — samples are from "
+                "a live Hive connection; the answer-key pattern can "
+                "collide with legitimate production column names "
+                "(e.g. var_01, col_12)."
+            )
         else:
             logger.info(
                 "Reference-column exclusion DISABLED — answer-key "
@@ -1391,6 +1435,9 @@ def run_classification_pipeline(
                 use_cosine=has_embeddings,
                 discounts=discounts,
                 fusion_strategy=cfg.classify_fusion_strategy,
+                resolve_llm_annotation_mnemonic=getattr(
+                    cfg, "classify_resolve_llm_annotation_mnemonic", True,
+                ),
             )
             classifications.append(result)
 
@@ -1439,7 +1486,7 @@ def run_classification_pipeline(
             "columns_fused": len(classifications),
         })
 
-        summary = _evaluate_results(classifications)
+        summary = _evaluate_results(classifications, category_set)
         eval_report = evaluate_classifications(
             classifications, category_set, run_id=run_id,
         )
@@ -2048,6 +2095,7 @@ def _classify_column(
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
+    resolve_llm_annotation_mnemonic: bool = True,
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -2122,6 +2170,7 @@ def _classify_column(
             llm_code, llm_confidence,
             llm_alternatives or [],
             frame, discount=llm_discount,
+            allow_annotation_fallback=resolve_llm_annotation_mnemonic,
         )
         if not _is_vacuous(llm_mass_val):
             source_masses["llm"] = llm_mass_val
@@ -2220,7 +2269,7 @@ def _classify_column(
         "conflict": hc.conflict,
         "needs_clarification": hc.needs_clarification,
         "evidence": hc.evidence,
-        "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
+        "evidence_sources": {name: _mass_summary(ba, frame) for name, ba in source_masses.items()},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine
@@ -2318,13 +2367,50 @@ def _is_vacuous(assignment) -> bool:
     return False
 
 
-def _mass_summary(assignment) -> dict[str, float]:
-    """Summarize a BeliefAssignment as top-3 singletons."""
-    singletons = sorted(
-        [(next(iter(fe.codes)), m) for fe, m in assignment.masses.items() if len(fe.codes) == 1],
-        key=lambda x: -x[1],
-    )
-    return {code: round(m, 4) for code, m in singletons[:3]}
+def _mass_summary(
+    assignment,
+    frame: FrameOfDiscernment | None = None,
+) -> dict[str, float]:
+    """Summarize a BeliefAssignment as top-3 focal elements.
+
+    R10 (audit_2026-05-06_a_resolution_path): surfaces internal-node
+    focal elements alongside singletons, so ``evidence_sources.llm`` is
+    non-empty when the LLM emits a parent code (e.g., ``A_PHN`` →
+    1.1.1.9.4 *parent*) — 71/316 rows in 8c7e72ea showed empty llm
+    evidence under the singletons-only filter.  Internal-node FEs are
+    tagged with a trailing ``*`` so consumers (overwatch prompt,
+    embeddings reviewer guide) can read ``1.1.1.9.4*`` as "parent FE —
+    mass spread across descendants."  When ``frame`` is supplied, the
+    parent code is reverse-looked-up from ``frame.internal_nodes``;
+    otherwise we fall back to the FE's display label.  Theta is
+    omitted (it's the vacuous discount and is reported separately via
+    the assignment's K).
+    """
+    # Reverse map: frozenset(leaf_codes) → parent_code, built once.
+    internal_by_codes: dict[frozenset[str], str] = {}
+    if frame is not None:
+        internal_by_codes = {
+            fe.codes: code for code, fe in frame.internal_nodes.items()
+        }
+
+    items: list[tuple[str, float]] = []
+    for fe, m in assignment.masses.items():
+        if len(fe.codes) == 1:
+            items.append((next(iter(fe.codes)), m))
+            continue
+        # Skip Θ (the full-frame vacuous discount).
+        if frame is not None and fe.codes == frame.theta.codes:
+            continue
+        if (fe.label or "").strip() == "Θ":
+            continue
+        parent_code = internal_by_codes.get(fe.codes)
+        if parent_code is None:
+            # Confusable pair, ad-hoc FE, or frame-less call: fall back
+            # to label or a sorted-codes signature.
+            parent_code = (fe.label or "").strip() or "+".join(sorted(fe.codes)[:3])
+        items.append((f"{parent_code}*", m))
+    items.sort(key=lambda x: -x[1])
+    return {code: round(m, 4) for code, m in items[:3]}
 
 
 def _run_feature_analysis(
@@ -2447,7 +2533,10 @@ def _run_shap(cfg, all_features, category_set, classifications, results_dir):
         logger.warning("SHAP analysis failed: %s", e)
 
 
-def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
+def _evaluate_results(
+    classifications: list[dict],
+    category_set: HierarchicalCategorySet | None = None,
+) -> dict[str, Any]:
     """Compute summary statistics for a classification run."""
     total = len(classifications)
     if total == 0:
@@ -2468,10 +2557,50 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
     # LLM's top pick.  With fit-to-LLM on, agreement should track
     # 100% on LLM-covered columns; divergence is a diagnostic signal
     # that CatBoost disagreed with the LLM after fine-tuning.
+    #
+    # R5 (audit_2026-05-06_a, P3): also report pre-review agreement
+    # so overwatch can disambiguate "fusion disagreed with LLM" from
+    # "review reassigned an LLM-aligned prediction."  When the column
+    # was not visited by cautious-review, ``predicted_code_pre_review``
+    # is empty and the pre/post values coincide.
+    #
+    # R9 (audit_2026-05-06_a_resolution_path): the LLM frequently emits
+    # abbrev mnemonics ("A_PHN") that R1 resolves to numeric codes
+    # ("1.1.1.9.4"); raw string-equality miscounts these as
+    # disagreement (40/316 rows in 8c7e72ea).  Use semantic equivalence
+    # (lc == target_code OR cat.code(lc) == target_code) as the
+    # primary metric; keep raw-string ``llm_agreement_strict`` as a
+    # diagnostic for the LLM-emits-numeric-codes invariant.
+    abbrev_to_code: dict[str, str] = {}
+    if category_set is not None:
+        idx = getattr(category_set, "all_by_abbrev", None) or {}
+        abbrev_to_code = {a: c.code for a, c in idx.items() if c.code}
+
+    def _semantic_eq(llm_code: str, target_code: str) -> bool:
+        if not llm_code or not target_code:
+            return False
+        if llm_code == target_code:
+            return True
+        resolved = abbrev_to_code.get(llm_code)
+        return bool(resolved) and resolved == target_code
+
     llm_covered = [c for c in classifications if c.get("llm_code")]
     llm_matches = sum(
         1 for c in llm_covered
-        if c.get("llm_code") == c.get("predicted_code")
+        if _semantic_eq(c.get("llm_code") or "", c.get("predicted_code") or "")
+    )
+    llm_matches_strict = sum(
+        1 for c in llm_covered
+        if (c.get("llm_code") or "") == (c.get("predicted_code") or "")
+    )
+
+    def _pre_review(c: dict) -> str:
+        return (c.get("predicted_code_pre_review") or "").strip() \
+            or (c.get("predicted_code") or "")
+
+    llm_matches_pre_review = sum(
+        1 for c in llm_covered
+        if _semantic_eq(c.get("llm_code") or "", _pre_review(c))
     )
 
     return {
@@ -2481,6 +2610,12 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
         "llm_coverage": round(len(llm_covered) / total, 4) if total else 0.0,
         "llm_agreement": (
             round(llm_matches / len(llm_covered), 4) if llm_covered else None
+        ),
+        "llm_agreement_strict": (
+            round(llm_matches_strict / len(llm_covered), 4) if llm_covered else None
+        ),
+        "llm_agreement_pre_review": (
+            round(llm_matches_pre_review / len(llm_covered), 4) if llm_covered else None
         ),
         "with_reference": len(with_reference),
         "correct": correct,
