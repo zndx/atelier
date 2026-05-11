@@ -32,7 +32,6 @@ from features.agent.step_defs.shap_steps import *  # noqa: F401,F403
 from features.agent.step_defs.real_data_steps import *  # noqa: F401,F403
 from features.agent.step_defs.belief_path_steps import *  # noqa: F401,F403
 from features.agent.step_defs.synth_framework_steps import *  # noqa: F401,F403
-from features.agent.step_defs.meta_tagging_steps import *  # noqa: F401,F403
 from features.agent.step_defs.experimentation_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.http_steps import *  # noqa: F401,F403
