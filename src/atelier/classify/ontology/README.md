@@ -54,6 +54,20 @@ BFO:GenericallyDependentContinuant
     cco:PrescriptiveICE         ←  software, specifications, plans
 ```
 
+> **Note on CCO labels.**  The shorthand above (`cco:DesignativeICE`, etc.)
+> is readable annotation, not a real IRI.  The canonical CCO classes are:
+>
+> | Shorthand | IRI | `rdfs:label` |
+> |---|---|---|
+> | `cco:ICE` | `cco:ont00000958` | Information Content Entity |
+> | `cco:DesignativeICE` | `cco:ont00000686` | Designative Information Content Entity |
+> | `cco:DescriptiveICE` | `cco:ont00000853` | Descriptive Information Content Entity |
+> | `cco:PrescriptiveICE` | `cco:ont00000965` | Prescriptive Information Content Entity |
+>
+> Verified against
+> [`InformationEntityOntology.ttl`](https://github.com/CommonCoreOntology/CommonCoreOntologies/blob/master/src/cco-modules/InformationEntityOntology.ttl)
+> on `CommonCoreOntology/CommonCoreOntologies@master`.
+
 ### Atelier PII leaves by CCO grounding
 
 | CCO Class | Atelier Leaves |

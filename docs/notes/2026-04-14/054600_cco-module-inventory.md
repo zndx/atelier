@@ -43,7 +43,8 @@ Key class hierarchy:
       - Ordinal (rank order)
       - Interval (equal units, e.g. Celsius)
       - Ratio (true zero, e.g. Kelvin)
-  - **Prescriptive ICE** (formerly "Directive ICE") -- propositions/images that prescribe
+  - **Prescriptive ICE** (`cco:ont00000965`, `rdfs:label "Prescriptive Information Content Entity"`)
+    -- propositions/images that prescribe
     - Algorithm (finite instruction sequences)
     - Performance Specification
     - Artifact Model (prescribes common functions/qualities)

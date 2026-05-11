@@ -23,6 +23,17 @@
 ##   It does NOT import Schema.org or DBpedia ontologies directly;
 ##   instead it declares the mapped terms with their canonical IRIs.
 ##
+## CCO label conventions (verified against InformationEntityOntology.ttl
+## on CommonCoreOntology/CommonCoreOntologies@master):
+##   cco:ont00000958  rdfs:label "Information Content Entity"
+##   cco:ont00000686  rdfs:label "Designative Information Content Entity"
+##   cco:ont00000853  rdfs:label "Descriptive Information Content Entity"
+##   cco:ont00000965  rdfs:label "Prescriptive Information Content Entity"
+## Comments below use shorthand "cco:DesignativeICE" / "cco:DescriptiveICE"
+## / "cco:PrescriptiveICE" — these are NOT real IRIs, only readable
+## annotations.  The IRI cited in every rdfs:subClassOf and SSSOM axiom
+## is the canonical ont0000XXXX form.
+##
 ## Version: 0.2.0 (expanded — 35 external types + 325 Atelier terms)
 ## License: Apache-2.0
 ## -----------------------------------------------------------------
