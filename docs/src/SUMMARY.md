@@ -20,6 +20,7 @@
 - [Data Sources & Versioning](./architecture/data-sources.md)
 - [ML Artifacts & Extend Classification](./architecture/ml-artifacts.md)
 - [Deployment: Unseen Ontology, Known Schema (Roadmap)](./architecture/deployment-ontology-agnosticism.md)
+- [SOTAB v2 Coverage Strategy (Roadmap)](./architecture/sotab-coverage.md)
 - [Pareto Capability Evolution (Roadmap)](./architecture/pareto-capability-evolution.md)
 - [Proposed Integrations](./architecture/integrations.md)
 
