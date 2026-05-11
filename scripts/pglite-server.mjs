@@ -44,10 +44,14 @@ const server = new PGLiteSocketServer({
   db,
   port: PORT,
   host: '127.0.0.1',
-  // Allow a handful of concurrent connections so migrations, DAO, and
-  // readiness probes don't block each other.  PGlite serialises queries
-  // internally, so this is safe — it just keeps the TCP accept queue open.
-  maxConnections: 8,
+  // Sized to absorb concurrent peaks from the gateway, gRPC servicer,
+  // pipeline workers, and readiness probes. PGlite serialises queries
+  // internally so a generous accept queue is safe — and avoids the
+  // "server closed the connection unexpectedly" symptom the socket
+  // server emits when the queue is full and it hangs up new sockets.
+  // Override via PGLITE_MAX_CONNECTIONS for environments with tighter
+  // file-descriptor budgets.
+  maxConnections: parseInt(process.env.PGLITE_MAX_CONNECTIONS || '32', 10),
 })
 // Don't await — use .catch() so startup errors crash loudly instead of
 // being swallowed by the Promise (upstream issue #964).

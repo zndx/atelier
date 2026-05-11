@@ -116,7 +116,7 @@ function App() {
           <Route
             path="/terminal"
             element={
-              <Layout fullHeight>
+              <Layout>
                 <Suspense
                   fallback={
                     <div
@@ -124,7 +124,7 @@ function App() {
                         display: "flex",
                         justifyContent: "center",
                         alignItems: "center",
-                        height: "calc(100vh - 128px)",
+                        height: "calc(100vh - 200px)",
                       }}
                     >
                       <Spin size="large" />

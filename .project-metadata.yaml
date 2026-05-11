@@ -212,11 +212,14 @@ environment_variables:
       label; lower values let partial coverage count as done. Range:
       0.0-1.0.
   ATELIER_BOOTSTRAP_CLARITY_TARGET:
-    default: "0.20"
+    default: "0.25"
     description: >-
-      Revisit any column whose clarity (top-1 confidence margin) is
-      below this fraction. Higher values make the LLM re-sweep more
-      aggressive on ambiguous columns. Range: 0.05-0.25.
+      Max fraction of columns flagged unclear (high gap or low belief)
+      tolerated before the bootstrap loop accepts an iteration.
+      Recalibrated 0.20 → 0.25 for the parent-aware DST frame: parent
+      focal elements widen leaf Pl-Bel intervals, so the leaf-only-tuned
+      0.20 caused convergence loops to grind through max_iterations for
+      negligible accuracy gain. Range: 0.05-0.30.
 
   # ── Monte Carlo sampling ───────────────────────────────────────
   ATELIER_MC_SAMPLE_FRACTION:

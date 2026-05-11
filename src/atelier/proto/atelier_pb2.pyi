@@ -55,7 +55,7 @@ class GetAgentResponse(_message.Message):
     def __init__(self, agent: _Optional[_Union[AgentMetadata, _Mapping]] = ...) -> None: ...
 
 class DataSource(_message.Message):
-    __slots__ = ("id", "source_type", "source_uri", "display_name", "vocabulary_mode", "created_at", "metadata_json", "is_archived")
+    __slots__ = ("id", "source_type", "source_uri", "display_name", "vocabulary_mode", "created_at", "metadata_json", "is_archived", "vocab_uri")
     ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_TYPE_FIELD_NUMBER: _ClassVar[int]
     SOURCE_URI_FIELD_NUMBER: _ClassVar[int]
@@ -64,6 +64,7 @@ class DataSource(_message.Message):
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
     IS_ARCHIVED_FIELD_NUMBER: _ClassVar[int]
+    VOCAB_URI_FIELD_NUMBER: _ClassVar[int]
     id: str
     source_type: str
     source_uri: str
@@ -72,7 +73,8 @@ class DataSource(_message.Message):
     created_at: str
     metadata_json: str
     is_archived: bool
-    def __init__(self, id: _Optional[str] = ..., source_type: _Optional[str] = ..., source_uri: _Optional[str] = ..., display_name: _Optional[str] = ..., vocabulary_mode: _Optional[str] = ..., created_at: _Optional[str] = ..., metadata_json: _Optional[str] = ..., is_archived: bool = ...) -> None: ...
+    vocab_uri: str
+    def __init__(self, id: _Optional[str] = ..., source_type: _Optional[str] = ..., source_uri: _Optional[str] = ..., display_name: _Optional[str] = ..., vocabulary_mode: _Optional[str] = ..., created_at: _Optional[str] = ..., metadata_json: _Optional[str] = ..., is_archived: bool = ..., vocab_uri: _Optional[str] = ...) -> None: ...
 
 class ListDataSourcesRequest(_message.Message):
     __slots__ = ("include_archived",)

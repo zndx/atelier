@@ -72,17 +72,14 @@ def _anthropic_test_model(cfg: AtelierConfig) -> str:
     CAI that value is a Bedrock inference-profile ARN — Anthropic's
     direct API returns a 404 for ARN-shaped model identifiers.
 
-    ``cfg.overwatch_model`` is the canonical direct-API consumer:
-    overwatch routes through ``ANTHROPIC_API_KEY`` by construction, so
-    whatever model the operator selected for overwatch is the right
-    thing to probe.  If that happens to also be a Bedrock ARN (unusual
-    but possible via env override), fall back to a well-known direct-
-    API default so the validator still returns something actionable.
+    Overwatch's previous ``cfg.overwatch_model`` field was the natural
+    direct-API stand-in, but it was retired when Overwatch became a
+    follower of the Web Terminal Agent's selected model.  Use a
+    well-known direct-API default unconditionally — the validator's
+    purpose is to confirm ANTHROPIC_API_KEY can call the API at all,
+    not to test any operator-selected model.
     """
-    candidate = getattr(cfg, "overwatch_model", "") or ""
-    if not candidate or candidate.startswith("arn:"):
-        return _ANTHROPIC_FALLBACK_MODEL
-    return candidate
+    return _ANTHROPIC_FALLBACK_MODEL
 
 
 def _validate_single(client, model: str, provider: str) -> dict:

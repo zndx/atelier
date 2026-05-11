@@ -135,6 +135,20 @@ class BootstrapConfig:
     """Bootstrap convergence configuration."""
 
     max_iterations: int = 5
+    # Floor — forces at least this many iterations even when the loop's
+    # disagreement criterion returns an empty set on the first pass.
+    # Project directive: iteration is part of the algorithm.  An
+    # early-exit without any revisit on iteration 1 produces output the
+    # same size as the algorithm-as-designed but with fundamentally
+    # different semantics — we haven't actually exercised the iterative
+    # DST-fusion component.  The invariant ``min_iterations >= 2`` is
+    # enforced at pipeline entry, mirroring the ``max_iterations >= 2``
+    # rule codified in 0c0170f.  Restored 2026-05-03 after merge 81f37b4
+    # dropped both the field and the factory wiring while pipeline.py
+    # kept reading ``boot_cfg.min_iterations`` at six call sites — a
+    # latent bug that fired on run eeb797e0 with AttributeError once
+    # the loop crossed the (undefined) threshold.
+    min_iterations: int = 2
     k_threshold: float = 0.2
     coverage_target: float = 1.0
     confidence_floor: float = 0.5
@@ -156,12 +170,13 @@ class BootstrapConfig:
     # the gate that stops the retry storm.
     max_total_llm_attempts: int = 10000
     llm_discount: float = 0.15
-    frontier_svm_retrain: bool = True
-    frontier_svm_min_labels: int = 20
-    # Belief-gap convergence (primary convergence criteria)
-    gap_threshold: float = 0.15
-    clarity_target: float = 0.10
-    bel_floor: float = 0.50
+    # Belief-gap convergence (primary convergence criteria).
+    # Defaults mirror config/base.conf — recalibrated 2026-05-03 for
+    # the parent-aware DST frame (parent focal elements widen leaf
+    # Pl-Bel intervals, so the leaf-only-tuned values were too tight).
+    gap_threshold: float = 0.18
+    clarity_target: float = 0.25
+    bel_floor: float = 0.45
     # Minimum independent-tier consensus mass required to fire a revisit
     # on the basis of indep-tier vs LLM disagreement.  Below this floor
     # the cosine/pattern/name_match signal is too diffuse to act on
@@ -186,6 +201,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
     max_calls = cfg.classify_bootstrap_max_total_llm_calls
     return BootstrapConfig(
         max_iterations=cfg.classify_bootstrap_max_iterations,
+        min_iterations=getattr(cfg, "classify_bootstrap_min_iterations", 2),
         k_threshold=cfg.classify_bootstrap_k_threshold,
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,
@@ -201,8 +217,6 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
             cfg, "classify_bootstrap_max_consecutive_halve_failures", 8,
         ),
         llm_discount=cfg.classify_llm_discount,
-        frontier_svm_retrain=cfg.classify_bootstrap_frontier_svm_retrain,
-        frontier_svm_min_labels=cfg.classify_bootstrap_frontier_svm_min_labels,
         gap_threshold=cfg.classify_bootstrap_gap_threshold,
         clarity_target=cfg.classify_bootstrap_clarity_target,
         bel_floor=cfg.classify_bootstrap_bel_floor,
@@ -251,8 +265,17 @@ class IterationMetrics:
     # means "fully converged").  ``contraction_rate`` is ρ_n =
     # residual_norm / prior_residual_norm; <1 means converging, →1
     # stalled, >1 diverging (Saad 2003 §4.1).
+    #
+    # ``gap_contraction_rate`` is the analogous ratio over the
+    # single-criterion mean-gap signal: mean_gap_n / mean_gap_{n-1}.
+    # This is what the live Status UI surfaces as "Trend Ratio" — the
+    # honest contraction over the actual stopping criterion, in
+    # contrast to the composite ``contraction_rate`` (a ratio over the
+    # 4-component heuristic ``residual_norm`` retained here for
+    # back-compat with column_trajectories.json analysis).
     residual_norm: float = 0.0
     contraction_rate: float = 0.0
+    gap_contraction_rate: float = 0.0
     indep_tier_disagreement_frac: float = 0.0
 
 
@@ -372,9 +395,6 @@ class BootstrapState:
     # LLM truncation tracking
     truncation_count: int = 0
     effective_batch_size: int = 50
-    # Frontier SVM retraining state
-    svm_retrain_count: int = 0
-    svm_frontier_path: str | None = None
     # Per-column residual trajectory.  Appended in
     # ``record_iteration_metrics`` after each iteration's ML
     # validation; column-major view of the convergence behaviour.
@@ -456,7 +476,10 @@ def _classify_batch_with_retry(
     """
     n = len(chunk_samples)
     batch_index = len(state.batch_audit) if _batch_index is None else _batch_index
-    col_names = [s.name for s in chunk_samples]
+    # Qualified names so ``state.failed_columns`` and the
+    # ``state.batch_audit`` ``columns`` field match the cross-table
+    # keying used throughout state — see ``ColumnSample.qualified_name``.
+    col_names = [s.qualified_name for s in chunk_samples]
 
     def _beat(phase: str) -> None:
         if heartbeat is None:
@@ -586,7 +609,11 @@ def _classify_batch_with_retry(
                 break
             sub_context = None
             if revisit_context:
-                sub_names = [s.name for s in sub]
+                # ``revisit_context`` is keyed by qualified_name (built
+                # in ``_llm_revisit`` from the qualified ``chunk``);
+                # use the same keying here so the halved sub-batch
+                # carries its enrichment forward.
+                sub_names = [s.qualified_name for s in sub]
                 sub_context = {n2: revisit_context[n2] for n2 in sub_names if n2 in revisit_context}
             results.extend(_classify_batch_with_retry(
                 backend, sub, system_prompt, state,
@@ -633,7 +660,10 @@ def _classify_batch_with_retry(
             break
         sub_context = None
         if revisit_context:
-            sub_names = [s.name for s in sub]
+            # ``revisit_context`` is keyed by qualified_name; use the
+            # same keying when halving so each sub-batch carries its
+            # enrichment forward.
+            sub_names = [s.qualified_name for s in sub]
             sub_context = {n2: revisit_context[n2] for n2 in sub_names if n2 in revisit_context}
         results.extend(_classify_batch_with_retry(
             backend, sub, system_prompt, state,
@@ -780,9 +810,19 @@ def _llm_sweep(
 
             for c in classifications:
                 if c.category_code and c.confidence > 0:
-                    state.labels[c.column_name] = c.category_code
-                    state.confidence[c.column_name] = c.confidence
-                    state.label_source[c.column_name] = "llm"
+                    # The LLM echoes the bare column name from the
+                    # prompt (``sample.name``); state dicts are keyed
+                    # by the qualified form to disambiguate cross-
+                    # table identity.  ``tname`` holds the batch's
+                    # table — recover the qualified key directly
+                    # rather than introducing a per-call mapping.
+                    key = (
+                        f"{tname}.{c.column_name}"
+                        if tname else c.column_name
+                    )
+                    state.labels[key] = c.category_code
+                    state.confidence[key] = c.confidence
+                    state.label_source[key] = "llm"
 
             # Per-batch heartbeat — advances FSM.updated_at so operators
             # and watchdogs can tell a running sweep from a stalled one
@@ -872,9 +912,15 @@ def _llm_sweep(
                     raise
                 for c in classifications:
                     if c.category_code and c.confidence > 0:
-                        state.labels[c.column_name] = c.category_code
-                        state.confidence[c.column_name] = c.confidence
-                        state.label_source[c.column_name] = "llm"
+                        # LLM-echoed bare name → qualified state key,
+                        # same convention as the main sweep above.
+                        key = (
+                            f"{tname}.{c.column_name}"
+                            if tname else c.column_name
+                        )
+                        state.labels[key] = c.category_code
+                        state.confidence[key] = c.confidence
+                        state.label_source[key] = "llm"
 
         final_missing = [n for n in column_names if n not in state.labels]
         if final_missing:
@@ -958,15 +1004,17 @@ def _identify_disagreements(
     1. The independent-tier consensus (cosine + pattern + name_match)
        has a top-1 prediction at meaningful mass (≥
        ``indep_revisit_mass_threshold``) that disagrees with the LLM
-       vote.  This branch matters because the LLM-derivative ML
-       sources (CatBoost-fit-to-LLM, frontier SVM) cannot, by
-       construction, contradict the LLM — see Shafer 1976 §11.3 on
-       reliability discounting and Denoeux 2008 on non-distinct
-       evidence.  The fully-fused ``ml_prediction`` therefore tracks
-       the LLM whenever the LLM is loud, masking genuine
-       independent-source disagreement.  Comparing LLM against the
-       ``{cosine, pattern, name_match}`` consensus restores a real
-       cross-source disagreement test.
+       vote.  This branch matters because the non-distinct ML
+       sources (CatBoost-fit-to-LLM strongly, the LLM-aligned SVM
+       weakly) cannot reliably contradict the LLM — see Shafer 1976
+       §11.3 on reliability discounting and Denoeux 2008 on
+       non-distinct evidence; the SVM's vocab-level alignment
+       dependency is documented in ``ontology_alignment.py``.  The
+       fully-fused ``ml_prediction`` therefore tracks the LLM
+       whenever the LLM is loud, masking genuine independent-source
+       disagreement.  Comparing LLM against the ``{cosine, pattern,
+       name_match}`` consensus restores a real cross-source
+       disagreement test.
 
     2. K is high *and* the fused prediction differs from LLM.  This
        is the legacy gate, retained as a safety net for cases where
@@ -1113,9 +1161,15 @@ def _llm_revisit(
 
             for c in classifications:
                 if c.category_code and c.confidence > 0:
-                    state.labels[c.column_name] = c.category_code
-                    state.confidence[c.column_name] = c.confidence
-                    state.label_source[c.column_name] = "llm_revisit"
+                    # LLM-echoed bare name → qualified state key, same
+                    # convention as ``_llm_sweep``.
+                    key = (
+                        f"{tname}.{c.column_name}"
+                        if tname else c.column_name
+                    )
+                    state.labels[key] = c.category_code
+                    state.confidence[key] = c.confidence
+                    state.label_source[key] = "llm_revisit"
 
 
 def _coverage(state: BootstrapState, column_names: list[str]) -> float:
@@ -1278,8 +1332,9 @@ def record_iteration_metrics(
         indep_tier_disagreement_frac=indep_frac,
     )
     state.iteration_metrics.append(metrics)
-    # Contraction rate needs the just-appended row, so compute after.
+    # Contraction rate(s) need the just-appended row, so compute after.
     metrics.contraction_rate = round(contraction_rate(state), 4)
+    metrics.gap_contraction_rate = round(gap_contraction_rate(state), 4)
 
     # Per-column trajectory append.  One snapshot per labeled column
     # per iteration; column-major view that complements the time-
@@ -1441,6 +1496,34 @@ def contraction_rate(state: BootstrapState) -> float:
         return 0.0
     prev = metrics[-2].residual_norm
     curr = metrics[-1].residual_norm
+    if prev <= 1e-12:
+        return 0.0
+    return curr / prev
+
+
+def gap_contraction_rate(state: BootstrapState) -> float:
+    """Per-iteration contraction ratio over the mean-gap signal.
+
+    Honest single-criterion analogue of ``contraction_rate`` over the
+    actual stopping criterion ``mean_gap`` (the loop converges when
+    ``mean_gap < gap_threshold``, not when the heuristic
+    ``residual_norm`` composite drops). Same semantics as
+    ``contraction_rate``: <1 = tightening predictions, →1 = stalled,
+    >1 = drifting wider.
+
+    Surfaced as "Trend Ratio" on the live Status page; the composite
+    ``contraction_rate`` is retained for column_trajectories.json
+    analysis but not promoted to the dashboard.
+
+    Returns 0.0 if fewer than two iterations have been recorded or
+    the prior gap is below 1e-12 (avoid divide-by-zero on a corpus
+    that converges to zero in a single step — vanishingly rare).
+    """
+    metrics = state.iteration_metrics
+    if len(metrics) < 2:
+        return 0.0
+    prev = metrics[-2].mean_gap
+    curr = metrics[-1].mean_gap
     if prev <= 1e-12:
         return 0.0
     return curr / prev

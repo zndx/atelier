@@ -219,7 +219,36 @@ export default function Embeddings() {
             projection: { x: "x", y: "y" },
           }}
           defaultChartsConfig={{
-            embedding: { data: { x: "x", y: "y", text: "text", category: "conflict" } },
+            // Color the canvas by `belief` (Bel) — the lower-bound,
+            // honest positive measure of self-assessed success.  K
+            // (`conflict`) was the default but is normalized out by
+            // Dempster's rule, so it does not separate strong from
+            // weak predictions; Bel does, with a natural cliff at
+            // the cautious-review threshold (0.80).  Reviewers
+            // should read low Bel as the danger zone.
+            embedding: { data: { x: "x", y: "y", text: "text", category: "belief" } },
+            // Curated predicate panel — ordered for an algo-tuning
+            // reviewer, not for completeness.  See
+            // docs/src/operations/embeddings-reviewer-guide.md for
+            // the rationale tying each chart to an audit finding.
+            include: [
+              "belief",
+              "confidence",
+              "review_decision",
+              "predicted_annotation",
+              "needs_clarification",
+              "llm_confidence",
+              "uncertainty",
+              "conflict",
+              "shap_top1_name",
+              "shap_top1_value",
+              "shap_top2_name",
+              "shap_top2_value",
+              "shap_top3_name",
+              "shap_top3_value",
+              "table_name",
+              "column_type",
+            ],
           }}
           embeddingViewConfig={{ autoLabelEnabled: true }}
           colorScheme="light"

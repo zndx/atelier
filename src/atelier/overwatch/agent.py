@@ -22,9 +22,10 @@ Two entry points live here:
    (``write_proposal``, ``ingest_reference``, ``apply_and_rerun``,
    ``kill_run``); the agent has no direct ``Write`` tool.
 
-Both entry points require a direct Anthropic API key (``has_overwatch``).
-Bedrock-only deployments get neither — the classifier runs on Bedrock,
-but the supervisor overwatch itself requires the Anthropic direct API.
+Both entry points follow the Web Terminal Agent's selected model
+(``has_overwatch``).  When the operator picks a Bedrock entry in the
+WTA, Overwatch routes through Bedrock too; same for direct API.  The
+classifier and the agent host are no longer split across providers.
 """
 
 from __future__ import annotations
@@ -53,11 +54,8 @@ def run_overwatch_analysis(
     if not cfg.has_overwatch:
         return None
 
-    # Hard validation: overwatch requires a real Anthropic API key.
-    # This is not negotiable — Bedrock cannot power overwatch.
-    if not cfg.anthropic_api_key:
-        log.warning("Overwatch: ANTHROPIC_API_KEY required (not Bedrock). Skipping.")
-        return None
+    # Provider/credential presence is enforced by ``has_overwatch`` —
+    # which mirrors the WTA's runnable check — so no second gate here.
 
     results_dir = Path(results_dir)
     classifications_path = results_dir / "classifications.json"
@@ -422,12 +420,16 @@ def _query_overwatch(cfg, prompt: str) -> str:
     from claude_agent_sdk import query, ClaudeAgentOptions, AssistantMessage, TextBlock
     from pathlib import Path
 
-    # Build a clean env for direct Anthropic API — no Bedrock.
-    # Overwatch is an independent SDK instance that must never route
-    # through Bedrock regardless of the terminal/pipeline config.
-    env: dict[str, str] = {
-        "ANTHROPIC_API_KEY": cfg.anthropic_api_key,
-    }
+    # Follow the Web Terminal Agent's model selection — single source
+    # of truth.  ``active_model_ref`` returns the WTA's currently
+    # selected model_ref (Bedrock ARN or direct-API id), falling back
+    # to ``cfg.agent_model`` when no override is set.  ``_build_sdk_env``
+    # then constructs a credential dict with the correct
+    # CLAUDE_CODE_USE_BEDROCK toggle for that model.
+    from atelier.agents.client import _build_sdk_env
+    from atelier.terminal_selection import active_model_ref
+    resolved_model = active_model_ref(cfg)
+    env = _build_sdk_env(cfg, selected_model=resolved_model)
 
     project_root = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -440,14 +442,14 @@ def _query_overwatch(cfg, prompt: str) -> str:
     # matching workaround + upstream-fix note.
     from atelier.model_compat import requires_adaptive_thinking
     thinking_kwargs: dict = {}
-    if requires_adaptive_thinking(cfg.overwatch_model):
+    if requires_adaptive_thinking(resolved_model):
         thinking_kwargs["max_thinking_tokens"] = 0
         thinking_kwargs["effort"] = "medium"
 
     options = ClaudeAgentOptions(
         allowed_tools=[],
         permission_mode="bypassPermissions",
-        model=cfg.overwatch_model,
+        model=resolved_model,
         max_turns=1,  # Single-turn analysis, no tool use
         cwd=str(project_root),
         env=env,
@@ -752,7 +754,7 @@ def run_supervisor_overwatch(
     autonomy = getattr(cfg, "overwatch_autonomy", "propose")
 
     if not cfg.has_overwatch:
-        return {"status": "skipped", "reason": "overwatch disabled or no Anthropic key"}
+        return {"status": "skipped", "reason": "overwatch disabled or no runnable WTA model (no Anthropic key and no Bedrock creds)"}
 
     results_dir = Path(results_dir)
 
@@ -765,11 +767,16 @@ def run_supervisor_overwatch(
 
     project_root = Path(__file__).resolve().parents[3]
 
-    env: dict[str, str] = {"ANTHROPIC_API_KEY": cfg.anthropic_api_key}
+    # Follow the Web Terminal Agent's model selection (Bedrock or
+    # direct API).  See _query_overwatch above for the rationale.
+    from atelier.agents.client import _build_sdk_env
+    from atelier.terminal_selection import active_model_ref
+    resolved_model = active_model_ref(cfg)
+    env = _build_sdk_env(cfg, selected_model=resolved_model)
 
     from atelier.model_compat import requires_adaptive_thinking
     thinking_kwargs: dict[str, Any] = {}
-    if requires_adaptive_thinking(cfg.overwatch_model):
+    if requires_adaptive_thinking(resolved_model):
         # SDK v0.1.56 workaround — see the matching comment in
         # run_overwatch_analysis above.
         thinking_kwargs["max_thinking_tokens"] = 0
@@ -780,7 +787,7 @@ def run_supervisor_overwatch(
         allowed_tools=["Read", "Grep", "Glob", "Bash"],
         disallowed_tools=["Write", "Edit", "NotebookEdit"],
         permission_mode="default",
-        model=cfg.overwatch_model,
+        model=resolved_model,
         max_turns=max_turns,
         max_budget_usd=max_budget_usd,
         cwd=str(project_root),

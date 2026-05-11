@@ -31,7 +31,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 - **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules.
 - **HTTP Gateway** (`src/atelier/gateway.py`) — FastAPI bridging REST→gRPC, serves compiled React in production.
 - **React Frontend** (`ui/`) — Vite + React 19 + Ant Design + @xyflow/react. Dev server on :3000 proxies /api to :8090.
-- **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port 5533) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) for CAI when no external PG is available.
+- **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port **5533**) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) on port **5440** for CAI deployments when no external PG is available. The two ports are NOT interchangeable; the CAI pod has nothing on 5533. Code that needs the live URL reads `ATELIER_DB_URL` (exported by `bin/start-app.sh` line 278) — never hardcode the port.
 - **Qdrant** — Vector store. devenv `pkgs.qdrant` process for local dev; binary download for CAI.
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
 - **Submodules** — `external/embedding-atlas` ([fork](https://github.com/rch/oss-embedding-atlas) with important modifications, used in both dev and CAI deployment — pre-built dist/ committed to the fork), `external/hermes-agent` (fork, dev-only reference).
@@ -67,6 +67,81 @@ just docs-serve           # mdbook serve docs/
 3. **Python/bash scripts** — Maximum compatibility for CAI (no devenv or just)
 
 CAI deployment uses tier 3 exclusively: `scripts/install_deps.py`, `scripts/startup_app.py`, `bin/start-app.sh`.
+
+## Running inside the CAI Application pod
+
+The Claude Agent SDK terminal embedded in the deployed Atelier app
+runs *inside* the CAI Application pod and shares its process group +
+filesystem with the live gateway, gRPC servicer, PGlite, and Qdrant.
+Mistakes here crash the operator's session in their browser.  Read
+this section before touching processes or ports.
+
+### Ports in this environment
+
+| Service | devenv (local) | **CAI Application pod** |
+|---|---|---|
+| HTTP gateway | 8090 | `$CDSW_APP_PORT` (= 8090, but managed by the platform) |
+| gRPC servicer | 50051 | 50051 |
+| PostgreSQL | 5533 (devenv `services.postgres`) | **PGlite on 5440** — port 5533 is unused in CAI |
+| Qdrant HTTP | 6333 | 6333 |
+
+The PGlite port (`5440`) is hardcoded in `bin/start-app.sh:251` and
+deliberately avoids CAI's platform Postgres on 5432.  Anything that
+*reads* the URL should read `os.environ["ATELIER_DB_URL"]` — exported
+by the same script at line 278 — and never assume the devenv default.
+
+### Processes you must NOT kill
+
+`bin/start-app.sh` runs once at AMP startup and includes its own
+`kill_stale_processes()` that `pkill -f`s `pglite-server.mjs`,
+`qdrant/qdrant`, `atelier.server`, `atelier.gateway`.  That helper
+is intended for AMP-lifecycle cleanup, not for agent use mid-session.
+Inside a running pod:
+
+- **`pkill -f pglite-server.mjs`** kills the live database. The
+  gateway's next DB call hangs or 500s; the operator sees a broken
+  Embeddings page until the AMP is restarted.
+- **`pkill -f atelier.gateway`** kills the HTTP server the operator
+  is talking to. Their browser session goes white.
+- **`pkill -f atelier.server`** kills the gRPC servicer the gateway
+  proxies to. Same blast radius.
+- **Re-running `bin/start-app.sh`** from a live pod is destructive
+  in the same way — the script's first action is to kill everything
+  it expects to start.
+
+The supervisor owning these processes is the AMP runtime, not the
+agent.  To pick up code changes, the operator restarts the
+Application from the CAI Workspace UI.
+
+### Diagnosing DB issues from inside the pod
+
+Symptom: `connection failed: connection to server at "127.0.0.1",
+port 5533 failed: Connection refused`.  Cause: code (or an agent
+session) is reading the devenv default; CAI uses 5440.  Fix: read
+`ATELIER_DB_URL` instead of constructing a URL.
+
+To inspect the live DB safely (read-only):
+
+```bash
+python -c "
+import sys; sys.path.insert(0, 'src')
+from atelier.db.dao import AtelierDao
+print(AtelierDao().list_datasets())
+"
+```
+
+The DAO reads `ATELIER_DB_URL` automatically; no port assumptions.
+
+### Filesystem realities
+
+- Project root is `/home/cdsw` (CAI convention; matches `$HOME`).
+- PGlite data lives at `.app/pgdata/`; PGlite log at `.app/pglite.log`.
+- `build/results/<run_id>/` accumulates per-run artifacts (parquet,
+  classifications.json, model files); nothing here is committed.
+- `/home/cdsw` is typically NFS-shared with the CAI Session pod
+  hosting the maintainer's IDE/Jupyter — file edits made elsewhere
+  appear here without warning.  Cross-check `git status` before
+  attributing diffs to your own session.
 
 ## Config Pattern
 
@@ -123,9 +198,12 @@ Terminology (Atlas Lexicon — use in UI / docs): **entities** (not rows),
 
 - **Overwatch** (`src/atelier/overwatch/agent.py`) — single-turn Opus
   analysis that writes `build/results/{run_id}/overwatch.md` with
-  pipeline recommendations. **Requires direct Anthropic API** — not
-  Bedrock. Gated by `cfg.has_overwatch`. Triggered at the end of a
-  pipeline run when `overwatch.enabled = true`.
+  pipeline recommendations. Follows the Web Terminal Agent's selected
+  model (direct Anthropic API or Bedrock) — single source of truth so
+  operators have one provider knob instead of two.  Gated by
+  `cfg.has_overwatch` (which is now `overwatch.enabled AND any WTA
+  catalog entry is runnable`). Triggered at the end of a pipeline run
+  when `overwatch.enabled = true`.
 - **Governance** (`src/atelier/governance/`) — optional Atlas sync
   (taxonomy → classification types; results → entity tags). Gated by
   `cfg.governance_auto_sync && cfg.has_atlas`. Knox-proxied Atlas auth
@@ -214,11 +292,16 @@ for full design notes.
 
 ## Model Defaults
 
-`agents.model` and `overwatch.model` in `config/base.conf` track the
-latest Opus on the Anthropic direct API (currently `claude-opus-4-7`).
-Bedrock deployments override via `ATELIER_AGENT_MODEL` with a Bedrock
-ARN — Bedrock lags direct-API releases, so the two are not kept in
+`agents.model` in `config/base.conf` tracks the latest Opus on the
+Anthropic direct API (currently `claude-opus-4-7`).  Bedrock
+deployments override via `ATELIER_AGENT_MODEL` with a Bedrock ARN —
+Bedrock lags direct-API releases, so the two are not kept in
 lockstep.
+
+Overwatch has no separate model setting — it follows whatever the
+operator selects in the Web Terminal Agent picker (which itself
+defaults to `cfg.agent_model`).  This keeps provider+model selection
+to a single, intuitive knob.
 
 ## Branch Convention
 

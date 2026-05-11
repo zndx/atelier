@@ -10,9 +10,10 @@ written consent of Cloudera, Inc.
 
 # ML Artifact Management + Extend Classification
 
-Each Atelier classify run trains a CatBoost classifier, optionally a
-incremental SVM classifier, and (when umap-learn handles the projection)
-a fitted UMAP reducer.  The **ML Artifact Set** feature makes those
+Each Atelier classify run trains a CatBoost classifier, optionally an
+SVM classifier (synth-trained, with runtime LLM-mediated alignment to
+the user vocabulary — see ``ontology_alignment.py``), and (when
+umap-learn handles the projection) a fitted UMAP reducer.  The **ML Artifact Set** feature makes those
 trained models first-class entities — registered in PG, listed in the
 UI, and replayable on new data through a streamlined **Extend
 Classification** pipeline that skips the LLM sweep, DST iteration, and

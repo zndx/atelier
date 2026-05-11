@@ -60,8 +60,17 @@ interface StatusSummary {
 // polling, the system is trying to reach the engine" state.  Avoids
 // the thrashing UX of flipping between Disconnected and Connecting on
 // every poll cycle while the gateway is genuinely unreachable.
-type ConnectionState = "connecting" | "connected" | "degraded" | "disconnected";
+type ConnectionState =
+  | "connecting"
+  | "connected"
+  | "classifying"
+  | "degraded"
+  | "disconnected";
 const DISCONNECTED_ALARM_MS = 10_000;
+
+// Pipeline considered "in flight" iff the FSM is in any non-terminal
+// state — same predicate Status.tsx uses for its Start/Stop button.
+const PIPELINE_TERMINAL_STATES = new Set(["IDLE", "CONVERGED", "ERROR"]);
 
 function Landing() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
@@ -70,6 +79,7 @@ function Landing() {
   const disconnectedSinceRef = useRef<number | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [termCount, setTermCount] = useState<number | null>(null);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
   const { activeDatasetId, activeSourceId, datasets, sources } = useDataset();
 
   useEffect(() => {
@@ -110,6 +120,22 @@ function Landing() {
     fetchStatus();
     const statusInterval = setInterval(fetchStatus, 5000);
 
+    // Poll FSM state on the same cadence — when the pipeline is
+    // running the Service Status card swaps in a "Classifying"
+    // spinner instead of the bare "Connected" indicator.  Failures
+    // are silent: a missing FSM endpoint just means we fall back
+    // to plain Connected.
+    const fetchFsm = () =>
+      fetch("/api/fsm/status")
+        .then((r) => r.json())
+        .then((data) => {
+          const fsmState = data?.state ?? "IDLE";
+          setPipelineRunning(!PIPELINE_TERMINAL_STATES.has(fsmState));
+        })
+        .catch(() => setPipelineRunning(false));
+    fetchFsm();
+    const fsmInterval = setInterval(fetchFsm, 5000);
+
     fetch("/api/agents")
       .then((r) => r.json())
       .then((data) => setAgents(data.agents || []))
@@ -123,7 +149,10 @@ function Landing() {
       .then((data) => setTermCount(data.terms ?? null))
       .catch(() => setTermCount(null));
 
-    return () => clearInterval(statusInterval);
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(fsmInterval);
+    };
   }, [activeSourceId]);
 
   const connectionDisplay: Record<
@@ -140,6 +169,11 @@ function Landing() {
       color: "#52c41a",
       icon: <CheckCircleOutlined />,
     },
+    classifying: {
+      label: "Classifying",
+      color: "#52c41a",
+      icon: <SyncOutlined spin />,
+    },
     degraded: {
       label: "Degraded",
       color: "#faad14",
@@ -151,7 +185,15 @@ function Landing() {
       icon: <CloseCircleOutlined />,
     },
   };
-  const conn = connectionDisplay[connectionState];
+  // Promote ``connected → classifying`` while the pipeline is in
+  // flight; degraded/disconnected/connecting still take precedence
+  // because a misbehaving service is more important to surface than
+  // a busy one.
+  const displayState: ConnectionState =
+    connectionState === "connected" && pipelineRunning
+      ? "classifying"
+      : connectionState;
+  const conn = connectionDisplay[displayState];
 
   const skillCount = useMemo(
     () => agents.reduce((n, a) => n + (a.tool_ids?.length || 0), 0),

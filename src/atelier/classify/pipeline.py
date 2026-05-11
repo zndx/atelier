@@ -85,9 +85,65 @@ _NON_DATA_TABLE_NAMES: frozenset[str] = frozenset({
 })
 
 
+def _convergence_progress(
+    state,
+    column_names: list[str],
+    disagreements,
+    boot_cfg,
+) -> dict:
+    """Build the iteration-boundary FSM progress payload.
+
+    Surfaces the thesis-aligned signals the live Status page renders
+    (``mean_gap``, ``mean_bel``, ``clarity``, ``gap_contraction_rate``,
+    revisit-queue count + fraction, LLM-fit count + fraction *f*) plus
+    the reference thresholds the UI needs to color-code them.
+
+    The composite ``residual_norm`` and its associated
+    ``contraction_rate`` (which is a ratio over the heuristic
+    composite, not over the actual stopping criterion ``mean_gap``)
+    are deliberately NOT surfaced here — see
+    ``.claude/plans/how-about-extend-the-golden-sedgewick.md`` for the
+    design rationale.  They remain in ``IterationMetrics`` and
+    ``column_trajectories.json`` for post-run analysis.
+
+    The latest ``IterationMetrics`` snapshot is read from
+    ``state.iteration_metrics[-1]`` when present; before the first
+    iteration completes (e.g. agent-convergence entry) the snapshot
+    keys are omitted and the UI falls back to the pre-iteration view.
+    """
+    n_cols = max(1, len(column_names))
+    n_disagree = len(disagreements) if disagreements is not None else 0
+    payload: dict = {
+        # Reference thresholds for UI color-coding.
+        "gap_threshold": boot_cfg.gap_threshold,
+        "bel_floor": boot_cfg.bel_floor,
+        "clarity_target": boot_cfg.clarity_target,
+        # Thesis core: the LLM-labeled fraction *f* in the operator's
+        # thesis, rendered explicitly.
+        "llm_fit_labels": len(state.labels),
+        "llm_fit_fraction": round(len(state.labels) / n_cols, 4),
+        # Revisit queue: count is the LLM budget for the next iteration;
+        # fraction is the thesis-relevant scale-invariant view.
+        "disagreements_count": n_disagree,
+        "disagreements_frac": round(n_disagree / n_cols, 4),
+    }
+    if state.iteration_metrics:
+        m = state.iteration_metrics[-1]
+        payload.update({
+            "mean_gap": m.mean_gap,
+            "mean_bel": m.mean_bel,
+            "clarity": round(1.0 - m.frac_unclear, 4),
+            "gap_contraction_rate": m.gap_contraction_rate,
+            "indep_tier_disagreement_frac": m.indep_tier_disagreement_frac,
+        })
+    return payload
+
+
 def _filter_classifiable_tables(
     samples: list[TableSample],
     vocab_uri: str | None,
+    *,
+    exclude_temp_tables: bool = True,
 ) -> list[TableSample]:
     """Drop tables that shouldn't be treated as data (vocab + test leftovers).
 
@@ -98,6 +154,12 @@ def _filter_classifiable_tables(
     vocab URI is e.g. ``"default.annotations"`` we want that specific
     table gone from classification even if it doesn't match the
     hard-coded list above.
+
+    R6 (audit_2026-05-06_a): when ``exclude_temp_tables`` is True
+    (default), drop tables whose name carries the Hive/Hue temp-table
+    prefix (``__tmp_*``, case-insensitive on either bare name or any
+    namespace component).  In 8d67b1ed a single ``hue__tmp_ecommerce_orders``
+    table contributed 14 of the run's annotation-hallucination cases.
     """
     skip = set(_NON_DATA_TABLE_NAMES)
     if vocab_uri:
@@ -110,17 +172,32 @@ def _filter_classifiable_tables(
         if bare:
             skip.add(bare.lower())
 
+    def _is_temp(name: str) -> bool:
+        if not exclude_temp_tables or not name:
+            return False
+        lower = name.lower()
+        return "__tmp_" in lower or lower.startswith("tmp_")
+
     kept: list[TableSample] = []
     dropped: list[str] = []
+    dropped_temp: list[str] = []
     for ts in samples:
         if ts.name.lower() in skip:
             dropped.append(ts.name)
+            continue
+        if _is_temp(ts.name):
+            dropped_temp.append(ts.name)
             continue
         kept.append(ts)
     if dropped:
         logger.info(
             "Excluded %d non-data tables from classification: %s",
             len(dropped), dropped,
+        )
+    if dropped_temp:
+        logger.info(
+            "Excluded %d Hive/Hue temp tables (R6, audit_2026-05-06_a): %s",
+            len(dropped_temp), dropped_temp,
         )
     return kept
 
@@ -142,9 +219,19 @@ def _install_fit_to_llm_catboost(
     When ``save_path`` is provided, the trained CatBoost model is also
     persisted to disk (native ``.cbm`` format + sibling ``.classes.json``)
     so downstream consumers can replay inference without retraining.
-    This is the hook that makes ML-only reproducibility auditable from
-    a run directory alone — pair it with ``svm_frontier.pkl`` and the
-    full ML stack for a given run is on disk.
+    This is the hook that makes the LLM-trained CatBoost auditable from
+    the run directory alone.
+
+    Note: there is no per-run SVM analogue.  The M9 frontier-SVM
+    retrain (``train_svm_on_frontier_labels``) was excised in commit
+    5199379 because training the SVM on per-column LLM votes broke
+    Denoeux 2008 source-independence.  The active SVM is the
+    synth-trained classifier at ``build/models/svm.pkl`` (built by
+    ``scripts/train_classifiers.py`` against the bundled-ontology
+    synth corpus); per-vocabulary alignment happens at runtime via
+    ``ontology_alignment.translate_proba``.  Old run directories may
+    still carry a ``svm_frontier.pkl`` from before the excision —
+    those files are vestiges and are no longer produced.
     """
     min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
     if len(state.labels) < min_labels:
@@ -216,53 +303,83 @@ def _install_fit_to_llm_catboost(
                            save_path, exc)
 
 
-def _maybe_retrain_svm(
-    state,
-    samples_by_name: dict[str, ColumnSample],
-    svm_frontier_path: Path,
-    boot_cfg,
+def _ensure_per_vocab_svm(
     cfg,
-    last_retrain_count: int,
-    min_new_labels: int = 10,
-) -> tuple[bool, int]:
-    """Retrain the incremental SVM on blended synth + frontier-tier labels.
+    category_set: HierarchicalCategorySet,
+    alignment: dict[str, str],
+    *,
+    cache_dir: Path,
+    run_dir: Path,
+) -> Path:
+    """Cache-then-bundle the per-vocabulary SVM.
 
-    Skips when the number of new oracle labels since the last retrain is
-    below ``min_new_labels``.  Returns (retrained, current_frontier_count).
+    Pipeline counterpart to ``ml_train.train_svm_for_vocab``.  Walks
+    three steps:
+
+      1. Compute the vocab signature from ``category_set.leaf_codes``.
+      2. Cache lookup at ``cache_dir/{vocab_sig}.pkl``; train via
+         ``train_svm_for_vocab`` if absent.  The cache is keyed solely
+         by user-vocab leaves so multiple classify runs against the
+         same vocabulary share one trained model — alignment + train
+         is non-trivial work and re-doing it per run is wasteful.
+      3. Copy ``cache/<sig>.pkl`` (and the ``.classes.json`` sidecar)
+         into ``run_dir/svm.pkl`` so the run is self-contained for
+         reproducibility and Extend Classification reuse.
+
+    Finally, install the loaded model via ``ml_inference.install_svm``
+    so the rest of the pipeline's SVM evidence path (``predict_svm``)
+    uses the per-vocab model directly — no ``translate_proba`` step
+    needed at inference time.
+
+    Returns the run-dir path of the bundled SVM.  Raises on failure
+    (caller logs and continues — strict-mode landing is deferred).
     """
     from atelier.classify import ml_inference
-    from atelier.classify.ml_train import train_svm_on_frontier_labels
-
-    # Count frontier labels
-    frontier_count = sum(
-        1 for src in state.label_source.values()
-        if src in ("llm", "llm_revisit")
-    )
-
-    if frontier_count - last_retrain_count < min_new_labels:
-        return False, last_retrain_count
-
-    if frontier_count < boot_cfg.frontier_svm_min_labels:
-        return False, last_retrain_count
-
-    synth_dir = _PROJECT_ROOT / "build" / "data" / "synth"
-    result = train_svm_on_frontier_labels(
-        state, samples_by_name, svm_frontier_path,
-        synth_dir=synth_dir if synth_dir.exists() else None,
-        min_frontier_labels=boot_cfg.frontier_svm_min_labels,
-    )
-    if result is None:
-        return False, last_retrain_count
-
-    # Hot-swap: install the freshly-retrained SVM in place of whatever
-    # was loaded before.  Must NOT touch CatBoost state — the fit-to-LLM
-    # install happens earlier in the same run, and a blanket reset here
-    # would silently wipe it (classifications emitted with catboost=0
-    # evidence despite fit_to_llm=True).
+    from atelier.classify.artifact_set import compute_vocab_signature
+    from atelier.classify.ml_train import train_svm_for_vocab
     from atelier.classify.svm_classifier import SVMClassifier
-    ml_inference.install_svm(SVMClassifier.load(svm_frontier_path))
-    logger.info("Incremental SVM hot-swapped: %s", svm_frontier_path)
-    return True, frontier_count
+
+    leaf_codes = sorted(getattr(category_set, "leaf_codes", set()))
+    if not leaf_codes:
+        raise ValueError(
+            "_ensure_per_vocab_svm: category_set has no leaf_codes — "
+            "cannot key cache or train"
+        )
+    vocab_sig = compute_vocab_signature(leaf_codes)
+
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{vocab_sig}.pkl"
+    cache_classes = cache_path.with_suffix(".classes.json")
+
+    if cache_path.is_file() and cache_classes.is_file():
+        logger.info(
+            "per-vocab SVM cache hit: %s (%d leaf codes)",
+            cache_path, len(leaf_codes),
+        )
+    else:
+        logger.info(
+            "per-vocab SVM cache miss: training for %d leaf codes "
+            "(%d alignment entries) → %s",
+            len(leaf_codes), len(alignment), cache_path,
+        )
+        train_svm_for_vocab(alignment, cache_path)
+
+    import shutil
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = run_dir / "svm.pkl"
+    bundle_classes = bundle_path.with_suffix(".classes.json")
+    shutil.copy2(cache_path, bundle_path)
+    shutil.copy2(cache_classes, bundle_classes)
+
+    model = SVMClassifier.load(bundle_path)
+    ml_inference.install_svm(model)
+    logger.info(
+        "per-vocab SVM bundled at %s and installed in-memory "
+        "(%d classes)", bundle_path, len(model._classes),
+    )
+    return bundle_path
 
 
 def run_classification_pipeline(
@@ -450,12 +567,16 @@ def run_classification_pipeline(
 
     # Persist the settings-at-start so the UI can show historical vs
     # current in the adaptive focus section even for past runs.
+    # ``source_id`` is included so the post-run reconcile pass
+    # (``atelier.db.sync.sync_filesystem_to_db``) can register the
+    # dataset row against the correct source without operator input.
     try:
         from atelier.config_overlay import snapshot as _settings_snapshot
         snapshot_path = results_dir / "settings_snapshot.json"
         snap = {
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "source_id": source_id,
             **_settings_snapshot(cfg),
         }
         snapshot_path.write_text(json.dumps(snap, indent=2, default=str) + "\n")
@@ -500,12 +621,20 @@ def run_classification_pipeline(
         if not isinstance(category_set, HierarchicalCategorySet):
             raise RuntimeError("Expected HierarchicalCategorySet")
 
+        # Build the frame BEFORE validation so the validator can run
+        # the R8 ``abbrev_unreachable_in_frame`` check against the
+        # active frame's ``_singletons`` / ``_internal`` sets.
+        frame = FrameOfDiscernment(
+            category_set,
+            confusable_pairs=_build_confusable_pairs(category_set),
+        )
+
         # Vocabulary quality check — flags label collisions like
         # "Web Browser" / "WebBrowser" that cause non-deterministic
         # name-match resolution.  Warn-only by default; gated to
         # raise via classify.taxonomy.strict_validation = true.
         from atelier.classify.taxonomy import validate_taxonomy
-        taxonomy_findings = validate_taxonomy(category_set)
+        taxonomy_findings = validate_taxonomy(category_set, frame=frame)
         if taxonomy_findings:
             errors = [f for f in taxonomy_findings if f.severity == "error"]
             warnings = [f for f in taxonomy_findings if f.severity == "warning"]
@@ -578,16 +707,13 @@ def run_classification_pipeline(
                     f"Taxonomy has {len(errors)} structural error(s); first: {errors[0].detail}"
                 )
 
-        frame = FrameOfDiscernment(
-            category_set,
-            confusable_pairs=_build_confusable_pairs(category_set),
-        )
         fsm.advance(run_id, FSMState.DISCOVERING, progress={
             "categories_loaded": len(category_set.categories),
         })
 
         # ── DISCOVERING + SAMPLING ────────────────────────────────
         heartbeat_interval = float(getattr(cfg, "classify_phase_heartbeat_interval_s", 5.0))
+        _samples_from_hive = False
         if samples is not None:
             all_samples = samples
             fsm.advance(run_id, FSMState.SAMPLING, progress={
@@ -595,6 +721,7 @@ def run_classification_pipeline(
                 "injected": True,
             })
         else:
+            _samples_from_hive = True
             with phase_heartbeat(
                 fsm, run_id, FSMState.DISCOVERING,
                 interval_s=heartbeat_interval, label="discovering",
@@ -629,7 +756,10 @@ def run_classification_pipeline(
         # internal test leftovers).  The annotations table IS the vocab,
         # not data; classifying it pollutes the accuracy signal.
         tables_before_filter = len(all_samples)
-        all_samples = _filter_classifiable_tables(all_samples, vocab_uri)
+        all_samples = _filter_classifiable_tables(
+            all_samples, vocab_uri,
+            exclude_temp_tables=getattr(cfg, "classify_exclude_temp_tables", True),
+        )
         tables_after_filter = len(all_samples)
         # Advance the FSM with the post-filter count so the UI shows
         # tables that will ACTUALLY be classified, not the raw Hive
@@ -686,17 +816,22 @@ def run_classification_pipeline(
         # never be classified (trivial by name parse) or appear in
         # sibling contexts (would leak answers into other columns'
         # embeddings).  The meta-tagging loader filters internally;
-        # the Hive sampler does not.  Applying the filter here means
-        # every loader path ends up with reference columns excluded,
-        # with zero behavior change on production data (pattern doesn't
-        # match production column names).
+        # the Hive sampler does not.
+        #
+        # IMPORTANT: this filter is ONLY applied to injected samples
+        # (synth/fixture data).  Hive-sampled production tables
+        # legitimately contain columns like ``var_05``, ``col_12``,
+        # ``val_33`` that match the answer-key pattern but carry real
+        # business data (e.g. payment_instruments.var_01 through
+        # var_26).  The original assumption that "the pattern doesn't
+        # match production column names" was incorrect.
         #
         # Gated by ``classify_exclude_reference_columns`` so UAT
         # reviewers can demonstrate accuracy in both configurations
         # (the toggle lives on the Status page).  Default ON; flag
         # exists purely for the UAT synth corpus that motivated it
         # and will be removed once that dataset is retired.
-        if cfg.classify_exclude_reference_columns:
+        if cfg.classify_exclude_reference_columns and not _samples_from_hive:
             from atelier.classify.meta_tagging_source import exclude_reference_columns
             pre_filter_cols = sum(len(t.columns) for t in all_samples)
             all_samples = exclude_reference_columns(all_samples)
@@ -708,6 +843,13 @@ def run_classification_pipeline(
                     pre_filter_cols, post_filter_cols,
                     pre_filter_cols - post_filter_cols, len(all_samples),
                 )
+        elif _samples_from_hive:
+            logger.info(
+                "Reference-column exclusion SKIPPED — samples are from "
+                "a live Hive connection; the answer-key pattern can "
+                "collide with legitimate production column names "
+                "(e.g. var_01, col_12)."
+            )
         else:
             logger.info(
                 "Reference-column exclusion DISABLED — answer-key "
@@ -715,18 +857,27 @@ def run_classification_pipeline(
                 "demonstration mode only; see Status page toggle)."
             )
 
-        # Flatten to column list with table mapping
+        # Flatten to column list with table mapping.  Cross-table dicts
+        # key on ``qualified_name`` (``f"{table_name}.{name}"``) — bare
+        # names collide across tables (a typical hive corpus has
+        # ``row_id`` in 20+ tables; bare keying would silently drop
+        # 19/20).  See ``ColumnSample.qualified_name``.  Downstream
+        # state dicts (``state.labels``, ``state.confidence``,
+        # ``column_table`` lookups in ``_llm_sweep`` /
+        # ``_llm_revisit``) inherit the same keying convention.
         all_columns: list[ColumnSample] = []
         column_table: dict[str, str] = {}
         for ts in all_samples:
             for col in ts.columns:
                 all_columns.append(col)
-                column_table[col.name] = ts.name
+                column_table[col.qualified_name] = ts.name
 
         total_columns = len(all_columns)
         logger.info("Sampled %d columns across %d tables", total_columns, len(all_samples))
 
-        samples_by_name: dict[str, ColumnSample] = {c.name: c for c in all_columns}
+        samples_by_name: dict[str, ColumnSample] = {
+            c.qualified_name: c for c in all_columns
+        }
         column_names = list(samples_by_name.keys())
 
         # ── Bootstrap config + LLM prompts ────────────────────────
@@ -763,6 +914,58 @@ def run_classification_pipeline(
         )
 
         discounts = DiscountConfig.from_cfg(cfg)
+
+        # ── Per-vocabulary SVM (alignment → relabel → train → bundle) ──
+        # The BFO/CCO synth corpus is keyed by ICE.* leaves; the runtime
+        # frame is keyed by the operator's annotations vocabulary.  We
+        # build a one-time ICE.* → user-code alignment via the LLM, then
+        # train a per-vocab SVM whose labels ARE user codes — so at
+        # inference the predictions land directly in the user-taxonomy
+        # frame, no runtime translation needed.  Cache-then-bundle:
+        # train into ``build/cache/svm/{vocab_sig}.pkl`` and copy into
+        # ``build/results/{run_id}/svm.pkl`` so the run is reproducible
+        # on its own and Extend Classification picks up the bundled
+        # SVM/CatBoost pair without retraining.  See
+        # ``ontology_alignment.py`` for the independence/discount
+        # rationale.
+        from atelier.classify.ontology_alignment import build_alignment
+        try:
+            svm_alignment = build_alignment(
+                category_set=category_set,
+                llm_backend=llm_backend,
+                system_prompt=system_prompt,
+                model_name=getattr(cfg, "classify_subagent_model", None) or "unknown",
+            )
+        except Exception as exc:
+            logger.warning(
+                "ontology_alignment: build failed — proceeding without "
+                "(SVM evidence will be vacuous for this run): %s",
+                exc,
+            )
+            svm_alignment = {}
+
+        # Multi-run safety: clear any SVM that a prior pipeline run on
+        # this same process installed.  ``_ensure_per_vocab_svm``
+        # re-installs on success.  If it fails (or alignment is empty),
+        # the SVM source stays absent rather than carrying a stale
+        # prior-vocabulary model into the new frame.
+        ml_inference.reset_svm()
+
+        if svm_alignment:
+            try:
+                _ensure_per_vocab_svm(
+                    cfg, category_set, svm_alignment,
+                    cache_dir=build_dir / "cache" / "svm",
+                    run_dir=results_dir,
+                )
+            except Exception as exc:
+                # Don't make per-vocab SVM a hard prerequisite yet —
+                # the strict-mode tightening lands in a follow-up.  Log
+                # loudly so the missing source is visible in run logs.
+                logger.warning(
+                    "per-vocab SVM build failed — SVM evidence will be "
+                    "absent for this run: %s", exc,
+                )
 
         # Try sentence-transformers for cosine
         has_embeddings = False
@@ -903,17 +1106,6 @@ def run_classification_pipeline(
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
 
-        # ── Incremental SVM retrain #1: after first LLM sweep ───────
-        svm_retrained = False
-        svm_retrain_count = 0
-        svm_frontier_path = results_dir / "svm_frontier.pkl"
-        if boot_cfg.frontier_svm_retrain:
-            svm_retrained, svm_retrain_count = _maybe_retrain_svm(
-                state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
-                last_retrain_count=0,
-                min_new_labels=boot_cfg.frontier_svm_min_labels,
-            )
-
         # ── VALIDATING ───────────────────────────────────────────
         fsm.advance(run_id, FSMState.VALIDATING, progress={
             "phase": "ml_validation",
@@ -964,8 +1156,10 @@ def run_classification_pipeline(
             logger.info("Using agent-driven convergence loop")
             fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                 "phase": "agent_convergence",
-                "disagreements": len(disagreements),
                 "mean_k": round(mean_k, 4),
+                **_convergence_progress(
+                    state, column_names, disagreements, boot_cfg,
+                ),
             })
             run_agent_loop(
                 state, cfg, boot_cfg, llm_backend, system_prompt,
@@ -1116,8 +1310,10 @@ def run_classification_pipeline(
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "phase": "revisit",
                     "iteration": iteration,
-                    "disagreements": len(disagreements),
                     "mean_k": round(mean_k, 4),
+                    **_convergence_progress(
+                        state, column_names, disagreements, boot_cfg,
+                    ),
                 })
 
                 # Snapshot the columns that will be revisited THIS
@@ -1132,15 +1328,6 @@ def run_classification_pipeline(
                     state, boot_cfg, llm_backend, system_prompt,
                     disagreements, samples_by_name, column_table, category_set,
                 )
-
-                # ── Incremental SVM retrain #2: mid-loop ─────────
-                if boot_cfg.frontier_svm_retrain:
-                    retrained, svm_retrain_count = _maybe_retrain_svm(
-                        state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
-                        last_retrain_count=svm_retrain_count,
-                    )
-                    if retrained:
-                        svm_retrained = True
 
                 fsm.advance(run_id, FSMState.VALIDATING, progress={
                     "phase": "revalidation",
@@ -1220,27 +1407,26 @@ def run_classification_pipeline(
                 "coverage_and_gap_met" if converged else "unknown"
             )
 
-        # ── Incremental SVM retrain #3: final (only if not converged)
-        if boot_cfg.frontier_svm_retrain and not converged:
-            retrained, svm_retrain_count = _maybe_retrain_svm(
-                state, samples_by_name, svm_frontier_path, boot_cfg, cfg,
-                last_retrain_count=svm_retrain_count,
-                min_new_labels=1,
-            )
-            if retrained:
-                svm_retrained = True
-
         fsm.advance(run_id, FSMState.CLASSIFYING, progress={
             "phase": "final_classification",
             "converged": converged,
             "mean_k": round(mean_k, 4),
             "coverage": round(coverage, 4),
+            **_convergence_progress(
+                state, column_names, disagreements, boot_cfg,
+            ),
         })
 
         classifications: list[dict[str, Any]] = []
         for col in all_columns:
-            llm_code = state.labels.get(col.name)
-            llm_conf = state.confidence.get(col.name, 0.0)
+            # Cross-table state dicts are keyed by ``qualified_name``
+            # (see the keying note above where ``samples_by_name`` is
+            # built); ``col.name`` is the bare canonical column id and
+            # would silently miss every entry past the first cross-
+            # table collision.
+            qkey = col.qualified_name
+            llm_code = state.labels.get(qkey)
+            llm_conf = state.confidence.get(qkey, 0.0)
             result = _classify_column(
                 col, category_set, frame,
                 llm_code=llm_code,
@@ -1249,6 +1435,9 @@ def run_classification_pipeline(
                 use_cosine=has_embeddings,
                 discounts=discounts,
                 fusion_strategy=cfg.classify_fusion_strategy,
+                resolve_llm_annotation_mnemonic=getattr(
+                    cfg, "classify_resolve_llm_annotation_mnemonic", True,
+                ),
             )
             classifications.append(result)
 
@@ -1297,7 +1486,7 @@ def run_classification_pipeline(
             "columns_fused": len(classifications),
         })
 
-        summary = _evaluate_results(classifications)
+        summary = _evaluate_results(classifications, category_set)
         eval_report = evaluate_classifications(
             classifications, category_set, run_id=run_id,
         )
@@ -1332,10 +1521,6 @@ def run_classification_pipeline(
         summary["mc_sample_fraction"] = (
             mc_plan.effective_sample_fraction if mc_plan else 1.0
         )
-        summary["svm_retrained_on_frontier"] = svm_retrained
-        if svm_retrained:
-            summary["svm_frontier_training_samples"] = svm_retrain_count
-            summary["svm_frontier_model_path"] = str(svm_frontier_path)
         summary["iteration_metrics"] = [
             {
                 "iteration": m.iteration,
@@ -1344,6 +1529,21 @@ def run_classification_pipeline(
                 "disagreements": m.disagreements,
                 "coverage": m.coverage,
                 "llm_calls": m.llm_calls,
+                # Belief-gap convergence (added 2026-05-03 — see plan
+                # how-about-extend-the-golden-sedgewick.md).  Time-major
+                # trajectory needed for thesis-defense plots; the older
+                # column_trajectories.json is column-major and doesn't
+                # substitute.
+                "mean_gap": m.mean_gap,
+                "mean_bel": m.mean_bel,
+                "frac_unclear": m.frac_unclear,
+                "gap_contraction_rate": m.gap_contraction_rate,
+                "indep_tier_disagreement_frac": m.indep_tier_disagreement_frac,
+                # Composite scalar retained for back-compat — see
+                # ``residual_norm`` docstring for why it isn't promoted
+                # to the live dashboard.
+                "residual_norm": m.residual_norm,
+                "contraction_rate": m.contraction_rate,
             }
             for m in state.iteration_metrics
         ]
@@ -1371,7 +1571,49 @@ def run_classification_pipeline(
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
-        # Auto-register as a dataset so the Embeddings page is populated
+        # Order matters here: the ``datasets`` table has a FK on
+        # ``artifact_set_id`` referencing ``ml_artifact_sets(id)``, so the
+        # artifact set must be registered BEFORE the dataset row tries to
+        # reference it.  Pre-2026-05-04 these blocks were inverted, which
+        # produced a silent FK violation on every classify run that
+        # trained ML artifacts (every run with f > 0).  See run b7e10711
+        # for the captured traceback in ``register_error.json``.
+
+        # 1. Register the ML artifact set so the dataset row's FK has a
+        #    target.  Non-fatal — a failure here means Extend is
+        #    unavailable for this run until backfilled via
+        #    scripts/backfill_dataset.py, AND the dataset row that
+        #    follows will fall back to ``artifact_set_id=None``.
+        artifact_set_registered = False
+        try:
+            from atelier.classify.artifact_set import build_artifact_set_record
+            from atelier.db.dao import AtelierDao
+            spec = build_artifact_set_record(
+                run_id=run_id,
+                results_dir=results_dir,
+                cfg=cfg,
+                n_columns=len(classifications),
+                source_id=source_id,
+                fsm_run_id=run_id,
+            )
+            if spec is not None:
+                AtelierDao().register_artifact_set(**spec)
+                artifact_set_registered = True
+                logger.info("Registered ML artifact set: %s", run_id)
+        except Exception as e:
+            logger.exception("Failed to register ML artifact set for run %s", run_id)
+            _write_register_error(
+                results_dir, "artifact_set", run_id, source_id, e,
+            )
+
+        # 2. Auto-register as a dataset so the Embeddings page is
+        #    populated.  When the artifact set wasn't registered (no
+        #    spec, or registration raised), pass ``artifact_set_id=None``
+        #    so the dataset row still lands — the Embeddings panel
+        #    surfaces the run even when Extend wiring is incomplete.
+        #    Any other failure here leaves a ``register_error.json``
+        #    sidecar so an operator can spot the orphan run and
+        #    backfill via scripts/backfill_dataset.py.
         if parquet_path:
             try:
                 from atelier.db.dao import AtelierDao
@@ -1390,35 +1632,17 @@ def run_classification_pipeline(
                     is_active=True,
                     summary=f"{len(all_samples)} tables, {len(classifications)} columns",
                     fsm_run_id=run_id,
-                    artifact_set_id=run_id,    # this run produced its own artifact set
+                    artifact_set_id=run_id if artifact_set_registered else None,
                     parent_dataset_id=None,    # classify runs have no parent
                     run_kind="classify",
                 )
                 if source_id:
                     dao.set_active_version(source_id, run_id)
             except Exception as e:
-                logger.warning("Failed to register dataset: %s", e)
-
-        # Register the ML artifact set so an Extend Classification run
-        # can replay the trained models on new data.  Non-fatal — a
-        # failure here just means Extend is unavailable for this run
-        # until backfilled (see dao.backfill in M4).
-        try:
-            from atelier.classify.artifact_set import build_artifact_set_record
-            from atelier.db.dao import AtelierDao
-            spec = build_artifact_set_record(
-                run_id=run_id,
-                results_dir=results_dir,
-                cfg=cfg,
-                n_columns=len(classifications),
-                source_id=source_id,
-                fsm_run_id=run_id,
-            )
-            if spec is not None:
-                AtelierDao().register_artifact_set(**spec)
-                logger.info("Registered ML artifact set: %s", run_id)
-        except Exception as e:
-            logger.warning("Failed to register ML artifact set: %s", e)
+                logger.exception("Failed to register dataset for run %s", run_id)
+                _write_register_error(
+                    results_dir, "dataset", run_id, source_id, e,
+                )
 
         # ── Governance sync (Atlas) ──────────────────────────────────
         # When auto_sync is enabled and Atlas is configured, push the
@@ -1730,6 +1954,43 @@ def _load_domain_annotations(
     cache_path = cache_dir / f"{connection_name}__{database}.json"
 
     if cache_path.exists():
+        # Pre-flight staleness check.  Caches written by older loader
+        # versions contained synthetic-parent placeholders (label
+        # ``Level{N}_X``) — these signal a cache written by code that
+        # also dropped description / common_names on non-leaf rows.
+        # Treat as stale and re-fetch from Hive so the new loader
+        # populates the cache with the rich Hive metadata.  Caches
+        # written by the current loader carry no placeholders, so the
+        # check is idempotent: one AMP restart heals the cache, and
+        # subsequent restarts see no placeholder → stable cache load.
+        try:
+            import json as _json
+            import re as _re
+            with open(cache_path) as _f:
+                _raw = _json.load(_f)
+            _has_placeholder = any(
+                _re.match(r"^Level\d+_", str(r.get("label") or ""))
+                for r in _raw
+            )
+            # CSV-oversplit corruption: caches written before the
+            # _repair_csv_oversplit pass landed contain descriptions
+            # like ``"Unstructured`` (leading orphan quote).  Re-fetch
+            # so the loader runs reassembly against the full Hive row.
+            _has_oversplit = any(
+                str(r.get("description") or "").lstrip().startswith('"')
+                for r in _raw
+            )
+            if _has_placeholder or _has_oversplit:
+                log.warning(
+                    "Cache %s is stale (placeholder=%s, oversplit=%s) — "
+                    "re-fetching from Hive",
+                    cache_path, _has_placeholder, _has_oversplit,
+                )
+                cache_path.unlink()
+        except Exception as _exc:
+            log.warning("Cache staleness check failed (%s); proceeding with cache load", _exc)
+
+    if cache_path.exists():
         cs = load_annotations_from_json(cache_path, hierarchical=True)
         if len(cs.categories) > 0:
             log.info(
@@ -1790,9 +2051,23 @@ def _build_confusable_pairs(
 # the full fusion so the bootstrap revisit gate can detect when the
 # LLM disagrees with the union of LLM-independent signals (cosine,
 # pattern, name_match) — see Shafer 1976 §11.3 reliability discount
-# and Denoeux 2008 on non-distinct evidence.  CatBoost (fit_to_llm)
-# and the frontier SVM ride on LLM labels and would tautologically
-# reinforce a wrong LLM vote, so they are deliberately excluded.
+# and Denoeux 2008 on non-distinct evidence.
+#
+# CatBoost (``fit_to_llm``) is excluded because its labels are the
+# LLM's labels by construction — it cannot tautologically contradict
+# the source it was trained on.
+#
+# SVM is excluded as a conservative call: its features and training
+# labels are independent of the LLM, but the per-vocabulary ICE→user-
+# code alignment in ``classify.ontology_alignment`` does pass through
+# the LLM at vocab-load time.  A contradicting SVM vote could in
+# principle be confounded by an alignment error that the LLM would
+# also commit on the live sweep.  Membership in this tier is meant
+# to be the strict "no shared knowledge with the runtime LLM at all"
+# set; SVM's weak vocab-level dependency keeps it out for now.
+# Future work to admit SVM here cleanly: switch the alignment to a
+# BM25 + transformer-reranker path that doesn't share an LLM with
+# the runtime sweep — see ``ontology_alignment.py`` module docstring.
 INDEPENDENT_TIER: frozenset[str] = frozenset({"cosine", "pattern", "name_match"})
 
 
@@ -1820,6 +2095,7 @@ def _classify_column(
     use_cosine: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
+    resolve_llm_annotation_mnemonic: bool = True,
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -1894,6 +2170,7 @@ def _classify_column(
             llm_code, llm_confidence,
             llm_alternatives or [],
             frame, discount=llm_discount,
+            allow_annotation_fallback=resolve_llm_annotation_mnemonic,
         )
         if not _is_vacuous(llm_mass_val):
             source_masses["llm"] = llm_mass_val
@@ -1916,7 +2193,15 @@ def _classify_column(
     except Exception as exc:
         logger.debug("CatBoost unavailable for %s: %s", col.name, exc)
 
-    # 6. SVM (if model available)
+    # 6. SVM (if model available).
+    # The per-vocabulary SVM (trained at ``_load_vocabulary`` time via
+    # ``ml_train.train_svm_for_vocab`` against the BFO/CCO synth corpus
+    # relabeled through the ICE.* → user-code alignment) emits user
+    # codes natively, so ``svm_to_mass`` can test frame membership
+    # directly with no runtime translation step.  When the per-vocab
+    # SVM build failed earlier in the pipeline, ``predict_svm`` returns
+    # None and the SVM source is silently absent — strict-mode
+    # tightening is deferred per project plan.
     try:
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
@@ -1984,7 +2269,7 @@ def _classify_column(
         "conflict": hc.conflict,
         "needs_clarification": hc.needs_clarification,
         "evidence": hc.evidence,
-        "evidence_sources": {name: _mass_summary(ba) for name, ba in source_masses.items()},
+        "evidence_sources": {name: _mass_summary(ba, frame) for name, ba in source_masses.items()},
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine
@@ -2082,13 +2367,50 @@ def _is_vacuous(assignment) -> bool:
     return False
 
 
-def _mass_summary(assignment) -> dict[str, float]:
-    """Summarize a BeliefAssignment as top-3 singletons."""
-    singletons = sorted(
-        [(next(iter(fe.codes)), m) for fe, m in assignment.masses.items() if len(fe.codes) == 1],
-        key=lambda x: -x[1],
-    )
-    return {code: round(m, 4) for code, m in singletons[:3]}
+def _mass_summary(
+    assignment,
+    frame: FrameOfDiscernment | None = None,
+) -> dict[str, float]:
+    """Summarize a BeliefAssignment as top-3 focal elements.
+
+    R10 (audit_2026-05-06_a_resolution_path): surfaces internal-node
+    focal elements alongside singletons, so ``evidence_sources.llm`` is
+    non-empty when the LLM emits a parent code (e.g., ``A_PHN`` →
+    1.1.1.9.4 *parent*) — 71/316 rows in 8c7e72ea showed empty llm
+    evidence under the singletons-only filter.  Internal-node FEs are
+    tagged with a trailing ``*`` so consumers (overwatch prompt,
+    embeddings reviewer guide) can read ``1.1.1.9.4*`` as "parent FE —
+    mass spread across descendants."  When ``frame`` is supplied, the
+    parent code is reverse-looked-up from ``frame.internal_nodes``;
+    otherwise we fall back to the FE's display label.  Theta is
+    omitted (it's the vacuous discount and is reported separately via
+    the assignment's K).
+    """
+    # Reverse map: frozenset(leaf_codes) → parent_code, built once.
+    internal_by_codes: dict[frozenset[str], str] = {}
+    if frame is not None:
+        internal_by_codes = {
+            fe.codes: code for code, fe in frame.internal_nodes.items()
+        }
+
+    items: list[tuple[str, float]] = []
+    for fe, m in assignment.masses.items():
+        if len(fe.codes) == 1:
+            items.append((next(iter(fe.codes)), m))
+            continue
+        # Skip Θ (the full-frame vacuous discount).
+        if frame is not None and fe.codes == frame.theta.codes:
+            continue
+        if (fe.label or "").strip() == "Θ":
+            continue
+        parent_code = internal_by_codes.get(fe.codes)
+        if parent_code is None:
+            # Confusable pair, ad-hoc FE, or frame-less call: fall back
+            # to label or a sorted-codes signature.
+            parent_code = (fe.label or "").strip() or "+".join(sorted(fe.codes)[:3])
+        items.append((f"{parent_code}*", m))
+    items.sort(key=lambda x: -x[1])
+    return {code: round(m, 4) for code, m in items[:3]}
 
 
 def _run_feature_analysis(
@@ -2211,7 +2533,10 @@ def _run_shap(cfg, all_features, category_set, classifications, results_dir):
         logger.warning("SHAP analysis failed: %s", e)
 
 
-def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
+def _evaluate_results(
+    classifications: list[dict],
+    category_set: HierarchicalCategorySet | None = None,
+) -> dict[str, Any]:
     """Compute summary statistics for a classification run."""
     total = len(classifications)
     if total == 0:
@@ -2232,10 +2557,50 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
     # LLM's top pick.  With fit-to-LLM on, agreement should track
     # 100% on LLM-covered columns; divergence is a diagnostic signal
     # that CatBoost disagreed with the LLM after fine-tuning.
+    #
+    # R5 (audit_2026-05-06_a, P3): also report pre-review agreement
+    # so overwatch can disambiguate "fusion disagreed with LLM" from
+    # "review reassigned an LLM-aligned prediction."  When the column
+    # was not visited by cautious-review, ``predicted_code_pre_review``
+    # is empty and the pre/post values coincide.
+    #
+    # R9 (audit_2026-05-06_a_resolution_path): the LLM frequently emits
+    # abbrev mnemonics ("A_PHN") that R1 resolves to numeric codes
+    # ("1.1.1.9.4"); raw string-equality miscounts these as
+    # disagreement (40/316 rows in 8c7e72ea).  Use semantic equivalence
+    # (lc == target_code OR cat.code(lc) == target_code) as the
+    # primary metric; keep raw-string ``llm_agreement_strict`` as a
+    # diagnostic for the LLM-emits-numeric-codes invariant.
+    abbrev_to_code: dict[str, str] = {}
+    if category_set is not None:
+        idx = getattr(category_set, "all_by_abbrev", None) or {}
+        abbrev_to_code = {a: c.code for a, c in idx.items() if c.code}
+
+    def _semantic_eq(llm_code: str, target_code: str) -> bool:
+        if not llm_code or not target_code:
+            return False
+        if llm_code == target_code:
+            return True
+        resolved = abbrev_to_code.get(llm_code)
+        return bool(resolved) and resolved == target_code
+
     llm_covered = [c for c in classifications if c.get("llm_code")]
     llm_matches = sum(
         1 for c in llm_covered
-        if c.get("llm_code") == c.get("predicted_code")
+        if _semantic_eq(c.get("llm_code") or "", c.get("predicted_code") or "")
+    )
+    llm_matches_strict = sum(
+        1 for c in llm_covered
+        if (c.get("llm_code") or "") == (c.get("predicted_code") or "")
+    )
+
+    def _pre_review(c: dict) -> str:
+        return (c.get("predicted_code_pre_review") or "").strip() \
+            or (c.get("predicted_code") or "")
+
+    llm_matches_pre_review = sum(
+        1 for c in llm_covered
+        if _semantic_eq(c.get("llm_code") or "", _pre_review(c))
     )
 
     return {
@@ -2246,6 +2611,12 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
         "llm_agreement": (
             round(llm_matches / len(llm_covered), 4) if llm_covered else None
         ),
+        "llm_agreement_strict": (
+            round(llm_matches_strict / len(llm_covered), 4) if llm_covered else None
+        ),
+        "llm_agreement_pre_review": (
+            round(llm_matches_pre_review / len(llm_covered), 4) if llm_covered else None
+        ),
         "with_reference": len(with_reference),
         "correct": correct,
         "accuracy": round(correct / len(with_reference), 4) if with_reference else None,
@@ -2253,6 +2624,52 @@ def _evaluate_results(classifications: list[dict]) -> dict[str, Any]:
         "avg_conflict": round(avg_conflict, 4),
         "avg_uncertainty": round(avg_uncertainty, 4),
     }
+
+
+def _write_register_error(
+    results_dir: Path,
+    kind: str,
+    run_id: str,
+    source_id: str | None,
+    exc: BaseException,
+) -> None:
+    """Persist a registration failure as a sidecar in the run directory.
+
+    Both ``dao.upsert_dataset`` and ``dao.register_artifact_set`` are
+    non-fatal — the artifacts on disk are the source of truth and a
+    later backfill can repair the missing rows.  But the original code
+    swallowed the failure with a single warning line, so a transient
+    PGlite outage during a multi-hour run produced an orphan: parquet
+    on disk, no UI-visible dataset, no obvious signal.  This sidecar
+    makes the failure discoverable for both humans (read the file) and
+    tools (``scripts/backfill_dataset.py`` keys off it).
+    """
+    import traceback as _tb
+
+    path = results_dir / "register_error.json"
+    existing: list[dict] = []
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text())
+            if isinstance(loaded, list):
+                existing = loaded
+        except Exception:
+            pass
+    existing.append({
+        "kind": kind,
+        "run_id": run_id,
+        "source_id": source_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "error": f"{type(exc).__name__}: {exc}",
+        "traceback": _tb.format_exc(),
+    })
+    try:
+        path.write_text(json.dumps(existing, indent=2) + "\n")
+    except Exception:
+        # If we can't even write to results_dir, the operator already
+        # has bigger problems — the artifacts wouldn't have made it
+        # this far.  Don't mask the original exception.
+        logger.exception("Could not write register_error.json")
 
 
 def _write_parquet(
@@ -2338,6 +2755,10 @@ def _write_parquet(
             "predicted_code_pre_review": c.get("predicted_code_pre_review", ""),
             "review_decision": c.get("review_decision", ""),
             "review_rationale": c.get("review_rationale", ""),
+            # Populated only when review_decision == "reroute": the
+            # specific shortlist code the agent chose, distinct from
+            # the deterministic backoff target (cautious_code).
+            "review_chosen_code": c.get("review_chosen_code", ""),
         }
         # SHAP columns (present when SHAP analysis ran)
         for rank in range(1, 4):

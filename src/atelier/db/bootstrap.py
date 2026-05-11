@@ -239,11 +239,53 @@ def seed_keystone_agents() -> None:
     log.info("Upserted %d keystone agents", len(KEYSTONE_AGENTS))
 
 
+def sync_orphaned_runs(cfg=None) -> None:
+    """Reconcile DB state against on-disk run artifacts.
+
+    Walks ``build/results/`` and registers missing ``fsm_runs``,
+    ``ml_artifact_sets``, and ``datasets`` rows for every complete
+    run whose DB writes failed during the pipeline (transient PGlite
+    hiccup, FK ordering bug, etc.).
+
+    Idempotent — runs already represented in the DB cost one read
+    per row.  Safe to call on every restart.
+    """
+    from pathlib import Path
+    from atelier.db.sync import sync_filesystem_to_db
+
+    results_root = Path("build/results")
+    if not results_root.is_dir():
+        log.info("No build/results directory — sync skipped")
+        return
+
+    report = sync_filesystem_to_db(results_root, cfg=cfg)
+    log.info(report.summary_line())
+    for outcome in report.outcomes:
+        if outcome.artifact_set == "registered" or outcome.dataset == "registered":
+            log.info(
+                "sync: %s — artifact_set=%s dataset=%s source_id=%s%s",
+                outcome.run_id, outcome.artifact_set, outcome.dataset,
+                outcome.source_id,
+                f" ({outcome.note})" if outcome.note else "",
+            )
+        elif outcome.artifact_set == "error" or outcome.dataset == "error":
+            log.warning(
+                "sync: %s — artifact_set=%s dataset=%s%s",
+                outcome.run_id, outcome.artifact_set, outcome.dataset,
+                f" ({outcome.note})" if outcome.note else "",
+            )
+
+
 def bootstrap() -> None:
-    """Run migrations and seed agents.
+    """Run migrations, seed agents, and sync orphaned runs.
 
     Shared entry point for ``devenv up`` and ``bin/start-app.sh``.
     Loads config from HOCON to get the database URL.
+
+    The sync step runs **synchronously** after migrations, while the
+    DB is guaranteed reachable — this is more reliable than the
+    gateway's async lifespan sync which can silently fail if PGlite
+    is still warming up.
     """
     from atelier.config import load_config
 
@@ -254,6 +296,13 @@ def bootstrap() -> None:
 
     log.info("Seeding keystone agents...")
     seed_keystone_agents()
+
+    log.info("Syncing orphaned runs...")
+    try:
+        sync_orphaned_runs(cfg=cfg)
+    except Exception as exc:
+        # Non-fatal — the gateway lifespan sync is a fallback.
+        log.warning("Orphaned-run sync failed (will retry in gateway): %s", exc)
 
     log.info("Bootstrap complete")
 

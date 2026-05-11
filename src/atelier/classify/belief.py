@@ -341,6 +341,80 @@ class FrameOfDiscernment:
     def singleton(self, code: str) -> FocalElement:
         return self._singletons[code]
 
+    def resolve_annotation(self, annotation: str) -> FocalElement | None:
+        """Resolve an annotation mnemonic (e.g. 'SSN', 'EMAIL') to a focal element.
+
+        The LLM is prompted to emit numeric category codes (``1.1.1.9.1``)
+        but occasionally returns the mnemonic instead (``NAMEFULL``).
+        The ``classify_resolve_llm_annotation_mnemonic`` flag (default on)
+        gates the fallback that maps these strings back to a focal
+        element via the category set's ``all_by_abbrev`` index, so the
+        LLM evidence is not silently discarded by the strict numeric-
+        code resolver.
+
+        Resolution chain (R7 — audit_2026-05-06_a_resolution_path):
+
+          1. Singleton hit — return the leaf focal element.
+          2. Internal-node hit — return the curated FE (or coerce to
+             leaf when the FE is a degenerate single-leaf cover).
+          3. Walk down — when the abbrev's code is neither a singleton
+             nor a curated internal node, but in-frame leaves exist
+             below it, return an ad-hoc FE covering those descendants.
+             This handles vocabulary projections where ``cat.code``
+             lives between a covered ancestor and covered descendants.
+          4. Walk up — when no descendants are in-frame, fall back to
+             the nearest ancestor's internal FE.  Atlas-style: "LLM
+             said child of X; the active vocab can only resolve to
+             X's parent."  Better than vacuous — preserves *some*
+             commitment toward the LLM's intent.
+          5. Otherwise None — abbrev's subtree is genuinely absent.
+
+        Step 3 / 4 fire ~0 times against the current Acme taxonomy
+        (which carries every internal node), but become load-bearing
+        for projections / blended vocabularies that mask portions of
+        the tree.
+        """
+        cs = self._category_set
+        if cs is None or not annotation:
+            return None
+        idx = getattr(cs, "all_by_abbrev", None)
+        if idx is None:
+            return None
+        cat = idx.get(annotation)
+        if cat is None:
+            return None
+        # 1. Singleton.
+        if cat.code in self._singletons:
+            return self._singletons[cat.code]
+        # 2. Curated internal node.
+        if cat.code in self._internal:
+            fe = self._internal[cat.code]
+            if len(fe.codes) == 1:
+                leaf = next(iter(fe.codes))
+                if leaf in self._singletons:
+                    return self._singletons[leaf]
+            return fe
+        # 3. Walk down — gather in-frame descendants (leaves only;
+        #    internal-node coverage is handled in step 2 already).
+        prefix = cat.code + "."
+        descendants = frozenset(
+            code for code in self._singletons if code.startswith(prefix)
+        )
+        if descendants:
+            if len(descendants) == 1:
+                return self._singletons[next(iter(descendants))]
+            return FocalElement(descendants, label=cat.label)
+        # 4. Walk up — nearest ancestor with a curated internal FE.
+        parent_code = cat.code
+        while "." in parent_code:
+            parent_code = parent_code.rsplit(".", 1)[0]
+            if parent_code in self._internal:
+                return self._internal[parent_code]
+            if parent_code in self._singletons:
+                return self._singletons[parent_code]
+        # 5. Genuinely absent.
+        return None
+
     def internal(self, code: str) -> FocalElement:
         return self._internal[code]
 

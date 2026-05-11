@@ -21,6 +21,7 @@ written consent of Cloudera, Inc.
 - [gRPC & Gateway](./architecture/grpc.md)
 - [Keystone Agents](./architecture/agents.md)
 - [Classification Pipeline](./architecture/classification.md)
+- [Pipeline Phases (FSM Walk-Through)](./architecture/pipeline-phases.md)
 - [DST Evidence Independence](./architecture/dst-evidence-independence.md)
 - [Nautilus Mid-Run Watcher](./architecture/nautilus.md)
 - [Monte Carlo Sampling](./architecture/monte-carlo.md)
@@ -37,6 +38,7 @@ written consent of Cloudera, Inc.
 # Operations
 
 - [Encrypted Deployment Defaults](./operations/secrets.md)
+- [Embeddings Canvas — Reviewer's Guide](./operations/embeddings-reviewer-guide.md)
 
 # Scenarios
 

@@ -90,7 +90,6 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # Overwatch
     "overwatch.enabled": ("overwatch_enabled", bool),
     "overwatch.autonomy": ("overwatch_autonomy", str),
-    "overwatch.model": ("overwatch_model", str),
     "overwatch.github_app_id": ("overwatch_github_app_id", str),
     "overwatch.github_private_key_path": ("overwatch_github_private_key_path", str),
     "overwatch.github_repo": ("overwatch_github_repo", str),
@@ -143,14 +142,18 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.cautious_review.enabled": ("classify_cautious_review_enabled", bool),
     "classify.cautious_review.bel_threshold": ("classify_cautious_review_bel_threshold", float),
     "classify.cautious_review.backend": ("classify_cautious_review_backend", str),
+    "classify.cautious_review.shortlist_permissive": ("classify_cautious_review_shortlist_permissive", bool),
+    "classify.cautious_review.exclude_opaque_siblings": ("classify_cautious_review_exclude_opaque_siblings", bool),
+    "classify.cautious_review.stability_guard_enabled": ("classify_cautious_review_stability_guard_enabled", bool),
+    "classify.cautious_review.stability_guard_llm_conf": ("classify_cautious_review_stability_guard_llm_conf", float),
+    "classify.resolve_llm_annotation_mnemonic": ("classify_resolve_llm_annotation_mnemonic", bool),
+    "classify.exclude_temp_tables": ("classify_exclude_temp_tables", bool),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
     "classify.bootstrap.max_total_llm_attempts": ("classify_bootstrap_max_total_llm_attempts", int),
     "classify.bootstrap.sweep_deadline_s": ("classify_bootstrap_sweep_deadline_s", float),
     "classify.bootstrap.max_consecutive_halve_failures": ("classify_bootstrap_max_consecutive_halve_failures", int),
-    "classify.bootstrap.frontier_svm_retrain": ("classify_bootstrap_frontier_svm_retrain", bool),
-    "classify.bootstrap.frontier_svm_min_labels": ("classify_bootstrap_frontier_svm_min_labels", int),
     "classify.bootstrap.gap_threshold": ("classify_bootstrap_gap_threshold", float),
     "classify.bootstrap.clarity_target": ("classify_bootstrap_clarity_target", float),
     "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
@@ -387,30 +390,58 @@ class AtelierConfig:
     # Cautious-code review — agent-mediated backoff for over-specified
     # predictions.  See atelier.classify.cautious_review.
     classify_cautious_review_enabled: bool = True
-    classify_cautious_review_bel_threshold: float = 0.85
+    classify_cautious_review_bel_threshold: float = 0.80
     classify_cautious_review_backend: str = "default"
+    # R2c: when the LLM emits a code outside the cross_subtree_belief
+    # shortlist but inside the runtime taxonomy, accept it instead of
+    # rejecting as a hallucination.  Closes 8/11 errored decisions in
+    # 8d67b1ed (audit_2026-05-06_a Finding 1, P1 split).
+    classify_cautious_review_shortlist_permissive: bool = True
+    # R3: drop opaque-named siblings (col_NN, var_NN, dim_NN) from
+    # cautious-review context to break the col_04 sibling-context-
+    # poisoning class (audit_2026-05-06_a Finding 3, P2).
+    classify_cautious_review_exclude_opaque_siblings: bool = True
+    # R2a: reject reroute when fusion + LLM already converged with
+    # high confidence (gaming_profiles.handle failure class —
+    # audit_2026-05-06_a Finding 1, P1).
+    classify_cautious_review_stability_guard_enabled: bool = True
+    classify_cautious_review_stability_guard_llm_conf: float = 0.80
+    # R1: annotation-mnemonic fallback in mass_functions
+    # (_resolve_to_focal_element).  Default on — strictly recovers LLM
+    # evidence for ~95 columns / 33% of corpus in 8d67b1ed (audit
+    # P0 expanded).  Toggle off only for ablation runs.
+    classify_resolve_llm_annotation_mnemonic: bool = True
+    # R6: skip Hive/Hue temp tables (``__tmp_*`` prefix) at discovery.
+    # 14 hallucinations from one such table in 8d67b1ed.
+    classify_exclude_temp_tables: bool = True
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
     classify_bootstrap_max_total_llm_attempts: int = 10000
     classify_bootstrap_sweep_deadline_s: float = 0.0
     classify_bootstrap_max_consecutive_halve_failures: int = 8
-    classify_bootstrap_frontier_svm_retrain: bool = True
-    classify_bootstrap_frontier_svm_min_labels: int = 20
-    # Belief-gap convergence
-    classify_bootstrap_gap_threshold: float = 0.15
-    classify_bootstrap_clarity_target: float = 0.20
-    classify_bootstrap_bel_floor: float = 0.50
+    # Belief-gap convergence — defaults mirror config/base.conf.
+    # Recalibrated 2026-05-03 for the parent-aware DST frame; see the
+    # comment in base.conf for the per-knob rationale.
+    classify_bootstrap_gap_threshold: float = 0.18
+    classify_bootstrap_clarity_target: float = 0.25
+    classify_bootstrap_bel_floor: float = 0.45
     classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
 
-    # DST discount factors.  The catboost_*/svm defaults are calibrated
-    # above the cosine discount because those sources are LLM-derivative
-    # in this pipeline (see ml_train.fit_catboost_to_llm_labels and the
-    # frontier-SVM filter at ml_train lines 118-127); per Shafer 1976
-    # §11.3 + Denoeux 2008, non-distinct evidence requires substantial
-    # discount to avoid double-counting under Dempster's rule.
+    # DST discount factors.  ``catboost_*`` defaults are calibrated
+    # well above the cosine discount because that source is LLM-
+    # derivative at the per-column level (``fit_to_llm`` mode trains
+    # on the live run's LLM labels — see
+    # ml_train.fit_catboost_to_llm_labels).  ``svm`` sits between
+    # fully-independent and CatBoost: features are independent (TF-IDF)
+    # and labels come from the synth generators, but the prediction-
+    # to-frame-element mapping passes through the LLM-mediated
+    # alignment in classify.ontology_alignment.  Per Shafer 1976
+    # §11.3 + Denoeux 2008, non-distinct evidence requires a
+    # discount to avoid double-counting under Dempster's rule; the
+    # current SVM default reflects the weakly-non-distinct regime.
     classify_discount_cosine: float = 0.20
-    classify_discount_svm: float = 0.55
+    classify_discount_svm: float = 0.30
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
     classify_discount_name_match_code: float = 0.50
@@ -456,7 +487,7 @@ class AtelierConfig:
     mc_sample_fraction: float = 1.00
     mc_min_per_stratum: int = 3
     mc_max_frontier_columns: int = 500
-    mc_propagation_threshold: float = 0.85
+    mc_propagation_threshold: float = 0.80
     mc_propagation_discount: float = 0.30
 
     # Row-level Monte Carlo
@@ -505,7 +536,6 @@ class AtelierConfig:
     # Overwatch
     overwatch_enabled: bool = True
     overwatch_autonomy: str = "propose"
-    overwatch_model: str = "claude-opus-4-7"
     overwatch_github_app_id: str = ""
     overwatch_github_private_key_path: str = ""
     overwatch_github_repo: str = ""
@@ -521,13 +551,37 @@ class AtelierConfig:
 
     @property
     def has_overwatch(self) -> bool:
-        """True only when overwatch is enabled AND Anthropic API is available.
+        """True when overwatch is enabled AND the Web Terminal Agent has a
+        runnable model.
 
-        Overwatch requires direct Anthropic API access for full Claude Code
-        capabilities (/fast, worktrees, subagents). Bedrock-only deployments
-        cannot activate overwatch.
+        Overwatch follows the WTA's selected model — operators configure
+        provider + model once and both surfaces pick it up.  When the WTA
+        can't run (no Anthropic key AND no Bedrock creds), Overwatch
+        also can't run; we deliberately do NOT silently fall back to a
+        weaker default since a half-functional Overwatch report would
+        do more harm than no report.
         """
-        return self.overwatch_enabled and self.has_anthropic
+        if not self.overwatch_enabled:
+            return False
+        # Same gate the WTA picker uses to decide if any catalog entry is
+        # available.  Importing here avoids a circular import at module
+        # load (terminal_catalog reads cfg).
+        #
+        # Fail-closed: if the catalog itself raises, we treat Overwatch
+        # as unavailable rather than falling back to a credential-only
+        # check.  The user-visible promise is "Overwatch runs whatever
+        # WTA is configured to run" — degrading silently to a path that
+        # WTA wouldn't accept would surprise reviewers and risk
+        # reputational harm.
+        try:
+            from atelier.terminal_catalog import available_models
+            return any(m.available for m in available_models(self))
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "has_overwatch: WTA catalog probe failed; reporting unavailable"
+            )
+            return False
 
     @property
     def has_atlas(self) -> bool:

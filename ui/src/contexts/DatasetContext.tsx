@@ -90,7 +90,12 @@ interface DatasetContextValue {
   setActiveSourceId: (id: string | null, opts?: { userPicked?: boolean }) => void;
   datasets: DatasetInfo[];
   activeDatasetId: string | null;
-  setActiveDatasetId: (id: string | null) => void;
+  // Set the active dataset.  Pass ``opts.userPicked = true`` when the
+  // operator made an explicit selection (e.g. via the version
+  // activation button) — the auto-promote-to-server-active effect
+  // backs off when this flag is set, preserving manual choices that
+  // would otherwise be reverted by the next render.
+  setActiveDatasetId: (id: string | null, opts?: { userPicked?: boolean }) => void;
   refreshSources: () => Promise<void>;
   refreshDatasets: () => Promise<void>;
   // ML Artifact Sets (Extend Classification, added 20260427).
@@ -110,6 +115,7 @@ const DatasetContext = createContext<DatasetContextValue | null>(null);
 const SOURCE_KEY = "atelier:activeSourceId";
 const SOURCE_USER_PICKED_KEY = "atelier:activeSourceIdUserPicked";
 const DATASET_KEY = "atelier:activeDatasetId";
+const DATASET_USER_PICKED_KEY = "atelier:activeDatasetIdUserPicked";
 const STATUS_PLATFORM_KEY = "atelier:statusPlatformId";
 const SMOKE_KEY = "atelier:smokeTest";
 
@@ -155,6 +161,15 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
   const [activeDatasetId, setActiveDatasetRaw] = useState<string | null>(
     () => localStorage.getItem(DATASET_KEY),
   );
+  // Mirror of ``sourceUserPicked`` for datasets — distinguishes an
+  // explicit operator activation (DataSourceCard's activateVersion)
+  // from an auto-pick.  The auto-promote-to-server-active effect only
+  // fires when this flag is *not* set, so manual selections aren't
+  // reverted by the next render.  Cleared whenever the source changes
+  // (new source = fresh dataset selection context).
+  const [datasetUserPicked, setDatasetUserPicked] = useState<boolean>(
+    () => localStorage.getItem(DATASET_USER_PICKED_KEY) === "1",
+  );
   const [statusPlatformId, setStatusPlatformRaw] = useState<string | null>(
     () => localStorage.getItem(STATUS_PLATFORM_KEY),
   );
@@ -181,19 +196,31 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
       setSourceUserPicked(true);
       localStorage.setItem(SOURCE_USER_PICKED_KEY, "1");
     }
-    // Clear stale dataset selection — refreshDatasets will auto-select
+    // Clear stale dataset selection — refreshDatasets will auto-select.
+    // Also clear the dataset-userPicked sticky bit: a new source means a
+    // fresh dataset context, and the auto-promote should be free to run
+    // on the new source's is_active version.
     setActiveDatasetRaw(null);
     localStorage.removeItem(DATASET_KEY);
+    setDatasetUserPicked(false);
+    localStorage.removeItem(DATASET_USER_PICKED_KEY);
   }, []);
 
-  const setActiveDatasetId = useCallback((id: string | null) => {
-    setActiveDatasetRaw(id);
-    if (id) {
-      localStorage.setItem(DATASET_KEY, id);
-    } else {
-      localStorage.removeItem(DATASET_KEY);
-    }
-  }, []);
+  const setActiveDatasetId = useCallback(
+    (id: string | null, opts?: { userPicked?: boolean }) => {
+      setActiveDatasetRaw(id);
+      if (id) {
+        localStorage.setItem(DATASET_KEY, id);
+      } else {
+        localStorage.removeItem(DATASET_KEY);
+      }
+      if (opts?.userPicked) {
+        setDatasetUserPicked(true);
+        localStorage.setItem(DATASET_USER_PICKED_KEY, "1");
+      }
+    },
+    [],
+  );
 
   const setStatusPlatformId = useCallback((id: string | null) => {
     setStatusPlatformRaw(id);
@@ -317,7 +344,20 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
     }
   }, [activeSourceId, sources, sourceUserPicked, setActiveSourceId]);
 
-  // Auto-select active dataset version (or most recent)
+  // Auto-select active dataset version (or most recent).
+  //
+  // Two separate concerns, each guarded:
+  //  1. No stored selection (or stored ID no longer in list) → pick the
+  //     best available.  Always safe.
+  //  2. A different version is server-marked is_active and the operator
+  //     has NOT pinned a manual selection (``datasetUserPicked``) →
+  //     promote to it.  Without the userPicked guard this fires after
+  //     every ``setActiveDatasetId`` mutation while ``datasets`` still
+  //     carries a stale ``is_active`` flag, which causes
+  //     ``activateVersion`` clicks to flicker-revert to the previous
+  //     active row.  The guard mirrors the ``sourceUserPicked`` pattern
+  //     above; ``setActiveSourceId`` clears it on source change so a
+  //     fresh source can promote freely on first load.
   useEffect(() => {
     if (datasets.length === 0) return;
     const activeVersion = datasets.find((d) => d.is_active);
@@ -327,8 +367,14 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
       !datasets.some((d) => d.id === activeDatasetId)
     ) {
       setActiveDatasetId(target.id);
+    } else if (
+      !datasetUserPicked &&
+      activeVersion &&
+      activeVersion.id !== activeDatasetId
+    ) {
+      setActiveDatasetId(activeVersion.id);
     }
-  }, [activeDatasetId, datasets, setActiveDatasetId]);
+  }, [activeDatasetId, datasets, datasetUserPicked, setActiveDatasetId]);
 
   return (
     <DatasetContext.Provider

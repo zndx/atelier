@@ -62,7 +62,7 @@ Classification pipeline, DST evidence fusion, ML classifiers, and agent orchestr
 | Feature | Tag | Tier | Scenarios | What it validates |
 |---------|-----|------|-----------|-------------------|
 | Classification pipeline | `@gpu` | 0 | 28 | DST belief, Dempster combination, features, patterns (+ Luhn/IPv4/date/currency validation), name matching, pipeline E2E, Monte Carlo sampling |
-| Bootstrap convergence | `@bootstrap` | 0 | 11 | LLM sweep, ML validation, targeted revisit, convergence criteria, incremental SVM |
+| Bootstrap convergence | `@bootstrap` | 0 | 11 | LLM sweep, ML validation, targeted revisit, convergence criteria, ontology-aligned SVM |
 | Agent convergence loop | `@gpu` | 0 | 6 | 6-tool agent loop, conflict reports, convergence, mock client |
 | Agent smoke test | `@agent` | 0 | 6 | Agent metadata, tool definitions, state formatting |
 | LLM backends | `@backend` | 0 | 8 | Backend factory, Anthropic/Bedrock/Cerebras/OpenAI clients |

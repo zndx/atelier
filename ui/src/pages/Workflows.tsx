@@ -6,7 +6,7 @@
 // modified, redistributed, or used in any other manner without the express
 // written consent of Cloudera, Inc.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -18,74 +18,90 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Button, Spin, Typography, Alert, Space } from "antd";
+import { Button, Spin, Typography, Space, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { nodeTypes } from "../components/canvas/nodeTypes";
-import { buildKeystoneTopology } from "../lib/canvasLayout";
-import type { AgentInfo } from "../types/canvas";
+import {
+  buildFsmPipelineTopology,
+  type RuntimeCapabilities,
+} from "../lib/fsmPipelineLayout";
 
 const { Title, Text } = Typography;
 
 const MINIMAP_COLORS: Record<string, string> = {
+  fsmPhase: "#1677ff",
+  skill: "#fa8c16",
+  // Legacy node types — preserved so the keystone-topology view (or
+  // a future Agent Studio overlay) can light them up if it lands.
   orchestrator: "#001529",
   keystone: "#1890ff",
   dynamicAgent: "#faad14",
   artifact: "#d9d9d9",
 };
 
+const FSM_POLL_INTERVAL_MS = 5000;
+
+const STATE_COLOR: Record<string, string> = {
+  IDLE: "default",
+  LOADING_VOCAB: "blue",
+  DISCOVERING: "blue",
+  SAMPLING: "blue",
+  LLM_SWEEP: "blue",
+  VALIDATING: "blue",
+  CLASSIFYING: "blue",
+  FUSING: "blue",
+  EVALUATING: "blue",
+  CONVERGED: "green",
+  ERROR: "red",
+};
+
 function WorkflowsInner() {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
+  const [currentState, setCurrentState] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<RuntimeCapabilities>({
+    cautious_review_enabled: false,
+    overwatch_enabled: false,
+    classify_agent_enabled: false,
+  });
 
-  const fetchAndLayout = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    // Tolerant JSON parser: backend plain-text 500s ("Internal Server
-    // Error") would otherwise bubble up as "Unexpected token 'I'" and
-    // hide the real failure.
-    const safeJson = async (r: Response): Promise<any | null> => {
-      try {
-        const text = await r.text();
-        if (!text) return null;
-        try {
-          return JSON.parse(text);
-        } catch {
-          return { error: text };
-        }
-      } catch {
-        return null;
-      }
-    };
-    try {
-      const [agentsResp, statusResp] = await Promise.all([
-        fetch("/api/agents").then(safeJson),
-        fetch("/api/status")
-          .then(safeJson)
-          .catch(() => null),
-      ]);
+  const fetchCapabilities = () => {
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then((data) => {
+        const cfg = data?.config || {};
+        setCapabilities({
+          cautious_review_enabled: Boolean(cfg.cautious_review_enabled),
+          overwatch_enabled: Boolean(cfg.overwatch_enabled),
+          classify_agent_enabled: Boolean(cfg.classify_agent_enabled),
+        });
+      })
+      .catch(() => {
+        // Leave capabilities at defaults — every skill will be omitted
+        // from the graph; phase nodes still render.
+      });
+  };
 
-      if (agentsResp?.error) {
-        throw new Error(agentsResp.error);
-      }
-      const agentList: AgentInfo[] = agentsResp?.agents || [];
-      const model =
-        statusResp?.config?.agent_model || "Claude (Agent SDK)";
-
-      const topology = buildKeystoneTopology(agentList, model);
-      setNodes(topology.nodes);
-      setEdges(topology.edges);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [setNodes, setEdges]);
+  const fetchFsmState = () => {
+    fetch("/api/fsm/status")
+      .then((r) => r.json())
+      .then((data) => {
+        setCurrentState(data?.state ?? null);
+      })
+      .catch(() => setCurrentState(null))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    fetchAndLayout();
-  }, [fetchAndLayout]);
+    fetchCapabilities();
+    fetchFsmState();
+    const interval = setInterval(fetchFsmState, FSM_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
+    const topo = buildFsmPipelineTopology(currentState, capabilities);
+    return { nodes: topo.nodes as Node[], edges: topo.edges };
+  }, [currentState, capabilities]);
 
   if (loading) {
     return (
@@ -102,26 +118,15 @@ function WorkflowsInner() {
     );
   }
 
-  if (error) {
-    return (
-      <div style={{ padding: 24 }}>
-        <Alert
-          type="error"
-          message="Failed to load workflow topology"
-          description={error}
-          showIcon
-          action={
-            <Button size="small" onClick={fetchAndLayout}>
-              Retry
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-
   return (
-    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <div
         style={{
           padding: "12px 16px",
@@ -135,19 +140,27 @@ function WorkflowsInner() {
       >
         <Space>
           <Title level={5} style={{ margin: 0 }}>
-            Orchestration Canvas
+            Pipeline Workflow
           </Title>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Keystone agent topology
+            FSM phases · skill attachments · live state
           </Text>
         </Space>
-        <Button
-          icon={<ReloadOutlined />}
-          size="small"
-          onClick={fetchAndLayout}
-        >
-          Refresh
-        </Button>
+        <Space>
+          <Tag color={STATE_COLOR[currentState ?? "IDLE"] ?? "default"}>
+            {currentState ?? "IDLE"}
+          </Tag>
+          <Button
+            icon={<ReloadOutlined />}
+            size="small"
+            onClick={() => {
+              fetchCapabilities();
+              fetchFsmState();
+            }}
+          >
+            Refresh
+          </Button>
+        </Space>
       </div>
 
       <div style={{ flex: 1 }}>
@@ -156,13 +169,18 @@ function WorkflowsInner() {
           edges={edges}
           nodeTypes={nodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.3 }}
+          fitViewOptions={{ padding: 0.25 }}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}
           proOptions={{ hideAttribution: false }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e8e8e8" />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={16}
+            size={1}
+            color="#e8e8e8"
+          />
           <Controls showInteractive={false} />
           <MiniMap
             nodeColor={(node) => MINIMAP_COLORS[node.type || ""] || "#d9d9d9"}

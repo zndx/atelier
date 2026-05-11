@@ -43,13 +43,20 @@ class DiscountConfig:
     fused belief reflects the underlying independent signal rather
     than amplified self-agreement.
 
-    In this pipeline ``catboost_*`` and ``svm`` ride on labels that
-    are deterministic transforms of the LLM sweep (see
-    ``ml_train.fit_catboost_to_llm_labels`` and the frontier-SVM
-    label filter at ``ml_train`` lines 118-127), so their defaults
-    are calibrated above the genuinely independent ``cosine``
-    discount.  See ``docs/src/architecture/dst-evidence-independence.md``
-    for the full rationale.
+    In this pipeline ``catboost_*`` rides on labels that are
+    deterministic transforms of the LLM sweep (see
+    ``ml_train.fit_catboost_to_llm_labels``), so its default is
+    calibrated above the genuinely independent ``cosine`` discount.
+
+    ``svm`` is a more nuanced case as of 2026-05-04: features are
+    independent (TF-IDF), training labels are independent (synth-
+    generator-keyed ICE.* leaves), and only the prediction-to-frame-
+    element mapping passes through the LLM-mediated alignment in
+    ``classify.ontology_alignment``.  Its default sits between the
+    fully-independent sources and CatBoost; see ``ontology_alignment.py``
+    module docstring + ``dst-evidence-independence.md`` for the full
+    rationale and the BM25-reranker future-work plan that would
+    eliminate the residual LLM dependency.
     """
 
     cosine: float = 0.20
@@ -931,16 +938,17 @@ def llm_to_mass(
     alternatives: list[dict],
     frame: FrameOfDiscernment,
     discount: float = 0.15,
+    *,
+    allow_annotation_fallback: bool = True,
 ) -> BeliefAssignment:
     """Convert LLM classification to a mass function.
 
     The primary prediction receives confidence-proportional mass.
     Alternatives distribute remaining evidence mass.  Low discount
-    (0.15 vs cosine's 0.20) because frontier LLM predictions are
-    well-informed and typically well-calibrated, but the LLM signal
-    informs multiple downstream metrics (CatBoost fit-to-LLM,
-    frontier-SVM trained on LLM labels) and a slight bump avoids
-    over-amplifying a non-distinct cluster.
+    (0.15 vs cosine's 0.20) because the runtime LLM is well-informed
+    and typically well-calibrated, but its signal informs CatBoost
+    via fit-to-LLM training and the SVM via the ontology→user-vocab
+    alignment, so a slight bump avoids over-amplifying that cluster.
 
     When the LLM returns a parent code or near-miss code, coercion
     attempts to resolve it to a valid leaf singleton.  Unresolvable
@@ -956,7 +964,10 @@ def llm_to_mass(
     if not category_code:
         return frame.vacuous()
 
-    primary_fe = _resolve_to_focal_element(category_code, frame)
+    primary_fe = _resolve_to_focal_element(
+        category_code, frame,
+        allow_annotation_fallback=allow_annotation_fallback,
+    )
     if primary_fe is None:
         import logging
         logging.getLogger(__name__).debug(
@@ -985,7 +996,10 @@ def llm_to_mass(
                 alt_code = alt.get("code", "")
                 alt_conf = alt.get("confidence", 0.0)
                 alt_fe = (
-                    _resolve_to_focal_element(alt_code, frame) if alt_code else None
+                    _resolve_to_focal_element(
+                        alt_code, frame,
+                        allow_annotation_fallback=allow_annotation_fallback,
+                    ) if alt_code else None
                 )
                 if alt_fe is not None and alt_conf > 0:
                     alt_mass = (alt_conf / alt_total) * remaining
@@ -1002,6 +1016,8 @@ def llm_to_mass(
 def _resolve_to_focal_element(
     code: str,
     frame: FrameOfDiscernment,
+    *,
+    allow_annotation_fallback: bool = True,
 ) -> FocalElement | None:
     """Resolve an LLM-emitted code to a frame focal element.
 
@@ -1025,6 +1041,14 @@ def _resolve_to_focal_element(
          singleton (e.g.  ``ICE.SENSITIVE.PID.IDENTITY.GOVID`` →
          ``ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN`` when SSN is the
          only descendant in the frame).
+      5. Annotation-mnemonic fallback (R1): the LLM occasionally
+         emits the abbreviated mnemonic (``SSN``, ``EMAIL``,
+         ``NAMEFULL``) instead of a numeric dot-code.  When paths
+         1-4 fail and ``allow_annotation_fallback`` is True, look
+         the mnemonic up in the frame's category-set index and
+         resolve to that node's focal element.  Closes the
+         33%-of-corpus "evidence_sources.llm = {}" gap that the
+         strict numeric resolver previously left open.
 
     Returns ``None`` for unresolvable / ambiguous codes.
     """
@@ -1044,6 +1068,11 @@ def _resolve_to_focal_element(
     matches = [s for s in frame.singletons if s.startswith(prefix)]
     if len(matches) == 1:
         return frame.singletons[matches[0]]
+
+    if allow_annotation_fallback:
+        fe = frame.resolve_annotation(code)
+        if fe is not None:
+            return fe
 
     return None
 
@@ -1112,10 +1141,15 @@ def svm_to_mass(
     transformer embedding shared by cosine and CatBoost sources.
 
     The default discount in this signature reflects an unmodified
-    SVM in isolation; the production default for the *frontier* SVM
-    (trained on accumulated LLM labels) is calibrated higher in
-    ``DiscountConfig.svm`` to suppress non-distinct double-counting
-    against the LLM source.
+    SVM in pure isolation — TF-IDF features, ICE-keyed labels, and
+    no shared knowledge with any other source.  The production
+    default in ``DiscountConfig.svm`` (currently 0.30) is slightly
+    higher to carry the residual vocabulary-level dependency
+    introduced by the LLM-mediated ICE → user-taxonomy alignment in
+    ``classify.ontology_alignment``.  Returning to this signature's
+    0.20 default would require switching the alignment to a path
+    that doesn't share an LLM with the runtime sweep — see
+    ``ontology_alignment.py`` for the BM25-reranker future-work plan.
 
     When the frame has confusable pairs and the top-2 singletons form
     a known pair with a close mass ratio, mass is redistributed to

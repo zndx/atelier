@@ -68,6 +68,15 @@ async def _lifespan(app: FastAPI):
             await asyncio.to_thread(_seed_classify_data_source)
         except Exception as exc:
             _log.warning("Classify data source seeding skipped: %s", exc)
+        # Reconcile DB against ``build/results/`` BEFORE auto-start so
+        # any orphaned runs (DB writes that failed mid-pipeline) become
+        # visible in the UI alongside the new run that auto-start
+        # produces.  Idempotent — runs already represented in the DB
+        # cost one read each.
+        try:
+            await asyncio.to_thread(_sync_orphaned_runs)
+        except Exception as exc:
+            _log.warning("Run-state sync skipped: %s", exc)
         try:
             await asyncio.to_thread(_maybe_auto_start_classify)
         except Exception as exc:
@@ -587,6 +596,38 @@ def _last_user_selected_source_id() -> str | None:
     return None
 
 
+def _sync_orphaned_runs() -> None:
+    """Reconcile DB rows against ``build/results/`` at gateway startup.
+
+    Idempotent — see ``atelier.db.sync.sync_filesystem_to_db``.  When
+    a previous run's DB writes failed mid-pipeline (transient PGlite
+    hiccup, FK ordering bug, etc.), this picks up the orphaned
+    artifacts on disk and registers whatever rows are missing so the
+    UI shows the run.  Runs already represented in the DB pay one
+    read per row and are reported as ``already_registered``.
+    """
+    from atelier.db.sync import sync_filesystem_to_db
+    results_root = _project_root / "build" / "results"
+    if not results_root.is_dir():
+        return
+    report = sync_filesystem_to_db(results_root)
+    _log.info(report.summary_line())
+    for outcome in report.outcomes:
+        if outcome.artifact_set == "registered" or outcome.dataset == "registered":
+            _log.info(
+                "sync: %s — artifact_set=%s dataset=%s source_id=%s%s",
+                outcome.run_id, outcome.artifact_set, outcome.dataset,
+                outcome.source_id,
+                f" ({outcome.note})" if outcome.note else "",
+            )
+        elif outcome.artifact_set == "error" or outcome.dataset == "error":
+            _log.warning(
+                "sync: %s — artifact_set=%s dataset=%s%s",
+                outcome.run_id, outcome.artifact_set, outcome.dataset,
+                f" ({outcome.note})" if outcome.note else "",
+            )
+
+
 def _maybe_auto_start_classify() -> None:
     """Kick off a classification run on boot when configured.
 
@@ -726,6 +767,89 @@ def health():
         return _error_envelope(f"gRPC health check failed: {exc}")
 
 
+# ── PGlite supervisor surfaces ────────────────────────────────────
+# bin/pglite-supervisor.sh respawns pglite when it dies and writes
+# state to .app/pglite-supervisor.state.  These endpoints expose that
+# state to the UI's Status panel + restart button.  When pglite is
+# *not* the active database (operator pointed ATELIER_DB_URL at an
+# external Postgres), the state file won't exist and we report
+# "unmanaged" so the UI hides the chip + button.
+
+_PGLITE_STATE_FILE = "/home/cdsw/.app/pglite-supervisor.state"
+_PGLITE_RESTART_SENTINEL = "/home/cdsw/.app/pglite-supervisor.restart"
+
+
+def _probe_pglite(port: int, timeout: float = 1.0) -> dict:
+    """Quick TCP probe.  Returns ``{listening, error}``."""
+    import socket
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+        s.close()
+        return {"listening": True, "error": None}
+    except Exception as exc:
+        return {"listening": False, "error": str(exc)}
+
+
+@app.get("/api/pglite/status")
+def pglite_status():
+    """Supervisor state + live TCP probe for the Status page chip.
+
+    Returns ``managed=False`` when pglite isn't the active backend
+    (external Postgres, sqlite tier-0 tests) so the UI knows to hide
+    the chip rather than showing a perpetually-unknown state.
+    """
+    import json
+    import os
+
+    if not os.path.exists(_PGLITE_STATE_FILE):
+        return {
+            "managed": False,
+            "reason": "no supervisor state file — pglite is not the active backend or the supervisor hasn't started yet",
+        }
+
+    try:
+        with open(_PGLITE_STATE_FILE) as f:
+            state = json.load(f)
+    except Exception as exc:
+        return _error_envelope(f"failed to read pglite supervisor state: {exc}")
+
+    port = int(state.get("port") or 5440)
+    probe = _probe_pglite(port)
+    state["managed"] = True
+    state["probe"] = probe
+    return state
+
+
+@app.post("/api/pglite/restart")
+def pglite_restart():
+    """Request an operator-initiated pglite restart.
+
+    Touches the sentinel the supervisor watches; the supervisor then
+    SIGTERMs the current child and respawns immediately (no backoff —
+    operator restart counts as healthy intent).  Idempotent — touching
+    the sentinel while the supervisor is already restarting is safe
+    and short-circuits the next watch-loop iteration.
+    """
+    import os
+    import time
+
+    if not os.path.exists(_PGLITE_STATE_FILE):
+        return _error_envelope(
+            "pglite is not under supervisor control — restart not available",
+            status=409,
+        )
+
+    # Touch the sentinel — create-or-update mtime.  The supervisor's
+    # watch loop polls mtime every ~2s.
+    try:
+        with open(_PGLITE_RESTART_SENTINEL, "a"):
+            os.utime(_PGLITE_RESTART_SENTINEL, (time.time(), time.time()))
+    except Exception as exc:
+        return _error_envelope(f"failed to touch restart sentinel: {exc}")
+
+    return {"ok": True, "requested_at": time.time()}
+
+
 @app.get("/api/agents")
 def list_agents():
     try:
@@ -821,6 +945,7 @@ def list_data_sources(include_archived: bool = False):
                 "source_uri": s.source_uri,
                 "display_name": s.display_name,
                 "vocabulary_mode": s.vocabulary_mode,
+                "vocab_uri": s.vocab_uri,
                 "created_at": s.created_at,
                 "metadata": s.metadata_json,
                 "is_archived": s.is_archived,
@@ -1006,6 +1131,151 @@ def artifact_set_compatibility(artifact_set_id: str, source_id: str):
         }
     except Exception as exc:
         return _error_envelope(f"artifact_set_compatibility failed: {exc}")
+
+
+@app.get("/api/artifact-sets/{artifact_set_id}/extend-scope")
+def artifact_set_extend_scope(artifact_set_id: str, source_id: str):
+    """Salient measures for the ML Artifacts panel.
+
+    Given an artifact set + a data source, report:
+
+    - what the artifact set bundles (CatBoost / SVM / UMAP, classes,
+      embedding model + dim, vocab signature);
+    - the producing dataset's training scope (tables/columns the
+      CatBoost was fit on);
+    - the source's *current* discovered scope (from its metadata —
+      ``table_count`` / ``column_count`` written at seed/discovery time);
+    - the delta — ``new_tables`` and ``new_columns`` the operator
+      could pick up with an Extend Classification run, without
+      re-training.
+
+    Vocab compatibility is included so the panel doesn't need a second
+    round-trip to ``/compatibility``.
+    """
+    try:
+        import json as _json
+        import re
+        from atelier.classify.artifact_set import check_compatibility
+        from atelier.classify.taxonomy import load_sample_vocabulary
+        from atelier.db.dao import AtelierDao
+        from atelier.db.model import Dataset
+
+        dao = AtelierDao()
+        artifact = dao.get_artifact_set(artifact_set_id)
+        if artifact is None:
+            return _error_envelope("Artifact set not found", status=404)
+
+        source = dao.get_data_source(source_id)
+        if source is None:
+            return _error_envelope("Data source not found", status=404)
+
+        # Source-side counts (from metadata stamped at seed/discovery).
+        source_meta: dict = {}
+        if source.get("metadata"):
+            try:
+                source_meta = _json.loads(source["metadata"]) or {}
+            except Exception:
+                source_meta = {}
+        source_table_count = source_meta.get("table_count")
+        source_column_count = source_meta.get("column_count")
+
+        # Producing dataset — the classify run whose output IS this
+        # artifact set.  Compared against the source's current scope to
+        # derive ``new_*``.  Look up by artifact_set_id (lineage column
+        # added 20260427) and fall back to fsm_run_id for older rows.
+        classified_column_count: int | None = None
+        classified_table_count: int | None = None
+        producing_dataset_id: str | None = None
+        with dao.get_session() as session:
+            ds = (
+                session.query(Dataset)
+                .filter_by(artifact_set_id=artifact_set_id, run_kind="classify")
+                .order_by(Dataset.created_at.desc())
+                .first()
+            )
+            if ds is None and artifact.get("fsm_run_id"):
+                ds = (
+                    session.query(Dataset)
+                    .filter_by(fsm_run_id=artifact["fsm_run_id"])
+                    .order_by(Dataset.created_at.desc())
+                    .first()
+                )
+            if ds is not None:
+                producing_dataset_id = ds.id
+                classified_column_count = int(ds.row_count or 0)
+                # Summary is a free-form string like "X tables, Y columns".
+                # Parse the leading integer out — best-effort.
+                if ds.summary:
+                    m = re.match(r"\s*(\d+)\s+tables?", ds.summary)
+                    if m:
+                        classified_table_count = int(m.group(1))
+
+        # Whether the artifact's training source matches the candidate.
+        # When False, every entity in the candidate is fair game for
+        # Extend (nothing has been classified there yet by this model).
+        same_source = artifact.get("source_id") == source_id
+
+        if same_source:
+            new_table_count = (
+                None
+                if source_table_count is None or classified_table_count is None
+                else max(0, source_table_count - classified_table_count)
+            )
+            new_column_count = (
+                None
+                if source_column_count is None or classified_column_count is None
+                else max(0, source_column_count - classified_column_count)
+            )
+        else:
+            new_table_count = source_table_count
+            new_column_count = source_column_count
+
+        # Vocab compatibility — same logic as the dedicated endpoint, kept
+        # here so the panel only needs one fetch.
+        artifact_classes = _json.loads(artifact["classes"])
+        if source_id in ("ootb-sample", "synthetic"):
+            cs = load_sample_vocabulary(hierarchical=True)
+            source_classes = [c.code for c in cs.categories]
+        else:
+            source_classes = artifact_classes
+        report = check_compatibility(artifact_classes, source_classes)
+
+        return {
+            "artifact_set_id": artifact_set_id,
+            "source_id": source_id,
+            "same_source": same_source,
+            "bundle": {
+                "catboost": bool(artifact.get("catboost_path")),
+                "svm": bool(artifact.get("svm_path")),
+                "umap": bool(artifact.get("umap_path")),
+            },
+            "classes_count": len(artifact_classes),
+            "embedding_model": artifact.get("embedding_model"),
+            "embedding_dim": artifact.get("embedding_dim"),
+            "vocab_signature": artifact.get("vocab_signature"),
+            "is_active": bool(artifact.get("is_active")),
+            "is_archived": bool(artifact.get("is_archived")),
+            "created_at": artifact.get("created_at"),
+            "summary": artifact.get("summary"),
+            "training_source_id": artifact.get("source_id"),
+            "fsm_run_id": artifact.get("fsm_run_id"),
+            "producing_dataset_id": producing_dataset_id,
+            "source_table_count": source_table_count,
+            "source_column_count": source_column_count,
+            "classified_table_count": classified_table_count,
+            "classified_column_count": classified_column_count,
+            "new_table_count": new_table_count,
+            "new_column_count": new_column_count,
+            "vocab_compatibility": {
+                "status": report.status,
+                "missing_codes": report.missing_codes,
+                "extra_codes": report.extra_codes,
+                "artifact_signature": report.artifact_signature,
+                "candidate_signature": report.candidate_signature,
+            },
+        }
+    except Exception as exc:
+        return _error_envelope(f"artifact_set_extend_scope failed: {exc}")
 
 
 # ── Archive / unarchive ──────────────────────────────────────────
@@ -1224,6 +1494,19 @@ def status():
         "qdrant_http_port": cfg.qdrant_http_port,
         "db_url_masked": db_masked,
         "model_discovery": model_discovery,
+        # Pipeline-stage capability flags consumed by the Workflows
+        # graph to decide which skill nodes are gated (absent /
+        # grayed) vs. attached (idle) vs. live (highlighted).
+        # ``has_overwatch`` already factors in the Anthropic-direct
+        # gate; the cautious_review and agent flags are read raw and
+        # the graph composes them with run state at render time.
+        "cautious_review_enabled": getattr(
+            cfg, "classify_cautious_review_enabled", False,
+        ),
+        "overwatch_enabled": getattr(cfg, "has_overwatch", False),
+        "classify_agent_enabled": getattr(
+            cfg, "classify_agent_enabled", False,
+        ),
     }
 
     # "connected" = gRPC reachable. gRPC is the only strict dealbreaker;
@@ -1307,16 +1590,26 @@ def model_discovery():
 
 @app.get("/api/overwatch/status")
 def overwatch_status():
-    """Report overwatch configuration, readiness, and GitHub App health."""
+    """Report overwatch configuration, readiness, and GitHub App health.
+
+    ``model`` reflects the WTA's currently selected model_ref —
+    Overwatch follows that selection so reviewers/operators see a
+    single provider+model knob rather than an Overwatch-specific one.
+    """
     try:
         from atelier.config import load_config
+        from atelier.terminal_selection import active_model_ref, get_active
         cfg = load_config()
+        active_entry = get_active(cfg)
         result: dict = {
             "enabled": cfg.overwatch_enabled,
             "has_overwatch": cfg.has_overwatch,
             "has_anthropic": cfg.has_anthropic,
+            "has_bedrock": cfg.has_bedrock,
             "autonomy": cfg.overwatch_autonomy,
-            "model": cfg.overwatch_model,
+            "model": active_model_ref(cfg),
+            "model_source": "wta",
+            "wta_entry_id": active_entry.id if active_entry else None,
             "github_app": {"configured": False},
         }
         if cfg.overwatch_github_app_id:
@@ -1609,8 +1902,12 @@ def list_data_platforms():
         cfg = load_config()
         platforms: list[dict] = []
 
-        # Hive connections
+        # ── Hive connections (HOCON config list) ──
+        # These are connection *names* from ATELIER_DATA_CONNECTIONS — they
+        # may or may not have a corresponding DB row yet.
+        hocon_hive_names: set[str] = set()
         for name in list_connections(cfg):
+            hocon_hive_names.add(name)
             platforms.append({
                 "id": name,
                 "kind": "hive",
@@ -1622,32 +1919,66 @@ def list_data_platforms():
                 "column_count": None,
             })
 
-        # Filesystem sources (non-archived only)
+        # ── DB-registered sources (non-archived) ──
+        # Includes *both* filesystem mounts and hive sources seeded from
+        # ATELIER_CLASSIFY_CONNECTION or auto-discovered at startup.
+        # De-duplicate hive entries that already appeared via the HOCON
+        # config list above (keyed on source_id).
+        # Retry-on-disconnect — the Status page polls this endpoint and
+        # a single transient PGlite blip would otherwise surface as a
+        # hard 500 in the UI.
         dao = AtelierDao()
-        with dao.get_session() as session:
-            rows = (
-                session.query(DataSource)
-                .filter_by(source_type="filesystem", is_archived=False)
-                .order_by(DataSource.id)
-                .all()
-            )
-            for r in rows:
-                meta = {}
-                if r.source_metadata:
-                    try:
-                        meta = _json.loads(r.source_metadata) or {}
-                    except Exception:
-                        meta = {}
-                # Strip file:// scheme for the mount display string.
-                mount = None
-                if r.source_uri and r.source_uri.startswith("file://"):
-                    mount = r.source_uri[len("file://"):]
+        # Materialise to dicts *inside* the session so we never touch
+        # detached ORM instances after run_with_retry closes the session.
+        rows = dao.run_with_retry(
+            lambda session: [
+                dao._source_to_dict(r)
+                for r in (
+                    session.query(DataSource)
+                    .filter_by(is_archived=False)
+                    .order_by(DataSource.id)
+                    .all()
+                )
+            ]
+        )
+        for r in rows:
+            meta = {}
+            if r.get("metadata"):
+                try:
+                    meta = _json.loads(r["metadata"]) or {}
+                except Exception:
+                    meta = {}
+
+            if r["source_type"] == "hive":
+                # Skip if already surfaced via the HOCON config list.
+                # HOCON entries use the bare connection name as id;
+                # DB-seeded entries use "connection/database".  Check
+                # both the full id and the connection component.
+                conn = meta.get("connection", "")
+                if r["id"] in hocon_hive_names or conn in hocon_hive_names:
+                    continue
                 platforms.append({
-                    "id": r.id,
+                    "id": r["id"],
+                    "kind": "hive",
+                    "label": r["display_name"] or f"Hive: {r['id']}",
+                    "source_uri": r["source_uri"] or "",
+                    "vocab_uri": r.get("vocab_uri") or "",
+                    "mount": None,
+                    "table_count": meta.get("table_count"),
+                    "column_count": meta.get("column_count"),
+                })
+            else:
+                # Filesystem source
+                mount = None
+                source_uri = r["source_uri"] or ""
+                if source_uri.startswith("file://"):
+                    mount = source_uri[len("file://"):]
+                platforms.append({
+                    "id": r["id"],
                     "kind": "filesystem",
-                    "label": f"Filesystem: {r.display_name}",
-                    "source_uri": r.source_uri or "",
-                    "vocab_uri": r.vocab_uri or "",
+                    "label": f"Filesystem: {r['display_name']}",
+                    "source_uri": source_uri,
+                    "vocab_uri": r.get("vocab_uri") or "",
                     "mount": mount,
                     "table_count": meta.get("table_count"),
                     "column_count": meta.get("column_count"),
@@ -2182,9 +2513,10 @@ def fsm_start(source_id: str | None = None):
         from atelier.classify import get_fsm
         from atelier.classify.pipeline import run_classification_pipeline
         from atelier.config import load_config
+        from atelier.db.dao import AtelierDao
 
         cfg = load_config()
-        fsm = get_fsm()
+        fsm = get_fsm(dao=AtelierDao())
 
         # Check if already running
         current = fsm.get_status()
@@ -2214,16 +2546,29 @@ def fsm_start(source_id: str | None = None):
             try:
                 from atelier.db.dao import AtelierDao
                 src = AtelierDao().get_data_source(source_id)
-                if src:
-                    vocab_uri = src.get("vocab_uri") or vocab_uri
-                    # source_uri format: "{connection}/{database}"
-                    uri = src.get("source_uri", "")
-                    if "/" in uri:
-                        connection_name, database = uri.split("/", 1)
-                    elif uri:
-                        connection_name = uri
-            except Exception:
-                pass  # proceed without — pipeline will use env-var fallback
+            except Exception as exc:
+                logger.warning(
+                    "DAO lookup for source %r failed: %s — falling back to "
+                    "env-var defaults (connection=%r, database=%r)",
+                    source_id, exc, connection_name, database,
+                )
+                src = None
+            if src:
+                vocab_uri = src.get("vocab_uri") or vocab_uri
+                # source_uri format: "{connection}/{database}"
+                uri = src.get("source_uri", "")
+                if "/" in uri:
+                    connection_name, database = uri.split("/", 1)
+                elif uri:
+                    connection_name = uri
+            elif source_id:
+                # Operator explicitly selected a source that doesn't
+                # exist (or the DAO lookup failed).  Proceeding with
+                # env-var defaults would silently classify the wrong
+                # database — fail fast instead.
+                return {"started": False,
+                        "error": f"Data source {source_id!r} not found. "
+                        "Select a valid source or remove the source_id parameter."}
 
         nautilus_watcher = None
 
@@ -2380,7 +2725,7 @@ def fsm_extend(body: dict):
             )
 
         cfg = load_config()
-        fsm = get_fsm()
+        fsm = get_fsm(dao=dao)
 
         # Refuse to spawn while another run is in flight — the FSM
         # singleton can only carry one run at a time.  Status codes

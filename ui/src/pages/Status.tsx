@@ -6,7 +6,7 @@
 // modified, redistributed, or used in any other manner without the express
 // written consent of Cloudera, Inc.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Badge,
@@ -15,6 +15,7 @@ import {
   Col,
   Descriptions,
   message,
+  Popconfirm,
   Progress,
   Radio,
   Row,
@@ -36,7 +37,7 @@ import {
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
-import { useDataset, type MLArtifactSet } from "../contexts/DatasetContext";
+import { useDataset } from "../contexts/DatasetContext";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -86,6 +87,28 @@ interface StatusResponse {
   connected: boolean;
 }
 
+// Mirrors bin/pglite-supervisor.sh state file + the gateway's
+// /api/pglite/status response.  ``managed=false`` means pglite isn't
+// the active backend (external Postgres or no supervisor) — UI hides
+// the chip entirely in that case.
+interface PGliteSupervisorState {
+  managed: boolean;
+  state?: "starting" | "running" | "backoff" | "circuit_broken" | "stopped";
+  pid?: number | null;
+  supervisor_pid?: number | null;
+  started_at?: number | null;
+  last_exit_code?: number | null;
+  consecutive_failures?: number;
+  restart_count?: number;
+  backoff_until?: number | null;
+  circuit_broken?: boolean;
+  port?: number;
+  updated_at?: number;
+  probe?: { listening: boolean; error: string | null };
+  reason?: string;
+  error?: string;
+}
+
 interface ProviderResult {
   provider: string;
   valid: boolean;
@@ -133,8 +156,10 @@ interface FSMStatus {
   started_at?: string;
   updated_at?: string;
   progress?: Record<string, unknown>;
+  config?: Record<string, unknown>;
   error?: string | null;
   result_path?: string | null;
+  source_id?: string | null;
 }
 
 interface TerminalModelStats {
@@ -398,7 +423,8 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const [fsmLoading, setFsmLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const { activeSourceId, refreshDatasets, refreshArtifactSets } = useDataset();
+  const { activeSourceId, setActiveSourceId, sources, refreshDatasets, refreshArtifactSets } = useDataset();
+  const activeSource = sources.find((s) => s.id === activeSourceId);
 
   const fetchFSM = () => {
     setFsmLoading(true);
@@ -453,21 +479,65 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   const isRunning = !["IDLE", "CONVERGED", "ERROR"].includes(state);
   const progress = fsm?.progress ?? {};
 
+  // When a run is active (or completed), show the source the run was
+  // started against (from the FSM record) — not the sidebar's active
+  // source, which the operator can change mid-run.  Fall back to the
+  // sidebar source only when IDLE (no prior run) so the operator sees
+  // what will be classified next.
+  const runSourceId = fsm?.source_id;
+  const runSource = runSourceId
+    ? sources.find((s) => s.id === runSourceId)
+    : null;
+  const displaySource = state === "IDLE" ? activeSource : (runSource ?? activeSource);
+
   // Refresh datasets + artifact sets when pipeline converges so the
   // new dataset and its produced artifact set both appear without a
   // manual click.  Extend runs also converge — same code path.
+  //
+  // When the converged run's source differs from the active sidebar
+  // source, switch to it so the new dataset shows in the Embeddings
+  // list without a manual source change.
+  //
+  // Fire once per converged run, keyed by ``fsm.id``: the prior version
+  // re-fired on every render while ``state === "CONVERGED"``, which
+  // would forcibly switch the source back if the operator manually
+  // changed it post-convergence.  ``handledRunRef`` records which run
+  // we already handled so the source-switch is a one-shot event.
+  const handledRunRef = useRef<string | null>(null);
+  const fsmRunId = fsm?.id ?? null;
   useEffect(() => {
-    if (state === "CONVERGED") {
+    if (state !== "CONVERGED") return;
+    if (!fsmRunId || handledRunRef.current === fsmRunId) return;
+    handledRunRef.current = fsmRunId;
+    if (runSourceId && runSourceId !== activeSourceId) {
+      // setActiveSourceId clears activeDatasetId and triggers
+      // refreshDatasets via the DatasetContext source-change effect.
+      setActiveSourceId(runSourceId);
+    } else {
       refreshDatasets();
-      refreshArtifactSets();
     }
-  }, [state, refreshDatasets, refreshArtifactSets]);
+    refreshArtifactSets();
+  }, [
+    state, fsmRunId, runSourceId, activeSourceId,
+    setActiveSourceId, refreshDatasets, refreshArtifactSets,
+  ]);
 
   return (
     <Card
       title="Classification Pipeline"
       extra={
         <Space>
+          {displaySource ? (
+            <Text type="secondary">
+              Source: <Text code>{displaySource.display_name}</Text>
+            </Text>
+          ) : runSourceId ? (
+            <Text type="secondary">
+              Source: <Text code>{runSourceId}</Text>
+            </Text>
+          ) : (
+            <Text type="secondary">No source selected</Text>
+          )}
           <Button
             icon={<ReloadOutlined />}
             onClick={fetchFSM}
@@ -570,21 +640,59 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             {String(progress.llm_labeled)}
           </Descriptions.Item>
         )}
-        {progress.mean_k != null && (
-          <Descriptions.Item label="Mean K (conflict)">
-            {Number(progress.mean_k).toFixed(3)}
-          </Descriptions.Item>
-        )}
-        {progress.disagreements != null && (
-          <Descriptions.Item label="Disagreements">
-            {String(progress.disagreements)}
-          </Descriptions.Item>
-        )}
         {progress.iteration != null && (
           <Descriptions.Item label="Iteration">
             {String(progress.iteration)}
           </Descriptions.Item>
         )}
+        {/* ── Tier 1: convergence (primary stopping criterion) ──
+            Mean Gap is the actual gate; Trend Ratio is the
+            iteration-to-iteration ρ over the gap (the honest
+            single-criterion contraction).  Color thresholds reference
+            the operator-configured gap_threshold so a tightened policy
+            re-colors the live tag without a code change. */}
+        {progress.mean_gap != null && (
+          <Descriptions.Item label="Mean Gap (Pl − Bel)">
+            <Tag
+              color={
+                progress.gap_threshold != null &&
+                Number(progress.mean_gap) <= Number(progress.gap_threshold)
+                  ? "green"
+                  : progress.gap_threshold != null &&
+                      Number(progress.mean_gap) <=
+                        Number(progress.gap_threshold) * 1.5
+                    ? "orange"
+                    : "red"
+              }
+            >
+              {Number(progress.mean_gap).toFixed(3)}
+            </Tag>
+            {progress.gap_threshold != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                target ≤ {Number(progress.gap_threshold).toFixed(2)}
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.gap_contraction_rate != null &&
+          Number(progress.gap_contraction_rate) > 0 && (
+            <Descriptions.Item label="Trend Ratio">
+              <Tag
+                color={
+                  Number(progress.gap_contraction_rate) < 0.7
+                    ? "green"
+                    : Number(progress.gap_contraction_rate) < 0.95
+                      ? "orange"
+                      : "red"
+                }
+              >
+                {Number(progress.gap_contraction_rate).toFixed(2)}
+              </Tag>
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                gapₙ / gapₙ₋₁ — &lt;1 tightening, →1 stalled
+              </Text>
+            </Descriptions.Item>
+          )}
         {progress.columns_classified != null && (
           <Descriptions.Item label="Classified">
             {String(progress.columns_classified)}
@@ -597,6 +705,11 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             </Tag>
           </Descriptions.Item>
         )}
+        {/* ── Tier 2: thesis core ──
+            LLM-Fit Labels renders f directly (the LLM-labeled fraction
+            in the operator's thesis); Revisit Queue is the
+            next-iteration LLM workload, surfaced as both count (LLM
+            budget) and fraction (scale-invariant thesis load). */}
         {progress.bootstrap_coverage != null && (
           <Descriptions.Item label="Coverage">
             <Tag color={Number(progress.bootstrap_coverage) >= 0.95 ? "green" : "orange"}>
@@ -617,6 +730,85 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             >
               {(Number(progress.llm_coverage) * 100).toFixed(1)}%
             </Tag>
+          </Descriptions.Item>
+        )}
+        {progress.llm_fit_labels != null && (
+          <Descriptions.Item label="LLM-Fit Labels (f)">
+            {String(progress.llm_fit_labels)}
+            {progress.llm_fit_fraction != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                f = {(Number(progress.llm_fit_fraction) * 100).toFixed(1)}%
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.disagreements_count != null && (
+          <Descriptions.Item label="Revisit Queue">
+            {String(progress.disagreements_count)}
+            {progress.disagreements_frac != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                ({(Number(progress.disagreements_frac) * 100).toFixed(1)}% of corpus)
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {/* ── Tier 3: prediction strength + evidence conflict ──
+            Clarity = 1 − frac_unclear (fraction of cols clear of the
+            gap/bel thresholds); K is evidence-conflict — the signal
+            that distinguishes "LLM right, done" from "indep tier knows
+            something the LLM is missing."  Both load-bearing under
+            the operator's thesis even though K no longer gates
+            convergence directly. */}
+        {progress.mean_bel != null && (
+          <Descriptions.Item label="Mean Belief">
+            <Tag
+              color={
+                progress.bel_floor != null &&
+                Number(progress.mean_bel) >= Number(progress.bel_floor)
+                  ? "green"
+                  : "orange"
+              }
+            >
+              {Number(progress.mean_bel).toFixed(3)}
+            </Tag>
+            {progress.bel_floor != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                floor ≥ {Number(progress.bel_floor).toFixed(2)}
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.clarity != null && (
+          <Descriptions.Item label="Clarity">
+            <Tag
+              color={
+                progress.clarity_target != null &&
+                Number(progress.clarity) >= 1 - Number(progress.clarity_target)
+                  ? "green"
+                  : progress.clarity_target != null &&
+                      Number(progress.clarity) >=
+                        1 - Number(progress.clarity_target) * 1.2
+                    ? "orange"
+                    : "red"
+              }
+            >
+              {(Number(progress.clarity) * 100).toFixed(1)}%
+            </Tag>
+            {progress.clarity_target != null && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                target ≥ {((1 - Number(progress.clarity_target)) * 100).toFixed(0)}%
+              </Text>
+            )}
+          </Descriptions.Item>
+        )}
+        {progress.mean_k != null && (
+          <Descriptions.Item label="Evidence Conflict (K)">
+            {Number(progress.mean_k).toFixed(3)}
+          </Descriptions.Item>
+        )}
+        {progress.indep_tier_disagreement_frac != null && (
+          <Descriptions.Item label="Indep-Tier Disagreement">
+            {(Number(progress.indep_tier_disagreement_frac) * 100).toFixed(1)}%
           </Descriptions.Item>
         )}
         {progress.llm_agreement != null && (
@@ -731,6 +923,53 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
   );
 }
 
+// Shape returned by /api/artifact-sets/{id}/extend-scope.  Each field
+// the panel surfaces as a salient measure for the *selected* RunID.
+interface ExtendScope {
+  artifact_set_id: string;
+  source_id: string;
+  same_source: boolean;
+  bundle: { catboost: boolean; svm: boolean; umap: boolean };
+  classes_count: number;
+  embedding_model: string | null;
+  embedding_dim: number | null;
+  vocab_signature: string | null;
+  is_active: boolean;
+  is_archived: boolean;
+  created_at: string | null;
+  summary: string | null;
+  training_source_id: string | null;
+  fsm_run_id: string | null;
+  producing_dataset_id: string | null;
+  source_table_count: number | null;
+  source_column_count: number | null;
+  classified_table_count: number | null;
+  classified_column_count: number | null;
+  new_table_count: number | null;
+  new_column_count: number | null;
+  vocab_compatibility: {
+    status: "ok" | "superset" | "partial" | "disjoint";
+    missing_codes: string[];
+    extra_codes: string[];
+    artifact_signature: string;
+    candidate_signature: string;
+  };
+}
+
+const COMPAT_COLOR: Record<string, string> = {
+  ok: "green",
+  superset: "blue",
+  partial: "orange",
+  disjoint: "red",
+};
+
+const COMPAT_DESCRIPTION: Record<string, string> = {
+  ok: "Artifact vocab matches the source vocab exactly.",
+  superset: "Source vocab includes all artifact codes plus extras the model can't predict.",
+  partial: "Artifact has codes the source vocab doesn't define — Extend will still run, but predictions may emit unknown codes.",
+  disjoint: "No vocab overlap — almost certainly the wrong artifact for this source.",
+};
+
 function MLArtifactsCard() {
   const {
     activeSourceId,
@@ -738,32 +977,71 @@ function MLArtifactsCard() {
     datasets,
     activeDatasetId,
     artifactSets,
-    activeArtifactSetId,
     setActiveArtifactSetId,
     refreshArtifactSets,
   } = useDataset();
 
+  const [scope, setScope] = useState<ExtendScope | null>(null);
+  const [scopeLoading, setScopeLoading] = useState(false);
   const [extending, setExtending] = useState<boolean>(false);
-  const [archiving, setArchiving] = useState<string | null>(null);
 
   const activeSource = sources.find((s) => s.id === activeSourceId);
   const activeDataset = datasets.find((d) => d.id === activeDatasetId);
 
-  const archiveArtifact = async (id: string) => {
-    setArchiving(id);
-    try {
-      await fetch(`/api/artifact-sets/${encodeURIComponent(id)}/archive`, {
-        method: "POST",
-      });
-      await refreshArtifactSets();
-    } finally {
-      setArchiving(null);
+  // Resolve the artifact set to display.  Priority:
+  //   1. The artifact set the selected dataset CONSUMED (Extend runs)
+  //      OR PRODUCED (classify runs) — both stamp dataset.artifact_set_id.
+  //   2. Lineage fallback: match by fsm_run_id.
+  //   3. None — render an empty-state hint.
+  const targetArtifactSet = (() => {
+    if (!activeDataset) return null;
+    if (activeDataset.artifact_set_id) {
+      const m = artifactSets.find((a) => a.id === activeDataset.artifact_set_id);
+      if (m) return m;
     }
+    if (activeDataset.fsm_run_id) {
+      const m = artifactSets.find((a) => a.fsm_run_id === activeDataset.fsm_run_id);
+      if (m) return m;
+    }
+    return null;
+  })();
+
+  const fetchScope = useCallback(async () => {
+    if (!targetArtifactSet || !activeSourceId) {
+      setScope(null);
+      return;
+    }
+    setScopeLoading(true);
+    try {
+      const r = await fetch(
+        `/api/artifact-sets/${encodeURIComponent(targetArtifactSet.id)}/extend-scope?source_id=${encodeURIComponent(activeSourceId)}`,
+      );
+      const data = await r.json();
+      if (data.error) {
+        setScope(null);
+      } else {
+        setScope(data as ExtendScope);
+      }
+    } catch {
+      setScope(null);
+    } finally {
+      setScopeLoading(false);
+    }
+  }, [targetArtifactSet, activeSourceId]);
+
+  useEffect(() => {
+    fetchScope();
+  }, [fetchScope]);
+
+  const promote = async () => {
+    if (!targetArtifactSet) return;
+    await setActiveArtifactSetId(targetArtifactSet.id);
+    await fetchScope();
   };
 
   const startExtend = async () => {
-    if (!activeSourceId || !activeArtifactSetId) {
-      message.error("Select a data source and an artifact set first");
+    if (!activeSourceId || !targetArtifactSet) {
+      message.error("Select a data source and a Run ID with an artifact set first");
       return;
     }
     setExtending(true);
@@ -773,14 +1051,14 @@ function MLArtifactsCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_id: activeSourceId,
-          artifact_set_id: activeArtifactSetId,
+          artifact_set_id: targetArtifactSet.id,
           parent_dataset_id: activeDatasetId ?? null,
         }),
       });
       const data = await r.json();
       if (data.started) {
         message.success(
-          `Extend Classification started — using artifact ${activeArtifactSetId.slice(0, 8)}`,
+          `Extend Classification started — using artifact ${targetArtifactSet.id.slice(0, 8)}`,
         );
       } else {
         message.error(data.error || "Failed to start Extend Classification");
@@ -792,31 +1070,37 @@ function MLArtifactsCard() {
     }
   };
 
-  const canExtend = Boolean(
-    activeSourceId && activeArtifactSetId && activeDataset,
-  );
+  const canExtend = Boolean(activeSourceId && targetArtifactSet && activeDataset);
+
+  // Header label — mirrors the Classification Pipeline card's pattern of
+  // surfacing the source the *selected run* was about, not the sidebar's
+  // current source (which the operator may have changed).
+  const headerSummary = (() => {
+    if (!activeSource) return <Text type="secondary">No source selected</Text>;
+    if (!activeDataset) return (
+      <Text type="secondary">
+        Source: <Text code>{activeSource.display_name}</Text>
+      </Text>
+    );
+    return (
+      <Text type="secondary">
+        Source: <Text code>{activeSource.display_name}</Text>{" · "}
+        Run: <Text code>{(activeDataset.fsm_run_id ?? activeDataset.id).slice(0, 8)}</Text>
+        {" · "}v{activeDataset.version_number}
+      </Text>
+    );
+  })();
 
   return (
     <Card
       title="ML Artifacts"
       extra={
         <Space>
-          {activeSource ? (
-            <Text type="secondary">
-              Source: <Text code>{activeSource.display_name}</Text>
-              {activeDataset && (
-                <>
-                  {" · "}
-                  Dataset: <Text code>v{activeDataset.version_number}</Text>
-                </>
-              )}
-            </Text>
-          ) : (
-            <Text type="secondary">No source selected</Text>
-          )}
+          {headerSummary}
           <Button
             icon={<ReloadOutlined />}
-            onClick={refreshArtifactSets}
+            onClick={() => { refreshArtifactSets(); fetchScope(); }}
+            loading={scopeLoading}
             size="small"
           >
             Refresh
@@ -824,8 +1108,8 @@ function MLArtifactsCard() {
           <Tooltip
             title={
               !canExtend
-                ? "Select an active source, dataset, and artifact set to enable Extend"
-                : "Run a streamlined classification on the selected data source using the active artifact set (no LLM, no DST iteration)"
+                ? "Select a Run ID in Data Source whose run produced (or consumed) an artifact set."
+                : "Apply this run's CatBoost (and SVM/UMAP if bundled) to the selected source — skips the LLM sweep, DST iteration, and re-training."
             }
           >
             <Button
@@ -842,129 +1126,225 @@ function MLArtifactsCard() {
         </Space>
       }
     >
-      {artifactSets.length === 0 ? (
+      {!activeDataset ? (
         <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          No artifact sets registered yet. Run the Classification Pipeline to
-          produce one — each completed classify run registers its trained
-          CatBoost / SVM / UMAP bundle here for re-use.
+          No Run ID selected. Pick a row in the Data Source panel — its
+          Run produces (or consumes) the artifact set displayed here.
+        </Paragraph>
+      ) : !targetArtifactSet ? (
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          The selected Run ({(activeDataset.fsm_run_id ?? activeDataset.id).slice(0, 8)})
+          has no registered artifact set.{" "}
+          {artifactSets.length === 0
+            ? "Run the Classification Pipeline to produce one — each completed classify run registers its trained CatBoost / SVM / UMAP bundle for re-use."
+            : "This is normal for legacy runs that pre-date artifact-set lineage."}
         </Paragraph>
       ) : (
-        <Table
-          size="small"
-          pagination={false}
-          rowKey="id"
-          dataSource={artifactSets}
-          onRow={(record) => ({
-            style: {
-              cursor: "pointer",
-              background: record.id === activeArtifactSetId ? "#e6f4ff" : undefined,
-            },
-            onClick: () => setActiveArtifactSetId(record.id),
-          })}
-          columns={[
-            {
-              title: "Active",
-              key: "active",
-              width: 70,
-              align: "center" as const,
-              render: (_: unknown, record: MLArtifactSet) => (
-                <Radio
-                  checked={record.is_active}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveArtifactSetId(record.id);
-                  }}
-                />
-              ),
-            },
-            {
-              title: "Run ID",
-              dataIndex: "fsm_run_id",
-              key: "run_id",
-              width: 110,
-              render: (run_id: string | null, record: MLArtifactSet) => {
-                const id = run_id ?? record.id;
-                return run_id ? (
-                  <Link to={`/overwatch/${run_id}`}>
-                    <Text code>{id.slice(0, 8)}</Text>
-                  </Link>
+        <>
+          <Descriptions column={2} size="small" bordered>
+            <Descriptions.Item label="Status">
+              <Space>
+                {targetArtifactSet.is_active ? (
+                  <Tag color="green">Active</Tag>
+                ) : targetArtifactSet.is_archived ? (
+                  <Tag>Archived</Tag>
                 ) : (
-                  <Text code type="secondary">{id.slice(0, 8)}</Text>
-                );
-              },
-            },
-            {
-              title: "Created",
-              dataIndex: "created_at",
-              key: "created",
-              render: (v: string) => {
-                if (!v) return "—";
+                  <Tag color="blue">Available</Tag>
+                )}
+                {!targetArtifactSet.is_active && !targetArtifactSet.is_archived && (
+                  <Button size="small" type="link" onClick={promote}>
+                    Make active
+                  </Button>
+                )}
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="Bundle">
+              <Space size={4}>
+                <Tooltip title="CatBoost classifier (always present in a registered set)">
+                  <Tag
+                    color={targetArtifactSet.catboost_path ? "blue" : "default"}
+                    style={{ margin: 0 }}
+                  >
+                    CB
+                  </Tag>
+                </Tooltip>
+                <Tooltip
+                  title={
+                    targetArtifactSet.svm_path
+                      ? "Incremental SVM bundled — second-look classifier"
+                      : "No SVM in this bundle"
+                  }
+                >
+                  <Tag
+                    color={targetArtifactSet.svm_path ? "blue" : "default"}
+                    style={{ margin: 0 }}
+                  >
+                    SVM
+                  </Tag>
+                </Tooltip>
+                <Tooltip
+                  title={
+                    targetArtifactSet.umap_path
+                      ? "UMAP projection bundled — Extend lands in same coordinate space"
+                      : "No UMAP — Extend re-fits a fresh projection"
+                  }
+                >
+                  <Tag
+                    color={targetArtifactSet.umap_path ? "blue" : "default"}
+                    style={{ margin: 0 }}
+                  >
+                    UMAP
+                  </Tag>
+                </Tooltip>
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="Run ID">
+              {targetArtifactSet.fsm_run_id ? (
+                <Link to={`/overwatch/${targetArtifactSet.fsm_run_id}`}>
+                  <Text code>{targetArtifactSet.fsm_run_id.slice(0, 8)}</Text>
+                </Link>
+              ) : (
+                <Text code type="secondary">
+                  {targetArtifactSet.id.slice(0, 8)}
+                </Text>
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="Created">
+              {targetArtifactSet.created_at ? (() => {
                 try {
-                  return new Date(v).toLocaleString();
+                  return new Date(targetArtifactSet.created_at).toLocaleString();
                 } catch {
-                  return v;
+                  return targetArtifactSet.created_at;
                 }
-              },
-            },
-            {
-              title: "Summary",
-              dataIndex: "summary",
-              key: "summary",
-              ellipsis: true,
-              render: (v: string | null) => v || "—",
-            },
-            {
-              title: "Models",
-              key: "models",
-              width: 130,
-              render: (_: unknown, record: MLArtifactSet) => (
-                <Space size={4}>
-                  <Tooltip title="CatBoost classifier">
-                    <Tag color={record.catboost_path ? "blue" : "default"} style={{ margin: 0 }}>
-                      CB
-                    </Tag>
-                  </Tooltip>
-                  <Tooltip title={record.svm_path ? "Incremental SVM" : "No SVM in this bundle"}>
-                    <Tag color={record.svm_path ? "blue" : "default"} style={{ margin: 0 }}>
-                      SVM
-                    </Tag>
-                  </Tooltip>
-                  <Tooltip
-                    title={
-                      record.umap_path
-                        ? "UMAP projection bundled — Extend lands in same coordinate space"
-                        : "No UMAP — Extend re-fits a fresh projection"
+              })() : "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="Classes">
+              {scope?.classes_count ?? "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="Embedding">
+              {scope?.embedding_model ? (
+                <>
+                  <Text code>{scope.embedding_model}</Text>
+                  {scope.embedding_dim != null && (
+                    <Text type="secondary" style={{ marginLeft: 6 }}>
+                      ({scope.embedding_dim}d)
+                    </Text>
+                  )}
+                </>
+              ) : (
+                "—"
+              )}
+            </Descriptions.Item>
+
+            {/* ── Training scope (what CatBoost was fit on) ── */}
+            {scope?.classified_column_count != null && (
+              <Descriptions.Item label="Trained On">
+                {scope.classified_column_count.toLocaleString()} columns
+                {scope.classified_table_count != null && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    across {scope.classified_table_count.toLocaleString()} tables
+                  </Text>
+                )}
+              </Descriptions.Item>
+            )}
+
+            {/* ── Source scope + delta — the "extend headroom" the user
+                wants to see for Extend Classification planning. ── */}
+            {scope?.source_column_count != null && (
+              <Descriptions.Item label="Source Scope">
+                {scope.source_column_count.toLocaleString()} columns
+                {scope.source_table_count != null && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    across {scope.source_table_count.toLocaleString()} tables
+                  </Text>
+                )}
+              </Descriptions.Item>
+            )}
+            {scope &&
+              (scope.new_column_count != null || scope.new_table_count != null) && (
+                <Descriptions.Item
+                  label={
+                    <Tooltip
+                      title={
+                        scope.same_source
+                          ? "Entities present in the source today that this artifact set hasn't classified yet — what an Extend run would target."
+                          : "Artifact was trained on a different source — Extend would classify the candidate source from scratch using this CatBoost."
+                      }
+                    >
+                      New Entities
+                    </Tooltip>
+                  }
+                >
+                  <Tag
+                    color={
+                      scope.new_column_count && scope.new_column_count > 0
+                        ? "purple"
+                        : "default"
                     }
                   >
-                    <Tag color={record.umap_path ? "blue" : "default"} style={{ margin: 0 }}>
-                      UMAP
-                    </Tag>
-                  </Tooltip>
-                </Space>
-              ),
-            },
-            {
-              title: "",
-              key: "actions",
-              width: 60,
-              render: (_: unknown, record: MLArtifactSet) => (
-                <Tooltip title="Archive (files on disk are kept)">
-                  <Button
-                    icon={<DeleteOutlined />}
-                    size="small"
-                    type="text"
-                    danger
-                    loading={archiving === record.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      archiveArtifact(record.id);
-                    }}
-                  />
+                    {scope.new_column_count != null
+                      ? `${scope.new_column_count.toLocaleString()} columns`
+                      : "—"}
+                  </Tag>
+                  {scope.new_table_count != null && scope.new_table_count > 0 && (
+                    <Text type="secondary" style={{ marginLeft: 6 }}>
+                      across {scope.new_table_count.toLocaleString()} new tables
+                    </Text>
+                  )}
+                  {!scope.same_source && (
+                    <Text type="secondary" style={{ marginLeft: 6 }}>
+                      (cross-source extend)
+                    </Text>
+                  )}
+                </Descriptions.Item>
+              )}
+
+            {/* ── Vocab compatibility — surfaced inline so the operator
+                sees the warning before clicking Extend. ── */}
+            {scope?.vocab_compatibility && (
+              <Descriptions.Item label="Vocab" span={2}>
+                <Tooltip
+                  title={
+                    COMPAT_DESCRIPTION[scope.vocab_compatibility.status] ??
+                    scope.vocab_compatibility.status
+                  }
+                >
+                  <Tag
+                    color={
+                      COMPAT_COLOR[scope.vocab_compatibility.status] ?? "default"
+                    }
+                  >
+                    {scope.vocab_compatibility.status}
+                  </Tag>
                 </Tooltip>
-              ),
-            },
-          ]}
-        />
+                {scope.vocab_compatibility.missing_codes.length > 0 && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    {scope.vocab_compatibility.missing_codes.length} artifact
+                    code{scope.vocab_compatibility.missing_codes.length === 1
+                      ? ""
+                      : "s"}{" "}
+                    not in source vocab
+                  </Text>
+                )}
+                {scope.vocab_compatibility.extra_codes.length > 0 && (
+                  <Text type="secondary" style={{ marginLeft: 6 }}>
+                    · {scope.vocab_compatibility.extra_codes.length} source
+                    code{scope.vocab_compatibility.extra_codes.length === 1
+                      ? ""
+                      : "s"}{" "}
+                    artifact can't predict
+                  </Text>
+                )}
+              </Descriptions.Item>
+            )}
+
+            {targetArtifactSet.summary && (
+              <Descriptions.Item label="Summary" span={2}>
+                {targetArtifactSet.summary}
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        </>
       )}
     </Card>
   );
@@ -979,15 +1359,59 @@ function DataSourceCard() {
     datasets,
     activeDatasetId,
     setActiveDatasetId,
+    refreshDatasets,
+    refreshArtifactSets,
   } = useDataset();
+
+  const [archiving, setArchiving] = useState<string | null>(null);
 
   const activateVersion = (datasetId: string) => {
     fetch(`/api/datasets/${encodeURIComponent(datasetId)}/activate`, {
       method: "POST",
     })
       .then((r) => r.json())
-      .then(() => setActiveDatasetId(datasetId))
+      .then(() => {
+        // userPicked=true: this is an explicit operator activation,
+        // not an auto-promote.  Pins the choice so the auto-promote
+        // effect won't bounce back to the previously-active row before
+        // the next refreshDatasets settles is_active flags.
+        setActiveDatasetId(datasetId, { userPicked: true });
+        // Refresh so the local datasets list picks up the new
+        // is_active flags from the server, keeping the UI in sync
+        // without relying on a poll interval.
+        return refreshDatasets();
+      })
       .catch(() => {});
+  };
+
+  // Archive both the dataset and its associated artifact set in one
+  // click.  Operators think of the row as "the run" — splitting these
+  // across two panels means an archive on one side leaves the other
+  // dangling and visible.  Files on disk are untouched (soft-delete).
+  const archiveRun = async (
+    datasetId: string,
+    artifactSetId: string | null | undefined,
+  ) => {
+    setArchiving(datasetId);
+    try {
+      const calls: Promise<unknown>[] = [
+        fetch(`/api/datasets/${encodeURIComponent(datasetId)}/archive`, {
+          method: "POST",
+        }),
+      ];
+      if (artifactSetId) {
+        calls.push(
+          fetch(
+            `/api/artifact-sets/${encodeURIComponent(artifactSetId)}/archive`,
+            { method: "POST" },
+          ),
+        );
+      }
+      await Promise.all(calls);
+      await Promise.all([refreshDatasets(), refreshArtifactSets()]);
+    } finally {
+      setArchiving(null);
+    }
   };
 
   return (
@@ -1058,6 +1482,22 @@ function DataSourceCard() {
               render: (v: number) => <Text strong>v{v}</Text>,
             },
             {
+              title: "Run ID",
+              dataIndex: "fsm_run_id",
+              key: "run_id",
+              width: 110,
+              render: (run_id: string | null, record: { id: string }) => {
+                const id = run_id ?? record.id;
+                return run_id ? (
+                  <Link to={`/overwatch/${run_id}`}>
+                    <Text code>{id.slice(0, 8)}</Text>
+                  </Link>
+                ) : (
+                  <Text code type="secondary">{id.slice(0, 8)}</Text>
+                );
+              },
+            },
+            {
               title: "Columns",
               dataIndex: "row_count",
               key: "rows",
@@ -1086,16 +1526,43 @@ function DataSourceCard() {
             },
             {
               title: "",
-              key: "overwatch",
-              width: 90,
-              render: (_: unknown, record: any) =>
-                record.fsm_run_id ? (
-                  <Link to={`/overwatch/${record.fsm_run_id}`}>
-                    <Tag color="purple" style={{ cursor: "pointer", margin: 0 }}>
-                      Overwatch
-                    </Tag>
-                  </Link>
-                ) : null,
+              key: "actions",
+              width: 130,
+              render: (_: unknown, record: any) => (
+                <Space size={4} onClick={(e) => e.stopPropagation()}>
+                  {record.fsm_run_id && (
+                    <Link to={`/overwatch/${record.fsm_run_id}`}>
+                      <Tag color="purple" style={{ cursor: "pointer", margin: 0 }}>
+                        Overwatch
+                      </Tag>
+                    </Link>
+                  )}
+                  <Popconfirm
+                    title="Archive this run?"
+                    description={
+                      record.is_active
+                        ? "This is the active dataset — archiving hides both the dataset and its ML artifact bundle. Files on disk are kept."
+                        : "Archives both the dataset and its ML artifact bundle. Files on disk are kept."
+                    }
+                    okText="Archive"
+                    okButtonProps={{ danger: true }}
+                    cancelText="Cancel"
+                    onConfirm={() =>
+                      archiveRun(record.id, record.artifact_set_id)
+                    }
+                  >
+                    <Tooltip title="Archive run (dataset + ML artifacts)">
+                      <Button
+                        icon={<DeleteOutlined />}
+                        size="small"
+                        type="text"
+                        danger
+                        loading={archiving === record.id}
+                      />
+                    </Tooltip>
+                  </Popconfirm>
+                </Space>
+              ),
             },
           ]}
         />
@@ -1242,6 +1709,116 @@ function StatusBadge({ ok }: { ok: boolean }) {
   );
 }
 
+// Live countdown to a future epoch-seconds timestamp.  Re-renders
+// every second while ``until`` is in the future; collapses to "now"
+// once the deadline has passed.  Used by the supervisor chip + the
+// CAI Data Platform restart button to surface the backoff window.
+function CountdownText({ until }: { until: number | null | undefined }) {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!until) return;
+    const id = setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => clearInterval(id);
+  }, [until]);
+  if (!until) return null;
+  const remaining = Math.max(0, Math.ceil(until - now));
+  if (remaining === 0) return <Text type="secondary">restarting…</Text>;
+  return <Text type="secondary">retry in {remaining}s</Text>;
+}
+
+function PGliteStatusChip({
+  state,
+  onRestart,
+  restarting,
+}: {
+  state: PGliteSupervisorState | null;
+  onRestart: () => void;
+  restarting: boolean;
+}) {
+  if (!state || state.managed === false) return null;
+
+  const probeOk = state.probe?.listening === true;
+  const phase = state.state ?? "running";
+
+  // Color logic: the chip reflects what the operator should *do*.
+  // Green = healthy.  Orange = transient/recovering (no action).
+  // Red = stuck (action: click Restart).
+  let color: "green" | "orange" | "red" | "blue" = "blue";
+  let label: string = phase;
+  if (phase === "running" && probeOk) {
+    color = "green";
+    label = "running";
+  } else if (phase === "running" && !probeOk) {
+    // Process alive but socket not reachable — usually a brief
+    // hand-off during a restart that the probe caught mid-flight.
+    color = "orange";
+    label = "probe failing";
+  } else if (phase === "starting") {
+    color = "blue";
+    label = "starting";
+  } else if (phase === "backoff") {
+    color = "orange";
+    label = "restarting";
+  } else if (phase === "circuit_broken") {
+    color = "red";
+    label = "circuit broken";
+  } else if (phase === "stopped") {
+    color = "red";
+    label = "stopped";
+  }
+
+  const tooltip = (
+    <Space direction="vertical" size={2} style={{ fontSize: 12 }}>
+      <Text style={{ color: "white" }}>State: {phase}</Text>
+      {state.pid != null && <Text style={{ color: "white" }}>Child PID: {state.pid}</Text>}
+      {state.restart_count != null && (
+        <Text style={{ color: "white" }}>Restarts: {state.restart_count}</Text>
+      )}
+      {state.consecutive_failures != null && state.consecutive_failures > 0 && (
+        <Text style={{ color: "white" }}>
+          Consecutive failures: {state.consecutive_failures}
+        </Text>
+      )}
+      {state.last_exit_code != null && (
+        <Text style={{ color: "white" }}>Last exit: {state.last_exit_code}</Text>
+      )}
+      {state.started_at != null && (
+        <Text style={{ color: "white" }}>
+          Started: {formatAgo(state.started_at * 1000)}
+        </Text>
+      )}
+      {state.probe?.error && (
+        <Text style={{ color: "white" }}>Probe error: {state.probe.error}</Text>
+      )}
+    </Space>
+  );
+
+  return (
+    <Space size={6}>
+      <Tooltip title={tooltip}>
+        <Tag color={color} style={{ cursor: "help", margin: 0 }}>
+          {label}
+        </Tag>
+      </Tooltip>
+      {phase === "backoff" && state.backoff_until != null && (
+        <CountdownText until={state.backoff_until} />
+      )}
+      {phase === "circuit_broken" && (
+        <Button
+          size="small"
+          danger
+          icon={<ReloadOutlined />}
+          loading={restarting}
+          onClick={onRestart}
+          title="Touch the supervisor restart sentinel — clears the circuit and respawns pglite immediately."
+        >
+          Restart
+        </Button>
+      )}
+    </Space>
+  );
+}
+
 export default function Status() {
   // Status-page selection state (platform, smoke result) lives in
   // DatasetContext so it survives in-app navigation.  activeSourceId
@@ -1258,6 +1835,12 @@ export default function Status() {
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // PGlite supervisor health.  Polled every 5s — the chip + restart
+  // button on the CAI Data Platform panel both read from this single
+  // source so they never disagree about phase/backoff/circuit-broken.
+  const [pglite, setPglite] = useState<PGliteSupervisorState | null>(null);
+  const [pgliteRestarting, setPgliteRestarting] = useState(false);
 
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
   const [credLoading, setCredLoading] = useState(false);
@@ -1291,6 +1874,13 @@ export default function Status() {
     error?: string;
   };
   const [platforms, setPlatforms] = useState<Platform[]>([]);
+  // Diagnostic state — surfaces whatever /api/data-platforms returned
+  // so an empty panel distinguishes "endpoint errored" from "endpoint
+  // returned no rows" from "request never completed".  Without this
+  // every failure mode collapsed to the generic "No data platforms
+  // registered" empty state, which hid real bugs.
+  const [platformsError, setPlatformsError] = useState<string | null>(null);
+  const [platformsLoading, setPlatformsLoading] = useState(false);
   // Selected platform id lives in the dataset context so it survives
   // in-app navigation.  Context exposes `string | null`; local code
   // reads it as `string | undefined` to keep antd's Select happy.
@@ -1319,15 +1909,44 @@ export default function Status() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    fetchStatus();
-    // Auto-fire credential validation on every /status visit — cheap
-    // probe ($0 vs ~$0.007 for the smoke test) so it's worth keeping
-    // current state on screen without a manual button press.
-    runCredentialCheck();
-    fetch("/api/data-platforms")
+  const fetchPglite = () => {
+    fetch("/api/pglite/status")
+      .then((r) => r.json())
+      .then((data: PGliteSupervisorState) => setPglite(data))
+      .catch(() => setPglite(null));
+  };
+
+  const restartPglite = () => {
+    setPgliteRestarting(true);
+    fetch("/api/pglite/restart", { method: "POST" })
       .then((r) => r.json())
       .then((data) => {
+        if (data?.ok) {
+          message.success("PGlite restart requested — supervisor will respawn the process.");
+          // Optimistic refresh; the watch loop polls every 2s on the
+          // supervisor side, so by the next /api/pglite/status tick we
+          // should see state=starting → state=running.
+          setTimeout(fetchPglite, 1500);
+        } else {
+          message.error(data?.error ?? "Restart failed");
+        }
+      })
+      .catch((e) => message.error(`Restart failed: ${e}`))
+      .finally(() => setPgliteRestarting(false));
+  };
+
+  const fetchPlatforms = () => {
+    setPlatformsLoading(true);
+    setPlatformsError(null);
+    fetch("/api/data-platforms")
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok || (data && typeof data === "object" && "error" in data)) {
+          const msg = (data && data.error) || `HTTP ${r.status}`;
+          setPlatformsError(String(msg));
+          setPlatforms([]);
+          return;
+        }
         const list: Platform[] = Array.isArray(data?.platforms)
           ? data.platforms
           : [];
@@ -1340,7 +1959,27 @@ export default function Status() {
           setSelectedPlatformId(list[0].id);
         }
       })
-      .catch(() => setPlatforms([]));
+      .catch((e) => {
+        setPlatformsError(String(e));
+        setPlatforms([]);
+      })
+      .finally(() => setPlatformsLoading(false));
+  };
+
+  useEffect(() => {
+    fetchStatus();
+    // Auto-fire credential validation on every /status visit — cheap
+    // probe ($0 vs ~$0.007 for the smoke test) so it's worth keeping
+    // current state on screen without a manual button press.
+    runCredentialCheck();
+    fetchPlatforms();
+    fetchPglite();
+    // Poll supervisor health while the page is mounted.  5s is a
+    // good compromise: faster than the 2s supervisor watch loop so
+    // backoff transitions aren't visibly stale, slow enough to not
+    // burn CPU on a panel the operator may leave open.
+    const id = setInterval(fetchPglite, 5000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1404,25 +2043,47 @@ export default function Status() {
   const runConnectionRefresh = () => {
     if (!selectedConn) return;
     setConnLoading(true);
-    fetch(`/api/data-connections/${encodeURIComponent(selectedConn)}/refresh`, {
-      method: "POST",
-    })
+    // Fetch the probe result and the persisted data-source rows in
+    // parallel.  The persisted rows are the source of truth for
+    // ``vocab_uri`` — without hydrating from them, every refresh would
+    // overwrite the operator's prior vocabulary assignment with a
+    // ``${dbName}.annotations`` default and the Select would silently
+    // drift away from the value PATCHed to the server.
+    const probe = fetch(
+      `/api/data-connections/${encodeURIComponent(selectedConn)}/refresh`,
+      { method: "POST" },
+    ).then((r) => r.json());
+    const sources = fetch("/api/data-sources")
       .then((r) => r.json())
-      .then((data: RefreshResult) => {
+      .catch(() => ({ sources: [] }));
+    Promise.all([probe, sources])
+      .then(([data, srcResp]: [RefreshResult, { sources?: Array<{ id: string; vocab_uri?: string }> }]) => {
         setRefreshResult(data);
-        if (data.ok && data.databases) {
-          // Auto-enable databases that have annotations; auto-select their vocab_uri
-          const enabled: Record<string, boolean> = {};
-          const vocabs: Record<string, string> = {};
-          for (const db of data.databases) {
-            enabled[db.name] = db.has_annotations;
-            if (db.has_annotations) {
-              vocabs[db.name] = `${db.name}.annotations`;
-            }
+        if (!data.ok || !data.databases) return;
+
+        const persistedByDb: Record<string, string> = {};
+        for (const s of srcResp.sources ?? []) {
+          // source_id format: "<connection>/<database>"
+          const [conn, dbName] = (s.id || "").split("/", 2);
+          if (conn === selectedConn && dbName) {
+            persistedByDb[dbName] = s.vocab_uri ?? "";
           }
-          setDbEnabled(enabled);
-          setDbVocabUri(vocabs);
         }
+
+        const enabled: Record<string, boolean> = {};
+        const vocabs: Record<string, string> = {};
+        for (const db of data.databases) {
+          // Enabled iff a non-archived row exists for this db.
+          enabled[db.name] = persistedByDb[db.name] !== undefined;
+          // Hydration order: persisted server value > auto-default.
+          if (persistedByDb[db.name] !== undefined) {
+            vocabs[db.name] = persistedByDb[db.name];
+          } else if (db.has_annotations) {
+            vocabs[db.name] = `${db.name}.annotations`;
+          }
+        }
+        setDbEnabled(enabled);
+        setDbVocabUri(vocabs);
       })
       .catch((e) =>
         setRefreshResult({
@@ -1546,7 +2207,14 @@ export default function Status() {
                   </Tag>
                 </Descriptions.Item>
                 <Descriptions.Item label="Database">
-                  <Text code>{status.config.db_url_masked}</Text>
+                  <Space size={8} wrap>
+                    <Text code>{status.config.db_url_masked}</Text>
+                    <PGliteStatusChip
+                      state={pglite}
+                      onRestart={restartPglite}
+                      restarting={pgliteRestarting}
+                    />
+                  </Space>
                 </Descriptions.Item>
                 <Descriptions.Item label="Qdrant">
                   <Text code>
@@ -1765,6 +2433,15 @@ export default function Status() {
                   disabled={!platforms.length}
                   size="small"
                 />
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={fetchPlatforms}
+                  loading={platformsLoading}
+                  size="small"
+                  title="Re-fetch /api/data-platforms"
+                >
+                  Reload
+                </Button>
                 {selectedPlatform?.kind === "hive" && (
                   <Button
                     icon={<ReloadOutlined />}
@@ -1816,12 +2493,104 @@ export default function Status() {
                 that backs Hive sources.
               </Paragraph>
             )}
-            {platforms.length === 0 && (
-              <Text type="secondary">
-                No data platforms registered. Configure Hive via{" "}
-                <Text code>ATELIER_DATA_CONNECTIONS</Text> or mount a local
-                directory via <Text code>ATELIER_META_TAGGING_DIR</Text>.
-              </Text>
+            {platformsError && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="Failed to load data platforms"
+                description={
+                  <Space direction="vertical" size={6}>
+                    <Text code style={{ fontSize: 12 }}>
+                      GET /api/data-platforms — {platformsError}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      The Reload button above re-probes the endpoint.  If the
+                      error persists, check the gateway logs for{" "}
+                      <Text code>list_data_platforms failed</Text>.
+                    </Text>
+                    {/* When pglite is the active backend and the supervisor
+                        reports anything other than a clean running state,
+                        offer a one-click respawn — most "Failed to load data
+                        platforms" errors trace back to a transient pglite
+                        blip.  The button is disabled (with a countdown)
+                        while the supervisor is already in backoff so the
+                        operator doesn't click repeatedly during automatic
+                        recovery. */}
+                    {pglite?.managed && pglite.state !== "running" && (
+                      <Space size={6} wrap>
+                        <Button
+                          size="small"
+                          danger
+                          icon={<ReloadOutlined />}
+                          loading={pgliteRestarting}
+                          disabled={
+                            pgliteRestarting ||
+                            pglite.state === "starting" ||
+                            (pglite.state === "backoff" &&
+                              !!pglite.backoff_until &&
+                              pglite.backoff_until > Date.now() / 1000)
+                          }
+                          onClick={restartPglite}
+                          title={
+                            pglite.state === "circuit_broken"
+                              ? "Supervisor is in circuit-broken state — click to clear and respawn."
+                              : pglite.state === "backoff"
+                              ? "Supervisor is already retrying; the countdown shows the next attempt."
+                              : "Touch the supervisor restart sentinel to respawn pglite immediately."
+                          }
+                        >
+                          Restart database
+                        </Button>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          supervisor: {pglite.state}
+                        </Text>
+                        {pglite.state === "backoff" && (
+                          <CountdownText until={pglite.backoff_until} />
+                        )}
+                        {pglite.state === "starting" && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            supervisor restarting it now…
+                          </Text>
+                        )}
+                      </Space>
+                    )}
+                  </Space>
+                }
+              />
+            )}
+            {!platformsError && platforms.length === 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="No data platforms returned"
+                description={
+                  <Space direction="vertical" size={4}>
+                    <Text>
+                      The endpoint succeeded but returned an empty list.
+                      Other panels (Classification Pipeline, ML Artifacts)
+                      may be reading from{" "}
+                      <Text code>/api/data-sources</Text> directly, so a
+                      mismatch here points at{" "}
+                      <Text code>list_data_platforms</Text>'s consolidator
+                      logic rather than the underlying DB.
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Configure Hive via{" "}
+                      <Text code>ATELIER_DATA_CONNECTIONS</Text> or mount a
+                      local directory via{" "}
+                      <Text code>ATELIER_META_TAGGING_DIR</Text> if neither
+                      is set.  Otherwise paste this in the Application pod's
+                      terminal to compare endpoints:
+                    </Text>
+                    <Text code style={{ fontSize: 12, whiteSpace: "pre" }}>
+                      {"curl -s http://127.0.0.1:8090/api/data-platforms | python3 -m json.tool\n"}
+                      {"curl -s http://127.0.0.1:8090/api/data-sources   | python3 -m json.tool\n"}
+                      {"curl -s http://127.0.0.1:8090/api/data-connections | python3 -m json.tool"}
+                    </Text>
+                  </Space>
+                }
+              />
             )}
             {selectedPlatform?.kind === "hive" && refreshResult && !refreshResult.ok && (
               <Text type="danger">{refreshResult.error}</Text>
@@ -1902,14 +2671,18 @@ export default function Status() {
 
               const handleToggle = (dbName: string, checked: boolean) => {
                 setDbEnabled((prev) => ({ ...prev, [dbName]: checked }));
-                if (checked && !dbVocabUri[dbName]) {
-                  // Auto-pick own annotations if available
-                  const db = dbs.find((d) => d.name === dbName);
-                  if (db?.has_annotations) {
-                    setDbVocabUri((prev) => ({ ...prev, [dbName]: `${dbName}.annotations` }));
-                  }
+                // Compute the vocab_uri to send NOW — reading from the
+                // ``dbVocabUri`` state object alone races against the
+                // setDbVocabUri below (React batches updates), so on the
+                // first toggle-on the POST would otherwise carry an empty
+                // ``vocab_uri`` and the operator's default would not
+                // persist.
+                const db = dbs.find((d) => d.name === dbName);
+                let vocabForRequest = dbVocabUri[dbName] || "";
+                if (checked && !vocabForRequest && db?.has_annotations) {
+                  vocabForRequest = `${dbName}.annotations`;
+                  setDbVocabUri((prev) => ({ ...prev, [dbName]: vocabForRequest }));
                 }
-                // Create/archive data source
                 const sourceId = `${selectedConn}/${dbName}`;
                 if (checked) {
                   fetch("/api/data-sources", {
@@ -1919,13 +2692,31 @@ export default function Status() {
                       source_id: sourceId,
                       source_type: "hive",
                       display_name: `Hive: ${sourceId}`,
-                      vocab_uri: dbVocabUri[dbName] || "",
+                      vocab_uri: vocabForRequest,
                     }),
-                  }).catch(() => {});
+                  })
+                    .then((r) => r.json())
+                    .then((j) => {
+                      if (j?.error) {
+                        message.error(`Could not enable ${dbName}: ${j.error}`);
+                      }
+                    })
+                    .catch((e) =>
+                      message.error(`Could not enable ${dbName}: ${e}`),
+                    );
                 } else {
                   fetch(`/api/data-sources/${encodeURIComponent(sourceId)}/archive`, {
                     method: "POST",
-                  }).catch(() => {});
+                  })
+                    .then((r) => r.json())
+                    .then((j) => {
+                      if (j?.error) {
+                        message.error(`Could not disable ${dbName}: ${j.error}`);
+                      }
+                    })
+                    .catch((e) =>
+                      message.error(`Could not disable ${dbName}: ${e}`),
+                    );
                 }
               };
 
@@ -1936,7 +2727,20 @@ export default function Status() {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ vocab_uri: uri }),
-                }).catch(() => {});
+                })
+                  .then((r) => r.json())
+                  .then((j) => {
+                    if (j?.error) {
+                      message.error(`Could not save vocabulary for ${dbName}: ${j.error}`);
+                    } else {
+                      message.success(
+                        `Vocabulary for ${dbName} → ${uri || "(none)"}`,
+                      );
+                    }
+                  })
+                  .catch((e) =>
+                    message.error(`Could not save vocabulary for ${dbName}: ${e}`),
+                  );
               };
 
               return (

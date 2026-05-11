@@ -78,6 +78,7 @@ class AtelierServicer(atelier_pb2_grpc.AtelierServicer):
                     source_uri=s["source_uri"] or "",
                     display_name=s["display_name"] or "",
                     vocabulary_mode=s["vocabulary_mode"] or "",
+                    vocab_uri=s.get("vocab_uri") or "",
                     created_at=s["created_at"] or "",
                     metadata_json=s["metadata"] or "{}",
                     is_archived=s.get("is_archived", False),

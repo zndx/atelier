@@ -29,17 +29,16 @@ has converged.
 2. Agent calls get_conflict_report → identifies uncertain columns (high gap or low belief)
 3. Agent calls get_column_detail → inspects per-source evidence breakdown
 4. Agent calls revisit_columns → re-classifies with enriched context
-5. Agent calls retrain_svm → incremental SVM learns from accumulated frontier-tier labels
-6. Agent calls check_convergence → verifies gap trend + belief floor
-7. Repeat 2-6 until satisfied
-8. Agent calls declare_converged with reason
+5. Agent calls check_convergence → verifies gap trend + belief floor
+6. Repeat 2-5 until satisfied
+7. Agent calls declare_converged with reason
 ```
 
 The conversation loop runs up to `classify_agent_max_turns` (default 10)
 Messages API round-trips. Each tool call returns structured JSON that the
 agent uses to plan its next action.
 
-### Six Tools
+### Five Tools
 
 | Tool | Input | Returns | Purpose |
 |------|-------|---------|---------|
@@ -48,14 +47,16 @@ agent uses to plan its next action.
 | `check_convergence` | — | mean_gap, mean_bel, frac_unclear, coverage, K (diagnostic), iteration history | Assess convergence via belief-gap criteria |
 | `get_column_detail` | `column_name` (string) | Per-source evidence breakdown, sample values, belief interval | Deep-dive into a specific column |
 | `declare_converged` | `reason` (string) | Confirmation | Exit loop with stated rationale |
-| `retrain_svm` | — | frontier_samples, classes, model_path | Retrain incremental SVM on blended synth + frontier-tier labels |
 
-The `retrain_svm` tool (M9) lets the agent decide when to retrain the SVM
-classifier on accumulated frontier-tier LLM labels. The retrained
-incremental SVM is hot-swapped via `ml_inference.reset()` +
-`configure_paths()` and used in subsequent ML validation passes. The
-agent calls this when it judges enough new frontier-tier labels have
-accumulated to improve classification accuracy.
+> **Historical note (2026-05-04 refactor).** Earlier revisions of
+> the agent loop included a sixth `retrain_svm` tool that retrained
+> the SVM on accumulated LLM labels and hot-swapped the result.
+> That tool was removed alongside the M9 frontier-SVM retrain
+> machinery (commits 8627c2c, 5199379, cc59d01) for the source-
+> independence reasons documented in `ontology_alignment.py`. The
+> SVM is now trained once on synth and translated into the user
+> vocabulary at inference time; there is no per-run SVM retraining
+> for the agent to drive.
 
 ### Agent System Prompt
 
