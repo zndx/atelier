@@ -148,6 +148,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.cautious_review.stability_guard_llm_conf": ("classify_cautious_review_stability_guard_llm_conf", float),
     "classify.resolve_llm_annotation_mnemonic": ("classify_resolve_llm_annotation_mnemonic", bool),
     "classify.exclude_temp_tables": ("classify_exclude_temp_tables", bool),
+    "classify.svm.enabled": ("classify_svm_enabled", bool),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -414,6 +415,13 @@ class AtelierConfig:
     # R6: skip Hive/Hue temp tables (``__tmp_*`` prefix) at discovery.
     # 14 hallucinations from one such table in 8d67b1ed.
     classify_exclude_temp_tables: bool = True
+    # Toggle for the per-vocab SVM evidence source.  When false, the
+    # alignment LLM call is skipped, no SVM is trained, and the
+    # classification pipeline runs with 5 evidence sources.  Disabled
+    # by default until the failure-mode-recipe training lands (see
+    # c0ceaf5c regression).  Set true to re-enable the alignment-based
+    # SVM after the new training data is in place.
+    classify_svm_enabled: bool = False
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
