@@ -115,14 +115,14 @@ def step_resolve_ootb(context):
     context.vocab = load_sample_vocabulary(hierarchical=True)
 
 
-@then("the vocabulary has {count:d} leaves")
-def step_vocab_has_n_leaves(context, count):
+@then("the vocabulary has {count:d} categories")
+def step_vocab_has_n_categories(context, count):
     assert len(context.vocab.categories) == count, (
-        f"Expected {count} leaves, got {len(context.vocab.categories)}"
+        f"Expected {count} categories, got {len(context.vocab.categories)}"
     )
 
 
-@then('all leaf codes start with "ICE."')
+@then('all codes start with "ICE."')
 def step_all_codes_start_ice(context):
     for cat in context.vocab.categories:
         assert cat.code.startswith("ICE."), f"Code {cat.code} doesn't start with ICE."

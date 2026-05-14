@@ -304,12 +304,14 @@ def config_from_atelier(cfg) -> LLMBackendConfig:
 
 
 def build_category_table(category_set) -> str:
-    """Build a markdown table of leaf categories for the system prompt.
+    """Build a flat markdown table of categories for the system prompt.
 
-    Retained for callers that want a flat leaf-only rendering.  The
-    pipeline has switched to ``build_category_tree`` which renders
-    parents as first-class rows so the LLM can vote at any level of
-    the hierarchy that the evidence supports.
+    Iterates ``category_set.categories``, which under the unified
+    taxonomy semantics is the full tagging vocabulary (terminal and
+    parent nodes alike).  Retained for callers that want a flat
+    rendering; the pipeline default is ``build_category_tree`` which
+    additionally encodes the parent/child structure so the LLM can
+    reason about hierarchy depth when voting.
     """
     lines = [
         "| Code | Label | Aliases | Description |",

@@ -100,9 +100,11 @@ def _build_abbrev_index(category_set: "CategorySet | None") -> dict[str, str]:
         abbrev = getattr(cat, "abbrev", "") or ""
         if abbrev:
             idx[abbrev.upper()] = cat.code
-    # HierarchicalCategorySet also exposes all_by_code which includes
-    # non-leaf ancestors; walk it too so MNEMONICs anywhere in the
-    # taxonomy resolve, not just leaves.
+    # ``by_abbrev`` and ``all_by_code`` cover the full taxonomy under
+    # the unified ``categories`` semantics — walking ``all_by_code``
+    # here is a redundant safety net that catches any caller still
+    # passing a CategorySet built via the legacy flat-construction
+    # path (which only carries terminal nodes).
     for cat in getattr(category_set, "all_by_code", {}).values():
         abbrev = getattr(cat, "abbrev", "") or ""
         if abbrev:

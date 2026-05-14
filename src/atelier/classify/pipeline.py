@@ -2038,11 +2038,17 @@ _CONFUSABLE_PAIR_CODES: list[tuple[str, str]] = [
 def _build_confusable_pairs(
     category_set: HierarchicalCategorySet,
 ) -> list[tuple[str, str]]:
-    """Filter confusable pairs to those present in the loaded vocabulary."""
-    leaf_codes = category_set.leaf_codes
+    """Filter confusable pairs to those present in the loaded vocabulary.
+
+    Membership check is over the full tagging vocabulary (every
+    category), not just terminal nodes — confusable pairs may be at
+    any level of the taxonomy now that parent codes are first-class
+    tagging targets.
+    """
+    all_codes = {c.code for c in category_set.categories}
     return [
         (a, b) for a, b in _CONFUSABLE_PAIR_CODES
-        if a in leaf_codes and b in leaf_codes
+        if a in all_codes and b in all_codes
     ]
 
 

@@ -116,13 +116,13 @@ def step_stats_vocab_uri_path(context):
     assert uri.endswith("annotations.csv"), f"unexpected vocab_uri: {uri!r}"
 
 
-@then("the resulting category set has at least {n:d} leaf categories")
-def step_cs_has_n_leaves(context, n):
+@then("the resulting category set has at least {n:d} categories")
+def step_cs_has_n_categories(context, n):
     assert context.cs is not None
-    leaves = list(context.cs.categories)
-    assert len(leaves) >= n, f"only {len(leaves)} leaves (< {n})"
+    cats = list(context.cs.categories)
+    assert len(cats) >= n, f"only {len(cats)} categories (< {n})"
 
 
-@then("the resolved category set has at least {n:d} leaf categories")
-def step_resolved_cs_has_n_leaves(context, n):
-    step_cs_has_n_leaves(context, n)
+@then("the resolved category set has at least {n:d} categories")
+def step_resolved_cs_has_n_categories(context, n):
+    step_cs_has_n_categories(context, n)

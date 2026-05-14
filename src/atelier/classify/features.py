@@ -553,7 +553,8 @@ class ColumnFeatures:
     # the universal vocabulary at extraction time.  Populated by
     # ``mass_functions.lookup_pattern_ontology`` — each entry is a
     # dict with keys: pattern, code, label, description,
-    # common_names, path (root→leaf).  Threaded through embedding
+    # common_names, path (root → terminal node in the projected
+    # hierarchy).  Threaded through embedding
     # text + LLM prompt + SHAP feature surface; the canonical labels
     # never appear in user-facing classifications (the universal
     # vocab is a substrate, not a tagging layer — see

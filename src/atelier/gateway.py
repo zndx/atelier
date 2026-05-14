@@ -2096,8 +2096,8 @@ def vocabulary_stats(source_id: str | None = None):
         cfg = load_config()
 
         # OOTB sample and local Synthetic both use the expanded
-        # ontology — their reference codes share the 316-leaf ICE
-        # vocabulary.
+        # ontology — their reference codes share the 316-category
+        # ICE vocabulary.
         if source_id in ("ootb-sample", "synthetic"):
             try:
                 sample_vocab = load_sample_vocabulary(hierarchical=True)

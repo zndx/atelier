@@ -511,7 +511,7 @@ def _load_universal_ontology() -> dict[str, dict]:
 
 
 def _ontology_path_labels(code: str) -> list[str]:
-    """Walk parent_code chain to the root, returning labels root→leaf.
+    """Walk parent_code chain to the root, returning labels root→code.
 
     Uses the universal vocabulary's parent_code field to reconstruct
     the ontological path (e.g. ``["Sensitive Data", "Personally
@@ -901,12 +901,20 @@ def _coerce_to_singleton(
     code: str,
     frame: FrameOfDiscernment,
 ) -> str | None:
-    """Try to resolve a non-singleton code to a valid leaf code.
+    """Try to resolve a code to a valid focal-element singleton.
 
-    Handles three common LLM failure modes:
+    Every category in the tagging vocabulary has its own singleton
+    focal element (Phase 3 of the leaf-only-removal refactor), so the
+    common case is a direct hit at step 1.  Steps 2 and 3 stay
+    available for codes that come in via the internal-node FE path
+    (rare under the unified frame) or via near-miss prefix matching.
+
     1. Code is already a singleton → return as-is.
-    2. Code is a known internal node with a unique leaf descendant
-       → return that descendant.
+    2. Code is a known internal-node focal element with a unique
+       terminal-only descendant cover → return that descendant.
+       (Degenerate case under the unified frame, since internal FEs
+       now include the parent's own code; ``len(fe.codes) == 1`` is
+       only true when the parent has zero structural descendants.)
     3. Code is a prefix of exactly one singleton → return it.
 
     Returns None when the code is unresolvable or ambiguous.

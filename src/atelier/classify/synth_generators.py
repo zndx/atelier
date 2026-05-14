@@ -553,7 +553,13 @@ def gen_filepath(rng: random.Random) -> str:
 
 # ── Full generator registry ───────────────────────────────────
 #
-# Maps every leaf ICE.* code to a generator function.
+# Maps each ICE.* code that has a synthetic-value generator to its
+# generator function.  Today's registry is populated only for
+# terminal-node codes — a vestige of the leaf-only era that's
+# scheduled for follow-up alongside the broader leaf-only-removal
+# refactor.  Parent-tier categories deserve generators too (e.g.
+# ``Financial Data`` parent could draw mixed monetary samples from
+# its descendants).
 # This is the authoritative mapping used by both synth.py and
 # generate_sample_source.py.
 

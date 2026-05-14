@@ -30,9 +30,9 @@ Feature: CAI Data Platform — unified Hive + Filesystem surface
   Scenario: Filesystem vocabulary loads from an annotations.csv file
     Given a local filesystem mount with an annotations.csv
     When I load annotations from the filesystem path
-    Then the resulting category set has at least 50 leaf categories
+    Then the resulting category set has at least 50 categories
 
   Scenario: Pipeline's vocabulary loader resolves file:// vocab_uri
     Given a local filesystem mount with an annotations.csv
     When I resolve vocabulary for a file:// vocab_uri against the mount
-    Then the resolved category set has at least 50 leaf categories
+    Then the resolved category set has at least 50 categories

@@ -176,7 +176,7 @@ def run_real_data_eval(
     # 1. Load real vocabulary
     logger.info("Loading real vocabulary from %s", data_dir)
     category_set = load_real_vocabulary(data_dir)
-    logger.info("Vocabulary: %d leaves, %d total", len(category_set.categories), len(category_set.all_categories))
+    logger.info("Vocabulary: %d categories", len(category_set.categories))
 
     # 2. Extract value templates from real data
     logger.info("Extracting value templates")

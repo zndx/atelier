@@ -261,15 +261,19 @@ def epistemic_evaluation(
 ) -> dict[str, Any]:
     """Evaluate using belief paths — epistemic hierarchical metrics.
 
-    Each classification dict should have a ``belief_path`` key (list of
-    dicts with code/bel/pl/depth, leaf-first). Falls back gracefully when
-    belief paths are absent.
+    Each classification dict should have a ``belief_path`` key (list
+    of dicts with code/bel/pl/depth, ordered from the predicted
+    category at index 0 to the root).  The prediction at index 0 may
+    be at any depth in the taxonomy — terminal codes are common but
+    parent-tier predictions are first-class.  Falls back gracefully
+    when belief paths are absent.
 
     Returns:
       per_depth: {depth: {mean_bel, mean_pl, mean_gap, count}}
       cautious_accuracy: accuracy when only committing where Bel > τ
       mean_commitment_depth: average depth of cautious code
-      belief_convergence: fraction of columns where leaf Bel > 0.7
+      belief_convergence: fraction of columns where the predicted-
+        category Bel > 0.7
     """
     TAU = 0.7
     with_ref = [
@@ -299,7 +303,11 @@ def epistemic_evaluation(
         ref = c["reference_code"]
 
         if bp:
-            # Leaf is first entry
+            # Predicted category is the first entry — may be at any
+            # depth in the taxonomy.  The variable name reflects the
+            # historical leaf-only assumption; semantics are now
+            # "predicted-category belief," and renaming is scheduled
+            # for the Phase 3 code sweep.
             leaf_bel = bp[0].get("bel", 0.0)
             if leaf_bel >= TAU:
                 leaf_converged += 1
@@ -312,7 +320,7 @@ def epistemic_evaluation(
 
             # Cautious code: deepest with Bel >= TAU
             cautious = None
-            for entry in bp:  # leaf-first
+            for entry in bp:  # ordered prediction-first → root
                 if entry.get("bel", 0.0) >= TAU:
                     cautious = entry["code"]
                     commitment_depths.append(entry.get("depth", 0))
