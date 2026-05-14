@@ -1113,6 +1113,7 @@ def run_classification_pipeline(
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
             progress_callback=_sweep_progress,
+            category_set=category_set,
         )
 
         # ── Label Propagation ──────────────────────────────────────
@@ -1604,6 +1605,24 @@ def run_classification_pipeline(
         trajectories_path.write_text(
             json.dumps(trajectories_payload, indent=2, default=str) + "\n",
         )
+
+        # Out-of-vocabulary validation retries — one entry per retry
+        # event recorded by ``classify_batch_with_validation``.  Written
+        # as a separate artifact so post-mortem can answer "did the LLM
+        # hallucinate codes this run, and were they corrected?" without
+        # scanning pod logs.  An empty file = the LLM emitted only
+        # in-taxonomy codes throughout the sweep.
+        try:
+            validation_path = results_dir / "validation_retries.json"
+            validation_payload = {
+                "total_retries": len(state.validation_retries),
+                "events": list(state.validation_retries),
+            }
+            validation_path.write_text(
+                json.dumps(validation_payload, indent=2, default=str) + "\n",
+            )
+        except Exception as exc:
+            logger.debug("validation_retries.json write failed: %s", exc)
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
