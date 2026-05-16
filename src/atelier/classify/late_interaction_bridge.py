@@ -233,10 +233,11 @@ def try_compute_cosine_mass(
     pattern_summary: str | None,
     frame: "FrameOfDiscernment",
     embed,
-) -> "tuple[BeliefAssignment | None, str]":
+    attribution_top_k: int = 3,
+) -> "tuple[BeliefAssignment | None, str, dict | None]":
     """Compute the late-interaction cosine mass function for one column.
 
-    Returns ``(belief_assignment, status)`` where ``status`` is one of:
+    Returns ``(belief_assignment, status, attribution)``.  ``status`` is one of:
 
     - ``"ok"`` — late-interaction succeeded; ``belief_assignment`` is the result.
     - ``"explicit_disable"`` — the operator set
@@ -258,14 +259,28 @@ def try_compute_cosine_mass(
     restore the late-interaction path rather than leaving the
     pipeline in degraded mode.
 
+    The third return element, ``attribution``, is the **per-decision
+    SHAP surface** over the late-interaction roles.  When status is
+    ``"ok"``, it carries the per-role contribution breakdown for the
+    top-K (default 3) tags by post-fusion mass — one entry per tag
+    with ``positive_score``, ``negative_score``,
+    ``per_role: {label, name_hints, prototype_values, value_patterns,
+    context, parent_path, anti_examples}``, and
+    ``verifier_pass_rate``.  This is direct attribution, not
+    permutation-based: late-interaction's structure already exposes
+    the per-role components, so the operator-legible "predicted EMAIL
+    because prototype_values=0.42 and name_hints=0.15" view is
+    available without re-scoring cost.  ``None`` for any non-``"ok"``
+    status.
+
     Parameters
     ----------
     cfg
         AtelierConfig.  When ``is_enabled(cfg)`` is False the bridge
         short-circuits to ``"explicit_disable"``.
     column_features
-        Reserved for the SHAP integration that consumes per-view score
-        breakdowns.
+        Reserved for SHAP feature-aggregation use (the per-decision
+        attribution surface is returned in ``attribution``).
     column_name, table_name, samples, neighbor_column_names, pattern_summary
         Column-side inputs forwarded to
         :func:`multi_vector_features.build_column_query`.
@@ -273,14 +288,18 @@ def try_compute_cosine_mass(
         Frame of discernment for the candidate codes.
     embed
         Embedding callable shared with the legacy cosine path.
+    attribution_top_k
+        Number of top-mass tags to include in the attribution surface.
+        Default 3 — enough for an operator to see the prediction plus
+        its closest competitors.
     """
-    _ = column_features  # reserved for SHAP integration
+    _ = column_features  # reserved for SHAP feature-aggregation use
     if not is_enabled(cfg):
-        return None, "explicit_disable"
+        return None, "explicit_disable", None
 
     resolved = _resolve_qdrant_collection(cfg)
     if resolved is None:
-        return None, "degraded_no_collection"
+        return None, "degraded_no_collection", None
     qdrant_url, collection = resolved
 
     # Distinguish "no qdrant-client lib" from "Qdrant down" — both are
@@ -288,15 +307,15 @@ def try_compute_cosine_mass(
     try:
         import qdrant_client as _qdrant  # noqa: F401
     except ImportError:
-        return None, "degraded_no_qdrant_client"
+        return None, "degraded_no_qdrant_client", None
 
     client = _get_qdrant_client(qdrant_url)
     if client is None:
-        return None, "degraded_qdrant_connect"
+        return None, "degraded_qdrant_connect", None
 
     index = _get_annotation_index(qdrant_url, collection)
     if index is None:
-        return None, "degraded_load_failed"
+        return None, "degraded_load_failed", None
 
     try:
         from atelier.classify.late_interaction import (
@@ -315,14 +334,98 @@ def try_compute_cosine_mass(
         )
         weights = _scoring_weights_from_cfg(cfg)
         scores = score_column_against_index(query, index, weights)
-        return late_interaction_to_mass(scores, frame), "ok"
+        mass = late_interaction_to_mass(scores, frame)
+        attribution = _build_attribution(
+            mass=mass, scores=scores, frame=frame, top_k=attribution_top_k,
+        )
+        return mass, "ok", attribution
     except Exception as exc:  # noqa: BLE001 — bridge must not break the pipeline
         logger.warning(
             "late_interaction: scoring raised for %s.%s: %s; "
             "this is a deployment issue (investigate), not a normal flow",
             table_name, column_name, exc,
         )
-        return None, "degraded_score_error"
+        return None, "degraded_score_error", None
+
+
+def _build_attribution(
+    *,
+    mass: "BeliefAssignment",
+    scores: list,
+    frame: "FrameOfDiscernment",
+    top_k: int,
+) -> dict:
+    """Per-decision attribution: top-K post-fusion tags + their per-role breakdowns.
+
+    The attribution surface answers "why did the late-interaction
+    cosine source vote the way it did, on this column?" — operator-
+    legible explanation per prediction, with no permutation-based
+    re-scoring cost because the per-role components are already
+    computed during MaxSim execution.
+
+    Top-K selection is by **post-fusion singleton mass** (m({code})),
+    not by pre-fusion positive_score — the operator cares about
+    where the predicted classification will likely land, which is
+    determined by the fused mass after positive/negative channel
+    combination.
+
+    Returns a dict shaped for direct surfacing in the per-column
+    result:
+
+        {
+          "top_k": [
+            {
+              "code": "EMAIL",
+              "post_fusion_mass": 0.737,
+              "positive_score": 0.83,
+              "negative_score": 0.05,
+              "verifier_pass_rate": 1.0,
+              "per_role": {
+                "label": 0.78,
+                "name_hints": 0.65,
+                "prototype_values": 0.89,
+                "value_patterns": 0.71,
+                "context": 0.42,
+                "parent_path": 0.31,
+                "anti_examples": 0.05
+              }
+            },
+            ...
+          ],
+          "ranking_basis": "post_fusion_singleton_mass"
+        }
+    """
+    # Index the TagScores by code for O(1) lookup during top-K selection.
+    by_code = {s.code: s for s in scores}
+
+    # Top-K singletons by post-fusion mass.
+    singleton_masses: list[tuple[str, float]] = []
+    for fe, m in mass.masses.items():
+        if len(fe.codes) == 1:
+            (code,) = fe.codes
+            if code in by_code:  # only late-interaction-known codes
+                singleton_masses.append((code, m))
+    singleton_masses.sort(key=lambda kv: (-kv[1], kv[0]))
+    top = singleton_masses[:top_k]
+
+    rows: list[dict] = []
+    for code, post_mass in top:
+        s = by_code[code]
+        rows.append({
+            "code": code,
+            "post_fusion_mass": round(post_mass, 6),
+            "positive_score": round(s.positive_score, 6),
+            "negative_score": round(s.negative_score, 6),
+            "verifier_pass_rate": round(
+                getattr(s, "verifier_pass_rate", 1.0), 6,
+            ),
+            "per_role": {k: round(v, 6) for k, v in (s.per_role or {}).items()},
+        })
+
+    return {
+        "top_k": rows,
+        "ranking_basis": "post_fusion_singleton_mass",
+    }
 
 
 def _scoring_weights_from_cfg(cfg):

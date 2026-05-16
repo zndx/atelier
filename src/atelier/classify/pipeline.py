@@ -2432,6 +2432,9 @@ def _classify_column(
     # docs/src/architecture/late-interaction-cosine.md.
     cosine_path = "unused"  # 'late_interaction' | 'legacy_explicit' |
                             # 'legacy_degraded:<reason>' | 'unused'
+    cosine_attribution: dict | None = None  # per-decision SHAP surface;
+                                            # populated only when
+                                            # late-interaction ran cleanly
     if use_cosine:
         late_mass = None
         late_status = "explicit_disable"
@@ -2439,7 +2442,7 @@ def _classify_column(
             from atelier.classify.late_interaction_bridge import (
                 try_compute_cosine_mass as _try_late_interaction,
             )
-            late_mass, late_status = _try_late_interaction(
+            late_mass, late_status, cosine_attribution = _try_late_interaction(
                 cfg=cfg,
                 column_features=features,
                 column_name=col.name,
@@ -2613,6 +2616,13 @@ def _classify_column(
         # in the run artifact gives operators a per-run health view of
         # the cosine evidence path.
         "cosine_path": cosine_path,
+        # Per-decision SHAP surface for the late-interaction cosine
+        # source: top-K post-fusion tags + per-role contribution
+        # breakdowns.  None when cosine_path is not 'late_interaction'
+        # (legacy paths don't expose per-role attribution).  See
+        # docs/src/architecture/late-interaction-cosine.md § SHAP /
+        # SAGE shift under late interaction.
+        "cosine_attribution": cosine_attribution,
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine
