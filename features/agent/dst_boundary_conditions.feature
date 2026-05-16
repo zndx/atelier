@@ -135,8 +135,12 @@ Feature: DST boundary conditions across observed classification failure modes
   # ────────────────────────────────────────────────────────────────────
   # Failure mode 4 — within-subtree sibling-leaf disagreement.  LLM
   # picks leaf_1, ML picks leaf_2; both in left_branch_a.  Hierarchical
-  # aggregation routes the mass to the shared parent and the cautious
-  # mechanism surfaces it as the honest operator-facing call.
+  # aggregation routes the mass to the shared parent, and stepping
+  # back from a contested leaf to the supported parent is both
+  # epistemically honest (Smets least-commitment) *and* the
+  # operator-intuitive outcome — an operator-facing prediction at the
+  # parent level is more useful than an arbitrary leaf pick when the
+  # leaves disagree at comparable mass.
   # ────────────────────────────────────────────────────────────────────
 
   Scenario: Sibling-leaf disagreement within a subtree promotes the shared parent at moderate cautious threshold
@@ -154,3 +158,74 @@ Feature: DST boundary conditions across observed classification failure modes
     # At 0.55: neither leaf (0.25) clears; left_branch_a (0.80) clears;
     # left_root (0.80) clears.  Most-specific is left_branch_a.
     Then cautious_promoted_code should equal "left_branch_a"
+
+  # ────────────────────────────────────────────────────────────────────
+  # Failure mode 5 — generic-vs-specific at the same hierarchical depth.
+  # The dominant observed pattern in the running bel × gap sweep:
+  # ~24% of all wrong_subtree errors trace to the LLM-derivative
+  # cluster (LLM + CatBoost-on-LLM-labels) consolidating on a *generic*
+  # catch-all leaf under uncertainty, while an independent late-
+  # interaction signal (prototype-value MaxSim plus an explicit
+  # anti-example on the generic bucket) carries the *specific*
+  # domain leaf at the same depth.  Channel-decomposed Dempster +
+  # indep-tier revisit gate jointly surface the disagreement.
+  #
+  # Operational frame in this fixture:
+  #   right_leaf_a — the "generic bucket" the dependent-source
+  #                  cluster gravitates to under low signal
+  #   right_leaf_b — the "specific domain" leaf the operator-
+  #                  intended classification should land on
+  # Both at depth 2 in the same parent subtree (right_root) — the
+  # *structural* property the scenario tests is "same-depth disagreement
+  # surfaces through independent channels"; the within-subtree
+  # placement here is incidental and the test would behave the same
+  # way under any same-depth sibling pair across subtrees.
+  # ────────────────────────────────────────────────────────────────────
+
+  Scenario: Independent late-interaction signal surfaces the specific code over an LLM-favoured generic bucket at the same depth
+    # Architectural property — late-interaction mass alone.
+    # The specific code carries strong positive prototype-value
+    # support; the generic bucket carries weak positive evidence plus
+    # strong anti-example evidence.  The channel-decomposed Dempster
+    # combination produces conflict K against the generic bucket's
+    # singleton mass and leaves the specific code's mass intact.
+    Given a late-interaction tag score for "right_leaf_a" with positive 0.40 and negative 0.65
+    And a late-interaction tag score for "right_leaf_b" with positive 0.70 and negative 0.00
+    And a late-interaction tag score for "peer_leaf" with positive 0.10 and negative 0.00
+    When I compute the late-interaction mass function over those scores
+    # Post-channel-Dempster, the singleton focal element for the
+    # specific code should be the top non-Θ focal by mass — the
+    # late-interaction channel-decomposed view, on its own, votes the
+    # specific code.
+    Then the focal element covering codes {right_leaf_b} should be the top non-Θ focal element by mass
+
+    # Operational property — full multi-source fusion.
+    # When the LLM-derivative cluster (LLM + CatBoost-on-LLM) votes
+    # the generic bucket while the truly independent sources (cosine,
+    # pattern, name_match) unanimously vote the specific domain leaf,
+    # the indep-tier revisit gate fires at its default threshold —
+    # the wrong-subtree call is surfaced for re-evaluation rather than
+    # silently absorbed.
+    Given the following per-source classification votes
+      | source     | code         | mass |
+      | llm        | right_leaf_a | 0.75 |
+      | catboost   | right_leaf_a | 0.55 |
+      | cosine     | right_leaf_b | 0.45 |
+      | pattern    | right_leaf_b | 0.40 |
+      | name_match | right_leaf_b | 0.35 |
+    When the indep_revisit_mass_threshold is 0.45
+    Then the bootstrap revisit gate should fire for the column
+
+    # Non-regression: when the LLM-derivative cluster *and* the
+    # independent sources all agree on the same code (the easy case),
+    # the revisit gate must not fire — no false positives under the
+    # same default threshold.
+    When the per-source votes are
+      | source     | code         | mass |
+      | llm        | right_leaf_b | 0.80 |
+      | catboost   | right_leaf_b | 0.50 |
+      | cosine     | right_leaf_b | 0.55 |
+      | pattern    | right_leaf_b | 0.45 |
+      | name_match | right_leaf_b | 0.40 |
+    And the indep_revisit_mass_threshold is 0.45
+    Then the bootstrap revisit gate should not fire for the column
