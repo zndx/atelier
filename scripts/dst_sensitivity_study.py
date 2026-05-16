@@ -139,17 +139,24 @@ class StudyResult:
 def _build_scores(positives: dict[str, float],
                   negatives: dict[str, float] | None = None,
                   verifier_rates: dict[str, float] | None = None) -> list[TagScore]:
-    """Build a list of TagScore objects from per-tag positive scores.
+    """Build a list of TagScore objects from per-tag scores.
 
-    Missing negatives default to 0.0; missing verifier rates default to 1.0.
+    Iterates over the union of ``positives`` and ``negatives`` keys so
+    a tag with only negative evidence (e.g., an anti-example targeting
+    a parent internal node with no positive support) still produces a
+    TagScore — important when the test is exercising the negative
+    channel on a tag absent from the positive set.
+
+    Missing entries default to 0.0 (scores) and 1.0 (verifier rate).
     """
     negatives = negatives or {}
     verifier_rates = verifier_rates or {}
+    all_codes = set(positives.keys()) | set(negatives.keys()) | set(verifier_rates.keys())
     out = []
-    for code, p in positives.items():
+    for code in sorted(all_codes):
         out.append(TagScore(
             code=code,
-            positive_score=p,
+            positive_score=positives.get(code, 0.0),
             negative_score=negatives.get(code, 0.0),
             verifier_pass_rate=verifier_rates.get(code, 1.0),
             per_role={},
@@ -481,6 +488,304 @@ def test_ranking_stability(frame, epsilon: float = 0.01,
     return result
 
 
+def test_aggregation_threshold_cliff(frame) -> StudyResult:
+    """The ``_significant_subtree`` aggregator routes residual mass to
+    a parent's focal element when the parent's descendant softmax
+    concentration meets a hard 0.50 threshold.  Below the threshold,
+    no parent mass; at-or-above, parent absorbs the residual.
+
+    This is a step function by construction.  The test characterizes
+    how sharply mass routes across the cliff — a sharp transition
+    means small input perturbations near the boundary produce
+    discontinuous mass distributions, which is operationally
+    relevant for the parent_instead_of_leaf accuracy regression.
+    """
+    result = StudyResult(invariant="aggregation_threshold_cliff",
+                         cells_evaluated=0)
+    # Target: a leaf in left_branch_a (left_a_1).  Siblings under same
+    # parent: left_a_2.  External competitor: right_1.  By varying the
+    # ratio of left_a_2 vs right_1 scores, we tune how much softmax
+    # mass concentrates inside left_a vs outside.  Track parent FE
+    # (left_a's internal-node FE) mass routing as we cross 0.50.
+    parent_internal = frame.internal_nodes.get("left_a")
+    samples = []
+    for sibling_p in [round(0.05 * i, 2) for i in range(21)]:
+        for competitor_p in [round(0.05 * j, 2) for j in range(21)]:
+            scores = _build_scores(positives={
+                "left_a_1": 0.7,   # top-1 leaf
+                "left_a_2": sibling_p,
+                "right_1": competitor_p,
+                "right_2": 0.1,
+                "peer": 0.1,
+            })
+            mass = late_interaction_to_mass(scores, frame)
+            parent_mass = mass.masses.get(parent_internal, 0.0) if parent_internal else 0.0
+            result.cells_evaluated += 1
+            samples.append({
+                "sibling_p": sibling_p,
+                "competitor_p": competitor_p,
+                "parent_mass": parent_mass,
+            })
+
+    # Find the cliff: max parent_mass jump between adjacent cells
+    # along the sibling_p axis (with competitor held fixed at 0.3).
+    fixed_competitor = [s for s in samples if s["competitor_p"] == 0.3]
+    fixed_competitor.sort(key=lambda s: s["sibling_p"])
+    max_jump = 0.0
+    jump_location = None
+    for i in range(1, len(fixed_competitor)):
+        delta = fixed_competitor[i]["parent_mass"] - fixed_competitor[i - 1]["parent_mass"]
+        if delta > max_jump:
+            max_jump = delta
+            jump_location = (
+                fixed_competitor[i - 1]["sibling_p"],
+                fixed_competitor[i]["sibling_p"],
+            )
+    # Parent-mass extremes
+    min_pm = min(s["parent_mass"] for s in samples)
+    max_pm = max(s["parent_mass"] for s in samples)
+    nonzero_pm_cells = sum(1 for s in samples if s["parent_mass"] > 1e-12)
+
+    result.notes.append(
+        f"parent_mass range: [{min_pm:.4f}, {max_pm:.4f}] across "
+        f"{result.cells_evaluated} cells; "
+        f"{nonzero_pm_cells} cells have parent_mass > 0"
+    )
+    result.notes.append(
+        f"max parent_mass jump along sibling_p axis (competitor fixed): "
+        f"{max_jump:.4f} between sibling_p values {jump_location}"
+    )
+    # Sharp jump (> 0.15 across one 0.05 step) indicates the
+    # threshold cliff is operationally rough.
+    if max_jump > 0.15:
+        result.notes.append(
+            f"CONCERN: parent_mass jumps by {max_jump:.4f} across a single "
+            f"0.05-step sibling_p increment at {jump_location} — the "
+            f"concentration-threshold cliff (default 0.50) produces "
+            f"discontinuous parent-vs-leaf mass routing.  Small input "
+            f"perturbations near this boundary may flip a column "
+            f"between parent_instead_of_leaf and leaf prediction."
+        )
+    return result
+
+
+def test_aggregation_vs_leaf_competition(frame) -> StudyResult:
+    """Sweep the leaf-vs-parent mass competition boundary.
+
+    A confident leaf (left_a_1) vs varying levels of sibling clustering
+    in the same subtree (left_a_2).  At what sibling concentration does
+    the parent FE start absorbing meaningful mass relative to the leaf?
+    """
+    result = StudyResult(invariant="aggregation_vs_leaf_competition",
+                         cells_evaluated=0)
+    target_leaf_fe = frame.singletons["left_a_1"]
+    parent_internal = frame.internal_nodes.get("left_a")
+    samples = []
+    for top1_p in [round(0.05 * i, 2) for i in range(10, 21)]:  # 0.5 - 1.0
+        for sibling_p in [round(0.05 * j, 2) for j in range(11)]:  # 0.0 - 0.5
+            scores = _build_scores(positives={
+                "left_a_1": top1_p,
+                "left_a_2": sibling_p,
+                "left_b_1": 0.2,
+                "right_1": 0.2,
+                "peer": 0.1,
+            })
+            mass = late_interaction_to_mass(scores, frame)
+            leaf_mass = mass.masses.get(target_leaf_fe, 0.0)
+            parent_mass = (mass.masses.get(parent_internal, 0.0)
+                           if parent_internal else 0.0)
+            result.cells_evaluated += 1
+            samples.append({
+                "top1_p": top1_p,
+                "sibling_p": sibling_p,
+                "leaf_mass": leaf_mass,
+                "parent_mass": parent_mass,
+                "ratio": parent_mass / (leaf_mass + 1e-12),
+            })
+
+    # Find the cells where parent_mass exceeds leaf_mass (parent_instead_of_leaf
+    # territory) — these are operationally the failure-mode cases.
+    parent_wins = [s for s in samples if s["parent_mass"] > s["leaf_mass"]]
+    result.notes.append(
+        f"parent_mass exceeds leaf_mass in {len(parent_wins)}/{result.cells_evaluated} "
+        f"cells across the swept input range"
+    )
+    if parent_wins:
+        # Where does parent first win?
+        parent_wins.sort(key=lambda s: (s["top1_p"], -s["sibling_p"]))
+        first_win = parent_wins[0]
+        result.notes.append(
+            f"first cell where parent wins: top1_p={first_win['top1_p']}, "
+            f"sibling_p={first_win['sibling_p']}, leaf_mass={first_win['leaf_mass']:.4f}, "
+            f"parent_mass={first_win['parent_mass']:.4f}"
+        )
+        # Sample a few cells
+        result.notes.append(
+            "parent_wins samples (first 3): "
+            + json.dumps([{k: round(v, 4) if isinstance(v, float) else v
+                           for k, v in s.items()} for s in parent_wins[:3]])
+        )
+    return result
+
+
+def test_internal_node_top1_switch(frame) -> StudyResult:
+    """Sweep an internal-node positive score from 0 to 1 while a leaf
+    competes.  Characterize the switching behavior — does the mass
+    distribution transition smoothly across the leaf→internal-node
+    top-1 crossover, or is there a discontinuity?
+
+    This exercises the P3.8 hierarchical-integrity path that skips
+    ``_significant_subtree`` when top-1 is internal.
+    """
+    result = StudyResult(invariant="internal_node_top1_switch",
+                         cells_evaluated=0)
+    leaf_fe = frame.singletons["left_a_1"]
+    internal_fe = frame.internal_nodes.get("left_a")
+    leaf_top1_runs: list[tuple[float, str, float]] = []
+    internal_top1_runs: list[tuple[float, str, float]] = []
+    samples = []
+    for internal_p in [round(0.05 * i, 2) for i in range(21)]:
+        scores = _build_scores(positives={
+            "left_a": internal_p,    # internal-node tag with direct positive
+            "left_a_1": 0.7,         # leaf competitor
+            "left_a_2": 0.3,
+            "right_1": 0.3,
+            "peer": 0.2,
+        })
+        mass = late_interaction_to_mass(scores, frame)
+        leaf_mass = mass.masses.get(leaf_fe, 0.0)
+        internal_mass = mass.masses.get(internal_fe, 0.0) if internal_fe else 0.0
+        # Determine top-1 by mass (singleton or internal)
+        if leaf_mass >= internal_mass:
+            top_kind = "leaf"
+            leaf_top1_runs.append((internal_p, "leaf", leaf_mass))
+        else:
+            top_kind = "internal"
+            internal_top1_runs.append((internal_p, "internal", internal_mass))
+        result.cells_evaluated += 1
+        samples.append({
+            "internal_p": internal_p,
+            "leaf_mass": leaf_mass,
+            "internal_mass": internal_mass,
+            "top_kind": top_kind,
+        })
+
+    # Find crossover point and any discontinuity
+    transitions = []
+    for i in range(1, len(samples)):
+        if samples[i]["top_kind"] != samples[i - 1]["top_kind"]:
+            transitions.append({
+                "from_internal_p": samples[i - 1]["internal_p"],
+                "to_internal_p": samples[i]["internal_p"],
+                "from_kind": samples[i - 1]["top_kind"],
+                "to_kind": samples[i]["top_kind"],
+                "leaf_mass_jump": (samples[i]["leaf_mass"]
+                                   - samples[i - 1]["leaf_mass"]),
+                "internal_mass_jump": (samples[i]["internal_mass"]
+                                       - samples[i - 1]["internal_mass"]),
+            })
+
+    result.notes.append(
+        f"internal_p sweep: {len(leaf_top1_runs)} cells leaf-top, "
+        f"{len(internal_top1_runs)} cells internal-top"
+    )
+    if transitions:
+        result.notes.append(
+            f"top-1 kind transitions: "
+            + json.dumps([{k: round(v, 4) if isinstance(v, float) else v
+                           for k, v in t.items()} for t in transitions])
+        )
+        for t in transitions:
+            j = max(abs(t["leaf_mass_jump"]), abs(t["internal_mass_jump"]))
+            if j > 0.30:
+                result.notes.append(
+                    f"CONCERN: top-1 transition produced a {j:.4f} mass "
+                    f"jump in a single 0.05 increment of internal_p — "
+                    f"the leaf/internal-node aggregation paths produce "
+                    f"discontinuous outputs at the crossover.  "
+                    f"Operators may see large confidence swings at "
+                    f"this boundary."
+                )
+    else:
+        result.notes.append(
+            "no top-1 kind transition observed across the swept range — "
+            "the leaf retains top-1 throughout, or the internal node "
+            "retains it.  Inspect samples for which side dominates."
+        )
+    return result
+
+
+def test_aggregation_under_anti_example(frame) -> StudyResult:
+    """Positive evidence clusters in a subtree; anti-example targets the
+    same subtree's parent.  Does the negative channel correctly attenuate
+    the parent FE's mass that hierarchical aggregation would otherwise
+    route?
+    """
+    result = StudyResult(invariant="aggregation_under_anti_example",
+                         cells_evaluated=0)
+    leaf_fe = frame.singletons["left_a_1"]
+    parent_internal = frame.internal_nodes.get("left_a")
+    competing_fe = frame.singletons["right_1"]
+    samples = []
+    for neg_on_parent in [round(0.05 * j, 2) for j in range(21)]:
+        scores = _build_scores(
+            positives={
+                "left_a_1": 0.55,    # leaf top-1, modest
+                "left_a_2": 0.45,    # sibling clusters in left_a subtree
+                "right_1": 0.35,     # competing-subtree leaf
+                "peer": 0.10,
+            },
+            negatives={"left_a": neg_on_parent},
+        )
+        mass = late_interaction_to_mass(scores, frame)
+        leaf_mass = mass.masses.get(leaf_fe, 0.0)
+        parent_mass = mass.masses.get(parent_internal, 0.0) if parent_internal else 0.0
+        competing_mass = mass.masses.get(competing_fe, 0.0)
+        result.cells_evaluated += 1
+        samples.append({
+            "neg_on_parent": neg_on_parent,
+            "leaf_mass": leaf_mass,
+            "parent_mass": parent_mass,
+            "competing_mass": competing_mass,
+        })
+
+    # Both leaf and parent mass should decrease as negative grows
+    parent_first = samples[0]["parent_mass"]
+    parent_last = samples[-1]["parent_mass"]
+    competing_first = samples[0]["competing_mass"]
+    competing_last = samples[-1]["competing_mass"]
+    result.notes.append(
+        f"parent_mass: {parent_first:.4f} → {parent_last:.4f} "
+        f"(Δ={parent_first - parent_last:.4f}) as negative on parent rises 0 → 1"
+    )
+    result.notes.append(
+        f"competing-subtree leaf mass: {competing_first:.4f} → {competing_last:.4f} "
+        f"(Δ={competing_last - competing_first:.4f}) — should rise relative "
+        f"to the suppressed left_a subtree"
+    )
+
+    # Sanity: competing leaf should NOT decrease; it should remain or rise
+    competing_violations = 0
+    for i in range(1, len(samples)):
+        if samples[i]["competing_mass"] + 1e-9 < samples[i - 1]["competing_mass"]:
+            competing_violations += 1
+    if competing_violations > 0:
+        result.violations.append(Violation(
+            invariant="aggregation_under_anti_example",
+            detail=(
+                f"competing-subtree leaf mass decreased as negative on "
+                f"left_a parent grew — anti-example should *raise* "
+                f"competing-subtree mass relative to suppressed subtree, "
+                f"not lower it"
+            ),
+            inputs={"competing_violations": competing_violations,
+                    "total_steps": len(samples) - 1},
+            observed={"first_competing_mass": competing_first,
+                      "last_competing_mass": competing_last},
+        ))
+    return result
+
+
 def test_verifier_pass_rate_effect(frame) -> StudyResult:
     """Sweep verifier_pass_rate ∈ [0, 1] on a target tag; expect smooth
     monotonic scaling of singleton mass (no discontinuities)."""
@@ -543,6 +848,13 @@ def main() -> int:
         ("conflict_k_transit", test_conflict_k_transit),
         ("ranking_stability", test_ranking_stability),
         ("verifier_pass_rate_effect", test_verifier_pass_rate_effect),
+        # Hierarchical aggregation interaction battery — added P3.13.
+        # User correlates this with the parent↔leaf accuracy regression
+        # (22-25 % of errors in the running sweep).
+        ("aggregation_threshold_cliff", test_aggregation_threshold_cliff),
+        ("aggregation_vs_leaf_competition", test_aggregation_vs_leaf_competition),
+        ("internal_node_top1_switch", test_internal_node_top1_switch),
+        ("aggregation_under_anti_example", test_aggregation_under_anti_example),
     ]
     all_results: list[StudyResult] = []
     for name, fn in tests:
