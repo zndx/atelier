@@ -32,6 +32,7 @@ from features.agent.step_defs.shap_steps import *  # noqa: F401,F403
 from features.agent.step_defs.real_data_steps import *  # noqa: F401,F403
 from features.agent.step_defs.belief_path_steps import *  # noqa: F401,F403
 from features.agent.step_defs.hierarchical_anti_subtree_steps import *  # noqa: F401,F403
+from features.agent.step_defs.dst_boundary_conditions_steps import *  # noqa: F401,F403
 from features.agent.step_defs.synth_framework_steps import *  # noqa: F401,F403
 from features.agent.step_defs.experimentation_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_steps import *  # noqa: F401,F403
