@@ -522,6 +522,40 @@ def run_classification_pipeline(
         samples = load_meta_tagging_source(mount)
         if category_set is None:
             category_set = load_meta_tagging_vocabulary(mount)
+    elif source_id and source_id not in ("ootb-sample", "synthetic"):
+        # Generic Hive/external source — look up the data_sources row in
+        # the DAO and unpack source_uri ("{connection}/{database}") +
+        # vocab_uri.  Mirrors what the gateway's /api/fsm/start handler
+        # does (gateway.py lines 2540-2563) so non-gateway callers (the
+        # parameter sweep, ad-hoc scripts) don't need to know the URI
+        # decomposition.  Without this, _load_vocabulary lands in the
+        # "no vocab source" branch and raises — the exact failure mode
+        # the smoke test hit with --source-id but no connection/database.
+        try:
+            from atelier.db.dao import AtelierDao
+            src = AtelierDao().get_data_source(source_id)
+        except Exception as exc:
+            src = None
+            logger.warning(
+                "DAO lookup for source %r failed: %s — falling back to "
+                "caller-provided (connection_name, database).",
+                source_id, exc,
+            )
+        if src:
+            # Caller-supplied values win when present; the DAO row fills
+            # in whichever side is missing.  That preserves the operator
+            # override semantics the gateway uses.
+            if vocab_uri is None:
+                vocab_uri = src.get("vocab_uri") or vocab_uri
+            uri = src.get("source_uri", "")
+            if "/" in uri:
+                src_conn, src_db = uri.split("/", 1)
+                if not connection_name:
+                    connection_name = src_conn
+                if not database or database == "default":
+                    database = src_db
+            elif uri and not connection_name:
+                connection_name = uri
     # ── LLM backend resolution ────────────────────────────────
     # The pipeline cannot function without an LLM.  Resolve early
     # so callers get a clear error before any FSM state is created.
