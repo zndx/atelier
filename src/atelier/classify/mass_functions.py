@@ -397,6 +397,122 @@ def cosine_to_mass(
     return BeliefAssignment(masses=masses)
 
 
+def late_interaction_to_mass(
+    scores: list,
+    frame: FrameOfDiscernment,
+    *,
+    discount: float = 0.20,
+    reliability_floor: float = 0.10,
+    negative_attenuation: float = 1.0,
+    use_verifier_pass_rate: bool = True,
+) -> BeliefAssignment:
+    """Convert late-interaction :class:`TagScore` outputs to a mass function.
+
+    Wrapper around :func:`cosine_to_mass`'s arithmetic that incorporates
+    the negative-channel and verifier-pass-rate signals before
+    delegating to the existing reliability-shaped allocation.
+
+    Approach
+    --------
+
+    Per-tag positive scores are attenuated by the negative-channel
+    signal:
+
+        net_score(tag) = positive_score(tag) − β · negative_score(tag)
+
+    The clamped ``{tag: net_score}`` dict is then handed to the existing
+    cosine-to-mass arithmetic — this preserves all the
+    Haenni-Hartmann reliability shaping, margin-aware allocation, and
+    hierarchical-subtree aggregation that the existing pipeline relies
+    on, while admitting the negative-evidence signal as a coherent
+    pre-fusion attenuation.
+
+    When ``use_verifier_pass_rate`` is True, the global α (and thus
+    the maximum mass concentration) is additionally attenuated by the
+    mean verifier pass rate of the top-K contenders — annotations
+    whose own self-checks failed contribute less mass.  This is the
+    α_verifier factor described in the architecture note.
+
+    Deferred refinement
+    -------------------
+
+    The architecture note specifies a richer construction in which
+    positive and negative scores produce two separate mass functions
+    that combine via Dempster's rule (positive on singletons, negative
+    on complements per Smets 1990).  The net-score path here is a
+    correct-but-conservative approximation: it loses the ability to
+    surface "high positive AND high negative" cases as conflict K in
+    DST, treating them as cancellation instead.  When empirical
+    evidence justifies the complexity, replace this implementation
+    with the channel-decomposed version; the call site contract is
+    unchanged.
+
+    Parameters
+    ----------
+    scores : list[TagScore]
+        Per-tag late-interaction breakdowns from
+        :func:`late_interaction.score_column_against_index`.  Each
+        entry has ``code``, ``positive_score``, ``negative_score``,
+        ``per_role`` (diagnostic), ``verifier_pass_rate``.
+    frame
+        Frame of discernment over candidate codes.
+    discount
+        Complement of the reliability ceiling, as in
+        :func:`cosine_to_mass`.  Default 0.20 (matches cosine
+        baseline).
+    reliability_floor
+        Minimum α even under noisy signal.
+    negative_attenuation
+        Multiplier on ``negative_score`` before subtraction.  Defaults
+        to 1.0 since the negative-channel weight (``weight_anti``) is
+        already applied upstream in
+        :func:`late_interaction.score_column_against_index`.  Provided
+        as a knob for offline tuning when the score-weighting is
+        revisited.
+    use_verifier_pass_rate
+        When True, attenuate α by the mean verifier pass rate of the
+        top-K contenders.
+    """
+    if not scores:
+        return frame.vacuous()
+
+    # Build net-score similarity dict for the cosine_to_mass adapter.
+    similarities: dict[str, float] = {}
+    pass_rates: list[float] = []
+    for s in scores:
+        net = s.positive_score - negative_attenuation * s.negative_score
+        # Late-interaction net scores are bounded around [-w_anti, sum(weights)];
+        # clamp to [0, 1] before handing to cosine_to_mass so its
+        # softmax doesn't blow up on outliers.
+        similarities[s.code] = max(0.0, min(1.0, net))
+        pass_rates.append(getattr(s, "verifier_pass_rate", 1.0))
+
+    # Effective discount: tighten when verifier pass rates among the
+    # top contenders are low.  Tops the discount at 0.85 to keep at
+    # least *some* reliability headroom even when verifiers complain.
+    effective_discount = discount
+    if use_verifier_pass_rate and pass_rates:
+        # Use the mean of the top-5 contenders (or all when fewer).
+        top_sorted = sorted(
+            zip(similarities.values(), pass_rates),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )[:5]
+        if top_sorted:
+            mean_pass = sum(pr for _, pr in top_sorted) / len(top_sorted)
+            # mean_pass=1.0 → effective_discount unchanged
+            # mean_pass=0.0 → effective_discount widens fully toward 0.85
+            effective_discount = discount + (0.85 - discount) * (1.0 - mean_pass)
+            effective_discount = max(discount, min(0.85, effective_discount))
+
+    return cosine_to_mass(
+        similarities,
+        frame,
+        discount=effective_discount,
+        reliability_floor=reliability_floor,
+    )
+
+
 # ── Pattern detection ────────────────────────────────────────────────
 
 

@@ -2428,15 +2428,43 @@ def _classify_column(
 
     # 3. Cosine similarity (if available)
     if use_cosine:
+        # 3a. Late-interaction multi-vector cosine via Qdrant (gated; default off).
+        # Returns None when the flag is off, infrastructure is missing, or
+        # any failure occurs — falls through to the legacy single-vector
+        # cosine path below.  See docs/src/architecture/late-interaction-cosine.md.
+        late_mass = None
         try:
-            from atelier.classify.embedding import classify_cosine as _cosine
-            similarities = _cosine(features, category_set)
-            cosine_mass = cosine_to_mass(
-                similarities, frame, discount=discounts.cosine,
+            from atelier.classify.late_interaction_bridge import (
+                try_compute_cosine_mass as _try_late_interaction,
             )
-            source_masses["cosine"] = cosine_mass
+            late_mass = _try_late_interaction(
+                cfg=cfg,
+                column_features=features,
+                column_name=col.name,
+                table_name=getattr(col, "table", None) or getattr(col, "table_name", None),
+                samples=getattr(features, "sample_values", None) or [],
+                neighbor_column_names=getattr(col, "neighbor_column_names", None),
+                pattern_summary=getattr(features, "pattern_summary", None),
+                frame=frame,
+                embed=getattr(cfg, "_embedder", None),
+            )
         except Exception as exc:
-            logger.debug("Cosine similarity unavailable for %s: %s", col.name, exc)
+            logger.debug(
+                "late_interaction bridge unavailable for %s: %s", col.name, exc,
+            )
+
+        if late_mass is not None:
+            source_masses["cosine"] = late_mass
+        else:
+            try:
+                from atelier.classify.embedding import classify_cosine as _cosine
+                similarities = _cosine(features, category_set)
+                cosine_mass = cosine_to_mass(
+                    similarities, frame, discount=discounts.cosine,
+                )
+                source_masses["cosine"] = cosine_mass
+            except Exception as exc:
+                logger.debug("Cosine similarity unavailable for %s: %s", col.name, exc)
 
     # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
     if llm_code:

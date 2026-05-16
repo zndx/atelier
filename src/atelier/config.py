@@ -160,6 +160,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
+    # Late-interaction multi-vector cosine via Qdrant — feature-flag gated
+    "classify.cosine.late_interaction.enabled": ("classify_cosine_late_interaction_enabled", bool),
     "classify.discounts.svm": ("classify_discount_svm", float),
     "classify.discounts.pattern_theta": ("classify_discount_pattern_theta", float),
     "classify.discounts.name_match_exact": ("classify_discount_name_match_exact", float),
@@ -449,6 +451,10 @@ class AtelierConfig:
     # discount to avoid double-counting under Dempster's rule; the
     # current SVM default reflects the weakly-non-distinct regime.
     classify_discount_cosine: float = 0.20
+    # Late-interaction multi-vector cosine via Qdrant.  Default off;
+    # the legacy single-vector cosine path runs unchanged until this
+    # flag flips.  See docs/src/architecture/late-interaction-cosine.md.
+    classify_cosine_late_interaction_enabled: bool = False
     classify_discount_svm: float = 0.30
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
