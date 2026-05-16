@@ -192,6 +192,14 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.agent.enabled": ("classify_agent_enabled", bool),
     "classify.agent.max_turns": ("classify_agent_max_turns", int),
     "classify.agent.model": ("classify_agent_model", str),
+    # Per-iteration scoring against the Opus-crafted reference
+    "classify.evaluation.ground_truth_path": ("classify_evaluation_ground_truth_path", str),
+    "classify.evaluation.enabled": ("classify_evaluation_enabled", bool),
+    # Disk-space guard
+    "classify.disk_guard.enabled": ("classify_disk_guard_enabled", bool),
+    "classify.disk_guard.headroom_multiplier": ("classify_disk_guard_headroom_multiplier", float),
+    "classify.disk_guard.bootstrap_floor_bytes": ("classify_disk_guard_bootstrap_floor_bytes", int),
+    "classify.disk_guard.min_runs_for_stats": ("classify_disk_guard_min_runs_for_stats", int),
     # Monte Carlo sampling
     "classify.monte_carlo.min_corpus_size": ("mc_min_corpus_size", int),
     "classify.monte_carlo.sample_fraction": ("mc_sample_fraction", float),
@@ -481,6 +489,21 @@ class AtelierConfig:
     classify_agent_enabled: bool = False
     classify_agent_max_turns: int = 10
     classify_agent_model: str | None = None  # falls back to agent_model
+
+    # Per-iteration scoring against the Opus-crafted reference (see
+    # atelier.classify.incremental_scoring).  When ground_truth_path is
+    # empty, incremental scoring auto-disables with a single log line.
+    classify_evaluation_ground_truth_path: str = ""
+    classify_evaluation_enabled: bool = True
+
+    # Disk-space guard (atelier.classify.incremental_scoring.DiskGuardConfig).
+    # When enabled, the pipeline refuses to start (and refuses to advance
+    # past a bootstrap iteration) when projected free space falls short
+    # of mean+2σ × headroom of historical run sizes.
+    classify_disk_guard_enabled: bool = True
+    classify_disk_guard_headroom_multiplier: float = 1.25
+    classify_disk_guard_bootstrap_floor_bytes: int = 209715200  # 200 MiB
+    classify_disk_guard_min_runs_for_stats: int = 3
 
     # Monte Carlo sampling
     mc_min_corpus_size: int = 200

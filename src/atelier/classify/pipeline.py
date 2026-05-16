@@ -564,6 +564,36 @@ def run_classification_pipeline(
     results_dir = build_dir / "results" / run_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # Disk-space guard — refuse to start if projected free space falls
+    # short of mean+2σ of historical run sizes (with headroom).  Better
+    # to bail at iteration 0 than to die mid-run with a corrupt
+    # classifications.json.  See incremental_scoring.DiskGuardConfig.
+    if getattr(cfg, "classify_disk_guard_enabled", True):
+        from atelier.classify.incremental_scoring import (
+            DiskGuardConfig,
+            assert_disk_capacity,
+        )
+        _disk_cfg = DiskGuardConfig(
+            headroom_multiplier=float(getattr(
+                cfg, "classify_disk_guard_headroom_multiplier", 1.25,
+            )),
+            bootstrap_floor_bytes=int(getattr(
+                cfg, "classify_disk_guard_bootstrap_floor_bytes",
+                200 * 1024 * 1024,
+            )),
+            min_runs_for_stats=int(getattr(
+                cfg, "classify_disk_guard_min_runs_for_stats", 3,
+            )),
+        )
+        try:
+            assert_disk_capacity(
+                build_dir / "results", config=_disk_cfg,
+                context="run start",
+            )
+        except RuntimeError as exc:
+            fsm.advance(run_id, FSMState.ERROR, error=str(exc))
+            raise
+
     # Persist the settings-at-start so the UI can show historical vs
     # current in the adaptive focus section even for past runs.
     # ``source_id`` is included so the post-run reconcile pass
@@ -627,6 +657,34 @@ def run_classification_pipeline(
             category_set,
             confusable_pairs=_build_confusable_pairs(category_set),
         )
+
+        # ── Incremental scoring context ─────────────────────────
+        # Built here (after vocab load, before LLM_SWEEP) so the
+        # reference-vs-vocab alignment check fires BEFORE any LLM cost
+        # is incurred.  Misconfiguration (missing GT file, JSON
+        # malformation, annotation mnemonics absent from the loaded
+        # vocab) raises RuntimeError, which we surface as FSM.ERROR.
+        # See incremental_scoring module docstring for the full
+        # contract — fail-fast was an explicit operator requirement
+        # because this scaffold tunes more than the bel_threshold.
+        from atelier.classify.incremental_scoring import (
+            build_scoring_context,
+        )
+        _gt_path_str = getattr(cfg, "classify_evaluation_ground_truth_path", "") or ""
+        _scoring_enabled = bool(getattr(cfg, "classify_evaluation_enabled", True))
+        try:
+            scoring_ctx = build_scoring_context(
+                enabled=_scoring_enabled and bool(_gt_path_str),
+                reference_path=Path(_gt_path_str) if _gt_path_str else None,
+                category_set=category_set,
+                results_dir=results_dir,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            # Misalignment / missing reference is a configuration
+            # error, not a recoverable runtime condition.  Land in
+            # FSM.ERROR with the operator-actionable message intact.
+            fsm.advance(run_id, FSMState.ERROR, error=str(exc))
+            raise RuntimeError(str(exc)) from exc
 
         # Vocabulary quality check — flags label collisions like
         # "Web Browser" / "WebBrowser" that cause non-deterministic
@@ -1375,6 +1433,76 @@ def run_classification_pipeline(
                     revisited_this_iter=revisited_this_iter,
                 )
 
+                # ── Incremental scoring hook ─────────────────────────
+                # Score post-fusion (after _run_ml_validation re-fused
+                # this iteration's revisited columns), BEFORE the next
+                # iteration's convergence checks consume mean_gap /
+                # disagreements.  No-op when scoring_ctx.enabled=False.
+                if scoring_ctx.enabled:
+                    from atelier.classify.incremental_scoring import (
+                        score_iteration,
+                    )
+                    try:
+                        score_iteration(
+                            scoring_ctx,
+                            iteration=iteration,
+                            phase=f"post_fusion_iter_{iteration}",
+                            state=state,
+                            column_qkeys=column_names,
+                            samples_by_name=samples_by_name,
+                            revisited_count=len(revisited_this_iter),
+                        )
+                    except Exception as exc:
+                        # Scoring is best-effort *after* the startup
+                        # alignment check has passed — a hiccup mid-run
+                        # (transient disk error, missing column) must
+                        # not abort the pipeline.  The startup
+                        # validate_reference_against_vocab is the
+                        # fail-fast surface; in-loop failures degrade
+                        # to a logged warning and the trend file just
+                        # misses one iteration.
+                        logger.warning(
+                            "Incremental scoring failed at iteration %d "
+                            "(non-fatal): %s",
+                            iteration, exc,
+                        )
+
+                # ── Per-iteration disk guard ─────────────────────────
+                # Mid-loop check: each iteration adds CatBoost rounds,
+                # column_history snapshots, and (eventually) the run's
+                # parquet/json sidecars.  Recompute headroom against
+                # the same mean+2σ envelope used at run start.
+                if getattr(cfg, "classify_disk_guard_enabled", True):
+                    from atelier.classify.incremental_scoring import (
+                        DiskGuardConfig as _DGC,
+                        assert_disk_capacity as _adc,
+                    )
+                    try:
+                        _adc(
+                            build_dir / "results",
+                            config=_DGC(
+                                headroom_multiplier=float(getattr(
+                                    cfg,
+                                    "classify_disk_guard_headroom_multiplier",
+                                    1.25,
+                                )),
+                                bootstrap_floor_bytes=int(getattr(
+                                    cfg,
+                                    "classify_disk_guard_bootstrap_floor_bytes",
+                                    200 * 1024 * 1024,
+                                )),
+                                min_runs_for_stats=int(getattr(
+                                    cfg,
+                                    "classify_disk_guard_min_runs_for_stats",
+                                    3,
+                                )),
+                            ),
+                            context=f"iter {iteration}",
+                        )
+                    except RuntimeError as exc:
+                        fsm.advance(run_id, FSMState.ERROR, error=str(exc))
+                        raise
+
             # Loop exited without hitting one of the named break paths —
             # we ran the full max_iterations budget.  Flag that honestly
             # so the UI can show it rather than claiming belief-gap
@@ -1551,6 +1679,87 @@ def run_classification_pipeline(
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
         eval_report.write_json(results_dir / "evaluation_report.json")
+
+        # ── Final scoring tick + summary report ─────────────────
+        # The in-loop ticks score ``state.labels`` (post-fusion, pre-
+        # cautious-review).  Cautious review can flip predictions
+        # afterward, so the run's *actual* exit accuracy is whatever
+        # landed in classifications.json.  Score that artifact directly
+        # via a synthetic "final" iteration whose labels are read from
+        # the classifications rows.  Then emit the operator-facing
+        # markdown summary.
+        if scoring_ctx.enabled:
+            try:
+                # Build a state-shaped shim from classifications so we
+                # can reuse score_iteration without re-implementing the
+                # accuracy logic.  The shim only carries the fields
+                # score_iteration touches: .labels, .ml_belief,
+                # .ml_plausibility, .ml_conflict, .llm_calls_total,
+                # .llm_attempts_total, .tokens_input, .tokens_output.
+                from atelier.classify.incremental_scoring import (
+                    score_iteration as _score_iteration,
+                    write_summary_report as _write_summary_report,
+                )
+
+                class _FinalStateShim:
+                    pass
+
+                _shim = _FinalStateShim()
+                _shim.labels = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("predicted_code", "")
+                    for r in classifications
+                }
+                _shim.ml_belief = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("belief", 0.0)
+                    for r in classifications
+                }
+                _shim.ml_plausibility = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("plausibility", 0.0)
+                    for r in classifications
+                }
+                _shim.ml_conflict = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("conflict", 0.0)
+                    for r in classifications
+                }
+                _shim.ml_uncertainty = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("uncertainty", 0.0)
+                    for r in classifications
+                }
+                _shim.llm_calls_total = getattr(state, "llm_calls_total", 0)
+                _shim.llm_attempts_total = getattr(state, "llm_attempts_total", 0)
+                _shim.tokens_input = getattr(state, "tokens_input", 0)
+                _shim.tokens_output = getattr(state, "tokens_output", 0)
+
+                # iteration index = N+1 where N was the last bootstrap
+                # iteration; phase tag distinguishes it from in-loop
+                # ticks so the summary table reads cleanly.
+                final_iter_index = (
+                    max((t["iteration"] for t in scoring_ctx.trend), default=0) + 1
+                )
+                # score_iteration only does membership checks on
+                # samples_by_name (it uses qkey-as-table.col to look up
+                # reference rows); a dict-of-None works as a shim.
+                _score_iteration(
+                    scoring_ctx,
+                    iteration=final_iter_index,
+                    phase="final_post_cautious_review",
+                    state=_shim,
+                    column_qkeys=list(_shim.labels.keys()),
+                    samples_by_name={
+                        k: None for k in _shim.labels.keys()
+                    },
+                    revisited_count=0,
+                )
+                _write_summary_report(
+                    scoring_ctx,
+                    convergence_reason=convergence_reason,
+                    run_id=run_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Final scoring / summary write failed (non-fatal): %s",
+                    exc,
+                )
 
         # Per-column residual trajectories — column-major view of the
         # bootstrap loop's convergence behaviour, complementary to the
