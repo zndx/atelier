@@ -403,114 +403,236 @@ def late_interaction_to_mass(
     *,
     discount: float = 0.20,
     reliability_floor: float = 0.10,
-    negative_attenuation: float = 1.0,
+    negative_beta: float = 0.30,
+    negative_top_k: int = 5,
+    negative_min_score: float = 0.10,
     use_verifier_pass_rate: bool = True,
 ) -> BeliefAssignment:
     """Convert late-interaction :class:`TagScore` outputs to a mass function.
 
-    Wrapper around :func:`cosine_to_mass`'s arithmetic that incorporates
-    the negative-channel and verifier-pass-rate signals before
-    delegating to the existing reliability-shaped allocation.
+    Channel-decomposed construction per Smets 1990 § TBM and the
+    architecture note: positive evidence (label / description /
+    prototype / name-hints / value-patterns MaxSim) produces a mass
+    function on **singletons**; negative evidence (anti-examples
+    MaxSim) produces a mass function on **complements** (Θ \\ {x} for
+    each tag with anti-example support).  The two are
+    conditionally independent given the truth — positive answers
+    "does this look like X?", negative answers "does this look like a
+    known-confusable-with-X?" — so they combine via Dempster's rule.
 
-    Approach
-    --------
+    Why channel-decomposed rather than net-score
+    --------------------------------------------
 
-    Per-tag positive scores are attenuated by the negative-channel
-    signal:
+    The earlier net-score approximation collapsed the two channels
+    via ``net = positive - β · negative`` and fed the result to
+    :func:`cosine_to_mass`.  That approach silently lost a real
+    epistemic signal: "high positive AND high negative" was treated
+    as cancellation, when it should surface as DST **conflict K** —
+    the fusion system's native flag for "evidence sources disagree
+    about this tag, the operator should look".  Channel-decomposed
+    construction restores that signal so downstream mechanisms
+    (cross-subtree visibility, cautious_promoted_code, the indep-tier
+    revisit gate) can act on it.
 
-        net_score(tag) = positive_score(tag) − β · negative_score(tag)
+    Implementation
+    --------------
 
-    The clamped ``{tag: net_score}`` dict is then handed to the existing
-    cosine-to-mass arithmetic — this preserves all the
-    Haenni-Hartmann reliability shaping, margin-aware allocation, and
-    hierarchical-subtree aggregation that the existing pipeline relies
-    on, while admitting the negative-evidence signal as a coherent
-    pre-fusion attenuation.
-
-    When ``use_verifier_pass_rate`` is True, the global α (and thus
-    the maximum mass concentration) is additionally attenuated by the
-    mean verifier pass rate of the top-K contenders — annotations
-    whose own self-checks failed contribute less mass.  This is the
-    α_verifier factor described in the architecture note.
-
-    Deferred refinement
-    -------------------
-
-    The architecture note specifies a richer construction in which
-    positive and negative scores produce two separate mass functions
-    that combine via Dempster's rule (positive on singletons, negative
-    on complements per Smets 1990).  The net-score path here is a
-    correct-but-conservative approximation: it loses the ability to
-    surface "high positive AND high negative" cases as conflict K in
-    DST, treating them as cancellation instead.  When empirical
-    evidence justifies the complexity, replace this implementation
-    with the channel-decomposed version; the call site contract is
-    unchanged.
+    - **Verifier-pass-rate attenuation**: when
+      ``use_verifier_pass_rate`` is True, each tag's positive and
+      negative scores are scaled by its annotation's
+      ``verifier_pass_rate``.  An annotation whose own self-checks
+      failed contributes proportionally less in *both* channels —
+      epistemically appropriate (untrusted witness should be quiet),
+      and matches the α_verifier factor in the architecture note.
+    - **Positive mass** is built via :func:`cosine_to_mass`, which
+      keeps the Haenni-Hartmann reliability shaping, margin-aware
+      allocation, and hierarchical-subtree aggregation already in
+      use across the pipeline.
+    - **Negative mass** assigns the top-K (by negative score) tags
+      to their respective **complement** focal elements ``Θ \\ {x}``,
+      proportional to their share of the total top-K negative score.
+      ``β`` (``negative_beta``) caps the total negative mass.  The
+      remainder is ignorance.
+    - **Combination**: Dempster's rule.  K (conflict) is logged when
+      non-trivial — operators see when anti-examples are firing
+      against the positive top-1.  On total conflict (K = 1), the
+      combiner falls through to Yager's rule per Smets'
+      least-commitment principle: route conflict mass to ignorance
+      rather than amplify either channel.  This is a *DST math
+      edge case*, not a deployment-degraded fallback to the
+      collapsed-DST state.
 
     Parameters
     ----------
-    scores : list[TagScore]
+    scores
         Per-tag late-interaction breakdowns from
         :func:`late_interaction.score_column_against_index`.  Each
-        entry has ``code``, ``positive_score``, ``negative_score``,
+        entry carries ``code``, ``positive_score``, ``negative_score``,
         ``per_role`` (diagnostic), ``verifier_pass_rate``.
     frame
         Frame of discernment over candidate codes.
     discount
-        Complement of the reliability ceiling, as in
-        :func:`cosine_to_mass`.  Default 0.20 (matches cosine
-        baseline).
+        Complement of the positive-channel reliability ceiling, as
+        in :func:`cosine_to_mass`.  Default 0.20.
     reliability_floor
         Minimum α even under noisy signal.
-    negative_attenuation
-        Multiplier on ``negative_score`` before subtraction.  Defaults
-        to 1.0 since the negative-channel weight (``weight_anti``) is
-        already applied upstream in
-        :func:`late_interaction.score_column_against_index`.  Provided
-        as a knob for offline tuning when the score-weighting is
-        revisited.
+    negative_beta
+        Total mass budget for the negative channel (sum of allocations
+        to complement focal elements).  Bounded conservatively to
+        avoid over-suppression on a single anti-example hit.
+    negative_top_k
+        Cap on the number of complement focal elements emitted by the
+        negative channel.  Keeps Dempster combination cheap and
+        focuses attention on the most informative anti-example hits.
+    negative_min_score
+        Negative scores below this threshold contribute nothing —
+        prevents noise-floor anti-example hits from inflating the
+        focal-element count.
     use_verifier_pass_rate
-        When True, attenuate α by the mean verifier pass rate of the
-        top-K contenders.
+        When True, scale each tag's positive and negative scores by
+        its annotation's verifier_pass_rate.
     """
     if not scores:
         return frame.vacuous()
 
-    # Build net-score similarity dict for the cosine_to_mass adapter.
-    similarities: dict[str, float] = {}
-    pass_rates: list[float] = []
-    for s in scores:
-        net = s.positive_score - negative_attenuation * s.negative_score
-        # Late-interaction net scores are bounded around [-w_anti, sum(weights)];
-        # clamp to [0, 1] before handing to cosine_to_mass so its
-        # softmax doesn't blow up on outliers.
-        similarities[s.code] = max(0.0, min(1.0, net))
-        pass_rates.append(getattr(s, "verifier_pass_rate", 1.0))
+    # Per-tag verifier-aware attenuation: untrusted annotations get
+    # quieter on *both* channels.  Applied as a multiplier on raw
+    # scores rather than as a discount on α so the attenuation is
+    # localized per tag, not smeared globally.
+    if use_verifier_pass_rate:
+        scores_eff = [_AttenuatedTagScore(
+            code=s.code,
+            positive_score=s.positive_score * getattr(s, "verifier_pass_rate", 1.0),
+            negative_score=s.negative_score * getattr(s, "verifier_pass_rate", 1.0),
+        ) for s in scores]
+    else:
+        scores_eff = [_AttenuatedTagScore(
+            code=s.code,
+            positive_score=s.positive_score,
+            negative_score=s.negative_score,
+        ) for s in scores]
 
-    # Effective discount: tighten when verifier pass rates among the
-    # top contenders are low.  Tops the discount at 0.85 to keep at
-    # least *some* reliability headroom even when verifiers complain.
-    effective_discount = discount
-    if use_verifier_pass_rate and pass_rates:
-        # Use the mean of the top-5 contenders (or all when fewer).
-        top_sorted = sorted(
-            zip(similarities.values(), pass_rates),
-            key=lambda pair: pair[0],
-            reverse=True,
-        )[:5]
-        if top_sorted:
-            mean_pass = sum(pr for _, pr in top_sorted) / len(top_sorted)
-            # mean_pass=1.0 → effective_discount unchanged
-            # mean_pass=0.0 → effective_discount widens fully toward 0.85
-            effective_discount = discount + (0.85 - discount) * (1.0 - mean_pass)
-            effective_discount = max(discount, min(0.85, effective_discount))
-
-    return cosine_to_mass(
-        similarities,
-        frame,
-        discount=effective_discount,
-        reliability_floor=reliability_floor,
+    m_positive = _late_interaction_positive_mass(
+        scores_eff, frame,
+        discount=discount, reliability_floor=reliability_floor,
     )
+    m_negative = _late_interaction_negative_mass(
+        scores_eff, frame,
+        beta=negative_beta, top_k=negative_top_k, min_score=negative_min_score,
+    )
+
+    # If the negative channel has nothing to say, the combination
+    # reduces to the positive channel (vacuous ⊕ X = X).  Short-circuit
+    # to skip the Dempster machinery in that common case.
+    if all(fe == frame.theta for fe in m_negative.masses):
+        return m_positive
+
+    # Conjunctive combination — Dempster's rule.  Yager's rule on
+    # total conflict per Smets least-commitment.
+    from atelier.classify.belief import dempster_combine, yager_combine
+    try:
+        combined, k = dempster_combine(m_positive, m_negative)
+        if k > 0.5:
+            logger.info(
+                "late_interaction channel conflict K=%.3f "
+                "(positive evidence vs anti-example evidence disagree)", k,
+            )
+        return combined
+    except ValueError:
+        # K = 1 (total conflict): Yager redirects K to ignorance.
+        logger.info(
+            "late_interaction Dempster K=1; using Yager combination "
+            "(conflict mass routes to ignorance per Smets 1990 §6)"
+        )
+        combined, _ = yager_combine(m_positive, m_negative, frame.theta)
+        return combined
+
+
+@dataclass(frozen=True)
+class _AttenuatedTagScore:
+    """Internal: minimal interface late_interaction_to_mass needs after attenuation."""
+    code: str
+    positive_score: float
+    negative_score: float
+
+
+def _late_interaction_positive_mass(
+    scores: list,
+    frame: FrameOfDiscernment,
+    *,
+    discount: float,
+    reliability_floor: float,
+) -> BeliefAssignment:
+    """Positive channel: per-tag positive scores → mass on singletons.
+
+    Delegates to :func:`cosine_to_mass` so the positive channel
+    inherits the Haenni-Hartmann reliability shaping, margin-aware
+    allocation, and hierarchical-subtree aggregation the rest of the
+    pipeline expects.  Scores are clamped to ``[0, 1]`` before
+    handing off — late-interaction net scores can exceed 1 when
+    multiple high-weight roles agree, and ``cosine_to_mass``'s
+    softmax assumes bounded inputs.
+    """
+    similarities = {
+        s.code: max(0.0, min(1.0, s.positive_score)) for s in scores
+    }
+    return cosine_to_mass(
+        similarities, frame,
+        discount=discount, reliability_floor=reliability_floor,
+    )
+
+
+def _late_interaction_negative_mass(
+    scores: list,
+    frame: FrameOfDiscernment,
+    *,
+    beta: float,
+    top_k: int,
+    min_score: float,
+) -> BeliefAssignment:
+    """Negative channel: per-tag anti-example scores → mass on complements.
+
+    For each top-K tag with non-trivial negative evidence, allocate a
+    share of the total ``β`` mass budget to the **complement** focal
+    element ``Θ \\ {tag}``.  The complement focal element is the
+    DST encoding of "the answer is somewhere other than this tag" —
+    when combined via Dempster's rule with positive evidence that
+    supports the same tag, the empty intersection produces conflict K.
+    """
+    candidates = [
+        (s.code, s.negative_score)
+        for s in scores
+        if s.code in frame.singletons and s.negative_score >= min_score
+    ]
+    if not candidates:
+        return frame.vacuous()
+
+    # Top-K by negative score.  Deterministic tie-break by code.
+    candidates.sort(key=lambda pair: (-pair[1], pair[0]))
+    top = candidates[:top_k]
+
+    total_neg = sum(neg for _, neg in top)
+    if total_neg <= 0:
+        return frame.vacuous()
+
+    masses: dict[FocalElement, float] = {}
+    allocated = 0.0
+    theta_codes = frame.theta.codes
+    for code, neg in top:
+        share = beta * (neg / total_neg)
+        complement_codes = theta_codes - {code}
+        if not complement_codes:
+            # Singleton frame: no complement to allocate to.  Skip.
+            continue
+        complement_fe = FocalElement(
+            frozenset(complement_codes),
+            label=f"¬{code}",
+        )
+        masses[complement_fe] = masses.get(complement_fe, 0.0) + share
+        allocated += share
+
+    masses[frame.theta] = max(0.0, 1.0 - allocated)
+    return BeliefAssignment(masses=masses)
 
 
 # ── Pattern detection ────────────────────────────────────────────────
