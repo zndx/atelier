@@ -36,8 +36,9 @@ of the bootstrap loop than to refetch per iteration.
 
 When the collection grows (Aegir-scale ontologies, multi-customer
 deployments with overlay-extended taxonomies), this module gains a
-streaming / Qdrant-native fast path; the in-memory path remains a
-correctness reference and a fallback.
+streaming / Qdrant-native fast path; the in-memory implementation
+here remains the correctness reference the fast path is validated
+against.
 
 See ``docs/src/architecture/late-interaction-cosine.md`` § Late-
 interaction execution.
@@ -210,9 +211,12 @@ def _maxsim_one_query_vs_doc_list(
 ) -> float:
     """MaxSim contribution of one query vector against a doc-side multi-vector slot.
 
-    Returns 0.0 when the doc slot is empty — graceful degradation:
-    absent doc-side evidence contributes nothing without polluting
-    other roles.
+    Returns 0.0 when the doc slot has no embeddings for this role —
+    *within-source* graceful handling of missing per-role data (e.g., an
+    annotation with no anti_examples), distinct from the cross-source
+    fallback path that signals deployment issues.  Absent data here
+    contributes nothing without polluting the contributions of other
+    roles.
     """
     if not query_vec or not doc_vecs:
         return 0.0

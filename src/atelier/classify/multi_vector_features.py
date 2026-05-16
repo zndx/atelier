@@ -137,7 +137,7 @@ def build_column_query(
     else:
         sample_views = []
 
-    # ── context_view (single, optional)
+    # ── context_view (single; emitted when caller supplies neighbors)
     context_views: list[list[float]] = []
     if neighbor_column_names:
         neighbor_text = "table columns: " + ", ".join(
@@ -147,7 +147,7 @@ def build_column_query(
             ctx_vec = embed(neighbor_text)
             context_views = _wrap_single_vector(ctx_vec)
 
-    # ── pattern_view (single, optional)
+    # ── pattern_view (single; emitted when pattern source fired upstream)
     pattern_views: list[list[float]] = []
     if pattern_summary and pattern_summary.strip():
         pat_vec = embed(pattern_summary.strip())

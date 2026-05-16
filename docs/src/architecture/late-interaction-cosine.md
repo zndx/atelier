@@ -528,11 +528,15 @@ New keys under `classify.cosine.late_interaction` in `config/base.conf`:
 ```hocon
 classify {
   cosine {
-    # Existing cosine source remains; this section configures the
-    # late-interaction variant.  Activation knob below routes the
-    # pipeline through one or the other (or both, during A/B).
+    # Late-interaction multi-vector cosine is the production cosine
+    # source.  Default ON.  The legacy single-vector cosine path
+    # remains in the code only as a transitional emergency fallback;
+    # when the late-interaction flag is on and the path cannot run
+    # (no enriched collection, Qdrant unreachable, qdrant-client
+    # missing), the pipeline logs WARNING + marks the run degraded
+    # via `cosine_path` in the per-column result.
     late_interaction {
-      enabled = false
+      enabled = true
       enabled = ${?ATELIER_CLASSIFY_COSINE_LATE_INTERACTION}
 
       qdrant_url = "http://127.0.0.1:6333"
@@ -564,7 +568,12 @@ classify {
 ```
 
 Existing `classify.cosine.*` keys are unchanged; the late-interaction
-section is additive and gated off by default for safe rollout.
+path is the production cosine source under this design.  The flag
+exists for emergency rollback only — leaving the pipeline in legacy
+single-vector cosine is a deployment-degraded state, not a normal
+operating mode, and runs in that state are tagged with
+`cosine_path: "legacy_degraded:<reason>"` in the per-column result
+so the degradation is visible in operator-facing artifacts.
 
 ## Deferred work
 

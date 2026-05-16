@@ -2426,18 +2426,20 @@ def _classify_column(
     if not _is_vacuous(pattern_mass):
         source_masses["pattern"] = pattern_mass
 
-    # 3. Cosine similarity (if available)
+    # 3. Cosine evidence — late-interaction multi-vector via Qdrant is the
+    # production path (default on); the legacy single-vector path remains
+    # as a transitional emergency fallback only.  See
+    # docs/src/architecture/late-interaction-cosine.md.
+    cosine_path = "unused"  # 'late_interaction' | 'legacy_explicit' |
+                            # 'legacy_degraded:<reason>' | 'unused'
     if use_cosine:
-        # 3a. Late-interaction multi-vector cosine via Qdrant (gated; default off).
-        # Returns None when the flag is off, infrastructure is missing, or
-        # any failure occurs — falls through to the legacy single-vector
-        # cosine path below.  See docs/src/architecture/late-interaction-cosine.md.
         late_mass = None
+        late_status = "explicit_disable"
         try:
             from atelier.classify.late_interaction_bridge import (
                 try_compute_cosine_mass as _try_late_interaction,
             )
-            late_mass = _try_late_interaction(
+            late_mass, late_status = _try_late_interaction(
                 cfg=cfg,
                 column_features=features,
                 column_name=col.name,
@@ -2449,13 +2451,40 @@ def _classify_column(
                 embed=getattr(cfg, "_embedder", None),
             )
         except Exception as exc:
-            logger.debug(
-                "late_interaction bridge unavailable for %s: %s", col.name, exc,
+            # The bridge owns its own error handling; reaching here means
+            # the bridge module itself failed to import or its top-level
+            # call raised.  Treat as a deployment issue, log loudly.
+            logger.warning(
+                "late_interaction bridge raised unexpectedly for %s: %s "
+                "(deployment issue; investigate)",
+                col.name, exc,
             )
+            late_status = "degraded_bridge_error"
 
         if late_mass is not None:
             source_masses["cosine"] = late_mass
+            cosine_path = "late_interaction"
         else:
+            # Fallback to legacy single-vector cosine.  When the operator
+            # explicitly disabled late-interaction, this is silent.  When
+            # the flag is on but the late path failed, emit a WARNING and
+            # tag the column result as degraded so the run artifact
+            # surfaces the issue — leaving the pipeline in degraded mode
+            # is a deployment problem, not a normal operating state.
+            if late_status == "explicit_disable":
+                cosine_path = "legacy_explicit"
+            else:
+                cosine_path = f"legacy_degraded:{late_status}"
+                logger.warning(
+                    "late_interaction unavailable for %s.%s (status=%s); "
+                    "falling back to legacy single-vector cosine — this "
+                    "is a transitional emergency fallback only, not a "
+                    "normal operating mode.  Investigate and restore the "
+                    "late-interaction path (run scripts/enrich_annotations.py "
+                    "or check Qdrant connectivity).",
+                    getattr(col, "table_name", "?"), col.name, late_status,
+                )
+
             try:
                 from atelier.classify.embedding import classify_cosine as _cosine
                 similarities = _cosine(features, category_set)
@@ -2464,7 +2493,12 @@ def _classify_column(
                 )
                 source_masses["cosine"] = cosine_mass
             except Exception as exc:
-                logger.debug("Cosine similarity unavailable for %s: %s", col.name, exc)
+                logger.warning(
+                    "Cosine evidence unavailable for %s.%s "
+                    "(legacy fallback also failed: %s); "
+                    "fusion proceeds without cosine for this column.",
+                    getattr(col, "table_name", "?"), col.name, exc,
+                )
 
     # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
     if llm_code:
@@ -2572,6 +2606,13 @@ def _classify_column(
         "needs_clarification": hc.needs_clarification,
         "evidence": hc.evidence,
         "evidence_sources": {name: _mass_summary(ba, frame) for name, ba in source_masses.items()},
+        # 'late_interaction' (production), 'legacy_explicit' (operator
+        # opt-out), 'legacy_degraded:<reason>' (deployment issue, fix
+        # and remove this column's degraded marker), 'unused' (cosine
+        # source not enabled for this run).  Aggregating across columns
+        # in the run artifact gives operators a per-run health view of
+        # the cosine evidence path.
+        "cosine_path": cosine_path,
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine

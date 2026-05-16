@@ -181,7 +181,10 @@ def check_anti_example_targets_exist(
 
     ``valid_tag_codes`` is the set of codes (or mnemonics, depending on
     the taxonomy convention) the caller considers legitimate targets.
-    Empty set means we can't check — degrade gracefully and pass.
+    An empty set means the caller did not provide taxonomy context;
+    the check is **inapplicable** and is reported as passed.  Callers
+    that want this check enforced must supply a non-empty
+    ``valid_tag_codes``.
     """
     anti = enrichment.get("anti_examples", []) or []
     if not valid_tag_codes:
@@ -223,8 +226,10 @@ def check_parent_path_consistent(
 
     ``expected_parent_path`` is what the taxonomy hierarchy says the
     parent chain should be (a deterministic lookup from the source
-    taxonomy table).  None means we don't have a hierarchy to check
-    against; degrade gracefully and pass.
+    taxonomy table).  ``None`` means the caller did not supply a
+    hierarchy; the check is **inapplicable** and is reported as
+    passed.  Callers that want this check enforced must supply an
+    expected parent path.
     """
     if expected_parent_path is None:
         return CheckResult(

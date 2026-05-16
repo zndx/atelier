@@ -451,10 +451,19 @@ class AtelierConfig:
     # discount to avoid double-counting under Dempster's rule; the
     # current SVM default reflects the weakly-non-distinct regime.
     classify_discount_cosine: float = 0.20
-    # Late-interaction multi-vector cosine via Qdrant.  Default off;
-    # the legacy single-vector cosine path runs unchanged until this
-    # flag flips.  See docs/src/architecture/late-interaction-cosine.md.
-    classify_cosine_late_interaction_enabled: bool = False
+    # Late-interaction multi-vector cosine via Qdrant is the production
+    # cosine evidence source under the DST-independence architecture.
+    # Default ON: this is the path that restores independence among
+    # evidence sources.  Disabling it routes the pipeline back through
+    # the single-vector cosine path which is known to under-discriminate
+    # on adversarial corpora and is retained only as a transitional
+    # emergency fallback during deployment rollout.  When this flag is
+    # True and the late-interaction path cannot run (no enriched
+    # collection registered, Qdrant unreachable, qdrant-client missing),
+    # the pipeline logs a WARNING and marks the run as degraded — that
+    # condition is a deployment issue, not a normal operating mode.
+    # See docs/src/architecture/late-interaction-cosine.md.
+    classify_cosine_late_interaction_enabled: bool = True
     classify_discount_svm: float = 0.30
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70

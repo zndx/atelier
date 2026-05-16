@@ -8,20 +8,31 @@
 
 """Pipeline-side bridge for the late-interaction cosine evidence source.
 
-Encapsulates the integration surface so ``pipeline.py``'s
-``_classify_column`` only needs a 5-line gated insertion.  The bridge:
+This is the production cosine evidence path under the DST-independence
+architecture — not an optional feature.  It restores discriminative
+multi-vector signal on adversarial corpora and is load-bearing for the
+"no collapsed-DST" property the pipeline depends on.  The bridge:
 
-- Honors a ``classify.cosine.late_interaction.enabled`` config flag (default off)
-- Resolves the current Qdrant collection for the active taxonomy via PGlite
-- Materializes and caches the annotation index across columns
-- Builds the column-side multi-vector query and computes per-tag scores
-- Converts to a mass function via :func:`mass_functions.late_interaction_to_mass`
+- Reads ``classify.cosine.late_interaction.enabled`` (default **true**);
+  an explicit ``false`` is an emergency rollback path only.
+- Resolves the current Qdrant collection for the active taxonomy via PGlite.
+- Materializes and caches the annotation index across columns.
+- Builds the column-side multi-vector query and computes per-tag scores.
+- Converts to a mass function via :func:`mass_functions.late_interaction_to_mass`.
 
-When the flag is off or any required infrastructure is missing
-(qdrant-client not installed, no collection registered, Qdrant
-unreachable), the bridge returns ``None`` and the caller falls back to
-the legacy single-vector cosine path.  Failure modes are explicit and
-non-fatal — late-interaction is *additive*, never a hard dependency.
+When the flag is true and the late-interaction path cannot run
+(qdrant-client missing, no collection registered, Qdrant unreachable,
+scoring error), the bridge returns ``None`` so the caller can record
+the run as **degraded** and proceed under the legacy single-vector
+cosine path *as a transitional emergency fallback only*.  That
+condition is a deployment issue that must be investigated — it is not
+a normal operating mode and must not be normalized in code or docs.
+The caller (``pipeline.py``) emits a WARNING and marks the run's
+source-mass metadata so operators see the degradation in the result
+artifact.
+
+When the flag is explicitly ``false``, the bridge returns ``None``
+silently — that's the "operator knows what they're doing" path.
 
 See ``docs/src/architecture/late-interaction-cosine.md``.
 """
@@ -222,27 +233,39 @@ def try_compute_cosine_mass(
     pattern_summary: str | None,
     frame: "FrameOfDiscernment",
     embed,
-) -> "BeliefAssignment | None":
-    """Compute a late-interaction cosine mass function for one column.
+) -> "tuple[BeliefAssignment | None, str]":
+    """Compute the late-interaction cosine mass function for one column.
 
-    Returns the :class:`BeliefAssignment` on success or ``None`` if
-    the late-interaction path is disabled, infrastructure is
-    unavailable, or anything fails non-fatally.  The caller is
-    expected to handle ``None`` by falling through to the legacy
-    single-vector cosine path.
+    Returns ``(belief_assignment, status)`` where ``status`` is one of:
 
-    The signature accepts ``column_features`` for future use (SHAP
-    integration, pattern-summary derivation) without requiring it
-    today.
+    - ``"ok"`` — late-interaction succeeded; ``belief_assignment`` is the result.
+    - ``"explicit_disable"`` — the operator set
+      ``classify.cosine.late_interaction.enabled = false``; the caller
+      should fall back to legacy cosine silently.  This path is for
+      emergency rollback only.
+    - ``"degraded_no_dao"`` — PGlite unavailable.
+    - ``"degraded_no_collection"`` — no ``current`` collection for the
+      active taxonomy.  Run the enrichment script.
+    - ``"degraded_no_qdrant_client"`` — qdrant-client not installed.
+    - ``"degraded_qdrant_connect"`` — Qdrant unreachable at the URL.
+    - ``"degraded_load_failed"`` — annotation index materialization failed.
+    - ``"degraded_score_error"`` — late-interaction scoring raised.
+
+    Every ``degraded_*`` status indicates a deployment issue, not a
+    normal operating mode.  The caller is expected to emit a WARNING
+    and mark the run's source-mass metadata so the degradation is
+    visible in the result artifact.  Operators should investigate and
+    restore the late-interaction path rather than leaving the
+    pipeline in degraded mode.
 
     Parameters
     ----------
     cfg
-        AtelierConfig; ``is_enabled(cfg)`` must return True for the
-        bridge to do anything.
+        AtelierConfig.  When ``is_enabled(cfg)`` is False the bridge
+        short-circuits to ``"explicit_disable"``.
     column_features
-        Unused today; reserved for the SHAP integration that consumes
-        per-view score breakdowns.
+        Reserved for the SHAP integration that consumes per-view score
+        breakdowns.
     column_name, table_name, samples, neighbor_column_names, pattern_summary
         Column-side inputs forwarded to
         :func:`multi_vector_features.build_column_query`.
@@ -251,31 +274,37 @@ def try_compute_cosine_mass(
     embed
         Embedding callable shared with the legacy cosine path.
     """
-    _ = column_features  # reserved
+    _ = column_features  # reserved for SHAP integration
     if not is_enabled(cfg):
-        return None
+        return None, "explicit_disable"
 
     resolved = _resolve_qdrant_collection(cfg)
     if resolved is None:
-        return None
+        return None, "degraded_no_collection"
     qdrant_url, collection = resolved
+
+    # Distinguish "no qdrant-client lib" from "Qdrant down" — both are
+    # degraded but require different operator action.
+    try:
+        import qdrant_client as _qdrant  # noqa: F401
+    except ImportError:
+        return None, "degraded_no_qdrant_client"
+
+    client = _get_qdrant_client(qdrant_url)
+    if client is None:
+        return None, "degraded_qdrant_connect"
 
     index = _get_annotation_index(qdrant_url, collection)
     if index is None:
-        return None
+        return None, "degraded_load_failed"
 
     try:
         from atelier.classify.late_interaction import (
-            ScoringWeights,
             score_column_against_index,
         )
         from atelier.classify.mass_functions import late_interaction_to_mass
         from atelier.classify.multi_vector_features import build_column_query
-    except ImportError as exc:
-        logger.debug("late_interaction: module import failed: %s", exc)
-        return None
 
-    try:
         query = build_column_query(
             column_name=column_name,
             table_name=table_name,
@@ -286,13 +315,14 @@ def try_compute_cosine_mass(
         )
         weights = _scoring_weights_from_cfg(cfg)
         scores = score_column_against_index(query, index, weights)
-        return late_interaction_to_mass(scores, frame)
+        return late_interaction_to_mass(scores, frame), "ok"
     except Exception as exc:  # noqa: BLE001 — bridge must not break the pipeline
         logger.warning(
-            "late_interaction: scoring failed for %s.%s: %s; falling back",
+            "late_interaction: scoring raised for %s.%s: %s; "
+            "this is a deployment issue (investigate), not a normal flow",
             table_name, column_name, exc,
         )
-        return None
+        return None, "degraded_score_error"
 
 
 def _scoring_weights_from_cfg(cfg):
