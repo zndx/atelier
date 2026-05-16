@@ -363,11 +363,16 @@ def _build_attribution(
     re-scoring cost because the per-role components are already
     computed during MaxSim execution.
 
-    Top-K selection is by **post-fusion singleton mass** (m({code})),
-    not by pre-fusion positive_score — the operator cares about
-    where the predicted classification will likely land, which is
-    determined by the fused mass after positive/negative channel
-    combination.
+    Top-K selection is by **post-fusion tag mass** — both **singleton
+    focal elements** (leaves) and **internal-node focal elements**
+    (parent categories) qualify, per the every-tag-is-first-class
+    policy that ``HierarchicalClassification.from_combined_evidence``
+    already embodies.  An internal-node parent that carries
+    significant fused mass appears in the attribution surface
+    alongside leaves, with ``is_leaf: false`` marking the
+    distinction.  This honors the operator's view of predictions:
+    if the fusion lands on a parent category as the correct
+    granularity, the attribution surface shows it.
 
     Returns a dict shaped for direct surfacing in the per-column
     result:
@@ -376,6 +381,7 @@ def _build_attribution(
           "top_k": [
             {
               "code": "EMAIL",
+              "is_leaf": true,
               "post_fusion_mass": 0.737,
               "positive_score": 0.83,
               "negative_score": 0.05,
@@ -392,27 +398,49 @@ def _build_attribution(
             },
             ...
           ],
-          "ranking_basis": "post_fusion_singleton_mass"
+          "ranking_basis": "post_fusion_tag_mass"
         }
     """
     # Index the TagScores by code for O(1) lookup during top-K selection.
     by_code = {s.code: s for s in scores}
 
-    # Top-K singletons by post-fusion mass.
-    singleton_masses: list[tuple[str, float]] = []
+    # FE → code lookup over both leaves and internal nodes.  FocalElement
+    # equality is by codes-frozenset only (label is ignored in __eq__),
+    # so Dempster-produced FEs (which carry no label) match frame.singletons
+    # / frame.internal_nodes entries (which do).
+    fe_to_code: dict["FocalElement", str] = {}
+    for code, fe in frame.singletons.items():
+        fe_to_code[fe] = code
+    for code, fe in frame.internal_nodes.items():
+        fe_to_code[fe] = code
+
+    # Top-K by post-fusion mass over BOTH singletons and internal nodes.
+    # Skip Θ (the ignorance slot is not a tag prediction) and any focal
+    # element that doesn't map to a known tag (e.g., complement focal
+    # elements emitted by the negative channel, or Dempster-produced
+    # set intersections that don't correspond to a frame tag).
+    tag_masses: list[tuple[str, float]] = []
     for fe, m in mass.masses.items():
-        if len(fe.codes) == 1:
-            (code,) = fe.codes
-            if code in by_code:  # only late-interaction-known codes
-                singleton_masses.append((code, m))
-    singleton_masses.sort(key=lambda kv: (-kv[1], kv[0]))
-    top = singleton_masses[:top_k]
+        if fe == frame.theta:
+            continue
+        code = fe_to_code.get(fe)
+        if code is None:
+            continue
+        if code not in by_code:
+            # Tag is in the frame but the scoring pass didn't see it
+            # (e.g., absent from the enriched annotation collection).
+            # No per-role breakdown to surface — skip.
+            continue
+        tag_masses.append((code, m))
+    tag_masses.sort(key=lambda kv: (-kv[1], kv[0]))
+    top = tag_masses[:top_k]
 
     rows: list[dict] = []
     for code, post_mass in top:
         s = by_code[code]
         rows.append({
             "code": code,
+            "is_leaf": code in frame.singletons,
             "post_fusion_mass": round(post_mass, 6),
             "positive_score": round(s.positive_score, 6),
             "negative_score": round(s.negative_score, 6),
@@ -424,7 +452,7 @@ def _build_attribution(
 
     return {
         "top_k": rows,
-        "ranking_basis": "post_fusion_singleton_mass",
+        "ranking_basis": "post_fusion_tag_mass",
     }
 
 

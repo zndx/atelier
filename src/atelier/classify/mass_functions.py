@@ -563,23 +563,109 @@ def _late_interaction_positive_mass(
     discount: float,
     reliability_floor: float,
 ) -> BeliefAssignment:
-    """Positive channel: per-tag positive scores → mass on singletons.
+    """Positive channel: per-tag positive scores → mass on appropriate focal elements.
 
-    Delegates to :func:`cosine_to_mass` so the positive channel
-    inherits the Haenni-Hartmann reliability shaping, margin-aware
-    allocation, and hierarchical-subtree aggregation the rest of the
-    pipeline expects.  Scores are clamped to ``[0, 1]`` before
-    handing off — late-interaction net scores can exceed 1 when
-    multiple high-weight roles agree, and ``cosine_to_mass``'s
-    softmax assumes bounded inputs.
+    Honors the *every-tag-is-first-class* policy that
+    :class:`HierarchicalClassification.from_combined_evidence` already
+    embodies (see the "Atlas-style 'every node is a tag'" comment at
+    ``belief.py:921``).  Each tag's positive score allocates mass to
+    its **own** focal element — a singleton FE for a leaf, an
+    internal-node FE for a parent — without silently dropping internal
+    tags via a ``frame.singletons``-only filter.
+
+    The reliability-shaping arithmetic (Haenni-Hartmann α-bounded
+    reliability, margin-aware allocation, softmax-over-residual) is a
+    direct adaptation of :func:`cosine_to_mass`.  The differences:
+
+    1. **Filter accepts both singletons and internal nodes.**  The
+       enriched annotation collection in Qdrant may carry first-class
+       entries for parent categories alongside leaves; this function
+       respects that.
+    2. **Hierarchical aggregation (_significant_subtree) is invoked
+       only when top-1 is a leaf.**  An internal-node top-1 already
+       represents the appropriate granularity per Smets
+       least-commitment — walking further up would over-coarsen.
+       When invoked, the aggregation receives a leaf-only softmax
+       projection so the descendant-share computation is well-defined.
     """
-    similarities = {
-        s.code: max(0.0, min(1.0, s.positive_score)) for s in scores
-    }
-    return cosine_to_mass(
-        similarities, frame,
-        discount=discount, reliability_floor=reliability_floor,
+    if not scores:
+        return frame.vacuous()
+
+    # Build code → (FE, sim) for any in-frame tag — leaf singleton OR
+    # internal node.  An out-of-frame tag is silently skipped (the
+    # annotation collection may carry tags absent from the active
+    # frame, which is a legitimate corpus / vocab mismatch handled
+    # below as vacuous when nothing is in-frame).
+    in_frame: dict[str, tuple[FocalElement, float]] = {}
+    for s in scores:
+        sim = max(0.0, min(1.0, s.positive_score))
+        if s.code in frame.singletons:
+            in_frame[s.code] = (frame.singletons[s.code], sim)
+        elif s.code in frame.internal_nodes:
+            in_frame[s.code] = (frame.internal_nodes[s.code], sim)
+    if not in_frame:
+        return frame.vacuous()
+
+    sims = {code: pair[1] for code, pair in in_frame.items()}
+    sorted_sims = sorted(sims.values(), reverse=True)
+    top1 = sorted_sims[0]
+    top2 = sorted_sims[1] if len(sorted_sims) > 1 else None
+
+    alpha = _cosine_reliability(
+        top1, top2, floor=reliability_floor, ceiling=1.0 - discount,
     )
+    margin_w = _margin_weight(top1, top2)
+
+    max_sim = top1
+    exp_sims = {code: math.exp(sim - max_sim) for code, sim in sims.items()}
+    total_exp = sum(exp_sims.values())
+    if total_exp <= 0:
+        return frame.vacuous()
+    softmax_probs = {code: ev / total_exp for code, ev in exp_sims.items()}
+
+    top1_code = max(sims.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+    masses: dict[FocalElement, float] = {}
+    top1_share = alpha * margin_w
+    residual = alpha * (1.0 - margin_w)
+
+    # Hierarchical aggregation: leaf top-1 only.  Internal-node top-1
+    # is already coarse — Smets' least-commitment principle says
+    # don't over-coarsen.  When invoked, project softmax to leaf-only
+    # so ``_significant_subtree``'s descendant-share computation is
+    # well-defined (it sums probabilities of leaves that descend from
+    # each ancestor of top1_code; internal-node entries would not
+    # appear in any leaf-descendant chain and would underestimate the
+    # subtree concentration).
+    subtree_fe: FocalElement | None = None
+    lca_share = 0.0
+    if top1_code in frame.singletons:
+        leaf_only_probs = {
+            c: p for c, p in softmax_probs.items() if c in frame.singletons
+        }
+        leaf_total = sum(leaf_only_probs.values())
+        if leaf_total > 0:
+            leaf_only_probs = {c: p / leaf_total for c, p in leaf_only_probs.items()}
+            subtree_fe, lca_concentration = _significant_subtree(
+                top1_code, leaf_only_probs, frame,
+            )
+            lca_share = residual * lca_concentration
+
+    tag_residual = residual - lca_share
+
+    for code, prob in softmax_probs.items():
+        m = tag_residual * prob
+        if code == top1_code:
+            m += top1_share
+        if m > 1e-15:
+            masses[in_frame[code][0]] = m
+
+    if subtree_fe is not None and lca_share > 1e-15:
+        masses[subtree_fe] = masses.get(subtree_fe, 0.0) + lca_share
+
+    masses[frame.theta] = max(0.0, 1.0 - alpha)
+    masses = _redistribute_confusable_mass(masses, frame)
+    return BeliefAssignment(masses=masses)
 
 
 def _late_interaction_negative_mass(
@@ -592,37 +678,57 @@ def _late_interaction_negative_mass(
 ) -> BeliefAssignment:
     """Negative channel: per-tag anti-example scores → mass on complements.
 
-    For each top-K tag with non-trivial negative evidence, allocate a
-    share of the total ``β`` mass budget to the **complement** focal
-    element ``Θ \\ {tag}``.  The complement focal element is the
-    DST encoding of "the answer is somewhere other than this tag" —
-    when combined via Dempster's rule with positive evidence that
-    supports the same tag, the empty intersection produces conflict K.
+    Honors the every-tag-is-first-class policy.  For each top-K tag
+    with non-trivial anti-example evidence, allocate a share of ``β``
+    to the **complement** focal element relative to the tag's full
+    coverage in the frame:
+
+    - For a **leaf** tag $x$, the complement is $\\Theta \\setminus \\{x\\}$.
+    - For an **internal-node** tag $X$ with descendant leaf set $D$,
+      the complement is $\\Theta \\setminus D$ — "the truth is not
+      anywhere in this subtree."
+
+    The leaf case is the previous behavior; the internal-node case is
+    the correctness fix for the audit.  Both reduce to the same form
+    when leaves are the only tags in the annotation collection.
+
+    Combined with positive evidence supporting the same tag, the
+    empty intersection produces conflict K — the DST-native signal
+    that the channels disagree.
     """
-    candidates = [
-        (s.code, s.negative_score)
-        for s in scores
-        if s.code in frame.singletons and s.negative_score >= min_score
-    ]
+    # Accept any in-frame tag (leaf singleton OR internal node).  Tags
+    # absent from the active frame are skipped.
+    candidates: list[tuple[str, frozenset[str], float]] = []
+    for s in scores:
+        if s.negative_score < min_score:
+            continue
+        if s.code in frame.singletons:
+            tag_codes = frame.singletons[s.code].codes
+        elif s.code in frame.internal_nodes:
+            tag_codes = frame.internal_nodes[s.code].codes
+        else:
+            continue
+        candidates.append((s.code, tag_codes, s.negative_score))
     if not candidates:
         return frame.vacuous()
 
     # Top-K by negative score.  Deterministic tie-break by code.
-    candidates.sort(key=lambda pair: (-pair[1], pair[0]))
+    candidates.sort(key=lambda triple: (-triple[2], triple[0]))
     top = candidates[:top_k]
 
-    total_neg = sum(neg for _, neg in top)
+    total_neg = sum(neg for _, _, neg in top)
     if total_neg <= 0:
         return frame.vacuous()
 
     masses: dict[FocalElement, float] = {}
     allocated = 0.0
     theta_codes = frame.theta.codes
-    for code, neg in top:
+    for code, tag_codes, neg in top:
         share = beta * (neg / total_neg)
-        complement_codes = theta_codes - {code}
+        complement_codes = theta_codes - tag_codes
         if not complement_codes:
-            # Singleton frame: no complement to allocate to.  Skip.
+            # Tag covers the entire frame (Θ itself, or a degenerate
+            # frame).  No complement to allocate to; skip.
             continue
         complement_fe = FocalElement(
             frozenset(complement_codes),
