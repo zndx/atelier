@@ -66,7 +66,6 @@ from atelier.classify.taxonomy import (
     load_annotations_from_hive,
     load_annotations_from_json,
     load_sample_vocabulary,
-    load_universal_vocabulary,
     save_annotations_json,
 )
 
@@ -1834,10 +1833,17 @@ def _load_vocabulary(
     - **Env-default Hive**: when *vocab_uri* is empty but
       *connection_name* and *database* are both set (via
       ``ATELIER_CLASSIFY_CONNECTION`` + ``ATELIER_CLASSIFY_DATABASE``),
-      try ``{database}.annotations`` via ``load_annotations_from_hive``
-      before falling through.  This is the auto-classification-at-deploy
-      path that matches the env-seeded ``data_source`` row.
-    - **Fallback**: 16-leaf universal (only when no domain annotations).
+      load ``{database}.annotations`` via the cache-aware
+      ``_load_domain_annotations`` path.  Matches the env-seeded
+      ``data_source`` row.
+
+    There is **no silent fallback** to the universal fixture.  When the
+    resolution above fails to return a non-empty CategorySet, this
+    function raises ``RuntimeError`` rather than substituting a
+    generic vocabulary that would silently misalign with the
+    operator's domain annotations.  The universal fixture remains
+    importable via ``load_universal_vocabulary`` for callers that
+    genuinely want it (training fallback, info endpoints).
 
     Hive sources always require annotations; the annotations table
     location (``vocab_uri``) is configured per data source, decoupled
@@ -1897,38 +1903,63 @@ def _load_vocabulary(
 
     # Env-default Hive: when the operator set ATELIER_CLASSIFY_CONNECTION
     # + ATELIER_CLASSIFY_DATABASE but no explicit vocab_uri was threaded
-    # through, try {database}.annotations on that connection before
-    # falling through to the universal fixture.  Matches the stable
-    # data_source seeded at startup when the env vars are present.
+    # through, load {database}.annotations on that connection.  Matches
+    # the stable data_source seeded at startup when the env vars are
+    # present.  Uses the cache-aware loader so we survive transient Hive
+    # outages or off-platform sweep subprocesses that lack cml.data_v1.
+    #
+    # NOTE on failure semantics: this branch does *not* fall through to
+    # a universal-fixture default.  Silent fallback to a 29-leaf generic
+    # vocabulary masked a sweep-script bug for hours of compute (see
+    # bel_threshold-2026-05-15T22:42:57Z: all six runs predicted ICE
+    # codes instead of the operator's domain annotations because the
+    # raw load_annotations_from_hive call raised under cml-unavailable
+    # and the fallback ate the error).  An empty/failed annotations
+    # load is a configuration error — surface it.
     if connection_name and database:
-        try:
-            from atelier.classify.taxonomy import load_annotations_from_hive
-            domain_cs = load_annotations_from_hive(
-                cfg, connection_name, database, hierarchical=True,
+        domain_cs = _load_domain_annotations(
+            cfg, build_dir, connection_name, database=database,
+        )
+        if domain_cs is None or len(domain_cs.categories) == 0:
+            raise RuntimeError(
+                f"Env-default Hive vocab load returned 0 categories from "
+                f"{database!r}.annotations via connection {connection_name!r}. "
+                f"This usually means the annotations table is empty or the "
+                f"cache at build/data/annotations/{connection_name}__{database}.json "
+                f"is missing.  Configure a valid data source (gateway "
+                f"populates vocab_uri from data_sources.vocab_uri) instead "
+                f"of relying on env-default resolution."
             )
-            if domain_cs is not None and len(domain_cs.categories) > 0:
-                if not isinstance(domain_cs, HierarchicalCategorySet):
-                    domain_cs = HierarchicalCategorySet(
-                        name=domain_cs.name,
-                        categories=list(domain_cs.categories),
-                    )
-                log.info(
-                    "Loaded env-default vocabulary: %d leaf categories "
-                    "(%s.annotations via %s)",
-                    len(domain_cs.categories), database, connection_name,
-                )
-                return domain_cs
-        except Exception as exc:
-            log.warning(
-                "Env-default Hive vocab load failed (%s.annotations via %s): %s. "
-                "Falling through to universal fixture.",
-                database, connection_name, exc,
+        if not isinstance(domain_cs, HierarchicalCategorySet):
+            domain_cs = HierarchicalCategorySet(
+                name=domain_cs.name,
+                categories=list(domain_cs.categories),
             )
+        log.info(
+            "Loaded env-default vocabulary: %d leaf categories "
+            "(%s.annotations via %s)",
+            len(domain_cs.categories), database, connection_name,
+        )
+        return domain_cs
 
-    # Fallback: universal vocabulary (16 BFO-grounded leaves)
-    universal = load_universal_vocabulary(hierarchical=True)
-    log.info("Loaded universal vocabulary: %d terms", len(universal.categories))
-    return universal
+    # No vocab source resolvable.  We deliberately do NOT fall back to
+    # the universal fixture here — the universal vocabulary
+    # (load_universal_vocabulary) is a 29-leaf BFO-grounded *generic*
+    # taxonomy that does not align with any operator's domain
+    # annotations.  A pipeline run that silently lands on it produces
+    # plausible-looking predictions in the wrong vocabulary, which is
+    # exactly the silent-degradation pattern this guard exists to
+    # prevent.  Callers that genuinely want the universal fixture
+    # (e.g. ml_train.py's training fallback, gateway info endpoints)
+    # import load_universal_vocabulary directly.
+    raise RuntimeError(
+        "Could not resolve a vocabulary for this run.  No vocab_uri was "
+        "supplied and no (connection_name, database) pair is configured.  "
+        "Configure a data source (UI: Data Platform panel) or pass "
+        "vocab_uri / source_id explicitly when invoking the pipeline.  "
+        "The universal fixture is not a valid silent fallback because it "
+        "does not align with any operator's domain annotations."
+    )
 
 
 def _load_domain_annotations(

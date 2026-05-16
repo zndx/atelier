@@ -124,19 +124,38 @@ def step_set_vocab_args(context, conn, db):
 def step_env_default_branch_present(context):
     from atelier.classify import pipeline
     src = inspect.getsource(pipeline._load_vocabulary)
+    # The env-default branch is the (connection_name, database) path
+    # that resolves the operator's annotations table.  Cache-aware
+    # since the silent-fallback removal: it delegates to
+    # _load_domain_annotations, which itself wraps
+    # load_annotations_from_hive with a cache check.
     assert "connection_name and database" in src
-    assert "load_annotations_from_hive" in src
+    assert "_load_domain_annotations" in src
 
 
-@then("load_annotations_from_hive is called before the universal fallback")
-def step_hive_before_universal(context):
+@then("the universal fixture is not silently substituted on resolution failure")
+def step_no_silent_universal_fallback(context):
+    """The cure for the bel_threshold-2026-05-15T22:42:57Z sweep regression.
+
+    `_load_vocabulary` previously fell through to `load_universal_vocabulary`
+    when the env-default Hive load raised — which silently substituted a
+    29-leaf generic vocabulary that did not align with any operator's
+    domain annotations.  Removing that fallback is a deliberate
+    correctness fix; reinstating it would re-open the same hours-of-
+    compute-wasted-on-wrong-vocab failure mode.
+
+    Guard the property at the source level: any future caller of
+    `load_universal_vocabulary` from inside `_load_vocabulary`'s body
+    must justify itself, and this test should be revisited.
+    """
     from atelier.classify import pipeline
     src = inspect.getsource(pipeline._load_vocabulary)
-    hive_pos = src.find("load_annotations_from_hive")
-    universal_pos = src.find("load_universal_vocabulary")
-    assert hive_pos != -1 and universal_pos != -1
-    assert hive_pos < universal_pos, (
-        "Hive fallback must appear before universal fallback in source"
+    # The docstring may mention `load_universal_vocabulary` to explain
+    # why the function deliberately does NOT call it — that's fine.
+    # What we forbid is an actual *call*: the substring followed by `(`.
+    assert "load_universal_vocabulary(" not in src, (
+        "_load_vocabulary must not call load_universal_vocabulary() as a "
+        "silent fallback; raise instead so callers see misconfiguration."
     )
 
 
