@@ -115,6 +115,45 @@ class MLArtifactSet(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class TaxonomyRegistry(Base):
+    """Administrative pointer to an enriched annotation collection in Qdrant.
+
+    PGlite holds *only* the pointer — Qdrant holds the vectors + payload
+    (one multi-vector point per annotation with structured JSON metadata).
+    Multiple versions of a single ``taxonomy_id`` may coexist; the
+    partial unique index ``idx_taxonomy_registry_one_current`` enforces
+    at most one ``status='current'`` row per taxonomy.
+
+    See ``docs/src/architecture/late-interaction-cosine.md``.
+    """
+
+    __tablename__ = "taxonomy_registry"
+
+    id = Column(String, primary_key=True, nullable=False)
+
+    # Logical taxonomy identifier (e.g., "default", "hive-poc/synth").
+    # Stable across versions; version captured separately below.
+    taxonomy_id = Column(String, nullable=False)
+
+    source_table = Column(String, nullable=False)
+    qdrant_collection = Column(String, nullable=False, unique=True)
+    qdrant_url = Column(String, nullable=True)
+
+    # Prompt template + verifier suite + enrichment-script semantic version.
+    augmentation_version = Column(String, nullable=False)
+
+    embedding_model = Column(String, nullable=False)
+    embedding_dim = Column(Integer, nullable=False)
+
+    # 'building' | 'current' | 'stale' | 'archived'
+    status = Column(String, nullable=False, default="building")
+
+    summary = Column(Text, nullable=True)
+
+    built_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now())
+
+
 class FSMRun(Base):
     """Classification pipeline run state."""
 
@@ -129,6 +168,10 @@ class FSMRun(Base):
     error = Column(Text, nullable=True)
     result_path = Column(Text, nullable=True)
     source_id = Column(String, nullable=True)  # FK → data_sources.id
+
+    # Late-interaction cosine lineage: which enriched annotation collection
+    # this run consumed.  NULL = legacy single-vector cosine path.
+    taxonomy_collection = Column(String, nullable=True)
 
 
 class ClassificationRun(Base):
