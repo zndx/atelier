@@ -17,6 +17,65 @@ changes; the upgrade notes call them out).
 
 ---
 
+## v0.4.0-rc2 — 2026-05-11
+
+Staging branch for the second `v0.4.0` release candidate.  Reconciles
+the three deployment branches (`release/v0.3.0`, `release/v0.4.0`,
+`deploy/v0.4.0-rc1`) onto trunk so the Cloudera proprietary header,
+the algorithmic engine work, and the ontology / SOTAB strategy land
+together for the rc2 soak.
+
+### What landed from the merge
+
+- **Cloudera proprietary header** swept across all source + docs
+  (from `release/v0.3.0` + `release/v0.4.0`).
+- **Algorithmic engine reconciliation** from `deploy/v0.4.0-rc1` —
+  parent-aware DST frame, hierarchical cosine mass, cross-subtree
+  cautious_code, ontology priors, governance cost model, cautious-
+  review three-way decision, per-vocabulary synth-trained SVM,
+  R7–R10 audit remediations, Embeddings Canvas reviewer's guide,
+  FSM Pipeline Phases walkthrough, Nautilus mid-run watcher.
+- **Ontology IRI canonicalization** — CCO shorthand vs canonical
+  IRI clarifications in the ontology README, TTL header, and
+  CCO module inventory note.
+- **SOTAB v2 Coverage Strategy** architecture doc + Ægir handoff
+  note (vocabulary / synth / grounding work moves to Ægir; Atelier
+  becomes a consumer of trained artifacts).
+
+### Standing issues (block GA)
+
+`just behave` surfaces ~11 pre-existing failures + ~17 errors that
+travel with the deploy-branch content.  None are merge-induced
+(verified — the only merge-induced drift was a stale
+`meta_tagging_steps` import, fixed at HEAD).  Outstanding triage:
+
+- **Bootstrap mass-function assertion** (`bootstrap.feature:18`) —
+  test expects LLM mass > 0.8 at confidence 0.9, but the
+  `8a5f3de` LLM-discount recalibration (0.10 → 0.15) makes the
+  actual mass 0.765.  Update the test threshold.
+- **Terminal line editor errors** (12 scenarios) — pass in
+  isolation, error in the full suite with
+  `RuntimeWarning: coroutine 'TerminalSession.handle_input' was
+  never awaited`.  Inter-feature event-loop pollution; isolate the
+  offending hook.
+- **Evidence-independence ontology-prior scenarios** (2 errors) —
+  need to confirm new step bindings load against the merged
+  classify surface.
+- **Infra scenarios** (health_postgres, devenv_logs, application
+  stack) — require a fully-up devenv stack at run time.
+- **Classify failures** (classification / coverage_guarantees /
+  experimentation / gpu_acceleration) — likely additional
+  threshold drift from the discount recalibrations.
+
+GA promotion requires all five clusters resolved or explicitly
+deferred with `@known-failure` tagging.
+
+### Upgrade notes
+
+No upgrade actions from rc1.  Version bump only.
+
+---
+
 ## v0.4.0-rc1 — 2026-04-28
 
 First release candidate for `v0.4.0`.  Bumps `v0.3.0-rc1` after CAI
