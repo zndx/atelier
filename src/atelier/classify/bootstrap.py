@@ -252,7 +252,7 @@ class IterationMetrics:
     coverage: float
     llm_calls: int
     # MC-aware metrics (populated when MC sampling is active)
-    frontier_columns: int = 0
+    sampled_columns: int = 0  # directly LLM-classified
     propagated_columns: int = 0
     escalated_columns: int = 0
     # Belief-gap convergence (primary convergence measure)

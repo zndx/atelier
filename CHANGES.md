@@ -17,6 +17,63 @@ changes; the upgrade notes call them out).
 
 ---
 
+## Unreleased
+
+### Terminology cleanup — "frontier" no longer overloaded
+
+The token *frontier* was overloaded across MC sampling, the excised M9
+in-loop SVM-on-LLM-labels retrain, and the legitimate Pareto /
+"frontier model" senses.  Multiple prior attempts to dial back the MC
+and M9 uses left the codebase mid-rename; this pass completes the
+cleanup.
+
+Renamed (operator-visible):
+
+- HOCON key `classify.monte_carlo.max_frontier_columns` →
+  `classify.monte_carlo.max_sampled_columns`.
+- Env var `ATELIER_MC_MAX_FRONTIER` → `ATELIER_MC_MAX_SAMPLED`.
+- Overlay key `mc_max_frontier_columns` → `mc_max_sampled_columns`.
+
+Renamed (internal):
+
+- `MCPlan.frontier_columns` → `MCPlan.sampled_columns`.
+- `MCConfig.max_frontier_columns` → `MCConfig.max_sampled_columns`.
+- `AtelierConfig.mc_max_frontier_columns` →
+  `AtelierConfig.mc_max_sampled_columns`.
+- `BootstrapState.frontier_columns` → `BootstrapState.sampled_columns`.
+- Result-dict keys `mc_frontier` / `mc_frontier_columns` → `mc_sampled` /
+  `mc_sampled_columns`.
+- BDD step text "frontier columns" → "sampled columns";
+  "frontier-tier labels" → "LLM-classified labels"; etc.
+
+Preserved (legitimate Sense A — AI-industry "frontier model" +
+Pareto-capability-evolution senses):
+
+- `terminal_catalog.py`, `gateway.py`, `terminal_models.feature` —
+  "frontier model" as the standard AI-industry term for
+  capability-leading LLMs.
+- `docs/src/architecture/pareto-capability-evolution.md` — the Pareto
+  sense the term is reserved for in CLAUDE.md.
+
+Preserved (literal disk artifact names):
+
+- `svm_frontier.pkl` filename + `LEGACY_SVM_FILENAME` constant in
+  `artifact_set.py`.  Surrounding docstrings reframed.
+
+Preserved (historical identifiers, qualified inline):
+
+- `train_svm_on_frontier_labels` — referenced as the historical M9
+  function name in deprecation notes.
+
+The brief in `docs/notes/2026-05-16/dst-reborn-brief.md` will use
+"directly-LLM-classified" or "LLM-classified labels" where it
+previously implied "frontier-tier".
+
+See the dynamic-annotations and no-silent-DST-degradation principles
+for the broader hygiene this cleanup fits into.
+
+---
+
 ## v0.4.0-rc2 — 2026-05-11
 
 Staging branch for the second `v0.4.0` release candidate.  Reconciles

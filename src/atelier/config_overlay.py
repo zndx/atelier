@@ -501,10 +501,10 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default_focus": True,
         "caption_template": "Guarantee {value} LLM samples per stratum — raise when rare categories are being missed; the dominant stratum still gets sample_fraction × corpus.",
     },
-    "mc_max_frontier_columns": {
-        "hocon_path": "classify.monte_carlo.max_frontier_columns",
-        "label": "Max Frontier Columns",
-        "description": "Hard cap on LLM-swept columns regardless of fraction",
+    "mc_max_sampled_columns": {
+        "hocon_path": "classify.monte_carlo.max_sampled_columns",
+        "label": "Max Sampled Columns",
+        "description": "Hard cap on directly-LLM-classified columns regardless of fraction",
         "group": "sampling",
         "type": "int",
         "min": 100,

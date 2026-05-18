@@ -21,10 +21,12 @@ writer.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from atelier.enrichment.llm_generator import (
@@ -67,6 +69,15 @@ class EnrichmentLoopConfig:
     skip_on_cache_hit: bool = True
     recreate_collection: bool = False  # set True for clean rebuilds
     dry_run: bool = False  # if True, skip Qdrant writes
+    # Per-row JSONL checkpoint path.  When None, auto-derives to
+    # ``build/enrichment/{collection}-{started_at}.jsonl`` so a long-
+    # running enrichment becomes inspectable via the shared filesystem
+    # (one JSON event per row, append-only, tail-able mid-run).  Pass
+    # an empty string to disable checkpointing explicitly.  Default is
+    # the auto path — never silently off, consistent with the no-
+    # silent-degradation discipline: an unobservable long-running
+    # production process IS a degraded operating mode.
+    checkpoint_path: str | None = None
 
 
 @dataclass
@@ -169,15 +180,47 @@ def run_enrichment(
             recreate=config.recreate_collection,
         )
 
+    # Resolve the checkpoint path.  None → auto-derive a NFS-visible
+    # path under build/enrichment/; "" → explicit disable; anything
+    # else is used verbatim.  The directory is created eagerly so the
+    # first event lands cleanly.
+    checkpoint_file: Path | None = _resolve_checkpoint_path(
+        config.checkpoint_path, collection=collection, started_at=started_at,
+    )
+    if checkpoint_file is not None:
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        _emit_checkpoint(checkpoint_file, {
+            "event": "loop_start",
+            "ts": started_at,
+            "collection": collection,
+            "taxonomy_id": config.taxonomy_id,
+            "augmentation_version": config.augmentation_version,
+            "embedding_model": config.embedding_model,
+            "embedding_dim": config.embedding_dim,
+            "taxonomy_version_hash": version_hash,
+            "source_row_count": len(source_rows),
+            "max_attempts_per_row": config.max_attempts_per_row,
+            "skip_on_cache_hit": config.skip_on_cache_hit,
+            "dry_run": config.dry_run,
+        })
+        logger.info("Enrichment checkpoint: %s", checkpoint_file)
+
     result = LoopResult(
         collection_name=collection,
         taxonomy_version_hash=version_hash,
         started_at=started_at,
     )
 
-    taxonomy_context = {
-        "all_codes": list(valid_tag_codes) if valid_tag_codes else [],
-        "row_count": len(source_rows),
+    # Pre-index the taxonomy tree for efficient per-row context building.
+    by_code = {r.get("code"): r for r in source_rows if r.get("code")}
+    children_of: dict[str | None, list[dict]] = {}
+    for r in source_rows:
+        pc = r.get("parent_code")
+        children_of.setdefault(pc, []).append(r)
+
+    # A code is a leaf iff it has no children in the source taxonomy.
+    codes_with_children = {
+        pc for pc in children_of if pc is not None and pc in by_code
     }
 
     for row in source_rows:
@@ -186,7 +229,46 @@ def run_enrichment(
         expected_parent = (
             expected_parent_path_for(row) if expected_parent_path_for else None
         )
-        row_context = {**taxonomy_context, "expected_parent_path": expected_parent}
+
+        # Build rich per-row taxonomy context for the prompt.
+        parent_code = row.get("parent_code")
+        siblings = [
+            {"code": s.get("code"), "label": s.get("label")}
+            for s in children_of.get(parent_code, [])
+            if s.get("code") != row.get("code")
+        ]
+        children = [
+            {"code": c.get("code"), "label": c.get("label")}
+            for c in children_of.get(row.get("code"), [])
+        ]
+        is_leaf = row.get("code") not in codes_with_children
+
+        # Cross-level confusables: uncle/aunt tags (siblings of ancestors)
+        # that may carry visually similar values.
+        cross_level: list[dict] = []
+        cur_parent = parent_code
+        for _ in range(8):  # Walk up max 8 levels
+            if not cur_parent or cur_parent not in by_code:
+                break
+            grandparent_code = by_code[cur_parent].get("parent_code")
+            for s in children_of.get(grandparent_code, []):
+                if s.get("code") != cur_parent:
+                    cross_level.append(
+                        {"code": s.get("code"), "label": s.get("label")}
+                    )
+            cur_parent = grandparent_code
+        # Limit to 20 most relevant
+        cross_level = cross_level[:20]
+
+        row_context = {
+            "valid_tag_codes": list(valid_tag_codes) if valid_tag_codes else [],
+            "siblings": siblings,
+            "children": children,
+            "cross_level_confusables": cross_level,
+            "is_leaf": is_leaf,
+            "row_count": len(source_rows),
+            "expected_parent_path": expected_parent,
+        }
 
         # Cache-hit short circuit
         if config.skip_on_cache_hit and not config.dry_run:
@@ -199,11 +281,12 @@ def run_enrichment(
                 source_row_hash_value=sr_hash,
             )
             if point_exists(qdrant_client, collection=collection, point_id=pid):
-                result.rows.append(
-                    RowOutcome(
-                        code=code, status="cache_hit", attempts=0, point_id=pid
-                    )
+                outcome = RowOutcome(
+                    code=code, status="cache_hit", attempts=0, point_id=pid
                 )
+                result.rows.append(outcome)
+                if checkpoint_file is not None:
+                    _emit_checkpoint(checkpoint_file, _outcome_event(outcome))
                 continue
 
         outcome = _enrich_one_row(
@@ -219,14 +302,83 @@ def run_enrichment(
             collection=collection,
         )
         result.rows.append(outcome)
+        if checkpoint_file is not None:
+            _emit_checkpoint(checkpoint_file, _outcome_event(outcome))
 
     result.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if checkpoint_file is not None:
+        _emit_checkpoint(checkpoint_file, {
+            "event": "loop_end",
+            "ts": result.finished_at,
+            "collection": collection,
+            "counts": result.counts,
+            "rows_total": len(result.rows),
+        })
     logger.info(
         "Enrichment loop done: collection=%s outcomes=%s",
         collection,
         result.counts,
     )
     return result
+
+
+# ── Checkpoint helpers ────────────────────────────────────────────
+
+
+def _resolve_checkpoint_path(
+    configured: str | None,
+    *,
+    collection: str,
+    started_at: str,
+) -> Path | None:
+    """Resolve the configured checkpoint setting to an actual Path.
+
+    Semantics:
+      - ``None``  → auto-derive ``build/enrichment/{coll}-{ts}.jsonl``
+      - ``""``    → explicit disable (returns None)
+      - else      → use verbatim
+    """
+    if configured == "":
+        return None
+    if configured is None:
+        # NFS-visible default.  Timestamp tagged so concurrent or
+        # restarted runs land in distinct files; collection name
+        # makes the file's target identifiable at a glance.
+        safe_ts = started_at.replace(":", "")
+        return Path("build/enrichment") / f"{collection}-{safe_ts}.jsonl"
+    return Path(configured)
+
+
+def _emit_checkpoint(path: Path, event: dict) -> None:
+    """Append one JSON event to the checkpoint file.
+
+    Append-only + line-buffered so ``tail -f`` reads each event as it
+    lands.  Failures here are logged at WARNING and swallowed — a
+    flaky NFS write must never crash the enrichment loop.
+    """
+    try:
+        line = json.dumps(event, default=str)
+        with path.open("a", buffering=1) as fh:
+            fh.write(line + "\n")
+    except Exception as exc:  # noqa: BLE001 — observability is best-effort
+        logger.warning("Checkpoint write failed (continuing): %s", exc)
+
+
+def _outcome_event(outcome: RowOutcome) -> dict:
+    """Project a RowOutcome to a JSON-safe checkpoint event."""
+    return {
+        "event": "row",
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "code": outcome.code,
+        "status": outcome.status,
+        "attempts": outcome.attempts,
+        "verifier_pass": (
+            f"{outcome.verifier_checks_passed}/{outcome.verifier_checks_total}"
+            if outcome.verifier_checks_total else None
+        ),
+        "point_id": outcome.point_id,
+        "failure_reason": outcome.failure_reason or None,
+    }
 
 
 def _enrich_one_row(

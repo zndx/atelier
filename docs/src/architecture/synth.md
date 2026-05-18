@@ -144,9 +144,9 @@ data/synth/*.csv  +  ICE.* reference labels
 ```
 
 > **Historical note** — earlier revisions of this design ran a
-> mid-loop `train_svm_on_frontier_labels` that retrained the SVM on
-> live LLM labels and hot-swapped the result into the active model
-> slot.  That path was excised on 2026-05-04 (commits 8627c2c,
+> mid-loop `train_svm_on_frontier_labels` (historical function name)
+> that retrained the SVM on live LLM labels and hot-swapped the
+> result into the active model slot.  That path was excised on 2026-05-04 (commits 8627c2c,
 > 5199379, cc59d01) for the source-independence reasons documented
 > in `ontology_alignment.py`.  The current design preserves the
 > SVM's TF-IDF independence at the feature and label level; the
@@ -176,8 +176,9 @@ classification accuracy impact measured:
 - High SAGE value = feature is critical for classification
 - Low SAGE value = feature adds little discriminative power
 
-SAGE runs on the frontier sample when MC sampling is active
-(representative subset), reducing computation at scale.
+SAGE runs on the directly-LLM-classified sampled subset when MC
+sampling is active (representative by stratification design),
+reducing computation at scale.
 
 ## SHAP Per-Item Attribution
 

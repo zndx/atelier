@@ -150,40 +150,57 @@ The SVM is trained **once** on the synthetic corpus (see
 features and labels keyed on bundled-ontology ICE.* leaves from
 `synth_generators.GENERATORS`.  At pipeline runtime, the ICE.*
 predictions are translated into the user's taxonomy via the cached
-LLM-mediated alignment in `atelier.classify.ontology_alignment`.
+**subsumption-prediction alignment** in
+`atelier.classify.subsumption_alignment` — sentence-transformer
+cosine similarity between ICE concept signatures and enriched
+annotation payloads from the Qdrant taxonomy collection.  The legacy
+LLM-mediated alignment was retired in the P7 intervention (see
+[DST Evidence Independence](./dst-evidence-independence.md)).
+
+The alignment targets **every user node — leaves AND internal nodes**
+(per the dynamic-annotations principle that every node is a
+first-class tagging target).  An ICE leaf may legitimately align to a
+user internal node when the user's vocabulary covers a concept family
+without a leaf-specific equivalent.  Restricting alignment to user
+leaves only would silently reject the parent-family fallback that is
+the architecturally-correct behavior.
 
 The translation step is what restored the SVM as useful evidence for
 non-OOTB user vocabularies — pre-alignment, the SVM emitted ICE
 codes that didn't appear in the user-taxonomy frame and silently
-contributed nothing.  See `ontology_alignment.py` module docstring
-for the independence rationale and known caveats.
+contributed nothing.  See `subsumption_alignment.py` module docstring
+for the full independence argument.
 
 > **Historical note (2026-05-04 refactor).**  Earlier revisions of
-> this design ran a mid-loop `train_svm_on_frontier_labels` that
-> retrained the SVM on live LLM labels and hot-swapped the result
-> into the active model slot — labelled "M9 frontier-SVM
-> retraining" in commit history.  That path was excised on
+> this design ran a mid-loop `train_svm_on_frontier_labels` (historical
+> function name) that retrained the SVM on live LLM labels and
+> hot-swapped the result into the active model slot — labelled
+> "M9 incremental SVM retraining" in commit history.  That path was excised on
 > 2026-05-04 (commits 8627c2c, 5199379, cc59d01) for source-
 > independence reasons: the per-column LLM label copying made the
-> SVM strongly non-distinct with the LLM source under Denoeux 2008,
-> and the docstring's "different models for training vs. fusion"
-> defense only held on multi-backend deployments.  The current
-> design preserves the SVM's TF-IDF independence at the feature
-> and label level; the only LLM dependency is the per-vocabulary
-> alignment table.
+> SVM strongly non-distinct with the LLM source under Denoeux 2008.
+> The subsequent LLM-mediated alignment introduced a vocabulary-level
+> shared error mode (the alignment-time LLM and the runtime LLM share
+> weights), which the P7 subsumption-prediction intervention
+> eliminates — runtime alignment now uses sentence-transformer
+> embeddings rather than the runtime LLM.  The SVM's TF-IDF
+> independence at the feature and label level is preserved; the
+> remaining weak non-distinctness is the shared enrichment-LLM
+> upstream (offline-generated annotations), structurally identical to
+> the late-interaction cosine source's coupling.
 
 ##### Implementation
 
 - `train_svm()` in `ml_train.py` — synth-only training, persists to
   `build/models/svm.pkl` (label space: ICE.* leaves)
-- `ontology_alignment.build_alignment()` — once-per-(vocab, model)
-  ICE → user-code mapping via the existing LLM backend; cached at
-  `build/cache/alignment/<sha256>.json`
-- `ontology_alignment.translate_proba()` — applied at the SVM
-  evidence site in `pipeline._classify_column` before
-  `mass_functions.svm_to_mass`
-- Discount: `classify.discounts.svm = 0.30` (was 0.55 in M9 era)
-  reflects the weakly-non-distinct regime.
+- `ontology_alignment.build_alignment()` — once-per-(vocab, embedding_model)
+  ICE → user-code mapping via subsumption prediction (sentence-transformer
+  cosine similarity between ICE concept signatures and enriched annotation
+  payloads from Qdrant); cached at `build/cache/alignment/<sha256>.json`
+- Discount: `classify.discounts.svm = 0.22` (was 0.30 under LLM-mediated
+  alignment, 0.55 in M9 era) reflects the enrichment-mediated
+  subsumption-prediction regime — weakly non-distinct via shared
+  enrichment-LLM upstream only.
 
 ### Dempster's Rule of Combination
 
@@ -282,7 +299,7 @@ IDLE → LOADING_VOCAB → DISCOVERING → SAMPLING → LLM_SWEEP → VALIDATING
 
 MC sampling (when corpus > 200 columns):
 SAMPLING includes pre-classify → stratify → select MC sample
-LLM_SWEEP classifies frontier columns only → propagate labels to remainder
+LLM_SWEEP classifies the sampled subset only → propagate labels to remainder
 ```
 
 State transitions are persisted to PostgreSQL. The Status page polls
@@ -604,6 +621,6 @@ Environment variable overrides: `ATELIER_DISCOUNT_COSINE`, `ATELIER_DISCOUNT_SVM
 | **M7** | Monte Carlo stratified sampling, label propagation, background SHAP | Done |
 | **M8** | GPU acceleration (NVIDIA driver symlink, batch encoding), meta-tagging overlay | Done |
 | **M8.5** | SVM signals alignment (Pipeline+FeatureUnion adoption, evidence independence documentation) | Done |
-| **M9** | Incremental SVM training on frontier-tier labels (cross-model distillation via MC sampling) | Done |
+| **M9** | Incremental SVM training on LLM-classified labels (cross-model distillation via MC sampling) — *subsequently excised, see 2026-05-04 historical note above* | Done |
 | **M10** | Phase Gate #2 — belief-gap convergence pivot, Cautious-Code Review, TreeSHAP per-feature attribution, reasoning-trace citation analyzer (+9 pts iterative gain), 97.8% phase-gate validation on meta-tagging | Done |
 | M11 | MLflow experiment tracking, Hive data source integration | [Proposed](./integrations.md) |

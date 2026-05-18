@@ -221,15 +221,15 @@ def _install_fit_to_llm_catboost(
     This is the hook that makes the LLM-trained CatBoost auditable from
     the run directory alone.
 
-    Note: there is no per-run SVM analogue.  The M9 frontier-SVM
-    retrain (``train_svm_on_frontier_labels``) was excised in commit
-    5199379 because training the SVM on per-column LLM votes broke
-    Denoeux 2008 source-independence.  The active SVM is the
-    synth-trained classifier at ``build/models/svm.pkl`` (built by
-    ``scripts/train_classifiers.py`` against the bundled-ontology
+    Note: there is no per-run SVM analogue.  The M9 SVM-on-LLM-labels
+    retrain (``train_svm_on_frontier_labels`` — historical name) was
+    excised in commit 5199379 because training the SVM on per-column
+    LLM votes broke Denoeux 2008 source-independence.  The active SVM
+    is the synth-trained classifier at ``build/models/svm.pkl`` (built
+    by ``scripts/train_classifiers.py`` against the bundled-ontology
     synth corpus); per-vocabulary alignment happens at runtime via
     ``ontology_alignment.translate_proba``.  Old run directories may
-    still carry a ``svm_frontier.pkl`` from before the excision —
+    still carry a ``svm_frontier.pkl`` file from before the excision —
     those files are vestiges and are no longer produced.
     """
     min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
@@ -1023,9 +1023,7 @@ def run_classification_pipeline(
         try:
             svm_alignment = build_alignment(
                 category_set=category_set,
-                llm_backend=llm_backend,
-                system_prompt=system_prompt,
-                model_name=getattr(cfg, "classify_subagent_model", None) or "unknown",
+                cfg=cfg,
             )
         except Exception as exc:
             logger.warning(
@@ -1096,16 +1094,17 @@ def run_classification_pipeline(
             strata = _stratify(pre_results, mc_cfg)
             mc_plan = _select_sample(strata, mc_cfg, total=total_columns)
             logger.info(
-                "MC plan: %d frontier + %d propagation across %d strata",
-                len(mc_plan.frontier_columns),
+                "MC plan: %d sampled + %d propagation across %d strata",
+                len(mc_plan.sampled_columns),
                 len(mc_plan.propagation_columns),
                 len(mc_plan.strata),
             )
 
         # ── LLM SWEEP ────────────────────────────────────────────
-        # When MC is active, sweep only frontier columns
+        # When MC is active, the LLM sweep covers only the sampled subset;
+        # propagation later extends coverage to the remainder.
         sweep_columns = (
-            list(mc_plan.frontier_columns)
+            list(mc_plan.sampled_columns)
             if mc_plan and not mc_plan.is_passthrough
             else column_names
         )
@@ -1113,7 +1112,7 @@ def run_classification_pipeline(
         fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
             "columns_total": total_columns,
             "phase": "llm_sweep",
-            "mc_frontier": len(sweep_columns),
+            "mc_sampled": len(sweep_columns),
         })
 
         state = BootstrapState()
@@ -1150,7 +1149,7 @@ def run_classification_pipeline(
                 elapsed_s = round(time.time() - sweep_started, 1)
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "columns_total": total_columns,
-                    "mc_frontier": len(sweep_columns),
+                    "mc_sampled": len(sweep_columns),
                     "llm_labeled": p.get("columns_labeled", 0),
                     "llm_calls": p.get("llm_calls_total", 0),
                     "sweep_phase": p.get("phase"),
@@ -1674,8 +1673,8 @@ def run_classification_pipeline(
         # Monte Carlo sampling metadata
         summary["mc_enabled"] = mc_plan is not None and not mc_plan.is_passthrough
         summary["mc_strata"] = len(mc_plan.strata) if mc_plan else 0
-        summary["mc_frontier_columns"] = (
-            len(mc_plan.frontier_columns) if mc_plan else total_columns
+        summary["mc_sampled_columns"] = (
+            len(mc_plan.sampled_columns) if mc_plan else total_columns
         )
         summary["mc_propagated_columns"] = state.propagated_count
         summary["mc_escalated_columns"] = state.escalated_count
@@ -2781,8 +2780,9 @@ def _run_feature_analysis(
     contribution to the model's own decisions, not a curated reference.
 
     When MC is active and ``classify_background_analysis`` is true, SHAP runs
-    in a background daemon thread. SAGE runs on the frontier sample only
-    (representative subset).
+    in a background daemon thread.  SAGE runs on the directly-LLM-classified
+    (sampled) subset only — representative of the full corpus by the MC
+    stratification design.
     """
     all_features = [
         extract_features(
@@ -2831,20 +2831,21 @@ def _run_feature_analysis(
             pass
 
     if cfg.classify_sage_enabled or sage_auto:
-        # When MC active, run SAGE on frontier sample only (representative)
+        # When MC active, run SAGE on the directly-classified sampled subset
+        # only — representative of the full corpus by stratification design.
         sage_features = all_features
         sage_classifications = classifications
         if mc_plan and not mc_plan.is_passthrough:
-            frontier_set = mc_plan.frontier_columns
+            sampled_set = mc_plan.sampled_columns
             sage_pairs = [
                 (feat, cls) for feat, cls in zip(all_features, classifications)
-                if cls["column_name"] in frontier_set
+                if cls["column_name"] in sampled_set
             ]
             if sage_pairs:
                 sage_features, sage_classifications = zip(*sage_pairs)
                 sage_features = list(sage_features)
                 sage_classifications = list(sage_classifications)
-                logger.info("SAGE: using %d frontier columns (of %d total)",
+                logger.info("SAGE: using %d sampled columns (of %d total)",
                             len(sage_features), len(all_features))
 
         try:

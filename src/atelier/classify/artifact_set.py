@@ -34,13 +34,13 @@ the run dir so Extend Classification can replay inference on new
 tables without retraining and so historical runs are reproducible
 from the artifact set alone.
 
-The ``svm_frontier.pkl`` slot is a vestige: the M9 frontier-SVM
-retrain (``train_svm_on_frontier_labels``) was excised in commit
-5199379 because training the SVM on per-column LLM votes broke
-Denoeux 2008 source-independence.  No new run produces these files.
-The reader paths below detect them only when ``svm.pkl`` is absent,
-so artifact-set rows reconstructed for pre-excision runs continue to
-populate ``svm_path``.
+The ``svm_frontier.pkl`` slot is a vestige: the M9 in-loop SVM-on-
+LLM-labels retrain (``train_svm_on_frontier_labels`` — historical
+function name) was excised in commit 5199379 because training the
+SVM on per-column LLM votes broke Denoeux 2008 source-independence.
+No new run produces these files.  The reader paths below detect them
+only when ``svm.pkl`` is absent, so artifact-set rows reconstructed
+for pre-excision runs continue to populate ``svm_path``.
 
 This module is the single point of knowledge about that layout — when
 the pipeline writes new artifact files or the layout changes, only the
@@ -67,12 +67,15 @@ CATBOOST_FILENAME = "catboost_fit_to_llm.cbm"
 # via ``ml_train.train_svm_for_vocab`` from the BFO/CCO synth corpus
 # relabeled through the ICE.* → user-code alignment.
 SVM_FILENAME = "svm.pkl"
-# LEGACY: ``svm_frontier.pkl`` was the M9 frontier-SVM artifact
-# (``train_svm_on_frontier_labels``), excised in 5199379 for Denoeux
-# 2008 source-independence reasons.  Pre-excision runs may still
-# carry the file; the reader paths below check ``LEGACY_SVM_FILENAME``
-# only when ``SVM_FILENAME`` is absent so historical artifact-set
-# rows continue to populate ``svm_path`` after the rename.
+# LEGACY: ``svm_frontier.pkl`` was the M9 in-loop SVM-on-LLM-labels
+# artifact (``train_svm_on_frontier_labels`` — historical function
+# name), excised in 5199379 for Denoeux 2008 source-independence
+# reasons.  Pre-excision runs may still carry the file; the reader
+# paths below check ``LEGACY_SVM_FILENAME`` only when ``SVM_FILENAME``
+# is absent so historical artifact-set rows continue to populate
+# ``svm_path`` after the rename.  Constant name kept as
+# ``LEGACY_SVM_FILENAME`` (rather than renaming) so the literal disk
+# path stays unambiguous.
 LEGACY_SVM_FILENAME = "svm_frontier.pkl"
 UMAP_FILENAME = "umap.pkl"
 

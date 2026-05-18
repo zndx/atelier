@@ -116,7 +116,12 @@ def point_cache_key(
         embedding_model,
         source_row_hash_value,
     ])
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    # Qdrant requires point IDs to be unsigned integers or UUIDs.
+    # Derive a deterministic UUID (version 5 style) from the SHA256
+    # by taking the first 16 bytes and formatting as a UUID.
+    digest = hashlib.sha256(blob.encode("utf-8")).digest()
+    import uuid as _uuid
+    return str(_uuid.UUID(bytes=digest[:16]))
 
 
 # ── Point construction ────────────────────────────────────────────
@@ -275,10 +280,18 @@ def ensure_collection(
     """
     from qdrant_client.http import models as qm
 
-    vectors_config = {
-        name: qm.VectorParams(size=embedding_dim, distance=qm.Distance[distance.upper()])
-        for name in ALL_VECTOR_NAMES
-    }
+    dist = qm.Distance[distance.upper()]
+    vectors_config = {}
+    for name in SINGLE_VECTOR_NAMES:
+        vectors_config[name] = qm.VectorParams(size=embedding_dim, distance=dist)
+    for name in MULTI_VECTOR_NAMES:
+        vectors_config[name] = qm.VectorParams(
+            size=embedding_dim,
+            distance=dist,
+            multivector_config=qm.MultiVectorConfig(
+                comparator=qm.MultiVectorComparator.MAX_SIM,
+            ),
+        )
 
     exists = client.collection_exists(collection)
     if exists and recreate:

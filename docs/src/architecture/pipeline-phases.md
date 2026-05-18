@@ -57,7 +57,7 @@ below.
 | 1 | **`LOADING_VOCAB`** | Load the user-supplied taxonomy (annotations CSV / Hive table / DB) and validate: label collisions, duplicate codes, orphaned aliases, parent-aware frame structure. | `HierarchicalCategorySet`, `FrameOfDiscernment` |
 | 2 | **`DISCOVERING`** | Probe the data source via `cml.data_v1` (Hive), the meta-tagging mount (CSV), or the bundled fixtures to enumerate the tables in scope. | `list[str]` of table names |
 | 3 | **`SAMPLING`** | For each discovered table, sample column metadata: bare names, types, ~5 representative values, true `COUNT(DISTINCT)` bounded by the sample limit, null ratio, sibling list. Reference-key columns (`attr_1_2_3_*` answer-key shape) are filtered out so they don't trivially leak into evaluation. | `list[ColumnSample]` (canonical bare names — see [`ColumnSample` invariant](#columnsample-canonical-form)) |
-| 4 | **`LLM_SWEEP`** | Claude classifies each frontier-tier column into the user vocabulary. Iteration 1 sweeps every column (or the [Monte Carlo](./monte-carlo.md) frontier — a stratified subset for large corpora; non-frontier columns get label propagation later). Iterations 2…N revisit only the columns flagged for re-look in the previous `VALIDATING` pass. | `state.labels[qualified_name] → category_code`, plus per-column LLM confidence |
+| 4 | **`LLM_SWEEP`** | Claude classifies each directly-targeted column into the user vocabulary. Iteration 1 sweeps every column (or the [Monte Carlo](./monte-carlo.md) sampled subset — a stratified slice for large corpora; the remaining columns get label propagation later). Iterations 2…N revisit only the columns flagged for re-look in the previous `VALIDATING` pass. | `state.labels[qualified_name] → category_code`, plus per-column LLM confidence |
 | 5 | **`VALIDATING`** | ML re-validation: CatBoost (fit-to-LLM during the loop) and the synth-trained SVM (translated through the LLM-mediated ICE→user-vocab alignment) score the same columns independently of the LLM. Per-column DST mass with conflict K is computed under the parent-aware frame. The disagreement set — driven primarily by belief-gap `Pl − Bel`, with K and coverage as secondary signals — feeds the next iteration's revisit batch. The loop exits when convergence criteria are satisfied; otherwise it re-enters `LLM_SWEEP`. | `state.ml_prediction`, `state.ml_belief`, `state.ml_plausibility`, `state.ml_conflict`, the next iteration's disagreement list |
 | 6 | **`CLASSIFYING`** | Final per-column DST evidence fusion. Up to six evidence sources combine: `name_match`, `pattern`, `cosine`, `llm`, `catboost`, `svm`. Each produces a mass function over the parent-aware frame; per-column predicted code, belief, plausibility, and conflict are computed here. | `classifications: list[dict]` (each entry shaped as `classifications.json` rows) |
 | 7 | **`FUSING`** | Combine per-column mass functions via the configured fusion strategy. `dempster` normalizes conflict by `(1 − K)`; `yager` redirects conflict mass to Θ (ignorance). Cautious-code review (when enabled) runs *here* — backing off over-specified leaf predictions whose belief sits below the commit threshold to a parent code where it does. | Headline classification per column; `cautious_review.json` (when enabled) |
@@ -68,8 +68,10 @@ below.
 The FSM defines two states that the standard inference run does not
 visit — `GENERATING_SYNTH` and `TRAINING`.  These belong to the
 offline [synth-corpus generation + SVM-training flow](./synth.md) that
-produces the bundled `svm_frontier.pkl` artifact, and are reachable
-from `SAMPLING` only on the explicit synth-generate code path.
+produces the bundled SVM artifact (legacy filename
+``svm_frontier.pkl`` retained on disk for backward compatibility with
+older run directories), and are reachable from `SAMPLING` only on the
+explicit synth-generate code path.
 
 ## Iteration loop: `LLM_SWEEP ⇄ VALIDATING` is the algorithm
 
@@ -80,8 +82,8 @@ algorithm.**
 
 Each cycle:
 
-1. **`LLM_SWEEP`** labels (or re-labels) the frontier on iteration 1,
-   the disagreement set on iterations 2…N.
+1. **`LLM_SWEEP`** labels (or re-labels) the directly-targeted
+   column set on iteration 1, the disagreement set on iterations 2…N.
 2. **`VALIDATING`** runs ML re-validation, computes per-column belief,
    plausibility, and conflict under the parent-aware DST frame, and
    identifies the next disagreement set.
@@ -173,7 +175,7 @@ from `build/results/{run_id}/`, indexed by the phase that produced it:
 | Run start | `settings_snapshot.json` | The config that drove the run — `source_id`, all overlay values at start, default values, the resolved settings the pipeline actually used. |
 | `LLM_SWEEP` ⇄ `VALIDATING` | `column_trajectories.json` | Per-column history across iterations: label changes, ML predictions, belief/plausibility/conflict trajectory, the `revisited` flag per iteration. |
 | `LLM_SWEEP` ⇄ `VALIDATING` | `catboost_fit_to_llm.cbm` + `.classes.json` | CatBoost fit to the in-loop LLM labels. Persisted for [Extend runs](./ml-artifacts.md). |
-| `LLM_SWEEP` ⇄ `VALIDATING` | `svm_frontier.pkl` + `.classes.json` | Synth-trained SVM with the in-run LLM-mediated alignment. Persisted for Extend runs. |
+| `LLM_SWEEP` ⇄ `VALIDATING` | `svm_frontier.pkl` + `.classes.json` | Synth-trained SVM with the in-run LLM-mediated alignment. Persisted for Extend runs. (Filename retained for backward compatibility; underlying model is the synth-trained SVM, not the excised M9 in-loop retrain.) |
 | `CLASSIFYING` + `FUSING` | `classifications.json` | The per-column output: predicted code, belief, plausibility, conflict, full evidence-source mass distributions, belief path, llm/ML/cautious codes. The headline corpus result. |
 | `FUSING` | `cautious_review.json` | Cautious Review skill audit (only when enabled). |
 | `EVALUATING` | `evaluation_report.json` | Corpus-level metrics: accuracy, per-category precision/recall, K distribution, gap distribution, INOS residual count. |

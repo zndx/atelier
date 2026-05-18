@@ -77,7 +77,7 @@ def step_min_strata(context, n):
 @then("the MC plan should be passthrough")
 def step_plan_passthrough(context):
     assert context.mc_plan.is_passthrough, (
-        f"Expected passthrough, got frontier={len(context.mc_plan.frontier_columns)}, "
+        f"Expected passthrough, got sampled={len(context.mc_plan.sampled_columns)}, "
         f"total={context.mc_plan.total_columns}"
     )
 
@@ -85,24 +85,25 @@ def step_plan_passthrough(context):
 @then("the MC plan should NOT be passthrough")
 def step_plan_not_passthrough(context):
     assert not context.mc_plan.is_passthrough, (
-        f"Expected active MC, but all {context.mc_plan.total_columns} columns are frontier"
+        f"Expected active MC, but all {context.mc_plan.total_columns} "
+        "columns were sampled (passthrough)"
     )
 
 
-@then("frontier columns should be a subset of all columns")
-def step_frontier_subset(context):
+@then("sampled columns should be a subset of all columns")
+def step_sampled_subset(context):
     all_cols = set(context.mc_column_names)
-    assert context.mc_plan.frontier_columns.issubset(all_cols), (
-        "Frontier columns contain names not in corpus"
+    assert context.mc_plan.sampled_columns.issubset(all_cols), (
+        "Sampled columns contain names not in corpus"
     )
 
 
-@then("frontier + propagation should cover all columns")
+@then("sampled + propagation should cover all columns")
 def step_full_coverage(context):
-    covered = context.mc_plan.frontier_columns | context.mc_plan.propagation_columns
+    covered = context.mc_plan.sampled_columns | context.mc_plan.propagation_columns
     all_cols = set(context.mc_column_names)
     assert covered == all_cols, (
-        f"Coverage gap: {all_cols - covered} columns not in frontier or propagation"
+        f"Coverage gap: {all_cols - covered} columns not in sampled or propagation"
     )
 
 
@@ -117,6 +118,6 @@ def step_mc_config_defaults(context):
     # — MC passthrough mode where every column goes to the LLM.
     assert mc.sample_fraction == 1.00
     assert mc.min_per_stratum == 3
-    assert mc.max_frontier_columns == 500
+    assert mc.max_sampled_columns == 500
     assert mc.propagation_threshold == 0.85
     assert mc.propagation_discount == 0.30

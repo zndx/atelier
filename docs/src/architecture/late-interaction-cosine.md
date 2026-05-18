@@ -235,34 +235,106 @@ comparison and rollback.
 
 ## Enrichment pipeline (high-level)
 
-Detailed in companion scripts (`scripts/enrich_annotations.py`, P2).
+Detailed in `scripts/enrich_annotations.py` (P2) and the
+`atelier.enrichment` package.  Vocabulary identity is *dynamic*:
+operators select a `(connection, database, annotations_table)`
+triple at runtime; the pipeline must not encode the count, names,
+or structure of the currently-loaded set as intrinsic.  The single
+universal is that **every node — leaf or internal — is a first-class
+tagging target**, so both leaf and internal nodes receive enrichment.
+
 The shape:
 
-1. **Read** source taxonomy rows from PGlite (`default.annotations`
-   or user-selected equivalent).
-2. **For each annotation**, run the Agent SDK enrichment loop:
-   - Generate `prototype_values`, validate against any declared
-     `value_patterns`; reject + retry on mismatch.
-   - Generate `value_patterns`, validate that each compiles and that
-     `prototype_values` match at least one.
-   - Generate `name_hints`, validate as non-empty strings; flag
-     overlap with confusable tags' hints.
-   - Generate `anti_examples`, validate that each `confusable_tag`
-     exists in the taxonomy.
-   - Generate `parent_path` from the taxonomy structure (deterministic;
-     no LLM needed) and confirm the LLM's reasoning is consistent
-     with it.
+1. **Read** source taxonomy rows from the active annotations table
+   selected by the operator at runtime.  No vocabulary identity
+   is hardcoded.
+2. **For each node** (leaf or internal), run the enrichment loop:
+   - Build a generation prompt with parent-aware framing for
+     internal nodes (children listed, "what does a column tagged at
+     this generality look like without specializing to a child") or
+     leaf-aware framing for leaves (sibling-discriminative patterns,
+     concrete prototype values).
+   - Call the **provider-co-located** generator (see below) to
+     produce the six-field structured payload.
+   - Run the deterministic verifier suite
+     (`atelier.enrichment.verifiers`).  Failed checks become
+     verifier feedback that is fed back into the next generation
+     attempt up to `enrichment.max_attempts`.
+   - Compute `parent_path` deterministically from the taxonomy
+     structure (no LLM needed) and confirm the LLM's reasoning is
+     consistent with it.
 3. **Compute embeddings** for each named vector using the configured
    embedding model.
 4. **Write** the multi-vector point + payload to Qdrant, keyed by the
-   content-addressed cache key.
-5. **Update** the PGlite `taxonomy_registry` row to record the
-   build (taxonomy_id, augmentation_version, collection name,
-   `built_at`, status).
+   content-addressed cache key.  Idempotent: same `(vocabulary
+   content hash, augmentation_version, embedding_model, source_row
+   hash)` quadruple → same point ID → no redundant work on partial
+   rebuilds.
+5. **Update** the PGlite `taxonomy_registry` row to record the build
+   (taxonomy_id, augmentation_version, collection name, `built_at`,
+   status).  The registry is an *administrative pointer* — it
+   records *that* a collection exists and *where*, never the
+   primary content.
 
 This pipeline satisfies the LLM-mediated reference artifact bar
 (audited via memory): every output is procedurally reproducible from
 its inputs and falsifiable by the verifier suite.
+
+### Provider co-location with classify
+
+The enrichment generator does NOT introduce a separate provider
+knob.  It reads `cfg.classify_llm_backend` and uses the same
+backend the classification path uses — operators manage one set of
+credentials, one cost regime, one billing surface.  Within that
+backend, the generator selects the strongest reasoning model
+available, because per-node generation is single-shot and
+benefits from extended deliberation on structural taxonomy
+judgments (sibling discrimination, prototype induction, regex
+synthesis).
+
+Selection rule (highest priority first), implemented in
+`atelier.enrichment.model_resolver.resolve_enrichment_model`:
+
+1. `cfg.enrichment_model_override` (env: `ATELIER_ENRICHMENT_MODEL`)
+   — explicit operator choice, used verbatim.
+2. Per-backend apex constant when the platform owns the model
+   identity (currently: `anthropic → claude-opus-4-7`).
+3. Fall through to `cfg.classify_llm_model` for backends where the
+   model identity is endpoint-owned (`openai_compatible`,
+   `cerebras`) — the operator's served endpoint *is* the apex
+   available to that deployment.
+4. **Bedrock without `model_override` raises**
+   `EnrichmentModelError` with an operator-facing remediation
+   hint.  Bedrock model identities are AWS account + region +
+   inference-profile specific; no portable default constant would
+   be correct across deployments, and silently degrading to a
+   weaker model would contradict the strongest-reasoning-model
+   discipline.  This is a deployment-readiness gate consistent
+   with the no-silent-DST-degradation principle.
+
+The generator records `{backend}:{model}` in the point's
+`generated_by` provenance field, so verifier pass-rate per node is
+attributable to the exact provider+model combination — the unit of
+replayable experiment.
+
+### Parent-aware vs leaf-aware prompts
+
+Both prompt variants produce the same six-field JSON schema, so
+downstream code treats their outputs identically.  The framing
+difference shapes content quality:
+
+- **Leaf prompt** asks for values, patterns, and name hints
+  describing what a column tagged *exactly* at this leaf would
+  contain.  Patterns are narrow enough to discriminate against
+  sibling leaves under the same parent.
+- **Parent prompt** asks for what a column tagged *at this
+  generality level — without further specificity to a child*
+  looks like.  Children are listed so the model knows what
+  specializations would NOT route here.  Anti-examples are
+  hierarchically aware: the confusable_tag may be a sibling at the
+  same level OR a sibling of an ancestor, because the late-
+  interaction architecture's anti-example evidence applies
+  regardless of where in the tree the confusable target lives.
 
 ## Late-interaction execution
 
@@ -322,10 +394,11 @@ different sample counts — standard ColBERT practice (Khattab &
 Zaharia 2020 §3).
 
 Execution happens in-engine via Qdrant's multi-vector named-vector
-query API.  At ~300 tags × ~20 vectors per tag × ~50 query vectors
-per column, naive Python is ~300K comparisons per classification;
+query API.  At `N` tags × `K` vectors per tag × `Q` query vectors
+per column, naive Python is `O(N·K·Q)` comparisons per classification;
 Qdrant's HNSW indexing brings this down to logarithmic in the
-candidate-tag count.
+candidate-tag count `N`, which is the dominant cost as vocabularies
+scale across deployments.
 
 ## Mass function construction
 
@@ -439,8 +512,9 @@ ALTER TABLE fsm_runs ADD COLUMN IF NOT EXISTS
 
 ## Operator inspection and edit surface
 
-The `default.annotations_enriched` *concept* (the runtime collection
-in Qdrant) is operator-facing through two surfaces:
+The active enriched-annotations collection in Qdrant (whatever the
+operator's runtime vocabulary selection happens to produce) is
+operator-facing through two surfaces:
 
 **On-demand export** (`scripts/export_enriched_annotations.py`,
 P2.4): writes the Qdrant payload for a given (taxonomy_id, version)

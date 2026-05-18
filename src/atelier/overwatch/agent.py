@@ -393,7 +393,7 @@ def _build_analysis_prompt(
             "(``actual > configured + overage``; e.g. "
             "``classify_mc_sample_fraction`` configured 0.40, "
             "actual 0.80): focus on ``classify_mc_sample_fraction`` "
-            "and ``classify_mc_max_frontier_columns``.  The sampling "
+            "and ``classify_mc_max_sampled_columns``.  The sampling "
             "policy is not being honored — the fix is the sampler, "
             "not the batcher.\n"
             "- **Excess failed_columns or LLM disagreement**: focus "
