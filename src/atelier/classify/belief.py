@@ -52,9 +52,17 @@ class BeliefAssignment:
     """A mass function m: 2^Θ → [0,1] with Σ m(A) = 1.
 
     Only focal elements (m(A) > 0) are stored.
+
+    Optional diagnostic fields are populated by specific source-mass
+    constructors (e.g. :func:`mass_functions.late_interaction_to_mass`).
+    They carry per-call observability — DST channel-conflict and
+    subtree-concentration values that would otherwise be log-only —
+    to make sweep outputs self-diagnosing.  None means "not measured".
     """
 
     masses: dict[FocalElement, float] = field(default_factory=dict)
+    channel_conflict_k: float | None = None
+    subtree_concentration: float | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -485,6 +493,35 @@ class HierarchicalClassification:
             return 0.0
         code = self.category.code
         return self.plausibility_at(code) - self.belief_at(code)
+
+    def top1_margin(self) -> float:
+        """Difference between top-1 and top-2 belief across the frame.
+
+        Used by the bootstrap revisit gate to catch rank-instability:
+        a column whose top-1 vs top-2 belief is within ε is unstable
+        by construction regardless of the gap / bel-floor gates.  This
+        is Recommendation 3 from the DST sensitivity study
+        (``docs/notes/2026-05-16/dst-sensitivity-findings.md``).
+
+        Returns 1.0 when no second candidate exists (single-code frame
+        edge case) — interpreted as "maximally stable".
+        """
+        if self.belief_assignment is None or self._frame is None or self.category is None:
+            return 1.0
+        top1_code = self.category.code
+        if not top1_code:
+            return 1.0
+        all_codes = set(self._frame.singletons.keys()) | set(
+            self._frame.internal_nodes.keys()
+        )
+        if len(all_codes) < 2:
+            return 1.0
+        top1_bel = self.belief_at(top1_code)
+        top2_bel = max(
+            (self.belief_at(c) for c in all_codes if c != top1_code),
+            default=0.0,
+        )
+        return max(0.0, top1_bel - top2_bel)
 
     @property
     def needs_clarification(self) -> bool:

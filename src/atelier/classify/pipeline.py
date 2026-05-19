@@ -2589,6 +2589,23 @@ def _classify_column(
     bel, pl = hc.interval_at(best_code)
     belief_path = hc.belief_path()
 
+    # Stage A Rec 6 — surface late-interaction diagnostic state.
+    # top_kind: "leaf" if the final prediction is a leaf in the frame,
+    #          "internal" if it's an internal-node tag.  This is the
+    #          discontinuity boundary identified by Finding 6 of the
+    #          DST sensitivity study (Δmass 0.57 across the switch).
+    # channel_conflict_k / subtree_concentration: read off the cosine
+    #          source mass (populated by late_interaction_to_mass when
+    #          the late path fires; None otherwise).  Per Findings 1+4.
+    top_kind = "leaf" if best_code in frame.singletons else "internal"
+    _cosine_ba = source_masses.get("cosine")
+    late_interaction_channel_conflict_k = (
+        getattr(_cosine_ba, "channel_conflict_k", None) if _cosine_ba else None
+    )
+    subtree_concentration = (
+        getattr(_cosine_ba, "subtree_concentration", None) if _cosine_ba else None
+    )
+
     return {
         "table_name": col.table_name,
         "column_name": col.name,
@@ -2606,6 +2623,23 @@ def _classify_column(
         "uncertainty": round(pl - bel, 4),
         "conflict": hc.conflict,
         "needs_clarification": hc.needs_clarification,
+        # DST sensitivity instrumentation (Stage A Recs 1, 3, 6).
+        # Operators consult these alongside the per-cell sweep scores
+        # so cliff / discontinuity-clustered errors are diagnosed
+        # without re-running.  top1_margin powers the rank-instability
+        # gate in the bootstrap revisit step.
+        "top_kind": top_kind,
+        "top1_margin": round(hc.top1_margin(), 4),
+        "late_interaction_channel_conflict_k": (
+            round(late_interaction_channel_conflict_k, 4)
+            if late_interaction_channel_conflict_k is not None
+            else None
+        ),
+        "subtree_concentration": (
+            round(subtree_concentration, 4)
+            if subtree_concentration is not None
+            else None
+        ),
         "evidence": hc.evidence,
         "evidence_sources": {name: _mass_summary(ba, frame) for name, ba in source_masses.items()},
         # 'late_interaction' (production), 'legacy_explicit' (operator

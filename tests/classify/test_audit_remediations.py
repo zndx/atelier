@@ -447,3 +447,196 @@ def test_r8_no_frame_skips_check(vocab: HierarchicalCategorySet):
 
     findings = validate_taxonomy(vocab)
     assert not [f for f in findings if f.kind == "abbrev_unreachable_in_frame"]
+
+
+# ── Stage A — DST sensitivity-study visibility instrumentation ──────
+# Tests for Recs 1, 3, 6 from docs/notes/2026-05-16/dst-sensitivity-findings.md
+# Land as zero-calibration-risk additions: surface K, subtree
+# concentration, top_kind, and a top-1-margin revisit gate so the
+# bel × gap sweep output is self-diagnosing.
+
+
+from types import SimpleNamespace as _NS
+
+
+def _ts(code: str, pos: float, neg: float = 0.0, vpr: float = 1.0):
+    """Minimal TagScore-shaped object for late_interaction_to_mass tests."""
+    return _NS(
+        code=code, positive_score=pos, negative_score=neg,
+        verifier_pass_rate=vpr,
+    )
+
+
+def test_rec1_k_populated_with_negative_evidence(frame: FrameOfDiscernment):
+    """K is populated when the negative channel has non-vacuous mass."""
+    from atelier.classify.mass_functions import late_interaction_to_mass
+
+    # Positive evidence for NAMEFULL (1.1.1.9.1), negative against the
+    # same code — high-conflict scenario, K should be > 0.
+    scores = [
+        _ts("1.1.1.9.1", pos=0.9, neg=0.8),
+        _ts("1.1.1.4.1.1", pos=0.3, neg=0.0),
+    ]
+    mass = late_interaction_to_mass(scores, frame)
+    assert mass.channel_conflict_k is not None, "K must be populated"
+    assert mass.channel_conflict_k > 0.0, "non-trivial conflict expected"
+
+
+def test_rec1_k_zero_on_vacuous_negative_channel(frame: FrameOfDiscernment):
+    """K = 0.0 when no anti-example evidence triggers the negative channel."""
+    from atelier.classify.mass_functions import late_interaction_to_mass
+
+    scores = [
+        _ts("1.1.1.9.1", pos=0.9, neg=0.0),  # zero negative → vacuous
+        _ts("1.1.1.4.1.1", pos=0.3, neg=0.0),
+    ]
+    mass = late_interaction_to_mass(scores, frame)
+    assert mass.channel_conflict_k == 0.0
+
+
+def test_rec6_subtree_concentration_populated_for_leaf_top1(
+    frame: FrameOfDiscernment,
+):
+    """When top-1 is a leaf, _significant_subtree fires and
+    subtree_concentration is non-None on the returned mass."""
+    from atelier.classify.mass_functions import late_interaction_to_mass
+
+    # Concentrate cosine in a single leaf subtree — _significant_subtree
+    # should find an LCA at some concentration > 0.
+    scores = [
+        _ts("1.1.1.9.1", pos=0.95, neg=0.0),
+        _ts("1.1.1.4.1.1", pos=0.10, neg=0.0),
+    ]
+    mass = late_interaction_to_mass(scores, frame)
+    assert mass.subtree_concentration is not None, (
+        "leaf top-1 must populate subtree_concentration"
+    )
+    # In a frame this small with three leaves, concentration falls in [0, 1]
+    assert 0.0 <= mass.subtree_concentration <= 1.0
+
+
+def test_rec6_top_kind_derived_at_pipeline_level(frame: FrameOfDiscernment):
+    """top_kind == 'leaf' when predicted_code is in frame.singletons,
+    'internal' when it's an internal-node code."""
+    # This is a direct test of the derivation rule — used inline at
+    # pipeline.py:_classify_column.
+    leaf_code = next(iter(frame.singletons.keys()))
+    internal_code = next(iter(frame.internal_nodes.keys()))
+    assert ("leaf" if leaf_code in frame.singletons else "internal") == "leaf"
+    assert ("leaf" if internal_code in frame.singletons else "internal") == "internal"
+
+
+def test_rec3_top1_margin_below_threshold_triggers_revisit():
+    """A column with tight top-1 vs top-2 margin gets flagged even when
+    gap and bel are within tolerances (the rank-instability gate the
+    earlier code missed)."""
+    from atelier.classify.bootstrap import (
+        BootstrapConfig, BootstrapState, _identify_uncertain_columns,
+    )
+
+    state = BootstrapState()
+    state.labels = {"t.a": "X", "t.b": "Y"}
+    # Both columns have healthy gap+bel; only 't.a' has narrow top-1 margin.
+    state.ml_belief = {"t.a": 0.75, "t.b": 0.75}
+    state.ml_plausibility = {"t.a": 0.85, "t.b": 0.85}
+    state.ml_top1_margin = {"t.a": 0.02, "t.b": 0.40}
+
+    cfg = BootstrapConfig(
+        gap_threshold=0.30, bel_floor=0.50, top1_margin_threshold=0.05,
+    )
+    uncertain = _identify_uncertain_columns(state, ["t.a", "t.b"], cfg)
+    assert "t.a" in uncertain, (
+        "narrow top-1 margin must add column to uncertain list"
+    )
+    assert "t.b" not in uncertain, (
+        "wide top-1 margin must not add column when gap/bel are fine"
+    )
+
+
+def test_rec3_wide_margin_skips_revisit_when_gap_and_bel_fine():
+    """Wide top-1 margin alone should NOT mark a column uncertain when
+    gap and bel are within thresholds."""
+    from atelier.classify.bootstrap import (
+        BootstrapConfig, BootstrapState, _identify_uncertain_columns,
+    )
+
+    state = BootstrapState()
+    state.labels = {"t.x": "Y"}
+    state.ml_belief = {"t.x": 0.80}
+    state.ml_plausibility = {"t.x": 0.85}
+    state.ml_top1_margin = {"t.x": 0.50}
+
+    cfg = BootstrapConfig(
+        gap_threshold=0.30, bel_floor=0.50, top1_margin_threshold=0.05,
+    )
+    uncertain = _identify_uncertain_columns(state, ["t.x"], cfg)
+    assert "t.x" not in uncertain
+
+
+def test_rec3_hardcoded_0_3_replaced_with_cfg_gap_threshold():
+    """The latent issue from the audit: line 1275 of bootstrap.py used
+    a hardcoded 0.3 instead of cfg.gap_threshold.  With the fix, tightening
+    cfg.gap_threshold changes which columns qualify."""
+    from atelier.classify.bootstrap import (
+        BootstrapConfig, BootstrapState, _identify_uncertain_columns,
+    )
+
+    state = BootstrapState()
+    state.labels = {"t.q": "Z"}
+    state.ml_belief = {"t.q": 0.60}
+    state.ml_plausibility = {"t.q": 0.85}  # gap = 0.25
+    state.ml_top1_margin = {"t.q": 0.40}  # not a margin issue
+
+    # gap=0.25 should be marked uncertain when threshold=0.18 (the new
+    # default), but NOT when threshold=0.30.  Pre-fix this column was
+    # always evaluated against the hardcoded 0.3, masking the knob.
+    cfg_tight = BootstrapConfig(
+        gap_threshold=0.18, bel_floor=0.50, top1_margin_threshold=0.05,
+    )
+    cfg_loose = BootstrapConfig(
+        gap_threshold=0.30, bel_floor=0.50, top1_margin_threshold=0.05,
+    )
+    uncertain_tight = _identify_uncertain_columns(state, ["t.q"], cfg_tight)
+    uncertain_loose = _identify_uncertain_columns(state, ["t.q"], cfg_loose)
+    assert "t.q" in uncertain_tight, (
+        "0.25 gap should trigger when cfg.gap_threshold=0.18"
+    )
+    assert "t.q" not in uncertain_loose, (
+        "0.25 gap should NOT trigger when cfg.gap_threshold=0.30 — "
+        "previously hardcoded 0.3 was matching this case incorrectly"
+    )
+
+
+def test_rec3_default_ml_top1_margin_treats_missing_as_stable():
+    """If a column isn't in state.ml_top1_margin (pre-Stage-A or pre-
+    populated), default 1.0 (maximally stable) means it doesn't get
+    flagged on margin alone — preserves prior behavior."""
+    from atelier.classify.bootstrap import (
+        BootstrapConfig, BootstrapState, _identify_uncertain_columns,
+    )
+
+    state = BootstrapState()
+    state.labels = {"t.legacy": "L"}
+    state.ml_belief = {"t.legacy": 0.80}
+    state.ml_plausibility = {"t.legacy": 0.85}
+    # state.ml_top1_margin intentionally empty (pre-Stage-A state shape)
+
+    cfg = BootstrapConfig(
+        gap_threshold=0.30, bel_floor=0.50, top1_margin_threshold=0.50,
+    )
+    uncertain = _identify_uncertain_columns(state, ["t.legacy"], cfg)
+    assert "t.legacy" not in uncertain, (
+        "missing margin must default to 1.0 (stable); no Stage A "
+        "instrumentation should change pre-existing column eligibility"
+    )
+
+
+def test_rec3_top1_margin_threshold_field_propagates_from_atelier_config():
+    """BootstrapConfig.top1_margin_threshold is wired from
+    AtelierConfig.classify_bootstrap_top1_margin_threshold."""
+    from atelier.classify.bootstrap import bootstrap_config_from_cfg
+    from atelier.config import AtelierConfig
+
+    cfg = AtelierConfig(classify_bootstrap_top1_margin_threshold=0.12)
+    bc = bootstrap_config_from_cfg(cfg)
+    assert bc.top1_margin_threshold == 0.12

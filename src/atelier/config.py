@@ -158,6 +158,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.clarity_target": ("classify_bootstrap_clarity_target", float),
     "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
     "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
+    "classify.bootstrap.top1_margin_threshold": ("classify_bootstrap_top1_margin_threshold", float),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
     # Late-interaction multi-vector cosine via Qdrant — feature-flag gated
@@ -444,6 +445,8 @@ class AtelierConfig:
     classify_bootstrap_clarity_target: float = 0.25
     classify_bootstrap_bel_floor: float = 0.45
     classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
+    # DST sensitivity Rec 3 — rank-instability revisit gate.
+    classify_bootstrap_top1_margin_threshold: float = 0.05
 
     # DST discount factors.  ``catboost_*`` defaults are calibrated
     # well above the cosine discount because that source is LLM-

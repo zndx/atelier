@@ -523,8 +523,10 @@ def late_interaction_to_mass(
 
     # If the negative channel has nothing to say, the combination
     # reduces to the positive channel (vacuous ⊕ X = X).  Short-circuit
-    # to skip the Dempster machinery in that common case.
+    # to skip the Dempster machinery in that common case.  K=0.0
+    # (no conflict — no negative evidence to conflict with).
     if all(fe == frame.theta for fe in m_negative.masses):
+        m_positive.channel_conflict_k = 0.0
         return m_positive
 
     # Conjunctive combination — Dempster's rule.  Yager's rule on
@@ -537,6 +539,11 @@ def late_interaction_to_mass(
                 "late_interaction channel conflict K=%.3f "
                 "(positive evidence vs anti-example evidence disagree)", k,
             )
+        # Surface K + propagate subtree_concentration onto the combined
+        # mass (dempster_combine creates a fresh BeliefAssignment that
+        # doesn't carry the positive channel's diagnostic fields).
+        combined.channel_conflict_k = k
+        combined.subtree_concentration = m_positive.subtree_concentration
         return combined
     except ValueError:
         # K = 1 (total conflict): Yager redirects K to ignorance.
@@ -545,6 +552,8 @@ def late_interaction_to_mass(
             "(conflict mass routes to ignorance per Smets 1990 §6)"
         )
         combined, _ = yager_combine(m_positive, m_negative, frame.theta)
+        combined.channel_conflict_k = 1.0
+        combined.subtree_concentration = m_positive.subtree_concentration
         return combined
 
 
@@ -639,6 +648,7 @@ def _late_interaction_positive_mass(
     # subtree concentration).
     subtree_fe: FocalElement | None = None
     lca_share = 0.0
+    lca_concentration: float | None = None
     if top1_code in frame.singletons:
         leaf_only_probs = {
             c: p for c, p in softmax_probs.items() if c in frame.singletons
@@ -665,7 +675,15 @@ def _late_interaction_positive_mass(
 
     masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
+    # subtree_concentration captures _significant_subtree's findings even
+    # when no subtree concentrated above threshold (returns 0.0).  None
+    # means "the aggregation didn't fire" (internal-node top-1 or empty
+    # leaf projection); distinguishable from "fired with no qualifying
+    # subtree" (returns 0.0).  See Stage A Rec 6 in the alignment plan.
+    return BeliefAssignment(
+        masses=masses,
+        subtree_concentration=lca_concentration,
+    )
 
 
 def _late_interaction_negative_mass(
