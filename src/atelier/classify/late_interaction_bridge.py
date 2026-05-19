@@ -141,6 +141,34 @@ def _resolve_taxonomy_id(cfg) -> str:
     return explicit or "default"
 
 
+def _get_default_embedder():
+    """Self-supply a sentence-transformer embedder when the caller passes None.
+
+    The pipeline call-site passes ``embed=getattr(cfg, "_embedder", None)``
+    but that attribute is never actually populated on AtelierConfig.  Rather
+    than thread the embedder setup through the config, the bridge lazily
+    loads the same MiniLM model the rest of the classify path uses via
+    :func:`atelier.classify.embedding._get_model`.
+
+    Returns a callable matching ``EmbedFn`` from multi_vector_features:
+    ``str | list[str] → list[float] | list[list[float]]``.
+    """
+    from atelier.classify.embedding import _get_model
+
+    model = _get_model()
+
+    def _embed(text):
+        """Thin adapter: model.encode → list[float] (or list[list[float]])."""
+        import numpy as np
+
+        result = model.encode(text)
+        if isinstance(result, np.ndarray):
+            return result.tolist()
+        return result
+
+    return _embed
+
+
 def _resolve_qdrant_collection(cfg) -> tuple[str, str] | None:
     """Look up (qdrant_url, collection_name) for the active taxonomy.
 
@@ -324,13 +352,21 @@ def try_compute_cosine_mass(
         from atelier.classify.mass_functions import late_interaction_to_mass
         from atelier.classify.multi_vector_features import build_column_query
 
+        # Self-supply embedder when caller passes None — the pipeline
+        # historically set cfg._embedder but that attribute was never
+        # populated.  Lazy-loading via _get_model() is the canonical
+        # path for the sentence-transformer encoder.
+        _embed = embed
+        if _embed is None:
+            _embed = _get_default_embedder()
+
         query = build_column_query(
             column_name=column_name,
             table_name=table_name,
             samples=samples,
             neighbor_column_names=neighbor_column_names,
             pattern_summary=pattern_summary,
-            embed=embed,
+            embed=_embed,
         )
         weights = _scoring_weights_from_cfg(cfg)
         scores = score_column_against_index(query, index, weights)

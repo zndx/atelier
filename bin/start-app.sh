@@ -232,6 +232,14 @@ fi
 if [ -f .venv/bin/activate ]; then
   echo "Activating virtualenv..."
   source .venv/bin/activate
+  # CAI ML runtime images provide numpy, torch, sentence-transformers etc.
+  # at /usr/local/lib/python3.*/site-packages.  uv sync creates venvs with
+  # include-system-site-packages = false by default, which hides those
+  # packages.  Patch the venv so the runtime-provided packages are visible.
+  if [ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = false" .venv/pyvenv.cfg; then
+    sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' .venv/pyvenv.cfg
+    echo "  (patched pyvenv.cfg: include-system-site-packages = true)"
+  fi
 fi
 
 # Verify atelier is importable; if not, install into system python
