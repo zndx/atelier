@@ -640,3 +640,95 @@ def test_rec3_top1_margin_threshold_field_propagates_from_atelier_config():
     cfg = AtelierConfig(classify_bootstrap_top1_margin_threshold=0.12)
     bc = bootstrap_config_from_cfg(cfg)
     assert bc.top1_margin_threshold == 0.12
+
+
+def test_rec3_top1_margin_excludes_ancestor_and_descendant_focal_elements(
+    vocab: HierarchicalCategorySet,
+):
+    """Regression: an earlier formulation iterated singletons + internals
+    indiscriminately, which made ancestors/descendants of the top-1 code
+    register as the top-2 candidate.  Their belief is mass-accumulated
+    via DST hierarchy and equals (or exceeds) top-1's, collapsing margin
+    to 0 universally.  The fix restricts the top-2 search to focal
+    elements DISJOINT from top-1's FE.
+    """
+    from atelier.classify.belief import (
+        BeliefAssignment,
+        HierarchicalClassification,
+    )
+
+    frame = FrameOfDiscernment(vocab)
+
+    # Place 0.80 mass on leaf 1.1.1.9.1 (NAMEFULL); small 0.05 on a
+    # disjoint subtree (0.1, the Not-Sensitive branch); rest on Θ.
+    masses = {
+        frame.singletons["1.1.1.9.1"]: 0.80,
+        frame.singletons["0.1"]: 0.05,
+        frame.theta: 0.15,
+    }
+    ba = BeliefAssignment(masses=masses)
+    top1_cat = next(
+        c for c in vocab.all_categories if c.code == "1.1.1.9.1"
+    )
+    hc = HierarchicalClassification(
+        category=top1_cat,
+        confidence=0.8,
+        evidence="test",
+        belief_assignment=ba,
+        _frame=frame,
+        _category_set=vocab,
+    )
+
+    margin = hc.top1_margin()
+    # The competing disjoint singleton sits at 0.05; the top-1 leaf at
+    # 0.80; margin must be ~0.75 (within float tolerance of 0.80-0.05).
+    # The buggy iteration would have collapsed to 0 because ancestors
+    # 1.1.1.9, 1.1.1, 1.1, 1 all share top-1's mass via accumulation.
+    assert margin > 0.5, (
+        f"margin must reflect disjoint competitor (~0.75), "
+        f"not ancestor accumulation (~0); got {margin:.4f}"
+    )
+    # Sanity: the ancestor's belief equals the top-1's by construction.
+    assert hc.belief_at("1.1.1.9") >= hc.belief_at("1.1.1.9.1") - 1e-9, (
+        "ancestor belief must >= descendant belief (DST invariant); "
+        "if this fails, the fixture is wrong, not the margin fix"
+    )
+
+
+def test_rec3_top1_margin_internal_node_top1_excludes_descendants(
+    vocab: HierarchicalCategorySet,
+):
+    """When the top-1 prediction is an internal-node tag, the top-2
+    search must exclude leaves within its subtree (whose FE is a
+    subset of top-1's accumulated FE)."""
+    from atelier.classify.belief import (
+        BeliefAssignment,
+        HierarchicalClassification,
+    )
+
+    frame = FrameOfDiscernment(vocab)
+    # Mass on internal node 1.1.1.9 (Contact Data); disjoint mass on 0.1.
+    masses = {
+        frame.internal_nodes["1.1.1.9"]: 0.70,
+        frame.singletons["0.1"]: 0.10,
+        frame.theta: 0.20,
+    }
+    ba = BeliefAssignment(masses=masses)
+    top1_cat = next(c for c in vocab.all_categories if c.code == "1.1.1.9")
+    hc = HierarchicalClassification(
+        category=top1_cat,
+        confidence=0.7,
+        evidence="test",
+        belief_assignment=ba,
+        _frame=frame,
+        _category_set=vocab,
+    )
+
+    margin = hc.top1_margin()
+    # Competing disjoint singleton 0.1 sits at 0.10; top-1 internal at
+    # 0.70 → expected margin ~0.60.  Descendants like 1.1.1.9.1 sit at 0
+    # but their FE is a subset of top-1's FE, so they must be excluded.
+    assert margin > 0.4, (
+        f"internal-node top-1 must score margin against disjoint "
+        f"focal elements (~0.60), not descendants; got {margin:.4f}"
+    )
