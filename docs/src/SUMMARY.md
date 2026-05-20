@@ -47,3 +47,7 @@ written consent of Cloudera, Inc.
 - [Test Infrastructure](./scenarios/testing.md)
 - [Deployment Modalities](./scenarios/deployment.md)
 - [Runtime Profile](./scenarios/runtime-profile.md)
+
+# Appendix
+
+- [Sprint Summary: 2026-05-20](./appendix/sprint-2026-05-20.md)
