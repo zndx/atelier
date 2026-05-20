@@ -159,6 +159,105 @@ class HierarchicalCategorySet(CategorySet):
             current = self.parent.get(current)
         return result
 
+    def path_from_root(self, code: str) -> list[str]:
+        """Path from root to *code* inclusive (``[root, ..., parent, code]``)."""
+        return list(reversed(self.ancestors(code))) + [code]
+
+    def compute_nhsvm_alphas(self) -> dict[str, float]:
+        """NHSVM normalization weights with directional constraint (Choi et al. 2015, Eq. 7).
+
+        Solves the LP: max min_n alpha_n, subject to path-sum = 1 for
+        every leaf, alpha_child >= alpha_parent for all parent-child
+        pairs, alpha_n >= 0.  The directional constraint forces weight
+        toward leaves, preventing shallow nodes from absorbing the
+        budget on unbalanced trees.
+
+        Falls back to the unconstrained closed-form on solver failure.
+        """
+        try:
+            return self._compute_nhsvm_alphas_constrained()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "NHSVM LP solver failed; falling back to unconstrained alphas"
+            )
+            return self._compute_nhsvm_alphas_unconstrained()
+
+    def _compute_nhsvm_alphas_constrained(self) -> dict[str, float]:
+        """Directional-constraint LP (Eq. 7, Choi et al. 2015)."""
+        import numpy as np
+        from scipy.optimize import linprog
+
+        all_cats = list(self.all_categories)
+        code_to_idx = {cat.code: i for i, cat in enumerate(all_cats)}
+        M = len(all_cats)
+
+        parents_with_children = set(self.children.keys())
+        leaf_codes = [c.code for c in all_cats if c.code not in parents_with_children]
+
+        # Variables: alpha_0..alpha_{M-1}, t  (maximize t = min alpha)
+        c_obj = np.zeros(M + 1)
+        c_obj[M] = -1.0
+
+        # Equality: path sums = 1 for each leaf
+        A_eq = np.zeros((len(leaf_codes), M + 1))
+        b_eq = np.ones(len(leaf_codes))
+        for row_i, leaf in enumerate(leaf_codes):
+            for node in self.path_from_root(leaf):
+                if node in code_to_idx:
+                    A_eq[row_i, code_to_idx[node]] = 1.0
+
+        # Inequality (Ax <= b): directional + t <= alpha_n
+        ub_rows: list[np.ndarray] = []
+
+        for cat in all_cats:
+            parent_code = self.parent.get(cat.code)
+            if parent_code is not None and parent_code in code_to_idx:
+                row = np.zeros(M + 1)
+                row[code_to_idx[parent_code]] = 1.0
+                row[code_to_idx[cat.code]] = -1.0
+                ub_rows.append(row)
+
+        for i in range(M):
+            row = np.zeros(M + 1)
+            row[i] = -1.0
+            row[M] = 1.0
+            ub_rows.append(row)
+
+        A_ub = np.array(ub_rows)
+        b_ub = np.zeros(len(ub_rows))
+        bounds = [(0, None)] * (M + 1)
+
+        result = linprog(
+            c_obj, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
+            bounds=bounds, method="highs",
+        )
+        if result.status != 0:
+            raise RuntimeError(f"NHSVM LP failed: {result.message}")
+
+        return {all_cats[i].code: float(result.x[i]) for i in range(M)}
+
+    def _compute_nhsvm_alphas_unconstrained(self) -> dict[str, float]:
+        """Unconstrained closed-form (Lemma 2): ``alpha_n = 1/D_n - 1/D_parent``."""
+        def _max_subtree_depth(node: str) -> int:
+            ch = self.children.get(node, [])
+            if not ch:
+                return 1
+            return 1 + max(_max_subtree_depth(c) for c in ch)
+
+        depths: dict[str, int] = {}
+        for cat in self.all_categories:
+            depths[cat.code] = _max_subtree_depth(cat.code)
+
+        alphas: dict[str, float] = {}
+        for cat in self.all_categories:
+            parent_code = self.parent.get(cat.code)
+            if parent_code is None:
+                alphas[cat.code] = 1.0 / depths[cat.code]
+            else:
+                alphas[cat.code] = 1.0 / depths[cat.code] - 1.0 / depths[parent_code]
+        return alphas
+
     def atlas_type_graph(self) -> list[dict]:
         """Export as Apache Atlas Classification type definitions.
 

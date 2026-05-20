@@ -7,16 +7,16 @@
 # modified, redistributed, or used in any other manner without the express
 # written consent of Cloudera, Inc.
 
-"""Merge per-table review decisions into ground-truth artifacts.
+"""Merge per-table review decisions into agent-mediated reference artifacts.
 
-This is the persistence helper for the ground-truth review workflow
-(see ``project_ground_truth_principles.md``).  The reviewer (this
+This is the persistence helper for the agent-mediated reference review workflow
+(see ``project_agent_mediated_principles.md``).  The reviewer (this
 session) produces a per-table decisions JSON; this script validates
 it against the vocabulary + working_set and merges it into:
 
-  * ``build/data/ground_truth/ground_truth.json``  — flat {table.col: tag}
-  * ``build/data/ground_truth/audit.json``          — per-column reasoning
-  * ``build/data/ground_truth/review_state.json``   — per-table progress
+  * ``build/data/agent_mediated/agent_mediated.json``  — flat {table.col: tag}
+  * ``build/data/agent_mediated/audit.json``            — per-column reasoning
+  * ``build/data/agent_mediated/review_state.json``     — per-table progress
 
 Resume-safe: existing entries are merged, not overwritten, unless
 ``--force`` is passed.
@@ -79,15 +79,43 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 VALID_CONFIDENCE = {"high", "medium", "low", "unsure"}
-ROOT = Path("build/data/ground_truth")
+ROOT = Path("build/data/agent_mediated")
+ARCHIVE = ROOT / "archive"
 WORKING_SET = ROOT / "working_set.json"
-GROUND_TRUTH = ROOT / "ground_truth.json"
+AGENT_MEDIATED = ROOT / "agent_mediated.json"
 AUDIT = ROOT / "audit.json"
 REVIEW_STATE = ROOT / "review_state.json"
 
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _utc_date() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _archive_artifacts() -> Path | None:
+    """Copy current agent_mediated.json + audit.json to archive/<iso-date>_.
+
+    Runs once per calendar day; subsequent calls on the same day are
+    no-ops (the first snapshot of the day is the one that matters).
+    Returns the archive directory, or None if nothing to archive.
+    """
+    if not AGENT_MEDIATED.exists():
+        return None
+    date_tag = _utc_date()
+    dest = ARCHIVE / date_tag
+    sentinel = dest / f"{date_tag}_agent_mediated.json"
+    if sentinel.exists():
+        return dest
+    dest.mkdir(parents=True, exist_ok=True)
+    import shutil
+    for src in (AGENT_MEDIATED, AUDIT, REVIEW_STATE):
+        if src.exists():
+            shutil.copy2(src, dest / f"{date_tag}_{src.name}")
+    print(f"Archived pre-update snapshot → {dest}", file=sys.stderr)
+    return dest
 
 
 def _load_json(path: Path, default):
@@ -189,7 +217,7 @@ def main() -> int:
     if not WORKING_SET.exists():
         print(
             f"No working_set at {WORKING_SET}.  Run "
-            f"`python scripts/build_ground_truth.py` first.",
+            f"`python scripts/build_agent_mediated.py` first.",
             file=sys.stderr,
         )
         return 2
@@ -205,7 +233,7 @@ def main() -> int:
         payload, working_set, allow_partial=args.allow_partial,
     )
 
-    gt = _load_json(GROUND_TRUTH, {})
+    gt = _load_json(AGENT_MEDIATED, {})
     audit = _load_json(AUDIT, {})
     state = _load_json(REVIEW_STATE, {})
 
@@ -251,7 +279,8 @@ def main() -> int:
         "table_notes": payload.get("table_notes"),
     }
 
-    _write_json(GROUND_TRUTH, gt)
+    _archive_artifacts()
+    _write_json(AGENT_MEDIATED, gt)
     _write_json(AUDIT, audit)
     _write_json(REVIEW_STATE, state)
 

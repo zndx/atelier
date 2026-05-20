@@ -49,7 +49,7 @@ explicitly to avoid the conflation our prior reports had let slip in.
 
 | Term | Source | Authority | Where it lives |
 |---|---|---|---|
-| **Published ground truth** | External, human-curated benchmarks (e.g., SOTAB, GitTables) | Gold standard; memorization-safe check on an LLM's one-shot classification ability | SOTAB pilot artifacts |
+| **Published benchmark labels** | External, human-curated benchmarks (e.g., SOTAB, GitTables) | Gold standard; memorization-safe check on an LLM's one-shot classification ability | SOTAB pilot artifacts |
 | **Curated reference** | Generator-derived (synth pairs each natural-named column with an answer-key "reference column"); spot-checked by hand | Definitive **for the synthetic corpus**; not equivalent to a published GT | `build/meta-tagging-clean/curated_reference.csv` (246 rows) |
 | **LLM commitment** | A single LLM's pass-1 or pass-2 output | Classifier opinion; not a truth | parquet `llm_code`, `predicted_code` |
 | **CatBoost prior** | CatBoost fit to LLM labels, used for revisit enrichment | *Not independent evidence* — it is a compressed self-consensus of the LLM; valuable **specifically** for rescuing abstentions | parquet `predicted_code` when fused via DST |
@@ -280,7 +280,7 @@ endpoint, not of our seed handling. Reported numbers are the specific
 release-coincident run; magnitude varies, the direction of
 pass-1 → pass-2 improvement is consistent across observed variance.
 
-### 5.4 Curated reference is not a ground truth
+### 5.4 Curated reference is not an agent-mediated reference
 
 The `curated_reference.csv` in the UAT hand-off bundle is generator-
 deterministic (193 of 246 rows come directly from the synth generator's

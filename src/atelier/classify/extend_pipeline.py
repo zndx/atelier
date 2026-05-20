@@ -487,7 +487,7 @@ def run_extend_classification(
         parquet_path = results_dir / "atelier_embeddings.parquet"
         _write_extend_parquet(classifications, parquet_path, bundle)
 
-        # evaluation_report.json — minimal, since we have no ground truth
+        # evaluation_report.json — minimal, since we have no agent-mediated reference
         # and no DST metrics to publish.
         n_with_ref = sum(
             1 for c in classifications if c.get("reference_code")

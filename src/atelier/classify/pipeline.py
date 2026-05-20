@@ -49,6 +49,7 @@ from atelier.classify.mass_functions import (
     cosine_to_mass,
     llm_to_mass,
     name_match_to_mass,
+    nhsvm_to_mass,
     pattern_to_mass,
     resolve_pattern_map,
     svm_to_mass,
@@ -305,66 +306,82 @@ def _install_fit_to_llm_catboost(
 def _ensure_per_vocab_svm(
     cfg,
     category_set: HierarchicalCategorySet,
-    alignment: dict[str, str],
     *,
     cache_dir: Path,
     run_dir: Path,
 ) -> Path:
     """Cache-then-bundle the per-vocabulary SVM.
 
-    Pipeline counterpart to ``ml_train.train_svm_for_vocab``.  Walks
-    three steps:
+    Generates a user-code-labeled synthetic corpus from enrichment
+    payloads and trains the SVM directly — no alignment step needed.
+    Walks three steps:
 
-      1. Compute the vocab signature from ``category_set.leaf_codes``.
-      2. Cache lookup at ``cache_dir/{vocab_sig}.pkl``; train via
-         ``train_svm_for_vocab`` if absent.  The cache is keyed solely
-         by user-vocab leaves so multiple classify runs against the
-         same vocabulary share one trained model — alignment + train
-         is non-trivial work and re-doing it per run is wasteful.
+      1. Compute the vocab signature from all category codes.
+      2. Cache lookup at ``cache_dir/{vocab_sig}.pkl``; on miss, load
+         enrichment payloads (Qdrant or JSON export), generate corpus
+         via ``generate_user_taxonomy_corpus``, and train via
+         ``train_svm``.
       3. Copy ``cache/<sig>.pkl`` (and the ``.classes.json`` sidecar)
-         into ``run_dir/svm.pkl`` so the run is self-contained for
-         reproducibility and Extend Classification reuse.
+         into ``run_dir/svm.pkl`` so the run is self-contained.
 
     Finally, install the loaded model via ``ml_inference.install_svm``
     so the rest of the pipeline's SVM evidence path (``predict_svm``)
-    uses the per-vocab model directly — no ``translate_proba`` step
-    needed at inference time.
+    uses the per-vocab model directly.
 
     Returns the run-dir path of the bundled SVM.  Raises on failure
     (caller logs and continues — strict-mode landing is deferred).
     """
+    import shutil
+    import tempfile
+
     from atelier.classify import ml_inference
     from atelier.classify.artifact_set import compute_vocab_signature
-    from atelier.classify.ml_train import train_svm_for_vocab
+    from atelier.classify.enrichment_loader import load_enrichment_payloads
+    from atelier.classify.ml_train import train_svm
     from atelier.classify.svm_classifier import SVMClassifier
+    from atelier.classify.synth import generate_user_taxonomy_corpus
 
-    leaf_codes = sorted(getattr(category_set, "leaf_codes", set()))
-    if not leaf_codes:
+    svm_hierarchical = getattr(cfg, "classify_svm_hierarchical", True)
+
+    all_cats = getattr(category_set, "all_categories", category_set.categories)
+    all_codes = sorted(c.code for c in all_cats)
+    if not all_codes:
         raise ValueError(
-            "_ensure_per_vocab_svm: category_set has no leaf_codes — "
+            "_ensure_per_vocab_svm: category_set has no categories — "
             "cannot key cache or train"
         )
-    vocab_sig = compute_vocab_signature(leaf_codes)
+    vocab_sig = compute_vocab_signature(all_codes)
+    suffix = "_nhsvm" if svm_hierarchical else ""
 
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{vocab_sig}.pkl"
+    cache_path = cache_dir / f"{vocab_sig}{suffix}.pkl"
     cache_classes = cache_path.with_suffix(".classes.json")
 
     if cache_path.is_file() and cache_classes.is_file():
         logger.info(
-            "per-vocab SVM cache hit: %s (%d leaf codes)",
-            cache_path, len(leaf_codes),
+            "per-vocab SVM cache hit: %s (%d codes, hierarchical=%s)",
+            cache_path, len(all_codes), svm_hierarchical,
         )
     else:
+        payloads = load_enrichment_payloads(cfg=cfg)
         logger.info(
-            "per-vocab SVM cache miss: training for %d leaf codes "
-            "(%d alignment entries) → %s",
-            len(leaf_codes), len(alignment), cache_path,
+            "per-vocab SVM cache miss: training for %d codes "
+            "(%d enrichment payloads, hierarchical=%s) → %s",
+            len(all_codes), len(payloads), svm_hierarchical, cache_path,
         )
-        train_svm_for_vocab(alignment, cache_path)
+        synth_dir = Path(tempfile.mkdtemp(prefix="atelier_svm_enrich_"))
+        try:
+            generate_user_taxonomy_corpus(
+                category_set, payloads, synth_dir,
+            )
+            train_svm(
+                synth_dir, cache_path,
+                category_set=category_set, hierarchical=svm_hierarchical,
+            )
+        finally:
+            shutil.rmtree(synth_dir, ignore_errors=True)
 
-    import shutil
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     bundle_path = run_dir / "svm.pkl"
@@ -704,7 +721,7 @@ def run_classification_pipeline(
         from atelier.classify.incremental_scoring import (
             build_scoring_context,
         )
-        _gt_path_str = getattr(cfg, "classify_evaluation_ground_truth_path", "") or ""
+        _gt_path_str = getattr(cfg, "classify_evaluation_agent_mediated_path", "") or ""
         _scoring_enabled = bool(getattr(cfg, "classify_evaluation_enabled", True))
         try:
             scoring_ctx = build_scoring_context(
@@ -1006,55 +1023,33 @@ def run_classification_pipeline(
 
         discounts = DiscountConfig.from_cfg(cfg)
 
-        # ── Per-vocabulary SVM (alignment → relabel → train → bundle) ──
-        # The BFO/CCO synth corpus is keyed by ICE.* leaves; the runtime
-        # frame is keyed by the operator's annotations vocabulary.  We
-        # build a one-time ICE.* → user-code alignment via the LLM, then
-        # train a per-vocab SVM whose labels ARE user codes — so at
-        # inference the predictions land directly in the user-taxonomy
-        # frame, no runtime translation needed.  Cache-then-bundle:
+        # ── Per-vocabulary SVM (enrichment → corpus → train → bundle) ──
+        # Generates a user-code-labeled synthetic corpus from enrichment
+        # payloads (Qdrant or JSON export) and trains a per-vocab SVM
+        # whose output classes ARE user codes.  Cache-then-bundle:
         # train into ``build/cache/svm/{vocab_sig}.pkl`` and copy into
         # ``build/results/{run_id}/svm.pkl`` so the run is reproducible
         # on its own and Extend Classification picks up the bundled
-        # SVM/CatBoost pair without retraining.  See
-        # ``ontology_alignment.py`` for the independence/discount
-        # rationale.
-        from atelier.classify.ontology_alignment import build_alignment
-        try:
-            svm_alignment = build_alignment(
-                category_set=category_set,
-                cfg=cfg,
-            )
-        except Exception as exc:
-            logger.warning(
-                "ontology_alignment: build failed — proceeding without "
-                "(SVM evidence will be vacuous for this run): %s",
-                exc,
-            )
-            svm_alignment = {}
+        # SVM/CatBoost pair without retraining.
 
         # Multi-run safety: clear any SVM that a prior pipeline run on
         # this same process installed.  ``_ensure_per_vocab_svm``
-        # re-installs on success.  If it fails (or alignment is empty),
-        # the SVM source stays absent rather than carrying a stale
-        # prior-vocabulary model into the new frame.
+        # re-installs on success.  If it fails, the SVM source stays
+        # absent rather than carrying a stale prior-vocabulary model
+        # into the new frame.
         ml_inference.reset_svm()
 
-        if svm_alignment:
-            try:
-                _ensure_per_vocab_svm(
-                    cfg, category_set, svm_alignment,
-                    cache_dir=build_dir / "cache" / "svm",
-                    run_dir=results_dir,
-                )
-            except Exception as exc:
-                # Don't make per-vocab SVM a hard prerequisite yet —
-                # the strict-mode tightening lands in a follow-up.  Log
-                # loudly so the missing source is visible in run logs.
-                logger.warning(
-                    "per-vocab SVM build failed — SVM evidence will be "
-                    "absent for this run: %s", exc,
-                )
+        try:
+            _ensure_per_vocab_svm(
+                cfg, category_set,
+                cache_dir=build_dir / "cache" / "svm",
+                run_dir=results_dir,
+            )
+        except Exception as exc:
+            logger.warning(
+                "per-vocab SVM build failed — SVM evidence will be "
+                "absent for this run: %s", exc,
+            )
 
         # Try sentence-transformers for cosine
         has_embeddings = False
@@ -1577,6 +1572,41 @@ def run_classification_pipeline(
             ),
         })
 
+        svm_hierarchical = getattr(cfg, "classify_svm_hierarchical", True)
+        nhsvm_temp = getattr(cfg, "classify_svm_nhsvm_temperature", 1.0)
+        nhsvm_alphas: dict[str, float] | None = None
+        nhsvm_dist_matrix: dict[tuple[str, str], float] | None = None
+
+        svm_is_training_time_nhsvm = False
+        try:
+            from atelier.classify.ml_inference import get_svm
+            _svm = get_svm()
+            if _svm is not None:
+                svm_is_training_time_nhsvm = getattr(_svm, "_hierarchical", False)
+        except Exception:
+            pass
+
+        if svm_hierarchical and not svm_is_training_time_nhsvm:
+            nhsvm_alphas = category_set.compute_nhsvm_alphas()
+            try:
+                from atelier.classify.svm_classifier import build_nhsvm_distance_matrix
+                if _svm is not None and _svm._classes:
+                    nhsvm_dist_matrix = build_nhsvm_distance_matrix(
+                        _svm._classes, nhsvm_alphas, category_set,
+                    )
+                    logger.info(
+                        "NHSVM distance matrix precomputed for %d classes "
+                        "(post-hoc reweighting — legacy flat SVM)",
+                        len(_svm._classes),
+                    )
+            except Exception:
+                pass
+        elif svm_is_training_time_nhsvm:
+            logger.info(
+                "SVM is training-time NHSVM — skipping post-hoc "
+                "reweighting setup (hierarchy baked into training)"
+            )
+
         classifications: list[dict[str, Any]] = []
         for col in all_columns:
             # Cross-table state dicts are keyed by ``qualified_name``
@@ -1598,6 +1628,10 @@ def run_classification_pipeline(
                 resolve_llm_annotation_mnemonic=getattr(
                     cfg, "classify_resolve_llm_annotation_mnemonic", True,
                 ),
+                svm_hierarchical=svm_hierarchical,
+                nhsvm_temperature=nhsvm_temp,
+                nhsvm_alphas=nhsvm_alphas,
+                nhsvm_distance_matrix=nhsvm_dist_matrix,
             )
             classifications.append(result)
 
@@ -1608,13 +1642,13 @@ def run_classification_pipeline(
         # ── Feature analysis (SHAP + SAGE, config-gated) ──────────
         _run_feature_analysis(cfg, classifications, all_samples, category_set, results_dir, mc_plan=mc_plan)
 
-        # ── Cautious-code review — agent-mediated backoff ────────
-        # Runs between FUSING and EVALUATING so accuracy numbers reflect
-        # post-review predictions.  SHAP/SAGE attribute to features-in-
-        # general (not per-column codes), so order doesn't disturb them.
-        # On by default — see classify.cautious_review.enabled.
+        # ── Cautious-code review — PROVEN HARMFUL, default OFF ──
+        # Empirically destroys accuracy: run ce4f3777 measured −13.6pp
+        # vs LLM-only (reroute 76.1% miss, backoff 78.8% miss).
+        # Default disabled + bel_threshold=0.0 (unreachable).  The
+        # code path is retained for controlled re-validation only.
         cautious_audit: dict = {"enabled": False}
-        if getattr(cfg, "classify_cautious_review_enabled", True):
+        if getattr(cfg, "classify_cautious_review_enabled", False):
             from atelier.classify.cautious_review import review_classifications
             def _cautious_progress(p: dict) -> None:
                 try:
@@ -2312,10 +2346,10 @@ def _build_confusable_pairs(
     category_set: HierarchicalCategorySet,
 ) -> list[tuple[str, str]]:
     """Filter confusable pairs to those present in the loaded vocabulary."""
-    leaf_codes = category_set.leaf_codes
+    all_codes = frozenset(c.code for c in category_set.all_categories)
     return [
         (a, b) for a, b in _CONFUSABLE_PAIR_CODES
-        if a in leaf_codes and b in leaf_codes
+        if a in all_codes and b in all_codes
     ]
 
 
@@ -2369,6 +2403,10 @@ def _classify_column(
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
     resolve_llm_annotation_mnemonic: bool = True,
+    svm_hierarchical: bool = True,
+    nhsvm_temperature: float = 1.0,
+    nhsvm_alphas: dict[str, float] | None = None,
+    nhsvm_distance_matrix: dict[tuple[str, str], float] | None = None,
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -2532,19 +2570,25 @@ def _classify_column(
         logger.debug("CatBoost unavailable for %s: %s", col.name, exc)
 
     # 6. SVM (if model available).
-    # The per-vocabulary SVM (trained at ``_load_vocabulary`` time via
-    # ``ml_train.train_svm_for_vocab`` against the BFO/CCO synth corpus
-    # relabeled through the ICE.* → user-code alignment) emits user
-    # codes natively, so ``svm_to_mass`` can test frame membership
-    # directly with no runtime translation step.  When the per-vocab
-    # SVM build failed earlier in the pipeline, ``predict_svm`` returns
-    # None and the SVM source is silently absent — strict-mode
+    # The per-vocabulary SVM (trained from an enrichment-derived
+    # synthetic corpus) emits user codes natively, so ``svm_to_mass``
+    # can test frame membership directly with no runtime translation
+    # step.  When the per-vocab SVM build failed earlier in the
+    # pipeline, ``predict_svm`` returns None and the SVM source is
+    # silently absent — strict-mode
     # tightening is deferred per project plan.
     try:
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
         if svm_proba:
-            svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
+            if svm_hierarchical and nhsvm_alphas:
+                svm_mass = nhsvm_to_mass(
+                    svm_proba, frame, category_set, nhsvm_alphas,
+                    discount=discounts.svm, temperature=nhsvm_temperature,
+                    distance_matrix=nhsvm_distance_matrix,
+                )
+            else:
+                svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
     except Exception as exc:

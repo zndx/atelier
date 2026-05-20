@@ -1,52 +1,44 @@
 #!/usr/bin/env bash
-# Stage B — accuracy verification, executable in the long-lived CAI
-# Application session after Stage A lands.
-#
-# Composes three existing scripts:
-#   1. scripts/dst_sensitivity_study.py — synthetic-cell DST invariant
-#      battery (Rec 7 part 1)
-#   2. scripts/sweep_matrix.py          — bel × gap parameter sweep
-#   3. scripts/score_sweep_matrix.py    — score sweep cells against
-#      agent-mediated reference
-#   4. inline jq aggregation            — K distribution from
-#      per-column results (Rec 7 part 2 — consumes Stage A's
-#      late_interaction_channel_conflict_k field)
-#
-# Run from project root (/home/cdsw on the CAI Application pod):
-#   chmod +x scripts/stage_b_accuracy_verification.sh
-#   SOURCE_ID=<your hive-poc source id> ./scripts/stage_b_accuracy_verification.sh
-#
-# Expected wall-clock: ~1-2 hours (12 sweep cells × ~5-10 min each).
-
+# Stage B runner — CAI tier-3 compatible (no devenv/just/uv required)
+# Wraps stage_b_accuracy_verification.sh logic using system Python directly.
 set -euo pipefail
 
+export PATH="/home/cdsw/.local/bin:$PATH"
+
 # ── Inputs (override via env) ────────────────────────────────────────
-SOURCE_ID="${SOURCE_ID:-hive-poc/default}"
+SOURCE_ID="${SOURCE_ID:-hive-poc/reference_corpus}"
 AGENT_MEDIATED="${AGENT_MEDIATED:-build/data/agent_mediated/agent_mediated.json}"
 OUTPUT_DIR="${OUTPUT_DIR:-build/sweeps}"
-NAME="${NAME:-bel_x_gap}"
-BASELINE_CELL="${BASELINE_CELL:-bel=0.75,gap=0.18}"
+NAME="${NAME:-gap_sweep}"
+BASELINE_CELL="${BASELINE_CELL:-gap=0.18}"
 
-# Bel × gap grid (4 × 3 = 12 cells)
-BEL_VALUES="${BEL_VALUES:-0.55,0.65,0.75,0.80}"
-GAP_VALUES="${GAP_VALUES:-0.12,0.18,0.24}"
+# Gap threshold sweep (cautious review is disabled — bel_threshold axis
+# is no longer meaningful since ce4f3777 proved cautious review harmful).
+GAP_VALUES="${GAP_VALUES:-0.12,0.15,0.18,0.24}"
 
 # ── Preflight ────────────────────────────────────────────────────────
-bel_count=$(tr ',' '\n' <<<"$BEL_VALUES" | wc -l)
 gap_count=$(tr ',' '\n' <<<"$GAP_VALUES" | wc -l)
-total_cells=$((bel_count * gap_count))
+total_cells=$gap_count
 
 echo "== Stage B accuracy verification =="
 echo "  source-id:     $SOURCE_ID"
 echo "  agent-mediated reference:  $AGENT_MEDIATED"
-echo "  grid:          bel={$BEL_VALUES} × gap={$GAP_VALUES} = $total_cells cells"
+echo "  grid:          gap={$GAP_VALUES} = $total_cells cells"
 echo "  baseline cell: $BASELINE_CELL"
+echo "  note:          cautious review disabled (proven harmful)"
 echo
 
-# Materialize HOCON → atelier.env and source it
-just resolve-config >/dev/null
+# Resolve config (tier 3 — direct python, no uv)
+python3 bin/resolve-config.py >/dev/null 2>&1 || echo "  (config already materialized, continuing)"
+# Source atelier.env safely (values may contain spaces)
 # shellcheck disable=SC1091
-source build/config/atelier.env
+set -a
+while IFS='=' read -r key val; do
+    # Skip blank lines and comments
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    export "$key=$val"
+done < build/config/atelier.env
+set +a
 
 [ -f "$AGENT_MEDIATED" ] || {
     echo "ERROR: agent-mediated reference file not found: $AGENT_MEDIATED"
@@ -54,10 +46,8 @@ source build/config/atelier.env
 }
 
 # ── 1. DST sensitivity synthetic-cell re-run ─────────────────────────
-# Validates Stage A's instrumentation didn't break DST form-correctness
-# invariants (mass conservation, monotonicity, ranking stability, etc.).
 echo "[1/4] DST sensitivity study — synthetic-cell battery..."
-uv run python scripts/dst_sensitivity_study.py
+python3 scripts/dst_sensitivity_study.py
 
 SENS_DIR=$(ls -td build/sensitivity/dst-* | head -1)
 VIOLATIONS=$(jq 'length' "$SENS_DIR/violations.json" 2>/dev/null || echo "?")
@@ -70,8 +60,7 @@ echo
 
 # ── 2. Bel × gap parameter sweep ─────────────────────────────────────
 echo "[2/4] Bel × gap parameter sweep — full classify pipeline per cell..."
-uv run python scripts/sweep_matrix.py \
-    --axis "classify.cautious_review.bel_threshold=$BEL_VALUES" \
+python3 scripts/sweep_matrix.py \
     --axis "classify.bootstrap.gap_threshold=$GAP_VALUES" \
     --source-id "$SOURCE_ID" \
     --name "$NAME" \
@@ -97,7 +86,7 @@ echo
 
 # ── 3. Score against agent-mediated reference ────────────────────────
 echo "[3/4] Score sweep outputs against agent-mediated reference..."
-uv run python scripts/score_sweep_matrix.py \
+python3 scripts/score_sweep_matrix.py \
     --manifest "$MANIFEST" \
     --reference "$AGENT_MEDIATED" \
     --results-dir build/results \
@@ -116,8 +105,6 @@ jq -r '.per_cell | to_entries | sort_by(-.value.strict_pct) | .[:5] |
 echo
 
 # ── 4. K distribution analysis (Rec 7 part 2) ────────────────────────
-# Pulls late_interaction_channel_conflict_k off every column in the
-# top-scoring run. Requires Stage A's instrumentation (per-column field).
 echo "[4/4] K distribution analysis (Stage A's Rec 1 field)..."
 TOP_RUN=$(jq -r '.per_cell | to_entries | sort_by(-.value.strict_pct) |
                  .[0].value.run_id' "$SCORING")

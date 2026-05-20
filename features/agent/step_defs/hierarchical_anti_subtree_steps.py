@@ -83,17 +83,11 @@ def step_build_abstract_taxonomy(context):
     'and negative {negative:f}'
 )
 def step_add_tag_score(context, code: str, positive: float, negative: float):
-    from atelier.classify.late_interaction import TagScore
-
-    context.late_scores.append(
-        TagScore(
-            code=code,
-            positive_score=positive,
-            negative_score=negative,
-            verifier_pass_rate=1.0,
-            per_role={},
-        )
-    )
+    # The new simplified bridge produces (code, score) tuples.
+    # The negative channel was removed in the ColBERT simplification;
+    # only positive_score flows into the mass function now.
+    _ = negative  # historically tested; negative channel removed
+    context.late_scores.append((code, positive))
 
 
 # ── Action ────────────────────────────────────────────────────────

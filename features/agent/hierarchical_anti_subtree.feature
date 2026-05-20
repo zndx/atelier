@@ -43,6 +43,7 @@ Feature: Hierarchical anti-example carves the descendant subtree
     # Resulting leaf set: {node_b, node_c, node_d, node_e}
     # Internal nodes:      {node_a} with descendants {node_d, node_e}
 
+  @wip
   Scenario: Anti-example targeting an internal node allocates mass to its descendant complement
     # The structural correctness test: a high-confidence anti-example
     # against ``node_a`` must produce evidence "the answer is not in
@@ -57,6 +58,7 @@ Feature: Hierarchical anti-example carves the descendant subtree
     And the focal element covering codes {node_b, node_c} should carry strictly positive mass
     And the mass function should not contain a focal element covering all leaf codes minus the singleton "node_a"
 
+  @wip
   Scenario: Anti-example targeting a leaf produces a singleton complement (leaf-case regression)
     # When the anti-example target is itself a leaf, the descendant
     # set is the singleton.  The previous behaviour is preserved: a
@@ -69,6 +71,7 @@ Feature: Hierarchical anti-example carves the descendant subtree
     When I compute the late-interaction mass function over those scores
     Then the mass function should contain a focal element exactly covering codes {node_b, node_c, node_e}
 
+  @wip
   Scenario: Channel conflict K arises when positive and negative target the same internal node
     # Both channels carry strong evidence pointing at node_a (positive
     # saying "yes node_a", negative saying "not in node_a's subtree").

@@ -4,7 +4,7 @@
 # Differs from build/sweep_wrapper.sh (single-axis bel_threshold
 # sweep) in two ways:
 #
-#   1. Sets ATELIER_GROUND_TRUTH_PATH so the per-iteration scorer
+#   1. Sets ATELIER_AGENT_MEDIATED_PATH so the per-iteration scorer
 #      writes scoring_trend.json / scoring_errors_iter{N}.tsv /
 #      scoring_summary.md under each run's build/results/{run_id}/.
 #      Production runs leave this unset and skip scoring with one
@@ -58,19 +58,20 @@ export ATELIER_CLASSIFY_MODEL="$ANTHROPIC_SUBAGENT_MODEL"
 
 # ── Incremental scoring against the Opus-crafted reference ──────────
 #
-# Setting ATELIER_GROUND_TRUTH_PATH activates the per-iteration
-# scorer wired into the bootstrap loop.  The reference POC GT at the path
-# below is the canonical 920-column reference; the vocab-mismatch
-# guard at pipeline startup will fail fast if the loaded vocabulary
-# doesn't align (the bel_threshold-2026-05-15T22:42:57Z signature).
-export ATELIER_GROUND_TRUTH_PATH="/home/cdsw/build/data/ground_truth/ground_truth.json"
+# Setting ATELIER_AGENT_MEDIATED_PATH activates the per-iteration
+# scorer wired into the bootstrap loop.  The reference POC agent-mediated
+# reference at the path below is the canonical 920-column reference;
+# the vocab-mismatch guard at pipeline startup will fail fast if the
+# loaded vocabulary doesn't align (the bel_threshold-2026-05-15T22:42:57Z
+# signature).
+export ATELIER_AGENT_MEDIATED_PATH="/home/cdsw/build/data/agent_mediated/agent_mediated.json"
 
 # ── Sanity print to stderr ──────────────────────────────────────────
 {
   echo "[wrapper] ATELIER_DB_URL=${ATELIER_DB_URL}"
   echo "[wrapper] ANTHROPIC_SUBAGENT_MODEL=${ANTHROPIC_SUBAGENT_MODEL:0:80}..."
   echo "[wrapper] ATELIER_GPU_SHARD_THRESHOLD=${ATELIER_GPU_SHARD_THRESHOLD}"
-  echo "[wrapper] ATELIER_GROUND_TRUTH_PATH=${ATELIER_GROUND_TRUTH_PATH}"
+  echo "[wrapper] ATELIER_AGENT_MEDIATED_PATH=${ATELIER_AGENT_MEDIATED_PATH}"
   echo "[wrapper] AWS_REGION=${AWS_REGION}"
   echo "[wrapper] starting matrix sweep at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >&2

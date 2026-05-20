@@ -38,6 +38,7 @@ from atelier.enrichment.qdrant_writer import (
     EnrichedAnnotationPoint,
     build_point,
     collection_name_for,
+    compose_annotation_text,
     ensure_collection,
     point_cache_key,
     point_exists,
@@ -444,7 +445,7 @@ def _enrich_one_row(
         )
 
     # Verified — now embed each view and build the point.
-    vectors = _embed_views(last_attempt.enrichment, row=row, embed=embed)
+    vectors = _embed_annotation(last_attempt.enrichment, row=row, embed=embed)
     point = build_point(
         source_row=row,
         enrichment=last_attempt.enrichment,
@@ -471,56 +472,24 @@ def _enrich_one_row(
     )
 
 
-def _embed_views(enrichment: dict, *, row: dict, embed: EmbedFn) -> AnnotationVectors:
-    """Compute embeddings for each named-vector slot.
+def _embed_annotation(enrichment: dict, *, row: dict, embed: EmbedFn) -> AnnotationVectors:
+    """Encode the annotation's composed text through ColBERT.
 
-    Multi-vector slots become lists-of-embeddings; single-vector slots
-    become flat lists.  Empty multi-vector slots are tolerated (the
-    Qdrant write accepts an empty list under a named-vector slot).
+    Composes a single text passage from the annotation row + enrichment
+    features via ``compose_annotation_text``, then encodes it to produce
+    per-token ColBERT vectors for Qdrant's native MaxSim.
+
+    The ``embed`` callable should be ``colbert_encoder.get_encoder().encode_single``
+    (returns an ndarray of shape ``(num_tokens, dim)``).
     """
-    label = row.get("label", "") or ""
-    mnemonic = row.get("mnemonic", "") or ""
-    description = row.get("description", "") or ""
-    parent_path = enrichment.get("parent_path") or []
+    payload = {**row, **enrichment}
+    text = compose_annotation_text(payload)
+    if not text:
+        text = row.get("label") or row.get("code") or "unknown"
 
-    label_view_text = f"{label} — {mnemonic} — {description}".strip(" —")
-    description_view_text = description or label
-    parent_path_text = " > ".join(parent_path) if parent_path else label
+    token_vectors = embed(text)
 
-    label_vec = embed(label_view_text)
-    description_vec = embed(description_view_text)
-    parent_path_vec = embed(parent_path_text)
+    if hasattr(token_vectors, "tolist"):
+        token_vectors = token_vectors.tolist()
 
-    def embed_many(texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        out = embed(texts)
-        # Defensive: handle both "embed returns list-of-vectors" and
-        # "embed returns a single vector when given a single string"
-        # under a degenerate single-element list.
-        if texts and isinstance(out, list) and out and not isinstance(out[0], list):
-            return [out]  # single vector wrapped
-        return out  # type: ignore[return-value]
-
-    prototype_texts = [str(v) for v in (enrichment.get("prototype_values") or []) if v is not None]
-    pattern_texts = [
-        (p.get("expr") if isinstance(p, dict) else str(p))
-        for p in (enrichment.get("value_patterns") or [])
-        if p is not None
-    ]
-    name_hint_texts = [str(h) for h in (enrichment.get("name_hints") or []) if h]
-    anti_texts = [
-        (a.get("value") if isinstance(a, dict) else str(a))
-        for a in (enrichment.get("anti_examples") or [])
-        if a is not None
-    ]
-
-    return AnnotationVectors(
-        label_view=label_vec,  # type: ignore[arg-type]
-        description_view=description_vec,  # type: ignore[arg-type]
-        parent_path_view=parent_path_vec,  # type: ignore[arg-type]
-        prototype_values=embed_many(prototype_texts),
-        value_patterns=embed_many(pattern_texts),
-        name_hints=embed_many(name_hint_texts),
-        anti_examples=embed_many(anti_texts),
-    )
+    return AnnotationVectors(colbert=token_vectors)

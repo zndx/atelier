@@ -138,7 +138,7 @@ class ValidationReport:
     # re-walking Qdrant.  Only the new method's uncovered list is
     # surfaced (legacy method's coverage is a baseline, not actionable).
     uncovered_user_codes_new: list[UncoveredUserCode] = field(default_factory=list)
-    # Optional: if ground_truth_path is set, classification accuracy
+    # Optional: if agent_mediated_path is set, classification accuracy
     accuracy_new: float | None = None
     accuracy_legacy: float | None = None
     accuracy_delta: float | None = None

@@ -27,12 +27,11 @@ The on-disk layout is fixed by :mod:`atelier.classify.pipeline`:
         svm_frontier.pkl                     (LEGACY, optional, pre-excision only)
         svm_frontier.classes.json            (LEGACY sidecar)
 
-The ``svm.pkl`` slot holds the per-vocabulary SVM trained at vocab-load
-time from the BFO/CCO synth corpus relabeled through the ICE.* →
-user-code alignment (``ml_train.train_svm_for_vocab``).  Bundled into
-the run dir so Extend Classification can replay inference on new
-tables without retraining and so historical runs are reproducible
-from the artifact set alone.
+The ``svm.pkl`` slot holds the per-vocabulary SVM trained from an
+enrichment-derived synthetic corpus.  Bundled into the run dir so
+Extend Classification can replay inference on new tables without
+retraining and so historical runs are reproducible from the artifact
+set alone.
 
 The ``svm_frontier.pkl`` slot is a vestige: the M9 in-loop SVM-on-
 LLM-labels retrain (``train_svm_on_frontier_labels`` — historical
@@ -63,9 +62,8 @@ logger = logging.getLogger(__name__)
 # the DAO, and the Extend runner agree on what to write / read.
 CATBOOST_FILENAME = "catboost_fit_to_llm.cbm"
 # Per-vocabulary SVM bundled with the run for reproducibility +
-# Extend Classification reuse.  Trained at ``_load_vocabulary`` time
-# via ``ml_train.train_svm_for_vocab`` from the BFO/CCO synth corpus
-# relabeled through the ICE.* → user-code alignment.
+# Extend Classification reuse.  Trained from enrichment-derived
+# synthetic corpus (see ``enrichment_loader.py``).
 SVM_FILENAME = "svm.pkl"
 # LEGACY: ``svm_frontier.pkl`` was the M9 in-loop SVM-on-LLM-labels
 # artifact (``train_svm_on_frontier_labels`` — historical function

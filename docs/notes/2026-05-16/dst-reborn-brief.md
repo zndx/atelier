@@ -164,8 +164,8 @@ the pathology Denoeux 2008 §1 identifies.  The SVM's dependence is weaker
 
 ### 2.2 Quantitative cost
 
-The 920-column ground-truth artifact (an LLM-mediated reference produced by
-an independent Opus 4.7 reasoning session, paired with audit metadata) gives
+The 920-column agent-mediated reference artifact (produced by an independent
+Opus 4.7 reasoning session, paired with audit metadata) gives
 an upper bound on the current pipeline's accuracy on adversarial enterprise
 corpora.  Atelier-current scores 481/618 = **77.8 %** strict match (Cat A
 78.9 %, Cat B 76.8 %).  Pre-expansion ablation studies on smaller target

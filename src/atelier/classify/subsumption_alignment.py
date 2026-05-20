@@ -138,11 +138,11 @@ def _build_ice_concept_signatures() -> dict[str, str]:
 def _load_enriched_concept_signatures_from_index(
     annotation_index,
 ) -> dict[str, str]:
-    """Extract concept-text signatures from an in-memory AnnotationIndex.
+    """Extract concept-text signatures from an in-memory annotation index.
 
-    For each annotation view, builds a rich text representation from the
-    payload fields that survive the Qdrant materialization.  The text is
-    designed for embedding comparison against ICE concept signatures.
+    For each annotation, builds a rich text representation from the
+    payload fields.  The text is designed for embedding comparison
+    against ICE concept signatures.
 
     Signature format:
       "{label} | {description} | values: {v1}, {v2}, ... | names: {n1}, {n2}, ..."
@@ -154,10 +154,6 @@ def _load_enriched_concept_signatures_from_index(
         if not code:
             continue
 
-        # Build from payload stored alongside vectors.
-        # The AnnotationView stores pre-embedded vectors, but we need
-        # the text to embed alongside ICE signatures.  We reconstruct
-        # from the view's label (always present) and fall back to code.
         label = view.label or code
         signatures[code] = label
 

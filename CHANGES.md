@@ -333,8 +333,8 @@ smoke before promoting to `v0.3.0` GA.
 - SOPS + age encrypted CAI deployment defaults — minimal AMP config
   surface (4 required vars after the consolidation).
 - `bake-everything-in` posture for fresh CAI deployments — Opus / Sonnet
-  / Haiku ARNs, overwatch settings, and ground-truth fixture all
-  delivered via the encrypted dotenv.
+  / Haiku ARNs, overwatch settings, and agent-mediated reference fixture
+  all delivered via the encrypted dotenv.
 - LICENSE prep + snapshot scripts.
 - `apply_cloudera_header.py` — proprietary header stamper for release
   branches.  Idempotent, with `--dry-run` / `--check` modes.
@@ -370,7 +370,10 @@ smoke before promoting to `v0.3.0` GA.
 - `frontier SVM` → `incremental SVM` (terminology only; no code or
   filename rename).
 - `seam_a_review` → `cautious_review`.
-- `ground_truth` → `curated_reference` (parity scripts + fixture rename).
+- `ground_truth` → `curated_reference` (parity scripts + fixture rename);
+  subsequently `ground_truth` → `agent_mediated` (docs, memory, path
+  references — `reference_code`/`reference_label`/`matches_reference`
+  JSON keys preserved).
 - FAIR-aligned overwatch review prompts (no suppressive language).
 
 ### Stability & Bugfixes

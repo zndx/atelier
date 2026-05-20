@@ -25,9 +25,9 @@ The classify pipeline costs tens of minutes and (on Bedrock / Anthropic
 direct) tens of dollars per run.  When the governance team adds new
 tables to an existing Hive database, or stands up a new Hive / Impala
 database with the same taxonomy, re-running the full pipeline is the
-wrong tool — there's no new ground truth to learn from, and the LLM
-sweep adds nothing the trained CatBoost can't reproduce at >100×
-speed.  Extend Classification is the right shape: load the trained
+wrong tool — there's no new agent-mediated reference to learn from,
+and the LLM sweep adds nothing the trained CatBoost can't reproduce
+at >100x speed.  Extend Classification is the right shape: load the trained
 artifacts, predict on the new columns, write a parquet, register a
 new dataset.  Done.
 

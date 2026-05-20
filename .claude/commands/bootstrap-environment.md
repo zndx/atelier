@@ -21,11 +21,12 @@ Parse the argument for:
 
 | Scope | Phases | Use case |
 |-------|--------|----------|
-| `full` | 1-5 | New environment, start from scratch (resume-safe) |
-| `resume` | 1-5 | Pick up where the last invocation stopped |
+| `full` | 1-6 | New environment, start from scratch (resume-safe) |
+| `resume` | 1-6 | Pick up where the last invocation stopped |
 | `enrich-only` | 1-3 | Prepare enrichment before a curation session |
 | `curate-only` | 4 | Enrichment already at 100%; curate columns only |
-| `report` | 5 | Read-only summary of current bootstrap state |
+| `train-svm` | 5 | Train SVM after curation (requires Phases 1-4 complete) |
+| `report` | 6 | Read-only summary of current bootstrap state |
 | `table <name>` | 4 | Curate a specific table (with 100% enrichment pre-check) |
 
 ## Principles (non-negotiable)
@@ -435,7 +436,92 @@ Persist after EACH table. Do not batch.
 
 ---
 
-## Phase 5 — Coverage Report
+## Phase 5 — SVM Training (agent-mediated)
+
+With 100% enrichment coverage and the reference curated, train (or retrain)
+the SVM evidence source using enrichment-derived generators. This follows
+the same methodology as `/train-svm` but with two bootstrap-specific
+advantages: enrichment payloads are already verified (Phase 3) and the
+reference is freshly curated (Phase 4).
+
+### 5a. Check prerequisites
+
+```python
+# Verify we have what SVM training needs
+am = json.loads(Path("build/data/agent_mediated/agent_mediated.json").read_text()) \
+    if Path("build/data/agent_mediated/agent_mediated.json").exists() else {}
+if len(am) < 50:
+    print(f"Only {len(am)} curated columns — need ≥50 for evaluation. Skipping SVM training.")
+    # Skip to Phase 6
+else:
+    print(f"Reference: {len(am)} curated columns — sufficient for evaluation")
+```
+
+### 5b. Extract enrichment payloads
+
+If Phase 3 already ran, payloads are in Qdrant and have been quality-reviewed.
+Use `enrichment_loader.load_enrichment_payloads(cfg=cfg)` to load from Qdrant.
+Persist to `build/data/svm_training/enrichment_payloads.json` (resume
+checkpoint — skip if exists with matching vocab hash).
+
+### 5c. Generate corpus from enrichment payloads
+
+Bootstrap guarantees 100% enrichment. The registry layers ICE hand-coded
+generators (matched via enrichment metadata) > template generators (from
+prototype_values) > inferred generators (from category metadata):
+
+```python
+from atelier.classify.taxonomy import load_annotations_from_json
+from atelier.classify.synth import generate_user_taxonomy_corpus
+
+cache_path = Path("build/cache/annotations/default.json")
+user_category_set = load_annotations_from_json(cache_path, hierarchical=True)
+
+corpus_dir = Path("build/data/svm_training/corpus")
+results, coverage = generate_user_taxonomy_corpus(
+    user_category_set, payloads, corpus_dir,
+    seed=42, variants_per_category=30,
+)
+
+from collections import Counter
+print(f"Generator coverage: {Counter(coverage.values())}")
+```
+
+Agent reviews a sample of generated columns per subtree for semantic
+quality (same review criteria as Phase 3 enrichment quality review,
+but applied to generated values instead of prototypes).
+
+### 5d. Train and evaluate
+
+```python
+from atelier.classify.ml_train import train_svm
+
+candidate_path = Path("build/data/svm_training/candidate_svm")
+train_svm(corpus_dir, candidate_path)
+```
+
+Score candidate against the Phase 4 reference. Compare vs. incumbent
+SVM (if one exists). Gate criterion: candidate ≥ incumbent on exact
+accuracy. On pass, promote to `build/models/svm.pkl` and invalidate
+per-vocab SVM cache. On fail, report diagnosis but do not block the
+bootstrap — the existing SVM (or no SVM) remains.
+
+See `/train-svm` skill for the full evaluation procedure, confusion
+matrix inspection, and promotion protocol.
+
+### 5e. Persist
+
+Training artifacts go to `build/data/svm_training/`:
+- `enrichment_payloads.json` — extracted Qdrant payloads
+- `corpus/` — synth CSVs + reference_labels.json
+- `generator_review.json` — agent's quality assessment
+- `candidate_svm.pkl` — trained candidate
+- `evaluation.json` — A/B results + gate decision
+- `promotion_log.json` — append-only promotion history
+
+---
+
+## Phase 6 — Coverage Report
 
 ```python
 import json
@@ -499,12 +585,30 @@ if cf_path.exists():
     cf = json.loads(cf_path.read_text())
     print(f"\nEnrichment feedback from curation: {len(cf.get('entries', []))} notes")
 
+# SVM training status
+svm_eval_path = Path("build/data/svm_training/evaluation.json")
+if svm_eval_path.exists():
+    svm_eval = json.loads(svm_eval_path.read_text())
+    cand = svm_eval.get("candidate", {})
+    print(f"\nSVM Training:")
+    print(f"  Training path: {cand.get('training_path', '?')}")
+    print(f"  Training classes: {cand.get('training_classes', '?')}")
+    print(f"  Exact accuracy: {cand.get('exact_accuracy', '?')}")
+    print(f"  Hierarchical accuracy: {cand.get('hierarchical_accuracy', '?')}")
+    print(f"  Gate: {svm_eval.get('gate_result', '?')}")
+    inc = svm_eval.get("incumbent", {})
+    if inc and inc.get("exact_accuracy") is not None:
+        delta = (cand.get("exact_accuracy", 0) or 0) - (inc.get("exact_accuracy", 0) or 0)
+        print(f"  vs incumbent: {delta:+.3f}")
+else:
+    print(f"\nSVM Training: not yet run")
+
 # What's left
 remaining = total_cols - len(am)
 if remaining > 0:
     print(f"\n  Remaining: {remaining} columns to curate")
 else:
-    print(f"\n  COMPLETE: all columns curated")
+    print(f"\n  COMPLETE: all columns curated, SVM {'trained' if svm_eval_path.exists() else 'pending'}")
 ```
 
 ---

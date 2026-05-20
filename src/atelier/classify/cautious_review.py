@@ -8,6 +8,35 @@
 
 """Cautious-code review — agent-mediated backoff for over-specified predictions.
 
+.. warning:: **PROVEN HARMFUL — DO NOT ENABLE IN PRODUCTION.**
+
+   Empirical validation against run ``ce4f3777`` (2026-05-20, 920
+   reference columns) demonstrated that cautious review **destroys**
+   classification accuracy:
+
+   - **Reroute** (238 columns): 76.1% miss rate.  Hurt 99 columns
+     where the LLM was already correct; helped only 19.
+   - **Backoff** (80 columns): 78.8% miss rate.  Hurt 50 columns
+     where the leaf prediction was correct; helped only 3.
+   - **Overall**: fused + review accuracy = **62.5%** vs LLM-only
+     accuracy = **76.1%** — cautious review cost **13.6 percentage
+     points** of strict accuracy.
+
+   Root cause: when evidence sources conflict (mean K = 0.70 in that
+   run), beliefs are low, the bel_threshold fires on nearly every
+   column, and the review LLM (Sonnet 4.5 on Bedrock) systematically
+   overrides correct predictions with wrong ones.  The cascade is
+   self-reinforcing — degraded evidence → high K → low belief →
+   mass review → mass damage.
+
+   The ``bel_threshold`` default is set to **0.0** (unreachable) so
+   that the review never fires unless an operator explicitly opts in.
+   If you are experimenting with re-enabling this logic, be aware
+   that every prior attempt to tune it (R2a stability guard, R2c
+   shortlist-permissive, R3 opaque-sibling exclusion) failed to
+   overcome the fundamental problem: a second LLM call on low-
+   confidence evidence introduces more error than it corrects.
+
 When the DST fusion commits to a deeper code than the cautious-belief
 threshold supports, the over-specified code may be wrong.  This module
 asks Claude (via the same LLM backend the classify pipeline uses, or
@@ -19,17 +48,6 @@ recommended, the original is preserved as ``predicted_code_pre_review``,
 and ``review_decision`` / ``review_rationale`` are stamped on the
 classification dict and into ``cautious_review.json`` beside the run
 parquet.
-
-Aligns with existing cautious-classification vocabulary in the package
-— ``HierarchicalClassification.cautious_code(tau)`` defines the deepest
-code with belief above ``tau``; ``epistemic_evaluation`` reports
-``cautious_accuracy``.  This module is the runtime that closes the
-loop: when belief at the predicted depth is weak, ask whether to emit
-the cautious code instead.
-
-Project directive — on by default.  Iteration is part of the
-algorithm, and this is one of its iterations.  Toggle off only for
-ablation windows (compare-with-and-without).
 """
 
 from __future__ import annotations
@@ -505,32 +523,29 @@ def review_classifications(
 ) -> dict[str, Any]:
     """Run the Cautious-Code Review pass on a fused classification set.
 
+    .. warning:: **PROVEN HARMFUL — this function should not be called
+       in production.**  See module docstring for the empirical evidence
+       (run ce4f3777: −13.6pp accuracy).  The default config disables
+       this path (enabled=False, bel_threshold=0.0).  If you are here
+       because you re-enabled it, you should have a validated fix for
+       the fundamental problem first.
+
     Mutates ``classifications`` in place when the agent recommends a
-    swap.  Three possible decisions:
-
-    - ``keep`` — predicted_code stays.
-    - ``backoff`` — same subtree, over-specified; ``predicted_code``
-      becomes ``cautious_code`` (the existing pre-extension semantic).
-    - ``reroute`` — wrong subtree (or right subtree at a depth not on
-      the cautious_code chain); ``predicted_code`` becomes a code
-      chosen by the agent from the shortlist drawn from
-      ``cross_subtree_belief``.  ``review_chosen_code`` records the
-      target separately for audit.
-
-    For backoff and reroute, the original ``predicted_code`` is
-    preserved as ``predicted_code_pre_review``, ``review_decision`` /
-    ``review_rationale`` are stamped on the column, ``predicted_label``
-    / ``predicted_annotation`` are refreshed via the category_set, and
-    ``matches_reference`` is recomputed if a reference exists.
-
-    Returns an audit dict suitable for writing as
-    ``cautious_review.json`` beside the run's other artifacts.
+    swap.  Returns an audit dict for ``cautious_review.json``.
     """
-    if not getattr(cfg, "classify_cautious_review_enabled", True):
+    if not getattr(cfg, "classify_cautious_review_enabled", False):
         return {"enabled": False}
 
     bel_threshold = float(
-        getattr(cfg, "classify_cautious_review_bel_threshold", 0.85)
+        getattr(cfg, "classify_cautious_review_bel_threshold", 0.0)
+    )
+
+    logger.warning(
+        "Cautious review is ENABLED (proven harmful — see "
+        "cautious_review.py docstring).  bel_threshold=%.2f.  "
+        "This will review and likely damage predictions.  "
+        "Disable via classify.cautious_review.enabled=false.",
+        bel_threshold,
     )
     backend_choice = getattr(cfg, "classify_cautious_review_backend", "default")
 

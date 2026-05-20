@@ -120,6 +120,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm_model_path": ("classify_svm_model_path", str),
+    "classify.svm.hierarchical": ("classify_svm_hierarchical", bool),
+    "classify.svm.nhsvm_temperature": ("classify_svm_nhsvm_temperature", float),
+    "classify.svm.nhsvm_svd_components": ("classify_svm_nhsvm_svd_components", int),
     # LLM backend for classification
     "classify.llm.backend": ("classify_llm_backend", str),
     "classify.llm.api_key": ("classify_llm_api_key", str),
@@ -161,8 +164,9 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.top1_margin_threshold": ("classify_bootstrap_top1_margin_threshold", float),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
-    # Late-interaction multi-vector cosine via Qdrant — feature-flag gated
+    # Late-interaction ColBERT cosine via Qdrant — feature-flag gated
     "classify.cosine.late_interaction.enabled": ("classify_cosine_late_interaction_enabled", bool),
+    "classify.cosine.late_interaction.model": ("classify_colbert_model", str),
     "classify.discounts.svm": ("classify_discount_svm", float),
     "classify.subsumption_alignment.score_threshold": ("classify_subsumption_score_threshold", float),
     "classify.discounts.pattern_theta": ("classify_discount_pattern_theta", float),
@@ -197,7 +201,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.agent.max_turns": ("classify_agent_max_turns", int),
     "classify.agent.model": ("classify_agent_model", str),
     # Per-iteration scoring against the Opus-crafted reference
-    "classify.evaluation.ground_truth_path": ("classify_evaluation_ground_truth_path", str),
+    "classify.evaluation.agent_mediated_path": ("classify_evaluation_agent_mediated_path", str),
     "classify.evaluation.enabled": ("classify_evaluation_enabled", bool),
     # Disk-space guard
     "classify.disk_guard.enabled": ("classify_disk_guard_enabled", bool),
@@ -380,6 +384,9 @@ class AtelierConfig:
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"
     classify_svm_model_path: str = "build/models/svm.pkl"
+    classify_svm_hierarchical: bool = True
+    classify_svm_nhsvm_temperature: float = 1.0
+    classify_svm_nhsvm_svd_components: int = 200
 
     # Classification LLM backend
     classify_llm_backend: str = "openai_compatible"
@@ -405,23 +412,19 @@ class AtelierConfig:
     # Bootstrap convergence
     classify_bootstrap_max_iterations: int = 5
     classify_bootstrap_min_iterations: int = 2
-    # Cautious-code review — agent-mediated backoff for over-specified
-    # predictions.  See atelier.classify.cautious_review.
-    classify_cautious_review_enabled: bool = True
-    classify_cautious_review_bel_threshold: float = 0.80
+    # Cautious-code review — PROVEN HARMFUL.  Empirically destroys
+    # accuracy (ce4f3777: 76% reroute miss rate, −13.6pp vs LLM-only).
+    # Default OFF (enabled=False) with bel_threshold=0.0 (unreachable)
+    # as a belt-and-suspenders guard.  See cautious_review.py docstring.
+    classify_cautious_review_enabled: bool = False
+    classify_cautious_review_bel_threshold: float = 0.0
     classify_cautious_review_backend: str = "default"
-    # R2c: when the LLM emits a code outside the cross_subtree_belief
-    # shortlist but inside the runtime taxonomy, accept it instead of
-    # rejecting as a hallucination.  Closes 8/11 errored decisions in
-    # 8d67b1ed (audit_2026-05-06_a Finding 1, P1 split).
+    # The following sub-knobs are part of the proven-harmful cautious
+    # review system.  All prior remediations (R2a, R2c, R3) failed to
+    # overcome the fundamental accuracy-destruction problem.  Retained
+    # only for controlled re-validation experiments.
     classify_cautious_review_shortlist_permissive: bool = True
-    # R3: drop opaque-named siblings (col_NN, var_NN, dim_NN) from
-    # cautious-review context to break the col_04 sibling-context-
-    # poisoning class (audit_2026-05-06_a Finding 3, P2).
     classify_cautious_review_exclude_opaque_siblings: bool = True
-    # R2a: reject reroute when fusion + LLM already converged with
-    # high confidence (gaming_profiles.handle failure class —
-    # audit_2026-05-06_a Finding 1, P1).
     classify_cautious_review_stability_guard_enabled: bool = True
     classify_cautious_review_stability_guard_llm_conf: float = 0.80
     # R1: annotation-mnemonic fallback in mass_functions
@@ -474,6 +477,7 @@ class AtelierConfig:
     # condition is a deployment issue, not a normal operating mode.
     # See docs/src/architecture/late-interaction-cosine.md.
     classify_cosine_late_interaction_enabled: bool = True
+    classify_colbert_model: str = "colbert-ir/colbertv2.0"
     classify_discount_svm: float = 0.22
     classify_subsumption_score_threshold: float = 0.35
     classify_discount_pattern_theta: float = 0.25
@@ -517,9 +521,9 @@ class AtelierConfig:
     classify_agent_model: str | None = None  # falls back to agent_model
 
     # Per-iteration scoring against the Opus-crafted reference (see
-    # atelier.classify.incremental_scoring).  When ground_truth_path is
+    # atelier.classify.incremental_scoring).  When agent_mediated_path is
     # empty, incremental scoring auto-disables with a single log line.
-    classify_evaluation_ground_truth_path: str = ""
+    classify_evaluation_agent_mediated_path: str = ""
     classify_evaluation_enabled: bool = True
 
     # Disk-space guard (atelier.classify.incremental_scoring.DiskGuardConfig).

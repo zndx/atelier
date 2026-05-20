@@ -192,7 +192,7 @@ def build_user_prompt(
         )
 
     if prior_attempt_json and verifier_feedback:
-        failed_checks = verifier_feedback.get("failed_checks") or []
+        failed_checks = verifier_feedback.get("details") or []
         check_summary = "\n".join(
             f"  - {c.get('name', '?')}: {c.get('detail', '')}"
             for c in failed_checks

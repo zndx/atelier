@@ -24,13 +24,14 @@ collection; cosine similarity identifies the best user-code match.
 Result is cached on disk under a stable (ICE leaves, user codes,
 embedding model, method) key, reloaded on subsequent vocab-loads.
 
-The alignment is consumed at **training time**, not runtime:
-``ml_train.train_svm_for_vocab`` projects the synth corpus's ICE
-labels through the alignment and trains a per-vocabulary SVM whose
-output classes ARE user codes.  Inference (``predict_svm`` →
-``svm_to_mass``) reads user-code-keyed proba directly, so there is
-no per-column translation step and no LLM in the SVM's classify-time
-critical path.
+The alignment is available for diagnostic and validation use.
+The pipeline now generates user-code-labeled corpora directly from
+enrichment payloads (see ``enrichment_loader.py`` +
+``synth_registry.from_enrichment_payloads``), so ICE.* → user-code
+alignment is no longer in the training hot path.  Inference
+(``predict_svm`` → ``svm_to_mass``) reads user-code-keyed proba
+directly, so there is no per-column translation step and no LLM in
+the SVM's classify-time critical path.
 
 ═══════════════════════════════════════════════════════════════════
 NOTE ON THEORETICAL RIGOR — DST source independence

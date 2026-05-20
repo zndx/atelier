@@ -19,7 +19,7 @@ Inputs
 
   --manifest        Path to ``bel_x_gap-<ts>.json`` (matrix-shaped).
   --reference       Path to the reference annotation JSON.  Format
-                    identical to ``score_sweep.py``'s ``--ground-truth``
+                    identical to ``score_sweep.py``'s ``--agent-mediated``
                     arg: flat ``{"table.col": "ANN", ...}`` or one
                     level of nesting auto-flattened.  Reference values
                     of ``null`` or ``""`` are loaded but skipped at
@@ -33,9 +33,9 @@ Note on terminology
 -------------------
 
 The reference is an LLM-mediated artifact (Opus annotations on the
-920-column test set), not an objective ground truth.  Field names in
-code retain ``ground_truth`` for compatibility with the existing
-``ground_truth.json`` filename on disk; output labels say
+920-column test set), not an objective ground truth in the ML sense.  Field names in
+code retain ``agent_mediated`` for compatibility with the existing
+``agent_mediated.json`` filename on disk; output labels say
 ``reference``.
 
 Outputs
@@ -214,7 +214,7 @@ def main() -> int:
     scoreable = sum(1 for v in reference.values() if v is not None)
     print(
         f"Loaded {scoreable} scoreable columns from {args.reference.name} "
-        f"(LLM-mediated reference, not objective ground truth)",
+        f"(LLM-mediated reference, not objective agent-mediated reference)",
         file=sys.stderr,
     )
 
