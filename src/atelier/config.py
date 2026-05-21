@@ -162,6 +162,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
+    # Late-interaction multi-vector cosine via Qdrant — feature-flag gated
+    "classify.cosine.late_interaction.enabled": ("classify_cosine_late_interaction_enabled", bool),
     "classify.discounts.svm": ("classify_discount_svm", float),
     "classify.discounts.pattern_theta": ("classify_discount_pattern_theta", float),
     "classify.discounts.name_match_exact": ("classify_discount_name_match_exact", float),
@@ -194,6 +196,14 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.agent.enabled": ("classify_agent_enabled", bool),
     "classify.agent.max_turns": ("classify_agent_max_turns", int),
     "classify.agent.model": ("classify_agent_model", str),
+    # Per-iteration scoring against the Opus-crafted reference
+    "classify.evaluation.ground_truth_path": ("classify_evaluation_ground_truth_path", str),
+    "classify.evaluation.enabled": ("classify_evaluation_enabled", bool),
+    # Disk-space guard
+    "classify.disk_guard.enabled": ("classify_disk_guard_enabled", bool),
+    "classify.disk_guard.headroom_multiplier": ("classify_disk_guard_headroom_multiplier", float),
+    "classify.disk_guard.bootstrap_floor_bytes": ("classify_disk_guard_bootstrap_floor_bytes", int),
+    "classify.disk_guard.min_runs_for_stats": ("classify_disk_guard_min_runs_for_stats", int),
     # Monte Carlo sampling
     "classify.monte_carlo.min_corpus_size": ("mc_min_corpus_size", int),
     "classify.monte_carlo.sample_fraction": ("mc_sample_fraction", float),
@@ -457,6 +467,19 @@ class AtelierConfig:
     # discount to avoid double-counting under Dempster's rule; the
     # current SVM default reflects the weakly-non-distinct regime.
     classify_discount_cosine: float = 0.20
+    # Late-interaction multi-vector cosine via Qdrant is the production
+    # cosine evidence source under the DST-independence architecture.
+    # Default ON: this is the path that restores independence among
+    # evidence sources.  Disabling it routes the pipeline back through
+    # the single-vector cosine path which is known to under-discriminate
+    # on adversarial corpora and is retained only as a transitional
+    # emergency fallback during deployment rollout.  When this flag is
+    # True and the late-interaction path cannot run (no enriched
+    # collection registered, Qdrant unreachable, qdrant-client missing),
+    # the pipeline logs a WARNING and marks the run as degraded — that
+    # condition is a deployment issue, not a normal operating mode.
+    # See docs/src/architecture/late-interaction-cosine.md.
+    classify_cosine_late_interaction_enabled: bool = True
     classify_discount_svm: float = 0.30
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
@@ -497,6 +520,21 @@ class AtelierConfig:
     classify_agent_enabled: bool = False
     classify_agent_max_turns: int = 10
     classify_agent_model: str | None = None  # falls back to agent_model
+
+    # Per-iteration scoring against the Opus-crafted reference (see
+    # atelier.classify.incremental_scoring).  When ground_truth_path is
+    # empty, incremental scoring auto-disables with a single log line.
+    classify_evaluation_ground_truth_path: str = ""
+    classify_evaluation_enabled: bool = True
+
+    # Disk-space guard (atelier.classify.incremental_scoring.DiskGuardConfig).
+    # When enabled, the pipeline refuses to start (and refuses to advance
+    # past a bootstrap iteration) when projected free space falls short
+    # of mean+2σ × headroom of historical run sizes.
+    classify_disk_guard_enabled: bool = True
+    classify_disk_guard_headroom_multiplier: float = 1.25
+    classify_disk_guard_bootstrap_floor_bytes: int = 209715200  # 200 MiB
+    classify_disk_guard_min_runs_for_stats: int = 3
 
     # Monte Carlo sampling
     mc_min_corpus_size: int = 200

@@ -31,10 +31,10 @@ Feature: Classify source layering — env vars, UI-saved rows, per-run overrides
     When I call load_annotations_from_hive with database "hive_poc"
     Then no whitelist-violation error is raised before the cml import
 
-  Scenario: _load_vocabulary falls through to Hive when vocab_uri is empty
+  Scenario: _load_vocabulary resolves env-default Hive without silent universal fallback
     Given _load_vocabulary receives connection_name "prod-hive" and database "default" with no vocab_uri
     Then the env-default Hive branch is present in the function source
-    And load_annotations_from_hive is called before the universal fallback
+    And the universal fixture is not silently substituted on resolution failure
 
   Scenario: Seeded classify source appears in the data sources list
     Given ATELIER_CLASSIFY_CONNECTION is "test-conn" in config

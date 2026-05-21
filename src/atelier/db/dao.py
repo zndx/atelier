@@ -714,3 +714,142 @@ class AtelierDao:
             "facets": r.facets,
             "created_at": str(r.created_at or ""),
         }
+
+    # ── Taxonomy Registry operations ──────────────────────────────
+    #
+    # Administrative pointers to enriched-annotation Qdrant collections.
+    # PGlite holds *only* the pointer; the actual vectors + payload live
+    # in Qdrant.  See docs/src/architecture/late-interaction-cosine.md.
+
+    def register_taxonomy_collection(self, *, id: str,
+                                     taxonomy_id: str,
+                                     source_table: str,
+                                     qdrant_collection: str,
+                                     augmentation_version: str,
+                                     embedding_model: str,
+                                     embedding_dim: int,
+                                     qdrant_url: str | None = None,
+                                     summary: str | None = None,
+                                     status: str = "building") -> dict:
+        """Insert a taxonomy_registry row.  Returns the created dict.
+
+        The row starts in ``status='building'`` by default; callers
+        promote to ``'current'`` via :meth:`set_current_taxonomy_collection`
+        once the Qdrant write completes successfully.
+        """
+        from atelier.db.model import TaxonomyRegistry
+        with self.get_session() as session:
+            row = TaxonomyRegistry(
+                id=id,
+                taxonomy_id=taxonomy_id,
+                source_table=source_table,
+                qdrant_collection=qdrant_collection,
+                qdrant_url=qdrant_url,
+                augmentation_version=augmentation_version,
+                embedding_model=embedding_model,
+                embedding_dim=embedding_dim,
+                status=status,
+                summary=summary,
+            )
+            session.add(row)
+            session.flush()
+            return self._taxonomy_collection_to_dict(row)
+
+    def get_taxonomy_collection(self, collection_id: str) -> dict | None:
+        """Return a taxonomy_registry row by id, or None."""
+        from atelier.db.model import TaxonomyRegistry
+        with self.get_session() as session:
+            r = (session.query(TaxonomyRegistry)
+                 .filter_by(id=collection_id).first())
+            if r is None:
+                return None
+            return self._taxonomy_collection_to_dict(r)
+
+    def get_current_taxonomy_collection(self, taxonomy_id: str) -> dict | None:
+        """Return the ``status='current'`` row for a taxonomy_id, or None.
+
+        Backed by the partial unique index ``idx_taxonomy_registry_one_current``
+        — at most one match by construction.
+        """
+        from atelier.db.model import TaxonomyRegistry
+        with self.get_session() as session:
+            r = (session.query(TaxonomyRegistry)
+                 .filter_by(taxonomy_id=taxonomy_id, status="current")
+                 .first())
+            if r is None:
+                return None
+            return self._taxonomy_collection_to_dict(r)
+
+    def list_taxonomy_collections(self, taxonomy_id: str | None = None,
+                                  include_archived: bool = False) -> list[dict]:
+        """List taxonomy_registry rows, newest build first.
+
+        Filters by ``taxonomy_id`` when provided; excludes ``archived``
+        unless explicitly requested.
+        """
+        from atelier.db.model import TaxonomyRegistry
+        with self.get_session() as session:
+            q = session.query(TaxonomyRegistry)
+            if taxonomy_id is not None:
+                q = q.filter_by(taxonomy_id=taxonomy_id)
+            if not include_archived:
+                q = q.filter(TaxonomyRegistry.status != "archived")
+            rows = q.order_by(TaxonomyRegistry.built_at.desc()).all()
+            return [self._taxonomy_collection_to_dict(r) for r in rows]
+
+    def set_current_taxonomy_collection(self, collection_id: str) -> bool:
+        """Promote one collection to ``status='current'`` for its taxonomy.
+
+        Demote-then-promote runs in a single transaction to honor the
+        partial unique index ``idx_taxonomy_registry_one_current``
+        (at most one ``current`` per ``taxonomy_id``).  Any prior
+        ``current`` row for the same taxonomy transitions to ``stale``.
+
+        Returns True when the target row was found and promoted.
+        """
+        from atelier.db.model import TaxonomyRegistry
+        with self.get_session() as session:
+            target = (session.query(TaxonomyRegistry)
+                      .filter_by(id=collection_id).first())
+            if target is None:
+                return False
+            # Demote any current row(s) for this taxonomy to 'stale'.
+            (session.query(TaxonomyRegistry)
+                .filter_by(taxonomy_id=target.taxonomy_id, status="current")
+                .update({"status": "stale"}))
+            session.flush()
+            target.status = "current"
+            return True
+
+    def set_taxonomy_collection_status(self, collection_id: str,
+                                       status: str) -> bool:
+        """Set a taxonomy_registry row's status to an arbitrary value.
+
+        Use :meth:`set_current_taxonomy_collection` to promote to
+        ``current`` (it handles the demotion invariant).  This method is
+        for ``archived`` / ``stale`` transitions where the partial-unique
+        index isn't at risk.
+        """
+        from atelier.db.model import TaxonomyRegistry
+        with self.get_session() as session:
+            count = (session.query(TaxonomyRegistry)
+                     .filter_by(id=collection_id)
+                     .update({"status": status}))
+            return count > 0
+
+    @staticmethod
+    def _taxonomy_collection_to_dict(r) -> dict:
+        return {
+            "id": r.id,
+            "taxonomy_id": r.taxonomy_id,
+            "source_table": r.source_table,
+            "qdrant_collection": r.qdrant_collection,
+            "qdrant_url": r.qdrant_url,
+            "augmentation_version": r.augmentation_version,
+            "embedding_model": r.embedding_model,
+            "embedding_dim": r.embedding_dim,
+            "status": r.status,
+            "summary": r.summary,
+            "built_at": str(r.built_at or ""),
+            "updated_at": str(r.updated_at or ""),
+        }

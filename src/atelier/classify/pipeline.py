@@ -66,7 +66,6 @@ from atelier.classify.taxonomy import (
     load_annotations_from_hive,
     load_annotations_from_json,
     load_sample_vocabulary,
-    load_universal_vocabulary,
     save_annotations_json,
 )
 
@@ -523,6 +522,40 @@ def run_classification_pipeline(
         samples = load_meta_tagging_source(mount)
         if category_set is None:
             category_set = load_meta_tagging_vocabulary(mount)
+    elif source_id and source_id not in ("ootb-sample", "synthetic"):
+        # Generic Hive/external source — look up the data_sources row in
+        # the DAO and unpack source_uri ("{connection}/{database}") +
+        # vocab_uri.  Mirrors what the gateway's /api/fsm/start handler
+        # does (gateway.py lines 2540-2563) so non-gateway callers (the
+        # parameter sweep, ad-hoc scripts) don't need to know the URI
+        # decomposition.  Without this, _load_vocabulary lands in the
+        # "no vocab source" branch and raises — the exact failure mode
+        # the smoke test hit with --source-id but no connection/database.
+        try:
+            from atelier.db.dao import AtelierDao
+            src = AtelierDao().get_data_source(source_id)
+        except Exception as exc:
+            src = None
+            logger.warning(
+                "DAO lookup for source %r failed: %s — falling back to "
+                "caller-provided (connection_name, database).",
+                source_id, exc,
+            )
+        if src:
+            # Caller-supplied values win when present; the DAO row fills
+            # in whichever side is missing.  That preserves the operator
+            # override semantics the gateway uses.
+            if vocab_uri is None:
+                vocab_uri = src.get("vocab_uri") or vocab_uri
+            uri = src.get("source_uri", "")
+            if "/" in uri:
+                src_conn, src_db = uri.split("/", 1)
+                if not connection_name:
+                    connection_name = src_conn
+                if not database or database == "default":
+                    database = src_db
+            elif uri and not connection_name:
+                connection_name = uri
     # ── LLM backend resolution ────────────────────────────────
     # The pipeline cannot function without an LLM.  Resolve early
     # so callers get a clear error before any FSM state is created.
@@ -564,6 +597,36 @@ def run_classification_pipeline(
     build_dir = _PROJECT_ROOT / "build"
     results_dir = build_dir / "results" / run_id
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Disk-space guard — refuse to start if projected free space falls
+    # short of mean+2σ of historical run sizes (with headroom).  Better
+    # to bail at iteration 0 than to die mid-run with a corrupt
+    # classifications.json.  See incremental_scoring.DiskGuardConfig.
+    if getattr(cfg, "classify_disk_guard_enabled", True):
+        from atelier.classify.incremental_scoring import (
+            DiskGuardConfig,
+            assert_disk_capacity,
+        )
+        _disk_cfg = DiskGuardConfig(
+            headroom_multiplier=float(getattr(
+                cfg, "classify_disk_guard_headroom_multiplier", 1.25,
+            )),
+            bootstrap_floor_bytes=int(getattr(
+                cfg, "classify_disk_guard_bootstrap_floor_bytes",
+                200 * 1024 * 1024,
+            )),
+            min_runs_for_stats=int(getattr(
+                cfg, "classify_disk_guard_min_runs_for_stats", 3,
+            )),
+        )
+        try:
+            assert_disk_capacity(
+                build_dir / "results", config=_disk_cfg,
+                context="run start",
+            )
+        except RuntimeError as exc:
+            fsm.advance(run_id, FSMState.ERROR, error=str(exc))
+            raise
 
     # Persist the settings-at-start so the UI can show historical vs
     # current in the adaptive focus section even for past runs.
@@ -628,6 +691,34 @@ def run_classification_pipeline(
             category_set,
             confusable_pairs=_build_confusable_pairs(category_set),
         )
+
+        # ── Incremental scoring context ─────────────────────────
+        # Built here (after vocab load, before LLM_SWEEP) so the
+        # reference-vs-vocab alignment check fires BEFORE any LLM cost
+        # is incurred.  Misconfiguration (missing GT file, JSON
+        # malformation, annotation mnemonics absent from the loaded
+        # vocab) raises RuntimeError, which we surface as FSM.ERROR.
+        # See incremental_scoring module docstring for the full
+        # contract — fail-fast was an explicit operator requirement
+        # because this scaffold tunes more than the bel_threshold.
+        from atelier.classify.incremental_scoring import (
+            build_scoring_context,
+        )
+        _gt_path_str = getattr(cfg, "classify_evaluation_ground_truth_path", "") or ""
+        _scoring_enabled = bool(getattr(cfg, "classify_evaluation_enabled", True))
+        try:
+            scoring_ctx = build_scoring_context(
+                enabled=_scoring_enabled and bool(_gt_path_str),
+                reference_path=Path(_gt_path_str) if _gt_path_str else None,
+                category_set=category_set,
+                results_dir=results_dir,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            # Misalignment / missing reference is a configuration
+            # error, not a recoverable runtime condition.  Land in
+            # FSM.ERROR with the operator-actionable message intact.
+            fsm.advance(run_id, FSMState.ERROR, error=str(exc))
+            raise RuntimeError(str(exc)) from exc
 
         # Vocabulary quality check — flags label collisions like
         # "Web Browser" / "WebBrowser" that cause non-deterministic
@@ -1413,6 +1504,76 @@ def run_classification_pipeline(
                     revisited_this_iter=revisited_this_iter,
                 )
 
+                # ── Incremental scoring hook ─────────────────────────
+                # Score post-fusion (after _run_ml_validation re-fused
+                # this iteration's revisited columns), BEFORE the next
+                # iteration's convergence checks consume mean_gap /
+                # disagreements.  No-op when scoring_ctx.enabled=False.
+                if scoring_ctx.enabled:
+                    from atelier.classify.incremental_scoring import (
+                        score_iteration,
+                    )
+                    try:
+                        score_iteration(
+                            scoring_ctx,
+                            iteration=iteration,
+                            phase=f"post_fusion_iter_{iteration}",
+                            state=state,
+                            column_qkeys=column_names,
+                            samples_by_name=samples_by_name,
+                            revisited_count=len(revisited_this_iter),
+                        )
+                    except Exception as exc:
+                        # Scoring is best-effort *after* the startup
+                        # alignment check has passed — a hiccup mid-run
+                        # (transient disk error, missing column) must
+                        # not abort the pipeline.  The startup
+                        # validate_reference_against_vocab is the
+                        # fail-fast surface; in-loop failures degrade
+                        # to a logged warning and the trend file just
+                        # misses one iteration.
+                        logger.warning(
+                            "Incremental scoring failed at iteration %d "
+                            "(non-fatal): %s",
+                            iteration, exc,
+                        )
+
+                # ── Per-iteration disk guard ─────────────────────────
+                # Mid-loop check: each iteration adds CatBoost rounds,
+                # column_history snapshots, and (eventually) the run's
+                # parquet/json sidecars.  Recompute headroom against
+                # the same mean+2σ envelope used at run start.
+                if getattr(cfg, "classify_disk_guard_enabled", True):
+                    from atelier.classify.incremental_scoring import (
+                        DiskGuardConfig as _DGC,
+                        assert_disk_capacity as _adc,
+                    )
+                    try:
+                        _adc(
+                            build_dir / "results",
+                            config=_DGC(
+                                headroom_multiplier=float(getattr(
+                                    cfg,
+                                    "classify_disk_guard_headroom_multiplier",
+                                    1.25,
+                                )),
+                                bootstrap_floor_bytes=int(getattr(
+                                    cfg,
+                                    "classify_disk_guard_bootstrap_floor_bytes",
+                                    200 * 1024 * 1024,
+                                )),
+                                min_runs_for_stats=int(getattr(
+                                    cfg,
+                                    "classify_disk_guard_min_runs_for_stats",
+                                    3,
+                                )),
+                            ),
+                            context=f"iter {iteration}",
+                        )
+                    except RuntimeError as exc:
+                        fsm.advance(run_id, FSMState.ERROR, error=str(exc))
+                        raise
+
             # Loop exited without hitting one of the named break paths —
             # we ran the full max_iterations budget.  Flag that honestly
             # so the UI can show it rather than claiming belief-gap
@@ -1589,6 +1750,87 @@ def run_classification_pipeline(
         results_path = results_dir / "classifications.json"
         results_path.write_text(json.dumps(classifications, indent=2, default=str) + "\n")
         eval_report.write_json(results_dir / "evaluation_report.json")
+
+        # ── Final scoring tick + summary report ─────────────────
+        # The in-loop ticks score ``state.labels`` (post-fusion, pre-
+        # cautious-review).  Cautious review can flip predictions
+        # afterward, so the run's *actual* exit accuracy is whatever
+        # landed in classifications.json.  Score that artifact directly
+        # via a synthetic "final" iteration whose labels are read from
+        # the classifications rows.  Then emit the operator-facing
+        # markdown summary.
+        if scoring_ctx.enabled:
+            try:
+                # Build a state-shaped shim from classifications so we
+                # can reuse score_iteration without re-implementing the
+                # accuracy logic.  The shim only carries the fields
+                # score_iteration touches: .labels, .ml_belief,
+                # .ml_plausibility, .ml_conflict, .llm_calls_total,
+                # .llm_attempts_total, .tokens_input, .tokens_output.
+                from atelier.classify.incremental_scoring import (
+                    score_iteration as _score_iteration,
+                    write_summary_report as _write_summary_report,
+                )
+
+                class _FinalStateShim:
+                    pass
+
+                _shim = _FinalStateShim()
+                _shim.labels = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("predicted_code", "")
+                    for r in classifications
+                }
+                _shim.ml_belief = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("belief", 0.0)
+                    for r in classifications
+                }
+                _shim.ml_plausibility = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("plausibility", 0.0)
+                    for r in classifications
+                }
+                _shim.ml_conflict = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("conflict", 0.0)
+                    for r in classifications
+                }
+                _shim.ml_uncertainty = {
+                    f"{r['table_name']}.{r['column_name']}": r.get("uncertainty", 0.0)
+                    for r in classifications
+                }
+                _shim.llm_calls_total = getattr(state, "llm_calls_total", 0)
+                _shim.llm_attempts_total = getattr(state, "llm_attempts_total", 0)
+                _shim.tokens_input = getattr(state, "tokens_input", 0)
+                _shim.tokens_output = getattr(state, "tokens_output", 0)
+
+                # iteration index = N+1 where N was the last bootstrap
+                # iteration; phase tag distinguishes it from in-loop
+                # ticks so the summary table reads cleanly.
+                final_iter_index = (
+                    max((t["iteration"] for t in scoring_ctx.trend), default=0) + 1
+                )
+                # score_iteration only does membership checks on
+                # samples_by_name (it uses qkey-as-table.col to look up
+                # reference rows); a dict-of-None works as a shim.
+                _score_iteration(
+                    scoring_ctx,
+                    iteration=final_iter_index,
+                    phase="final_post_cautious_review",
+                    state=_shim,
+                    column_qkeys=list(_shim.labels.keys()),
+                    samples_by_name={
+                        k: None for k in _shim.labels.keys()
+                    },
+                    revisited_count=0,
+                )
+                _write_summary_report(
+                    scoring_ctx,
+                    convergence_reason=convergence_reason,
+                    run_id=run_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Final scoring / summary write failed (non-fatal): %s",
+                    exc,
+                )
 
         # Per-column residual trajectories — column-major view of the
         # bootstrap loop's convergence behaviour, complementary to the
@@ -1889,10 +2131,17 @@ def _load_vocabulary(
     - **Env-default Hive**: when *vocab_uri* is empty but
       *connection_name* and *database* are both set (via
       ``ATELIER_CLASSIFY_CONNECTION`` + ``ATELIER_CLASSIFY_DATABASE``),
-      try ``{database}.annotations`` via ``load_annotations_from_hive``
-      before falling through.  This is the auto-classification-at-deploy
-      path that matches the env-seeded ``data_source`` row.
-    - **Fallback**: 16-leaf universal (only when no domain annotations).
+      load ``{database}.annotations`` via the cache-aware
+      ``_load_domain_annotations`` path.  Matches the env-seeded
+      ``data_source`` row.
+
+    There is **no silent fallback** to the universal fixture.  When the
+    resolution above fails to return a non-empty CategorySet, this
+    function raises ``RuntimeError`` rather than substituting a
+    generic vocabulary that would silently misalign with the
+    operator's domain annotations.  The universal fixture remains
+    importable via ``load_universal_vocabulary`` for callers that
+    genuinely want it (training fallback, info endpoints).
 
     Hive sources always require annotations; the annotations table
     location (``vocab_uri``) is configured per data source, decoupled
@@ -1952,38 +2201,63 @@ def _load_vocabulary(
 
     # Env-default Hive: when the operator set ATELIER_CLASSIFY_CONNECTION
     # + ATELIER_CLASSIFY_DATABASE but no explicit vocab_uri was threaded
-    # through, try {database}.annotations on that connection before
-    # falling through to the universal fixture.  Matches the stable
-    # data_source seeded at startup when the env vars are present.
+    # through, load {database}.annotations on that connection.  Matches
+    # the stable data_source seeded at startup when the env vars are
+    # present.  Uses the cache-aware loader so we survive transient Hive
+    # outages or off-platform sweep subprocesses that lack cml.data_v1.
+    #
+    # NOTE on failure semantics: this branch does *not* fall through to
+    # a universal-fixture default.  Silent fallback to a 29-leaf generic
+    # vocabulary masked a sweep-script bug for hours of compute (see
+    # bel_threshold-2026-05-15T22:42:57Z: all six runs predicted ICE
+    # codes instead of the operator's domain annotations because the
+    # raw load_annotations_from_hive call raised under cml-unavailable
+    # and the fallback ate the error).  An empty/failed annotations
+    # load is a configuration error — surface it.
     if connection_name and database:
-        try:
-            from atelier.classify.taxonomy import load_annotations_from_hive
-            domain_cs = load_annotations_from_hive(
-                cfg, connection_name, database, hierarchical=True,
+        domain_cs = _load_domain_annotations(
+            cfg, build_dir, connection_name, database=database,
+        )
+        if domain_cs is None or len(domain_cs.categories) == 0:
+            raise RuntimeError(
+                f"Env-default Hive vocab load returned 0 categories from "
+                f"{database!r}.annotations via connection {connection_name!r}. "
+                f"This usually means the annotations table is empty or the "
+                f"cache at build/data/annotations/{connection_name}__{database}.json "
+                f"is missing.  Configure a valid data source (gateway "
+                f"populates vocab_uri from data_sources.vocab_uri) instead "
+                f"of relying on env-default resolution."
             )
-            if domain_cs is not None and len(domain_cs.categories) > 0:
-                if not isinstance(domain_cs, HierarchicalCategorySet):
-                    domain_cs = HierarchicalCategorySet(
-                        name=domain_cs.name,
-                        categories=list(domain_cs.categories),
-                    )
-                log.info(
-                    "Loaded env-default vocabulary: %d leaf categories "
-                    "(%s.annotations via %s)",
-                    len(domain_cs.categories), database, connection_name,
-                )
-                return domain_cs
-        except Exception as exc:
-            log.warning(
-                "Env-default Hive vocab load failed (%s.annotations via %s): %s. "
-                "Falling through to universal fixture.",
-                database, connection_name, exc,
+        if not isinstance(domain_cs, HierarchicalCategorySet):
+            domain_cs = HierarchicalCategorySet(
+                name=domain_cs.name,
+                categories=list(domain_cs.categories),
             )
+        log.info(
+            "Loaded env-default vocabulary: %d leaf categories "
+            "(%s.annotations via %s)",
+            len(domain_cs.categories), database, connection_name,
+        )
+        return domain_cs
 
-    # Fallback: universal vocabulary (16 BFO-grounded leaves)
-    universal = load_universal_vocabulary(hierarchical=True)
-    log.info("Loaded universal vocabulary: %d terms", len(universal.categories))
-    return universal
+    # No vocab source resolvable.  We deliberately do NOT fall back to
+    # the universal fixture here — the universal vocabulary
+    # (load_universal_vocabulary) is a 29-leaf BFO-grounded *generic*
+    # taxonomy that does not align with any operator's domain
+    # annotations.  A pipeline run that silently lands on it produces
+    # plausible-looking predictions in the wrong vocabulary, which is
+    # exactly the silent-degradation pattern this guard exists to
+    # prevent.  Callers that genuinely want the universal fixture
+    # (e.g. ml_train.py's training fallback, gateway info endpoints)
+    # import load_universal_vocabulary directly.
+    raise RuntimeError(
+        "Could not resolve a vocabulary for this run.  No vocab_uri was "
+        "supplied and no (connection_name, database) pair is configured.  "
+        "Configure a data source (UI: Data Platform panel) or pass "
+        "vocab_uri / source_id explicitly when invoking the pipeline.  "
+        "The universal fixture is not a valid silent fallback because it "
+        "does not align with any operator's domain annotations."
+    )
 
 
 def _load_domain_annotations(
@@ -2213,17 +2487,82 @@ def _classify_column(
     if not _is_vacuous(pattern_mass):
         source_masses["pattern"] = pattern_mass
 
-    # 3. Cosine similarity (if available)
+    # 3. Cosine evidence — late-interaction multi-vector via Qdrant is the
+    # production path (default on); the legacy single-vector path remains
+    # as a transitional emergency fallback only.  See
+    # docs/src/architecture/late-interaction-cosine.md.
+    cosine_path = "unused"  # 'late_interaction' | 'legacy_explicit' |
+                            # 'legacy_degraded:<reason>' | 'unused'
+    cosine_attribution: dict | None = None  # per-decision SHAP surface;
+                                            # populated only when
+                                            # late-interaction ran cleanly
     if use_cosine:
+        late_mass = None
+        late_status = "explicit_disable"
         try:
-            from atelier.classify.embedding import classify_cosine as _cosine
-            similarities = _cosine(features, category_set)
-            cosine_mass = cosine_to_mass(
-                similarities, frame, discount=discounts.cosine,
+            from atelier.classify.late_interaction_bridge import (
+                try_compute_cosine_mass as _try_late_interaction,
             )
-            source_masses["cosine"] = cosine_mass
+            late_mass, late_status, cosine_attribution = _try_late_interaction(
+                cfg=cfg,
+                column_features=features,
+                column_name=col.name,
+                table_name=getattr(col, "table", None) or getattr(col, "table_name", None),
+                samples=getattr(features, "sample_values", None) or [],
+                neighbor_column_names=getattr(col, "neighbor_column_names", None),
+                pattern_summary=getattr(features, "pattern_summary", None),
+                frame=frame,
+                embed=getattr(cfg, "_embedder", None),
+            )
         except Exception as exc:
-            logger.debug("Cosine similarity unavailable for %s: %s", col.name, exc)
+            # The bridge owns its own error handling; reaching here means
+            # the bridge module itself failed to import or its top-level
+            # call raised.  Treat as a deployment issue, log loudly.
+            logger.warning(
+                "late_interaction bridge raised unexpectedly for %s: %s "
+                "(deployment issue; investigate)",
+                col.name, exc,
+            )
+            late_status = "degraded_bridge_error"
+
+        if late_mass is not None:
+            source_masses["cosine"] = late_mass
+            cosine_path = "late_interaction"
+        else:
+            # Fallback to legacy single-vector cosine.  When the operator
+            # explicitly disabled late-interaction, this is silent.  When
+            # the flag is on but the late path failed, emit a WARNING and
+            # tag the column result as degraded so the run artifact
+            # surfaces the issue — leaving the pipeline in degraded mode
+            # is a deployment problem, not a normal operating state.
+            if late_status == "explicit_disable":
+                cosine_path = "legacy_explicit"
+            else:
+                cosine_path = f"legacy_degraded:{late_status}"
+                logger.warning(
+                    "late_interaction unavailable for %s.%s (status=%s); "
+                    "falling back to legacy single-vector cosine — this "
+                    "is a transitional emergency fallback only, not a "
+                    "normal operating mode.  Investigate and restore the "
+                    "late-interaction path (run scripts/enrich_annotations.py "
+                    "or check Qdrant connectivity).",
+                    getattr(col, "table_name", "?"), col.name, late_status,
+                )
+
+            try:
+                from atelier.classify.embedding import classify_cosine as _cosine
+                similarities = _cosine(features, category_set)
+                cosine_mass = cosine_to_mass(
+                    similarities, frame, discount=discounts.cosine,
+                )
+                source_masses["cosine"] = cosine_mass
+            except Exception as exc:
+                logger.warning(
+                    "Cosine evidence unavailable for %s.%s "
+                    "(legacy fallback also failed: %s); "
+                    "fusion proceeds without cosine for this column.",
+                    getattr(col, "table_name", "?"), col.name, exc,
+                )
 
     # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
     if llm_code:
@@ -2331,6 +2670,20 @@ def _classify_column(
         "needs_clarification": hc.needs_clarification,
         "evidence": hc.evidence,
         "evidence_sources": {name: _mass_summary(ba, frame) for name, ba in source_masses.items()},
+        # 'late_interaction' (production), 'legacy_explicit' (operator
+        # opt-out), 'legacy_degraded:<reason>' (deployment issue, fix
+        # and remove this column's degraded marker), 'unused' (cosine
+        # source not enabled for this run).  Aggregating across columns
+        # in the run artifact gives operators a per-run health view of
+        # the cosine evidence path.
+        "cosine_path": cosine_path,
+        # Per-decision SHAP surface for the late-interaction cosine
+        # source: top-K post-fusion tags + per-role contribution
+        # breakdowns.  None when cosine_path is not 'late_interaction'
+        # (legacy paths don't expose per-role attribution).  See
+        # docs/src/architecture/late-interaction-cosine.md § SHAP /
+        # SAGE shift under late interaction.
+        "cosine_attribution": cosine_attribution,
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine
