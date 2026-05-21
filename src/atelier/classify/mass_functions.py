@@ -96,6 +96,34 @@ def _camel_to_words(name: str) -> str:
     return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name).lower()
 
 
+def _resolve_code_to_fe(
+    code: str,
+    frame: FrameOfDiscernment,
+) -> FocalElement | None:
+    """Resolve a predicted code to its focal element in the frame.
+
+    Handles three cases that arise when classifiers (CatBoost fit-to-LLM,
+    NHSVM) emit codes outside the leaf-singleton namespace:
+
+      1. Leaf singleton (dot-code in ``frame.singletons``).
+      2. Internal node (dot-code in ``frame.internal_nodes``).
+      3. Annotation mnemonic (``ADDRFULL``, ``SSN``, …) — resolved via
+         ``frame.resolve_annotation`` which walks the category set's
+         ``all_by_abbrev`` index.
+
+    Returns None when the code is unresolvable — caller should skip it
+    (mass falls through to Theta).
+    """
+    if code in frame.singletons:
+        return frame.singletons[code]
+    if code in frame.internal_nodes:
+        return frame.internal_nodes[code]
+    fe = frame.resolve_annotation(code)
+    if fe is not None:
+        return fe
+    return None
+
+
 def _redistribute_confusable_mass(
     masses: dict[FocalElement, float],
     frame: FrameOfDiscernment,
@@ -1293,8 +1321,11 @@ def catboost_to_mass(
     masses: dict[FocalElement, float] = {}
     evidence_mass = 1.0 - discount
     for code, prob in proba.items():
-        if code in frame.singletons and prob > 1e-15:
-            masses[frame.singleton(code)] = prob * evidence_mass
+        if prob <= 1e-15:
+            continue
+        fe = _resolve_code_to_fe(code, frame)
+        if fe is not None:
+            masses[fe] = masses.get(fe, 0.0) + prob * evidence_mass
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
@@ -1341,8 +1372,11 @@ def svm_to_mass(
     masses: dict[FocalElement, float] = {}
     evidence_mass = 1.0 - discount
     for code, prob in proba.items():
-        if code in frame.singletons and prob > 1e-15:
-            masses[frame.singleton(code)] = prob * evidence_mass
+        if prob <= 1e-15:
+            continue
+        fe = _resolve_code_to_fe(code, frame)
+        if fe is not None:
+            masses[fe] = masses.get(fe, 0.0) + prob * evidence_mass
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
