@@ -222,16 +222,11 @@ def _install_fit_to_llm_catboost(
     This is the hook that makes the LLM-trained CatBoost auditable from
     the run directory alone.
 
-    Note: there is no per-run SVM analogue.  The M9 SVM-on-LLM-labels
-    retrain (``train_svm_on_frontier_labels`` — historical name) was
-    excised in commit 5199379 because training the SVM on per-column
-    LLM votes broke Denoeux 2008 source-independence.  The active SVM
-    is the synth-trained classifier at ``build/models/svm.pkl`` (built
-    by ``scripts/train_classifiers.py`` against the bundled-ontology
-    synth corpus); per-vocabulary alignment happens at runtime via
-    ``ontology_alignment.translate_proba``.  Old run directories may
-    still carry a ``svm_frontier.pkl`` file from before the excision —
-    those files are vestiges and are no longer produced.
+    Note: there is no per-run SVM analogue.  SVM is trained once
+    per vocabulary by ``_ensure_per_vocab_svm`` from enrichment
+    payloads and cached by vocab signature.  It is installed
+    in-memory via ``ml_inference.install_svm`` — there is no
+    upstream-ontology fallback.
     """
     min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
     if len(state.labels) < min_labels:
@@ -881,11 +876,36 @@ def run_classification_pipeline(
                 "tables_filtered": tables_before_filter - tables_after_filter,
             })
 
-        # Apply curated-reference CSV (when configured) so evaluation_report
-        # gets real accuracy numbers.  Hive-backed runs don't carry a
-        # reference through sample_table_metadata, but an operator with an
-        # external reference (reviewer xlsx → CSV) can point the pipeline
-        # at it via cfg.classify_reference_uri.
+        # Agent-mediated reference (JSON).  When available, populate
+        # reference_code from the Opus-crafted reference artifact —
+        # the same file build_scoring_context uses for evaluation.
+        # Applied first; CSV reference (below) overwrites if both
+        # are configured, since CSV is more manually curated.
+        _am_path_str = getattr(cfg, "classify_evaluation_agent_mediated_path", "") or ""
+        if _am_path_str:
+            try:
+                from atelier.classify.reference import (
+                    apply_reference,
+                    load_reference_agent_mediated,
+                )
+                am_map = load_reference_agent_mediated(
+                    Path(_am_path_str), category_set=category_set,
+                )
+                if am_map:
+                    am_hits = apply_reference(all_samples, am_map)
+                    if am_hits:
+                        logger.info(
+                            "Agent-mediated reference applied to %d/%d columns",
+                            am_hits,
+                            sum(len(t.columns) for t in all_samples),
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Agent-mediated reference injection failed (non-fatal): %s", exc,
+                )
+
+        # Curated-reference CSV (when configured) overwrites the
+        # agent-mediated reference for any columns it matches.
         ref_uri = getattr(cfg, "classify_reference_uri", "") or ""
         if ref_uri:
             try:
@@ -893,10 +913,6 @@ def run_classification_pipeline(
                     apply_reference,
                     load_reference_csv,
                 )
-                # Pass category_set so rows with only a mnemonic
-                # (shape emitted by ingest_reference when the
-                # reviewer xlsx has no explicit code column) resolve
-                # via the vocabulary rather than being silently dropped.
                 ref_map = load_reference_csv(
                     ref_uri, _PROJECT_ROOT, category_set=category_set,
                 )
@@ -1014,11 +1030,12 @@ def run_classification_pipeline(
         category_table = build_category_tree(category_set)
         system_prompt = build_system_prompt(category_table, category_set=category_set)
 
-        # Wire config → ml_inference model paths
+        # Wire config → ml_inference model paths.  Only CatBoost has a
+        # pre-trained disk path; SVM is installed in-memory by
+        # _ensure_per_vocab_svm (no upstream fallback).
         from atelier.classify import ml_inference
         ml_inference.configure_paths(
             catboost_path=cfg.classify_catboost_model_path,
-            svm_path=cfg.classify_svm_model_path,
         )
 
         discounts = DiscountConfig.from_cfg(cfg)

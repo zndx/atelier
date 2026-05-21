@@ -75,8 +75,9 @@ def run_synth_train_eval(
     ml_inference.reset()
     ml_inference.configure_paths(
         catboost_path=model_paths["catboost"],
-        svm_path=model_paths["svm"],
     )
+    from atelier.classify.svm_classifier import SVMClassifier
+    ml_inference.install_svm(SVMClassifier.load(model_paths["svm"]))
 
     try:
         # 4. Classify mock data
@@ -205,8 +206,9 @@ def run_real_data_eval(
     ml_inference.reset()
     ml_inference.configure_paths(
         catboost_path=model_paths["catboost"],
-        svm_path=model_paths["svm"],
     )
+    from atelier.classify.svm_classifier import SVMClassifier
+    ml_inference.install_svm(SVMClassifier.load(model_paths["svm"]))
 
     try:
         # 6. Load real samples

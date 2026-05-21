@@ -60,6 +60,7 @@ land in git.
 from __future__ import annotations
 
 import csv
+import json
 import logging
 from pathlib import Path
 from typing import Iterable, TYPE_CHECKING
@@ -196,6 +197,88 @@ def load_reference_csv(
             + ("…" if len(unresolved_mnemonics) > 10 else ""),
         )
     return mapping
+
+
+def load_reference_agent_mediated(
+    path: Path,
+    category_set: "CategorySet | None" = None,
+) -> dict[str, str]:
+    """Load an agent-mediated reference JSON and return ``{key: code}``.
+
+    The agent-mediated artifact is ``{table.column: MNEMONIC}`` or
+    nested ``{table: {column: MNEMONIC}}``.  Mnemonics are resolved
+    to numeric codes via the category set so that
+    ``ColumnSample.reference_code`` carries the same form as
+    ``best_code`` at comparison time.
+
+    Keys are indexed in both qualified (``table.column``) and bare
+    (``column``) forms so ``apply_reference`` resolves either shape.
+    """
+    if not path.is_file():
+        log.warning(
+            "Agent-mediated reference path %s does not exist — "
+            "reference_code will not be populated",
+            path,
+        )
+        return {}
+
+    try:
+        raw = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning("Agent-mediated reference load failed: %s", exc)
+        return {}
+
+    if not isinstance(raw, dict):
+        log.warning(
+            "Agent-mediated reference root must be a JSON object, got %s",
+            type(raw).__name__,
+        )
+        return {}
+
+    by_abbrev = getattr(category_set, "all_by_abbrev", None) or {}
+
+    flat: dict[str, str] = {}
+    unresolved: set[str] = set()
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            for col, ann in v.items():
+                if not ann or not isinstance(ann, str):
+                    continue
+                cat = by_abbrev.get(ann.upper()) or by_abbrev.get(ann)
+                if cat is not None:
+                    qname = f"{k}.{col}"
+                    flat[qname] = cat.code
+                    flat.setdefault(col, cat.code)
+                else:
+                    unresolved.add(ann)
+        elif isinstance(v, str) and v:
+            cat = by_abbrev.get(v.upper()) or by_abbrev.get(v)
+            if cat is not None:
+                flat[k] = cat.code
+                if "." in k:
+                    bare = k.split(".", 1)[1]
+                    flat.setdefault(bare, cat.code)
+            else:
+                unresolved.add(v)
+
+    resolved = len({v for v in flat.values()})
+    total_entries = sum(
+        len(v) if isinstance(v, dict) else 1
+        for v in raw.values()
+    )
+    log.info(
+        "Agent-mediated reference: %d entries → %d resolved keys "
+        "(%d unique codes) from %s",
+        total_entries, len(flat), resolved, path,
+    )
+    if unresolved:
+        log.warning(
+            "Agent-mediated reference: %d mnemonic(s) not in vocabulary: %s",
+            len(unresolved),
+            ", ".join(sorted(unresolved)[:10])
+            + ("…" if len(unresolved) > 10 else ""),
+        )
+    return flat
 
 
 def apply_reference(
