@@ -270,7 +270,7 @@ def _build_attribution(
     for code, score in scored_tags[:top_k]:
         rows.append({
             "code": code,
-            "is_leaf": code in frame.singletons,
+            "is_leaf": code not in frame.internal_nodes,
             "maxsim_score": round(score, 6),
         })
     return {

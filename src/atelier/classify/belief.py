@@ -994,17 +994,19 @@ class HierarchicalClassification:
             raise ValueError("No singletons in frame")
 
         # Resolve the headline focal element for downstream Bel/Pl
-        # queries.  Singleton vs internal-node dispatch — the prior
-        # leaf-only picker only ever needed ``frame.singleton``.
-        if best_code in frame.singletons:
-            best_fe = frame.singletons[best_code]
-            best_betp = combined.pignistic_probability(best_fe)
-        else:
+        # queries.  Check internal_nodes BEFORE singletons: the unified
+        # frame puts every code in singletons, so checking singletons
+        # first would shadow the subtree FE that internal-node winners
+        # need for correct Bel computation.
+        if best_code in frame.internal_nodes:
             best_fe = frame.internal_nodes[best_code]
             # For an internal-node headline, BetP is undefined as a
             # singleton transform; report Bel(A) as the analog
             # operator-facing "confidence in this tag".
             best_betp = combined.belief(best_fe)
+        elif best_code in frame.singletons:
+            best_fe = frame.singletons[best_code]
+            best_betp = combined.pignistic_probability(best_fe)
 
         cat = category_set.by_code.get(best_code)
         if cat is None and hasattr(category_set, "all_by_code"):
