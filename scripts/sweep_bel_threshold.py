@@ -9,12 +9,21 @@
 
 """Sweep ``classify.cautious_review.bel_threshold`` across a grid.
 
-Hypothesis under test: cautious-review is over-correcting at the current
-default (0.80) — a sizeable fraction of parent->leaf flips it produces
-were actually wrong (per the extend-vs-parent differential observed
-on runs 0146134f vs 2ac4d0a6).  Lowering ``bel_threshold`` reduces the
-review fire rate; the sweep measures the accuracy curve so the right
-operating point falls out of the data rather than out of guesswork.
+.. warning:: **OBSOLETE — cautious review is proven harmful.**
+
+   Run ce4f3777 (2026-05-20) demonstrated that cautious review destroys
+   accuracy at every threshold tested: reroute 76.1% miss rate, backoff
+   78.8% miss rate, net −13.6pp vs LLM-only.  The default config now
+   disables cautious review entirely (enabled=false, bel_threshold=0.0).
+
+   This sweep script is retained only for the unlikely case that someone
+   re-implements cautious review from scratch and needs to re-validate.
+   Running it against the current (disabled) config will produce
+   identical results across all threshold values since review never fires.
+
+Historical hypothesis: cautious-review is over-correcting at the current
+default (0.80).  **Confirmed and worse**: it over-corrects at *every*
+threshold.
 
 What this does
 --------------
@@ -46,7 +55,7 @@ Output: ``build/sweeps/bel_threshold-<utc-iso>.json`` with shape::
   }
 
 Then feed the manifest to ``scripts/score_sweep.py`` to compare against
-ground truth.
+agent-mediated reference.
 
 Dataset pinning
 ---------------
@@ -55,7 +64,7 @@ This script does NOT pin the table set by itself.  Either:
 
   * Use a branch that has ``classify.table_exclude_patterns`` and set
     it in ``config/base.conf`` before invoking, OR
-  * Let ``score_sweep.py`` filter to ground-truth-known columns
+  * Let ``score_sweep.py`` filter to agent-mediated-reference-known columns
     (recommended; works regardless of branch state).
 
 Usage
@@ -71,7 +80,7 @@ Usage
   # then:
   uv run python scripts/score_sweep.py \\
       --manifest build/sweeps/bel_threshold-2026-05-15T01:23:45Z.json \\
-      --ground-truth path/to/ground_truth.json
+      --agent-mediated path/to/agent_mediated.json
 
 Cost
 ----

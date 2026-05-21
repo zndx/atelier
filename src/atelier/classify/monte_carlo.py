@@ -8,21 +8,22 @@
 
 """Monte Carlo sampling for scalable classification.
 
-At small N (< min_corpus_size), all columns get frontier-model classification
-(identical to current pipeline behavior). At larger N, stratified importance
-sampling selects representative columns for frontier inference, then label
-propagation extends coverage to the remaining corpus via embedding similarity.
+At small N (< min_corpus_size), every column gets direct LLM classification
+(identical to current pipeline behavior).  At larger N, stratified importance
+sampling selects representative columns for direct LLM classification, then
+label propagation extends coverage to the remaining corpus via embedding
+similarity.
 
 The MC layer is transparent: callers see the same BootstrapState with labels
 for all columns, regardless of whether labels came from direct LLM inference
-or propagation. Propagated labels enter DST fusion as discounted evidence —
+or propagation.  Propagated labels enter DST fusion as discounted evidence —
 the pipeline's existing conflict detection automatically escalates uncertain
-propagations back to the frontier model via targeted revisit.
+propagations back to direct LLM classification via targeted revisit.
 
-Designed for GitTables scale: 1.7M+ tables, 15M+ columns. The
-max_frontier_columns cap (default 500) bounds LLM cost regardless of corpus
-size. Stratified sampling guarantees every preliminary category stratum gets
-at least min_per_stratum frontier-classified exemplars.
+Designed for GitTables scale: 1.7M+ tables, 15M+ columns.  The
+``max_sampled_columns`` cap (default 500) bounds LLM cost regardless of corpus
+size.  Stratified sampling guarantees every preliminary category stratum
+contributes at least ``min_per_stratum`` directly-classified exemplars.
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ class MCConfig:
     min_corpus_size: int = 200
     sample_fraction: float = 0.15
     min_per_stratum: int = 3
-    max_frontier_columns: int = 500
+    max_sampled_columns: int = 500
     propagation_threshold: float = 0.85
     propagation_discount: float = 0.30
 
@@ -64,7 +65,7 @@ class MCConfig:
             min_corpus_size=cfg.mc_min_corpus_size,
             sample_fraction=cfg.mc_sample_fraction,
             min_per_stratum=cfg.mc_min_per_stratum,
-            max_frontier_columns=cfg.mc_max_frontier_columns,
+            max_sampled_columns=cfg.mc_max_sampled_columns,
             propagation_threshold=cfg.mc_propagation_threshold,
             propagation_discount=cfg.mc_propagation_discount,
         )
@@ -101,23 +102,31 @@ class Stratum:
 
 @dataclass
 class MCPlan:
-    """Sampling plan: which columns get frontier vs. propagation."""
+    """Sampling plan: which columns are LLM-classified directly vs. propagated.
+
+    The plan splits the corpus into two sets: ``sampled_columns`` are
+    classified by direct LLM inference; ``propagation_columns`` receive
+    labels via embedding-similarity propagation from the nearest
+    LLM-classified neighbor.  When the corpus is below
+    ``min_corpus_size`` or ``sample_fraction >= 1.0``, ``sampled_columns``
+    equals the full set and ``propagation_columns`` is empty.
+    """
 
     strata: list[Stratum]
-    frontier_columns: set[str]
+    sampled_columns: set[str]
     propagation_columns: set[str]
     total_columns: int
     effective_sample_fraction: float
 
     @property
     def is_passthrough(self) -> bool:
-        """True when MC is inactive (small corpus)."""
-        return len(self.frontier_columns) == self.total_columns
+        """True when MC is inactive (small corpus or full-coverage mode)."""
+        return len(self.sampled_columns) == self.total_columns
 
     def summary(self) -> dict[str, Any]:
         return {
             "strata": len(self.strata),
-            "frontier_columns": len(self.frontier_columns),
+            "sampled_columns": len(self.sampled_columns),
             "propagation_columns": len(self.propagation_columns),
             "total_columns": self.total_columns,
             "effective_sample_fraction": round(self.effective_sample_fraction, 4),
@@ -250,7 +259,7 @@ def stratify(
     """Partition columns into strata by preliminary category.
 
     Columns with low confidence or disagreeing signals go into an
-    UNRESOLVED stratum (always fully sampled by the frontier model).
+    UNRESOLVED stratum (always fully classified by the LLM directly).
     """
     # Group by best_code
     groups: dict[str, list[PreClassification]] = {}
@@ -286,12 +295,12 @@ def select_sample(
     total: int,
     seed: int = 42,
 ) -> MCPlan:
-    """Select representative columns for frontier-model classification.
+    """Select representative columns for direct LLM classification.
 
     Allocation strategy:
     - UNRESOLVED + rare strata: 100% (all members)
     - Normal strata: proportional allocation with importance weighting
-    - Total budget: min(max_frontier_columns, total × sample_fraction)
+    - Total budget: min(max_sampled_columns, total × sample_fraction)
 
     Importance weight per column: w = (1 - confidence) × (1 + ambiguity)
     Selection: weighted random sampling without replacement.
@@ -301,30 +310,30 @@ def select_sample(
     # Passthrough: classify everything when below the size threshold OR
     # when the operator has explicitly requested full LLM coverage by
     # pushing sample_fraction to 1.0.  In the latter case we bypass the
-    # max_frontier_columns cap as well — "100%" must literally mean 100%.
+    # max_sampled_columns cap as well — "100%" must literally mean 100%.
     all_names = set()
     for s in strata:
         all_names.update(s.column_names)
     if total < mc_cfg.min_corpus_size or mc_cfg.sample_fraction >= 1.0:
         return MCPlan(
             strata=strata,
-            frontier_columns=all_names,
+            sampled_columns=all_names,
             propagation_columns=set(),
             total_columns=total,
             effective_sample_fraction=1.0,
         )
 
-    budget = min(mc_cfg.max_frontier_columns, int(total * mc_cfg.sample_fraction))
+    budget = min(mc_cfg.max_sampled_columns, int(total * mc_cfg.sample_fraction))
 
-    frontier: set[str] = set()
+    sampled: set[str] = set()
 
     # Phase 1: Mandatory selections (UNRESOLVED + rare strata)
     for stratum in strata:
         if stratum.code == "UNRESOLVED" or stratum.is_rare:
-            frontier.update(stratum.column_names)
+            sampled.update(stratum.column_names)
 
     # Phase 2: Allocate remaining budget across normal strata
-    remaining_budget = max(0, budget - len(frontier))
+    remaining_budget = max(0, budget - len(sampled))
     normal_strata = [s for s in strata if s.code != "UNRESOLVED" and not s.is_rare]
     normal_total = sum(s.size for s in normal_strata)
 
@@ -338,36 +347,36 @@ def select_sample(
             allocation = min(allocation, stratum.size)
 
             if allocation >= stratum.size:
-                frontier.update(stratum.column_names)
+                sampled.update(stratum.column_names)
             else:
                 # Importance-weighted sampling within stratum
                 selected = _importance_sample(
                     stratum.column_names, allocation, rng,
                 )
-                frontier.update(selected)
+                sampled.update(selected)
 
     propagation = set()
     for stratum in strata:
         for name in stratum.column_names:
-            if name not in frontier:
+            if name not in sampled:
                 propagation.add(name)
 
-    effective_fraction = len(frontier) / total if total > 0 else 1.0
+    effective_fraction = len(sampled) / total if total > 0 else 1.0
 
     plan = MCPlan(
         strata=strata,
-        frontier_columns=frontier,
+        sampled_columns=sampled,
         propagation_columns=propagation,
         total_columns=total,
         effective_sample_fraction=effective_fraction,
     )
 
     logger.info(
-        "MC plan: %d frontier (%.1f%%) + %d propagation across %d strata "
+        "MC plan: %d sampled (%.1f%%) + %d propagation across %d strata "
         "(budget=%d, max=%d)",
-        len(frontier), effective_fraction * 100,
+        len(sampled), effective_fraction * 100,
         len(propagation), len(strata),
-        budget, mc_cfg.max_frontier_columns,
+        budget, mc_cfg.max_sampled_columns,
     )
 
     return plan
@@ -379,11 +388,11 @@ def propagate_labels(
     samples: dict[str, ColumnSample],
     mc_cfg: MCConfig,
 ) -> dict[str, str]:
-    """Propagate labels from frontier-classified to unclassified columns.
+    """Propagate labels from directly-classified to unclassified columns.
 
-    Uses cosine similarity on column feature embeddings. Propagation is
-    stratum-local: only compare within the same preliminary category to
-    reduce O(N×K) to O(stratum_size × K_frontier).
+    Uses cosine similarity on column feature embeddings.  Propagation
+    is stratum-local: only compare within the same preliminary category
+    to reduce O(N×K) to O(stratum_size × K_sampled).
 
     Returns dict of {column_name: propagated_code}.
     """
@@ -393,19 +402,19 @@ def propagate_labels(
     propagated: dict[str, str] = {}
     threshold = mc_cfg.propagation_threshold
 
-    # Build frontier embeddings (only classified frontier columns)
-    frontier_classified = [
-        name for name in mc_plan.frontier_columns
+    # Build source embeddings (the LLM-classified sampled columns)
+    sampled_classified = [
+        name for name in mc_plan.sampled_columns
         if name in state.labels
     ]
-    if not frontier_classified:
-        logger.warning("No frontier columns classified — skipping propagation")
+    if not sampled_classified:
+        logger.warning("No sampled columns classified — skipping propagation")
         return propagated
 
-    # Embed frontier columns
-    frontier_texts = []
-    frontier_names = []
-    for name in frontier_classified:
+    # Embed the sampled columns; these become the propagation sources.
+    sampled_texts = []
+    sampled_names = []
+    for name in sampled_classified:
         col = samples[name]
         feat = extract_features(
             column_name=col.name,
@@ -417,16 +426,16 @@ def propagate_labels(
             null_count=col.null_count,
             distinct_count=col.distinct_count,
         )
-        frontier_texts.append(feat.to_embedding_text())
-        frontier_names.append(name)
+        sampled_texts.append(feat.to_embedding_text())
+        sampled_names.append(name)
 
     model = _get_model()
     batch_size = get_batch_size()
-    frontier_embs = model.encode(
-        frontier_texts, normalize_embeddings=True,
+    sampled_embs = model.encode(
+        sampled_texts, normalize_embeddings=True,
         show_progress_bar=False, batch_size=batch_size,
     )
-    frontier_embs = np.array(frontier_embs)
+    sampled_embs = np.array(sampled_embs)
 
     # Process propagation columns in chunks to manage memory
     prop_names = list(mc_plan.propagation_columns)
@@ -456,15 +465,15 @@ def propagate_labels(
         )
         chunk_embs = np.array(chunk_embs)
 
-        # Compute similarities: (chunk_size, frontier_size)
-        sims = chunk_embs @ frontier_embs.T
+        # Compute similarities: (chunk_size, sampled_size)
+        sims = chunk_embs @ sampled_embs.T
 
         for i, name in enumerate(chunk):
             best_idx = int(np.argmax(sims[i]))
             best_sim = float(sims[i, best_idx])
 
             if best_sim >= threshold:
-                source_name = frontier_names[best_idx]
+                source_name = sampled_names[best_idx]
                 source_code = state.labels[source_name]
                 source_conf = state.confidence.get(source_name, 0.5)
 
@@ -478,9 +487,9 @@ def propagate_labels(
     state.propagated_count = len(propagated)
     logger.info(
         "Propagated labels to %d/%d columns (threshold=%.2f, "
-        "frontier_classified=%d)",
+        "sampled_classified=%d)",
         len(propagated), len(mc_plan.propagation_columns),
-        threshold, len(frontier_classified),
+        threshold, len(sampled_classified),
     )
 
     return propagated

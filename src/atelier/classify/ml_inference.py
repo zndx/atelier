@@ -182,10 +182,11 @@ def install_svm(model) -> None:
     """Install an in-memory SVM model, bypassing disk-load.
 
     Parallel to :func:`install_catboost`.  Currently has no
-    in-pipeline caller — the M9 frontier-SVM hot-swap that consumed
-    this entry point was excised on 2026-05-04 (commits 8627c2c,
-    5199379, cc59d01); the synth-trained SVM at ``build/models/svm.pkl``
-    is loaded once via the standard disk-load path.  Retained as a
+    in-pipeline caller — the M9 in-loop SVM-on-LLM-labels hot-swap
+    that consumed this entry point was excised on 2026-05-04
+    (commits 8627c2c, 5199379, cc59d01); the synth-trained SVM at
+    ``build/models/svm.pkl`` is loaded once via the standard disk-load
+    path.  Retained as a
     public seam for tests and any future code that legitimately needs
     to swap classifiers without disk I/O.
 

@@ -111,7 +111,7 @@ log = logging.getLogger(__name__)
 # filter here intentionally ignores them: they flow through the
 # classifier and get reclassified from values, so drift surfaces as
 # a disagreement between the human-maintained code and Atelier's
-# prediction rather than silently masquerading as ground truth.
+# prediction rather than silently masquerading as an authoritative reference.
 #
 # Adding a new prefix to this list should come with a
 # ``@given a column name "..."`` case in

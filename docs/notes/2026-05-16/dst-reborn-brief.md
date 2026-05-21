@@ -17,7 +17,12 @@ written consent of Cloudera, Inc.
 ## Abstract
 
 Atelier's classification pipeline is a Dempster-Shafer (DST) evidence-fusion
-system over a hierarchical category set of ~300 codes.  Empirical observation,
+system over a runtime-selected hierarchical category set.  Vocabulary
+identity is dynamic: operators choose a `(connection, database,
+annotations_table)` triple per run, and the architecture must scale
+across vocabularies of unbounded size and shape.  The one structural
+invariant is that every node — leaf or internal — is a first-class
+tagging target.  Empirical observation,
 corroborated by an audit of the in-loop training topology, shows that of six
 declared evidence sources only three are structurally independent of the LLM;
 the remainder are downstream of LLM labels via in-loop training.  Under
@@ -59,8 +64,12 @@ rather than a primary evidence source) is sketched.
 ### 1.1 The Atelier classification problem
 
 Atelier classifies columns of relational tables (entities) into terms drawn
-from a hierarchical category set (the *Atlas Lexicon*, ~300 leaf codes
-under a BFO/CCO-grounded universal vocabulary).  Each column receives a
+from a hierarchical category set selected at runtime by the operator
+(the *Atlas Lexicon* is the BFO/CCO-grounded reference used in the
+current UAT; other vocabularies will be loaded across deployments and
+test slices).  The current UAT snapshot carries roughly three-hundred
+nodes; this is a property of today's data, not of the architecture.
+Each column receives a
 single hierarchical classification with belief, plausibility, and conflict.
 The fusion stage combines evidence from multiple sources via Dempster-Shafer
 theory; the bootstrap loop iterates fusion + targeted LLM revisitation until
@@ -155,8 +164,8 @@ the pathology Denoeux 2008 §1 identifies.  The SVM's dependence is weaker
 
 ### 2.2 Quantitative cost
 
-The 920-column ground-truth artifact (an LLM-mediated reference produced by
-an independent Opus 4.7 reasoning session, paired with audit metadata) gives
+The 920-column agent-mediated reference artifact (produced by an independent
+Opus 4.7 reasoning session, paired with audit metadata) gives
 an upper bound on the current pipeline's accuracy on adversarial enterprise
 corpora.  Atelier-current scores 481/618 = **77.8 %** strict match (Cat A
 78.9 %, Cat B 76.8 %).  Pre-expansion ablation studies on smaller target
@@ -164,7 +173,8 @@ spaces showed ~97 % strict accuracy when the four-source DST stack
 (name_match, pattern, cosine, LLM) was genuinely independent.  The
 ~19 percentage-point gap decomposes approximately as:
 
-- ~5 points target-space difficulty (4 → ~300 codes)
+- ~5 points target-space difficulty (4 → hundreds of codes; UAT
+  snapshot at the time of writing)
 - ~14 points structural collapse of evidence independence
 
 A four-hour diagnostic sweep (`bel_threshold × gap_threshold` 12-cell grid,

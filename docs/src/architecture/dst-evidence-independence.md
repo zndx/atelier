@@ -122,16 +122,22 @@ mixed independence profile:
   with TF-IDF char-3-6gram + word-1-2gram features and labels keyed
   on the bundled-ontology ICE.* leaves from
   `synth_generators.GENERATORS`. At pipeline runtime, predictions
-  are translated into the user taxonomy via the cached alignment in
-  `classify.ontology_alignment` (one LLM call per (vocab, model)
-  tuple, results cached on disk). **Weakly non-distinct** with the
-  LLM source — the shared knowledge is vocabulary-level (the
-  alignment table) rather than column-level (the M9 frontier-SVM
-  regime, since excised — see commits 8627c2c, 5199379, cc59d01).
+  are translated into the user taxonomy via subsumption-prediction
+  alignment in `classify.subsumption_alignment` — sentence-transformer
+  cosine similarity between ICE concept signatures and enriched
+  annotation payloads from the Qdrant taxonomy collection (one
+  alignment computation per (vocab, embedding_model) tuple, results
+  cached on disk). **Weakly non-distinct** with the cosine source
+  via shared enrichment-LLM upstream — the enriched annotations were
+  generated offline by an LLM, but the alignment computation itself
+  uses a structurally independent model (BERT embeddings), not the
+  runtime autoregressive LLM. The prior LLM-mediated approach (one
+  LLM `classify_batch` call per alignment, excised in the P7
+  subsumption-alignment intervention) was weakly non-distinct with
+  the runtime LLM through shared model weights — the new approach
+  eliminates that correlation.
   See the `ontology_alignment.py` module docstring for the full
-  independence argument and known caveats; future work to push this
-  back below cosine is a BM25 + transformer-reranker alignment that
-  removes the LLM from the mapping path entirely.
+  independence argument.
 
 Treating LLM and CatBoost(LLM) as fully-independent sources and
 combining them via Dempster's rule double-counts the LLM atom; the
@@ -185,17 +191,20 @@ SVM **above** the cosine discount:
 | `name_match` | 0.30–0.70 | independent; lexical match against vocab                                            |
 | `llm`        | 0.15     | original; first-pass label                                                           |
 | `catboost`   | **0.55** | **strongly non-distinct** (`fit_to_llm`, per-column LLM labels)                      |
-| `svm`        | **0.30** | **weakly non-distinct** (vocab-level via `ontology_alignment`; was 0.55 under M9)    |
+| `svm`        | **0.22** | **weakly non-distinct** (enrichment-mediated subsumption alignment; was 0.30 under LLM-mediated, 0.55 under M9) |
 | `catboost_max` | 0.75   | variance ceiling; maintains headroom                                                 |
 
 Operators can dial these via the Settings page when retraining
 CatBoost on labels independent of the current LLM sweep (e.g.
 synth-only training); the metadata in `config_overlay.SETTINGS_METADATA`
-exposes the full range.  The SVM discount is the trickier one to
-move: lowering it below `cosine` requires switching the alignment
-to a path that doesn't share an LLM with the runtime sweep
-(BM25 + reranker is the future-work plan; see
-`ontology_alignment.py` module docstring).
+exposes the full range.  The SVM discount at 0.22 (slightly above
+cosine's 0.20) reflects the subsumption-prediction alignment:
+structurally independent of the runtime LLM (uses BERT embeddings,
+not autoregressive inference), with weak non-distinctness only via
+the shared enrichment-LLM upstream (same structural dependency the
+late-interaction cosine source carries).  The 0.02 margin above
+cosine accounts for subsumption prediction being a single per-ICE-code
+decision (structurally more brittle than per-column cosine evidence).
 
 ### 2. Independent-tier consensus + revisit gate
 

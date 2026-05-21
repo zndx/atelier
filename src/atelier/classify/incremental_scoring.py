@@ -147,8 +147,8 @@ def load_reference_artifact(path: Path) -> dict[str, str | None]:
     if not path.exists():
         raise FileNotFoundError(
             f"Reference artifact not found at {path}.  Set "
-            f"ATELIER_GROUND_TRUTH_PATH or classify.evaluation."
-            f"ground_truth_path to a valid Opus-crafted reference JSON."
+            f"ATELIER_AGENT_MEDIATED_PATH or classify.evaluation."
+            f"agent_mediated_path to a valid Opus-crafted reference JSON."
         )
     try:
         raw = json.loads(path.read_text())

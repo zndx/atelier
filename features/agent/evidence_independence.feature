@@ -9,7 +9,7 @@
 @agent @tier-0
 Feature: DST evidence-source independence
   Atelier's classification fusion treats LLM-derivative sources
-  (CatBoost fit-to-LLM, frontier SVM trained on LLM labels) as
+  (CatBoost fit-to-LLM, the excised M9 SVM-on-LLM-labels retrain) as
   non-distinct evidence per Denoeux 2008.  These scenarios validate
   the three soundness mechanisms: independent-tier consensus
   driving the revisit gate, raised reliability discount on
@@ -72,7 +72,7 @@ Feature: DST evidence-source independence
     # description, common-names aliases, and full ontological path are
     # injected into the column embedding text so cosine similarity is
     # anchored to publicly-grounded ontology terms (recognizable to
-    # any frontier embedding model from training) rather than just
+    # any leading embedding model from training) rather than just
     # the regex name.  See mass_functions.lookup_pattern_ontology and
     # docs/src/architecture/dst-evidence-independence.md.
     Given a column whose values match the monetary pattern

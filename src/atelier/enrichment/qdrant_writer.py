@@ -39,25 +39,22 @@ logger = logging.getLogger(__name__)
 
 # ── Named-vector schema ───────────────────────────────────────────
 
+COLBERT_VECTOR_NAME: str = "colbert"
 
-# Named vectors that hold *one* embedding (single-vector slots).
-# Stored in Qdrant as separate named vectors on the same point.
+# Legacy constants — kept only for migration tooling that reads old
+# collections.  New collections use a single ``colbert`` multi-vector
+# field.
 SINGLE_VECTOR_NAMES: tuple[str, ...] = (
     "label_view",
     "description_view",
     "parent_path_view",
 )
-
-# Named vectors that hold *many* embeddings each (multi-vector slots).
-# Stored in Qdrant using its multi-vector named-vectors API (one named
-# vector per slot, holding a list of embeddings).
 MULTI_VECTOR_NAMES: tuple[str, ...] = (
     "prototype_values",
     "value_patterns",
     "name_hints",
     "anti_examples",
 )
-
 ALL_VECTOR_NAMES: tuple[str, ...] = SINGLE_VECTOR_NAMES + MULTI_VECTOR_NAMES
 
 
@@ -116,7 +113,12 @@ def point_cache_key(
         embedding_model,
         source_row_hash_value,
     ])
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    # Qdrant requires point IDs to be unsigned integers or UUIDs.
+    # Derive a deterministic UUID (version 5 style) from the SHA256
+    # by taking the first 16 bytes and formatting as a UUID.
+    digest = hashlib.sha256(blob.encode("utf-8")).digest()
+    import uuid as _uuid
+    return str(_uuid.UUID(bytes=digest[:16]))
 
 
 # ── Point construction ────────────────────────────────────────────
@@ -124,36 +126,18 @@ def point_cache_key(
 
 @dataclass
 class AnnotationVectors:
-    """Embeddings for one annotation, keyed by named-vector slot.
+    """ColBERT token vectors for one annotation.
 
-    Single-vector slots hold a single list[float]; multi-vector slots
-    hold a list[list[float]].  Slot names must be drawn from
-    :data:`SINGLE_VECTOR_NAMES` and :data:`MULTI_VECTOR_NAMES`.
+    Holds the token-level embeddings produced by encoding the composed
+    annotation text through a ColBERT model.  Stored as a single
+    multi-vector field in Qdrant with MaxSim comparator.
     """
 
-    label_view: list[float]
-    description_view: list[float]
-    parent_path_view: list[float]
-    prototype_values: list[list[float]] = field(default_factory=list)
-    value_patterns: list[list[float]] = field(default_factory=list)
-    name_hints: list[list[float]] = field(default_factory=list)
-    anti_examples: list[list[float]] = field(default_factory=list)
+    colbert: list[list[float]]
 
     def to_qdrant_vectors(self) -> dict[str, Any]:
-        """Shape Qdrant's per-point vectors mapping expects.
-
-        Qdrant's multi-vector API accepts a list-of-vectors under a single
-        named-vector slot.  Single-vector slots take a flat list[float].
-        """
-        return {
-            "label_view": self.label_view,
-            "description_view": self.description_view,
-            "parent_path_view": self.parent_path_view,
-            "prototype_values": self.prototype_values,
-            "value_patterns": self.value_patterns,
-            "name_hints": self.name_hints,
-            "anti_examples": self.anti_examples,
-        }
+        """Shape Qdrant's per-point vectors mapping expects."""
+        return {COLBERT_VECTOR_NAME: self.colbert}
 
 
 @dataclass
@@ -238,6 +222,82 @@ def build_point(
     return EnrichedAnnotationPoint(point_id=pid, vectors=vectors, payload=payload)
 
 
+# ── Annotation text composition ──────────────────────────────────
+
+
+def compose_annotation_text(payload: dict) -> str:
+    """Compose a single text passage from an annotation's payload.
+
+    Mirrors ``ColumnFeatures.to_embedding_text()`` on the entity side:
+    the entity text carries column-level features (name, type, samples,
+    patterns, siblings, etc.); this text carries annotation-level
+    features (label, description, prototypes, name hints, taxonomy path).
+
+    Both are fed through the same ColBERT encoder — Qdrant's native
+    MaxSim handles the token-level cross-alignment.
+
+    Anti-examples are deliberately excluded: they add noise in the
+    embedding space without improving MaxSim discrimination.
+    """
+    parts: list[str] = []
+
+    label = payload.get("label") or ""
+    if label:
+        parts.append(label)
+
+    description = payload.get("description") or ""
+    if description:
+        parts.append(description)
+
+    prototype_values = payload.get("prototype_values") or []
+    if prototype_values:
+        vals = prototype_values[:10] if len(prototype_values) > 10 else prototype_values
+        # Flatten if values are dicts with a 'value' key (enrichment format)
+        flat = []
+        for v in vals:
+            if isinstance(v, dict):
+                flat.append(str(v.get("value", v)))
+            else:
+                flat.append(str(v))
+        parts.append("values: " + ", ".join(flat))
+
+    name_hints = payload.get("name_hints") or []
+    if name_hints:
+        hints = name_hints[:10] if len(name_hints) > 10 else name_hints
+        flat = []
+        for h in hints:
+            if isinstance(h, dict):
+                flat.append(str(h.get("hint", h)))
+            else:
+                flat.append(str(h))
+        parts.append("names: " + ", ".join(flat))
+
+    value_patterns = payload.get("value_patterns") or []
+    if value_patterns:
+        pats = value_patterns[:5] if len(value_patterns) > 5 else value_patterns
+        descs = []
+        for p in pats:
+            if isinstance(p, dict):
+                desc = p.get("description") or p.get("expr") or str(p)
+                descs.append(str(desc))
+            else:
+                descs.append(str(p))
+        parts.append("patterns: " + ", ".join(descs))
+
+    parent_path = payload.get("parent_path") or []
+    if parent_path:
+        if isinstance(parent_path, list):
+            parts.append("ontology: " + " > ".join(str(p) for p in parent_path))
+        else:
+            parts.append("ontology: " + str(parent_path))
+
+    mnemonic = payload.get("mnemonic") or ""
+    if mnemonic and mnemonic != label:
+        parts.append(f"abbrev: {mnemonic}")
+
+    return " | ".join(parts) if parts else ""
+
+
 # ── Qdrant operations ─────────────────────────────────────────────
 
 
@@ -261,23 +321,26 @@ def ensure_collection(
     distance: str = "Cosine",
     recreate: bool = False,
 ) -> None:
-    """Create the Qdrant collection with the required named-vector schema.
+    """Create the Qdrant collection with a single ColBERT multi-vector field.
 
     If ``recreate`` is True and the collection exists, it is dropped and
     re-created.  Otherwise an existing collection is left in place
     (idempotent rebuilds rely on this).
 
-    The named-vector schema declares one slot per name in
-    :data:`ALL_VECTOR_NAMES`, all with the same embedding dimensionality
-    and distance metric.  Multi-vector slots and single-vector slots are
-    declared identically; Qdrant decides whether a slot stores one or
-    many vectors at write time based on the input shape.
+    The collection has one named vector field (``colbert``) configured
+    with ``MaxSim`` comparator for native late-interaction scoring.
     """
     from qdrant_client.http import models as qm
 
+    dist = qm.Distance[distance.upper()]
     vectors_config = {
-        name: qm.VectorParams(size=embedding_dim, distance=qm.Distance[distance.upper()])
-        for name in ALL_VECTOR_NAMES
+        COLBERT_VECTOR_NAME: qm.VectorParams(
+            size=embedding_dim,
+            distance=dist,
+            multivector_config=qm.MultiVectorConfig(
+                comparator=qm.MultiVectorComparator.MAX_SIM,
+            ),
+        ),
     }
 
     exists = client.collection_exists(collection)

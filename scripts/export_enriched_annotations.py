@@ -10,13 +10,19 @@
 """Export an enriched annotation collection to build/ for operator review.
 
 Reads the Qdrant payload (vectors are skipped — the snapshot is for
-human inspection, not similarity comparison) and writes parquet plus
-a human-readable TSV alongside.
+human inspection, not similarity comparison) and writes in the
+requested format:
+
+  - **parquet** (default): typed columnar for downstream pandas use
+  - **json**: ``{code: payload_dict}`` mapping compatible with
+    ``enrichment_loader.load_enrichment_payloads(json_path=...)``
+    for offline SVM training without a live Qdrant instance
+  - **both**: parquet + json side by side
 
 Files land in ``build/exports/`` named:
 
-    <taxonomy_id>-enriched-<augmentation_version>-<utc>.parquet
-    <taxonomy_id>-enriched-<augmentation_version>-<utc>.tsv
+    <taxonomy_id>-enriched-<augmentation_version>-<utc>.{parquet,json}
+    <taxonomy_id>-enriched-<augmentation_version>-<utc>.tsv  (optional)
 
 Snapshots are read-only — edits go back to Qdrant through a structured
 CLI (deferred, P2 follow-on).  See
@@ -97,6 +103,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory to write the export into (created if absent).",
     )
     parser.add_argument(
+        "--format", choices=["parquet", "json", "both"], default="parquet",
+        help="Output format. 'json' produces enrichment_payloads.json "
+             "compatible dict for offline SVM training.",
+    )
+    parser.add_argument(
         "--no-tsv", action="store_true",
         help="Skip the TSV companion file (parquet only).",
     )
@@ -133,31 +144,58 @@ def main(argv: list[str] | None = None) -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     utc = _utc_iso()
-    parquet_path = args.output_dir / f"{taxonomy_id}-enriched-{aug_version}-{utc}.parquet"
-    tsv_path = args.output_dir / f"{taxonomy_id}-enriched-{aug_version}-{utc}.tsv"
+    base_name = f"{taxonomy_id}-enriched-{aug_version}-{utc}"
 
-    rows: list[dict] = []
+    raw_payloads: list[dict] = []
     for payload in _scroll_collection(client, coll):
-        rows.append(_flatten_for_table(payload))
-    logger.info("Read %d payload rows from %s", len(rows), coll)
+        raw_payloads.append(payload)
+    logger.info("Read %d payload rows from %s", len(raw_payloads), coll)
 
-    # Parquet first — preserves typing via pyarrow.
-    import pandas as pd
-
-    df = pd.DataFrame(rows)
-    df.to_parquet(parquet_path, index=False)
-    logger.info("Wrote parquet: %s", parquet_path)
-
-    if not args.no_tsv:
-        df.to_csv(tsv_path, sep="\t", index=False)
-        logger.info("Wrote TSV: %s", tsv_path)
-
-    print(json.dumps({
+    result: dict = {
         "collection": coll,
-        "rows_exported": len(rows),
-        "parquet_path": str(parquet_path),
-        "tsv_path": None if args.no_tsv else str(tsv_path),
-    }, indent=2))
+        "rows_exported": len(raw_payloads),
+    }
+
+    # JSON format: {code: payload_dict} for enrichment_loader compatibility
+    if args.format in ("json", "both"):
+        json_path = args.output_dir / f"{base_name}.json"
+        payloads_dict: dict[str, dict] = {}
+        for raw in raw_payloads:
+            code = raw.get("mnemonic") or raw.get("code")
+            if not code:
+                continue
+            payloads_dict[code] = {
+                "code": code,
+                "label": raw.get("label", ""),
+                "description": raw.get("description", ""),
+                "prototype_values": raw.get("prototype_values", []),
+                "value_patterns": raw.get("value_patterns", []),
+                "name_hints": raw.get("name_hints", []),
+                "anti_examples": raw.get("anti_examples", []),
+            }
+        json_path.write_text(json.dumps(payloads_dict, indent=2))
+        logger.info("Wrote JSON: %s (%d entries)", json_path, len(payloads_dict))
+        result["json_path"] = str(json_path)
+
+    # Parquet + optional TSV
+    if args.format in ("parquet", "both"):
+        import pandas as pd
+
+        parquet_path = args.output_dir / f"{base_name}.parquet"
+        tsv_path = args.output_dir / f"{base_name}.tsv"
+
+        rows = [_flatten_for_table(p) for p in raw_payloads]
+        df = pd.DataFrame(rows)
+        df.to_parquet(parquet_path, index=False)
+        logger.info("Wrote parquet: %s", parquet_path)
+        result["parquet_path"] = str(parquet_path)
+
+        if not args.no_tsv:
+            df.to_csv(tsv_path, sep="\t", index=False)
+            logger.info("Wrote TSV: %s", tsv_path)
+            result["tsv_path"] = str(tsv_path)
+
+    print(json.dumps(result, indent=2))
     return 0
 
 

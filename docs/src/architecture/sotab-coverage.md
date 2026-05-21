@@ -31,7 +31,7 @@ benchmark labels to BFO/CCO concepts.
   `gt-signals-dbpedia` and SOTAB v2.  SOTAB infrastructure already
   wired: `scripts/download_sotab.py` fetches the four canonical bundles,
   `src/aegir/data/table_dataset.py` loads `sotab_v2_cta_*_set.csv`
-  ground truth.  Inheriting `atelier-vocab.ttl` + synth generators
+  reference labels.  Inheriting `atelier-vocab.ttl` + synth generators
   is part of the M2 roadmap.
 - **Synthetic data pipeline**: currently in atelier
   (`synth_generators.py`, 316+ generators).  Migration target: Ægir,

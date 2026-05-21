@@ -159,7 +159,7 @@ Feature: Dempster-Shafer classification pipeline
     And I stratify the pre-classified columns
     And I select the MC sample
     Then the MC plan should be passthrough
-    And frontier + propagation should cover all columns
+    And sampled + propagation should cover all columns
 
   Scenario: MC activates when corpus exceeds threshold
     Given the fixture corpus with 50 columns
@@ -168,8 +168,8 @@ Feature: Dempster-Shafer classification pipeline
     And I stratify the pre-classified columns
     And I select the MC sample
     Then the MC plan should NOT be passthrough
-    And frontier columns should be a subset of all columns
-    And frontier + propagation should cover all columns
+    And sampled columns should be a subset of all columns
+    And sampled + propagation should cover all columns
 
   Scenario: Pre-classification assigns every column
     Given the fixture corpus with 50 columns

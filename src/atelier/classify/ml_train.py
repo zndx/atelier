@@ -55,12 +55,18 @@ def _load_synth_data(synth_dir: Path) -> tuple[dict[str, list[str]], dict[str, s
 def train_svm(
     synth_dir: Path,
     output_path: Path,
+    *,
+    category_set=None,
+    hierarchical: bool = False,
 ) -> Path:
     """Train SVM classifier on synthetic data.
 
     Args:
         synth_dir: Directory with synth CSVs + reference_labels.json.
         output_path: Where to save the .pkl model file.
+        category_set: When provided with ``hierarchical=True``, trains
+            with the Structured Shared Frobenius Norm (Choi et al. 2015).
+        hierarchical: Enable training-time NHSVM via Kronecker expansion.
 
     Returns:
         Path to the saved model.
@@ -79,8 +85,10 @@ def train_svm(
         texts.append(text)
         labels.append(code)
 
-    logger.info("Training SVM on %d samples", len(texts))
-    classifier = SVMClassifier()
+    logger.info("Training SVM on %d samples (hierarchical=%s)", len(texts), hierarchical)
+    classifier = SVMClassifier(
+        category_set=category_set, hierarchical=hierarchical,
+    )
     classifier.fit(texts, labels)
     classifier.save(output_path)
     return output_path
@@ -232,6 +240,7 @@ def train_all(
     catboost_iterations: int = 1000,
     catboost_depth: int = 6,
     catboost_learning_rate: float = 0.10,
+    hierarchical: bool = False,
 ) -> dict[str, Path]:
     """Train both CatBoost and SVM classifiers.
 
@@ -240,7 +249,10 @@ def train_all(
     """
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    svm_path = train_svm(synth_dir, models_dir / "svm.pkl")
+    svm_path = train_svm(
+        synth_dir, models_dir / "svm.pkl",
+        category_set=category_set, hierarchical=hierarchical,
+    )
     cb_path = train_catboost(
         synth_dir, category_set, models_dir / "catboost.cbm",
         embedding_model=embedding_model,
@@ -250,135 +262,3 @@ def train_all(
     )
 
     return {"catboost": cb_path, "svm": svm_path}
-
-
-def train_svm_for_vocab(
-    alignment: dict[str, str],
-    output_path: Path,
-    *,
-    variants_per_category: int = 30,
-    seed: int = 42,
-    synth_dir: Path | None = None,
-) -> tuple[Path, dict[str, int]]:
-    """Train a per-vocabulary SVM that emits user-vocab codes natively.
-
-    Bridges the BFO/CCO synth corpus into the operator's annotations
-    vocabulary by:
-
-      1. Generating the universal-vocabulary synth corpus (ICE.*-keyed
-         reference labels), via the same ``synth.generate_synth_tables``
-         path the pre-trained synth SVM uses.  The TF-IDF features
-         stay independent — column-name diversity, sample-value
-         distributions, and structure all derive from the synth
-         generators, not from any LLM column-vote.
-      2. Relabeling the reference-labels sidecar via
-         ``alignment[ICE.X] → user.Y``.  ICE leaves not in the alignment
-         are dropped from training: better to omit a concept than to
-         force a synthetic mapping.
-      3. Training the SVM via the standard ``train_svm`` path.  Output
-         is ICE-shape-trained but user-code-labeled, so at inference
-         the predictions are already in the operator's frame —
-         ``ontology_alignment.translate_proba`` is unnecessary.
-
-    The alignment-induced shared error mode (vocabulary-level, not
-    column-level — see ``ontology_alignment.py`` module docstring) is
-    pushed to *training time* rather than *runtime*: the SVM weights
-    encode the alignment once at fit, and per-column inference has no
-    LLM dependency.  Per-column DST independence is preserved.
-
-    Args:
-        alignment: ICE.* → user-code mapping from
-            ``ontology_alignment.build_alignment``.  Empty alignment
-            raises — there is nothing to train on.
-        output_path: Where to save the SVM model file.  Sibling
-            ``.classes.json`` is written by ``SVMClassifier.save``.
-        variants_per_category: Forwarded to ``generate_synth_tables``;
-            controls column-name diversity per ICE leaf.
-        seed: RNG seed for deterministic synth generation.
-        synth_dir: Optional override for the working synth-corpus
-            directory.  When None (default), a tempdir is used and
-            cleaned up after training.  Pass an explicit path when the
-            corpus should be inspectable post-hoc.
-
-    Returns:
-        (output_path, stats) where stats is a dict with
-            ``mapped_ice_count``, ``dropped_ice_count``,
-            ``training_columns``, ``training_classes``.
-
-    Raises:
-        ValueError: when the alignment is empty or relabeling produces
-            no training columns.
-    """
-    import shutil
-    import tempfile
-
-    from atelier.classify.synth import generate_synth_tables
-    from atelier.classify.taxonomy import load_universal_vocabulary
-
-    if not alignment:
-        raise ValueError(
-            "train_svm_for_vocab: alignment is empty — cannot train per-vocab "
-            "SVM without an ICE.* → user-code mapping"
-        )
-
-    cleanup = synth_dir is None
-    work_dir = Path(synth_dir) if synth_dir else Path(
-        tempfile.mkdtemp(prefix="atelier_svm_for_vocab_")
-    )
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        universal = load_universal_vocabulary(hierarchical=True)
-        generate_synth_tables(
-            universal,
-            work_dir,
-            variants_per_category=variants_per_category,
-            seed=seed,
-        )
-
-        ref_path = work_dir / "reference_labels.json"
-        with open(ref_path) as f:
-            ice_labels: dict[str, str] = json.load(f)
-
-        # Project ICE → user codes.  Columns whose ICE has no alignment
-        # entry are dropped (no synthetic contribution for unmapped
-        # concepts).
-        relabeled: dict[str, str] = {}
-        seen_ice: set[str] = set()
-        for col_name, ice_code in ice_labels.items():
-            user_code = alignment.get(ice_code)
-            if not user_code:
-                continue
-            relabeled[col_name] = user_code
-            seen_ice.add(ice_code)
-
-        if not relabeled:
-            raise ValueError(
-                "train_svm_for_vocab: no training columns survived "
-                "relabeling — alignment covers no ICE leaves with synth "
-                "generators"
-            )
-
-        with open(ref_path, "w") as f:
-            json.dump(relabeled, f, indent=2)
-
-        train_svm(work_dir, output_path)
-
-        all_ice_in_synth = set(ice_labels.values())
-        stats = {
-            "mapped_ice_count": len(seen_ice),
-            "dropped_ice_count": len(all_ice_in_synth - seen_ice),
-            "training_columns": len(relabeled),
-            "training_classes": len(set(relabeled.values())),
-        }
-        logger.info(
-            "train_svm_for_vocab: %d columns / %d classes "
-            "(mapped %d ICE leaves, dropped %d) → %s",
-            stats["training_columns"], stats["training_classes"],
-            stats["mapped_ice_count"], stats["dropped_ice_count"],
-            output_path,
-        )
-        return output_path, stats
-    finally:
-        if cleanup and work_dir.exists():
-            shutil.rmtree(work_dir, ignore_errors=True)

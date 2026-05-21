@@ -49,6 +49,7 @@ from atelier.classify.mass_functions import (
     cosine_to_mass,
     llm_to_mass,
     name_match_to_mass,
+    nhsvm_to_mass,
     pattern_to_mass,
     resolve_pattern_map,
     svm_to_mass,
@@ -221,15 +222,15 @@ def _install_fit_to_llm_catboost(
     This is the hook that makes the LLM-trained CatBoost auditable from
     the run directory alone.
 
-    Note: there is no per-run SVM analogue.  The M9 frontier-SVM
-    retrain (``train_svm_on_frontier_labels``) was excised in commit
-    5199379 because training the SVM on per-column LLM votes broke
-    Denoeux 2008 source-independence.  The active SVM is the
-    synth-trained classifier at ``build/models/svm.pkl`` (built by
-    ``scripts/train_classifiers.py`` against the bundled-ontology
+    Note: there is no per-run SVM analogue.  The M9 SVM-on-LLM-labels
+    retrain (``train_svm_on_frontier_labels`` — historical name) was
+    excised in commit 5199379 because training the SVM on per-column
+    LLM votes broke Denoeux 2008 source-independence.  The active SVM
+    is the synth-trained classifier at ``build/models/svm.pkl`` (built
+    by ``scripts/train_classifiers.py`` against the bundled-ontology
     synth corpus); per-vocabulary alignment happens at runtime via
     ``ontology_alignment.translate_proba``.  Old run directories may
-    still carry a ``svm_frontier.pkl`` from before the excision —
+    still carry a ``svm_frontier.pkl`` file from before the excision —
     those files are vestiges and are no longer produced.
     """
     min_labels = int(getattr(cfg, "classify_catboost_fit_to_llm_min_labels", 30))
@@ -305,66 +306,82 @@ def _install_fit_to_llm_catboost(
 def _ensure_per_vocab_svm(
     cfg,
     category_set: HierarchicalCategorySet,
-    alignment: dict[str, str],
     *,
     cache_dir: Path,
     run_dir: Path,
 ) -> Path:
     """Cache-then-bundle the per-vocabulary SVM.
 
-    Pipeline counterpart to ``ml_train.train_svm_for_vocab``.  Walks
-    three steps:
+    Generates a user-code-labeled synthetic corpus from enrichment
+    payloads and trains the SVM directly — no alignment step needed.
+    Walks three steps:
 
-      1. Compute the vocab signature from ``category_set.leaf_codes``.
-      2. Cache lookup at ``cache_dir/{vocab_sig}.pkl``; train via
-         ``train_svm_for_vocab`` if absent.  The cache is keyed solely
-         by user-vocab leaves so multiple classify runs against the
-         same vocabulary share one trained model — alignment + train
-         is non-trivial work and re-doing it per run is wasteful.
+      1. Compute the vocab signature from all category codes.
+      2. Cache lookup at ``cache_dir/{vocab_sig}.pkl``; on miss, load
+         enrichment payloads (Qdrant or JSON export), generate corpus
+         via ``generate_user_taxonomy_corpus``, and train via
+         ``train_svm``.
       3. Copy ``cache/<sig>.pkl`` (and the ``.classes.json`` sidecar)
-         into ``run_dir/svm.pkl`` so the run is self-contained for
-         reproducibility and Extend Classification reuse.
+         into ``run_dir/svm.pkl`` so the run is self-contained.
 
     Finally, install the loaded model via ``ml_inference.install_svm``
     so the rest of the pipeline's SVM evidence path (``predict_svm``)
-    uses the per-vocab model directly — no ``translate_proba`` step
-    needed at inference time.
+    uses the per-vocab model directly.
 
     Returns the run-dir path of the bundled SVM.  Raises on failure
     (caller logs and continues — strict-mode landing is deferred).
     """
+    import shutil
+    import tempfile
+
     from atelier.classify import ml_inference
     from atelier.classify.artifact_set import compute_vocab_signature
-    from atelier.classify.ml_train import train_svm_for_vocab
+    from atelier.classify.enrichment_loader import load_enrichment_payloads
+    from atelier.classify.ml_train import train_svm
     from atelier.classify.svm_classifier import SVMClassifier
+    from atelier.classify.synth import generate_user_taxonomy_corpus
 
-    leaf_codes = sorted(getattr(category_set, "leaf_codes", set()))
-    if not leaf_codes:
+    svm_hierarchical = getattr(cfg, "classify_svm_hierarchical", True)
+
+    all_cats = getattr(category_set, "all_categories", category_set.categories)
+    all_codes = sorted(c.code for c in all_cats)
+    if not all_codes:
         raise ValueError(
-            "_ensure_per_vocab_svm: category_set has no leaf_codes — "
+            "_ensure_per_vocab_svm: category_set has no categories — "
             "cannot key cache or train"
         )
-    vocab_sig = compute_vocab_signature(leaf_codes)
+    vocab_sig = compute_vocab_signature(all_codes)
+    suffix = "_nhsvm" if svm_hierarchical else ""
 
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{vocab_sig}.pkl"
+    cache_path = cache_dir / f"{vocab_sig}{suffix}.pkl"
     cache_classes = cache_path.with_suffix(".classes.json")
 
     if cache_path.is_file() and cache_classes.is_file():
         logger.info(
-            "per-vocab SVM cache hit: %s (%d leaf codes)",
-            cache_path, len(leaf_codes),
+            "per-vocab SVM cache hit: %s (%d codes, hierarchical=%s)",
+            cache_path, len(all_codes), svm_hierarchical,
         )
     else:
+        payloads = load_enrichment_payloads(cfg=cfg)
         logger.info(
-            "per-vocab SVM cache miss: training for %d leaf codes "
-            "(%d alignment entries) → %s",
-            len(leaf_codes), len(alignment), cache_path,
+            "per-vocab SVM cache miss: training for %d codes "
+            "(%d enrichment payloads, hierarchical=%s) → %s",
+            len(all_codes), len(payloads), svm_hierarchical, cache_path,
         )
-        train_svm_for_vocab(alignment, cache_path)
+        synth_dir = Path(tempfile.mkdtemp(prefix="atelier_svm_enrich_"))
+        try:
+            generate_user_taxonomy_corpus(
+                category_set, payloads, synth_dir,
+            )
+            train_svm(
+                synth_dir, cache_path,
+                category_set=category_set, hierarchical=svm_hierarchical,
+            )
+        finally:
+            shutil.rmtree(synth_dir, ignore_errors=True)
 
-    import shutil
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     bundle_path = run_dir / "svm.pkl"
@@ -704,7 +721,7 @@ def run_classification_pipeline(
         from atelier.classify.incremental_scoring import (
             build_scoring_context,
         )
-        _gt_path_str = getattr(cfg, "classify_evaluation_ground_truth_path", "") or ""
+        _gt_path_str = getattr(cfg, "classify_evaluation_agent_mediated_path", "") or ""
         _scoring_enabled = bool(getattr(cfg, "classify_evaluation_enabled", True))
         try:
             scoring_ctx = build_scoring_context(
@@ -1006,93 +1023,33 @@ def run_classification_pipeline(
 
         discounts = DiscountConfig.from_cfg(cfg)
 
-        # ── Per-vocabulary SVM (alignment → relabel → train → bundle) ──
-        # The BFO/CCO synth corpus is keyed by ICE.* leaves; the runtime
-        # frame is keyed by the operator's annotations vocabulary.  We
-        # build a one-time ICE.* → user-code alignment via the LLM, then
-        # train a per-vocab SVM whose labels ARE user codes — so at
-        # inference the predictions land directly in the user-taxonomy
-        # frame, no runtime translation needed.  Cache-then-bundle:
+        # ── Per-vocabulary SVM (enrichment → corpus → train → bundle) ──
+        # Generates a user-code-labeled synthetic corpus from enrichment
+        # payloads (Qdrant or JSON export) and trains a per-vocab SVM
+        # whose output classes ARE user codes.  Cache-then-bundle:
         # train into ``build/cache/svm/{vocab_sig}.pkl`` and copy into
         # ``build/results/{run_id}/svm.pkl`` so the run is reproducible
         # on its own and Extend Classification picks up the bundled
-        # SVM/CatBoost pair without retraining.  See
-        # ``ontology_alignment.py`` for the independence/discount
-        # rationale.
-        # Operator-controlled toggle (classify.svm.enabled).  When the
-        # SVM source is disabled, we skip the alignment LLM call
-        # entirely — the alignment-based per-vocab SVM is degenerate
-        # for narrow alignments (see c0ceaf5c regression: 3-class head
-        # voting on every column inflated K by 51%).  The toggle gates
-        # the whole subsystem; re-enable once recipe-driven training
-        # replaces the LLM-mediated alignment path.
-        alignment_status: dict | None = None
-        svm_enabled = bool(getattr(cfg, "classify_svm_enabled", True))
-        if not svm_enabled:
-            svm_alignment = {}
-            alignment_status = {"status": "disabled:classify.svm.enabled=false"}
-            logger.info(
-                "ontology_alignment: skipped — classify.svm.enabled=false"
-            )
-        else:
-            from atelier.classify.ontology_alignment import build_alignment
-            try:
-                svm_alignment, alignment_status = build_alignment(
-                    category_set=category_set,
-                    llm_backend=llm_backend,
-                    system_prompt=system_prompt,
-                    model_name=getattr(cfg, "classify_subagent_model", None) or "unknown",
-                    chunk_size=int(getattr(cfg, "classify_llm_columns_per_call", 25)),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "ontology_alignment: build failed — proceeding without "
-                    "(SVM evidence will be vacuous for this run): %s",
-                    exc,
-                )
-                svm_alignment = {}
-                alignment_status = {"status": f"failed:exception ({exc!r})"}
+        # SVM/CatBoost pair without retraining.
 
         # Multi-run safety: clear any SVM that a prior pipeline run on
         # this same process installed.  ``_ensure_per_vocab_svm``
-        # re-installs on success.  If it fails (or alignment is empty),
-        # the SVM source stays absent rather than carrying a stale
-        # prior-vocabulary model into the new frame.
+        # re-installs on success.  If it fails, the SVM source stays
+        # absent rather than carrying a stale prior-vocabulary model
+        # into the new frame.
         ml_inference.reset_svm()
 
-        svm_install_status: str | None = None
-        if svm_alignment:
-            try:
-                _ensure_per_vocab_svm(
-                    cfg, category_set, svm_alignment,
-                    cache_dir=build_dir / "cache" / "svm",
-                    run_dir=results_dir,
-                )
-                svm_install_status = "installed"
-            except Exception as exc:
-                # Don't make per-vocab SVM a hard prerequisite yet —
-                # the strict-mode tightening lands in a follow-up.  Log
-                # loudly so the missing source is visible in run logs.
-                logger.warning(
-                    "per-vocab SVM build failed — SVM evidence will be "
-                    "absent for this run: %s", exc,
-                )
-                svm_install_status = f"failed:{type(exc).__name__}"
-        else:
-            svm_install_status = "skipped:empty_alignment"
-
-        # Persist the diagnostic so missing-SVM regressions are visible
-        # from the on-disk run artifacts alone — no need to grep pod
-        # logs to know whether the 6th evidence source was installed.
         try:
-            (results_dir / "alignment_status.json").write_text(
-                json.dumps({
-                    "alignment": alignment_status or {"status": "unknown"},
-                    "svm_install": svm_install_status,
-                }, indent=2) + "\n"
+            _ensure_per_vocab_svm(
+                cfg, category_set,
+                cache_dir=build_dir / "cache" / "svm",
+                run_dir=results_dir,
             )
         except Exception as exc:
-            logger.debug("alignment_status.json write failed: %s", exc)
+            logger.warning(
+                "per-vocab SVM build failed — SVM evidence will be "
+                "absent for this run: %s", exc,
+            )
 
         # Try sentence-transformers for cosine
         has_embeddings = False
@@ -1132,16 +1089,17 @@ def run_classification_pipeline(
             strata = _stratify(pre_results, mc_cfg)
             mc_plan = _select_sample(strata, mc_cfg, total=total_columns)
             logger.info(
-                "MC plan: %d frontier + %d propagation across %d strata",
-                len(mc_plan.frontier_columns),
+                "MC plan: %d sampled + %d propagation across %d strata",
+                len(mc_plan.sampled_columns),
                 len(mc_plan.propagation_columns),
                 len(mc_plan.strata),
             )
 
         # ── LLM SWEEP ────────────────────────────────────────────
-        # When MC is active, sweep only frontier columns
+        # When MC is active, the LLM sweep covers only the sampled subset;
+        # propagation later extends coverage to the remainder.
         sweep_columns = (
-            list(mc_plan.frontier_columns)
+            list(mc_plan.sampled_columns)
             if mc_plan and not mc_plan.is_passthrough
             else column_names
         )
@@ -1149,7 +1107,7 @@ def run_classification_pipeline(
         fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
             "columns_total": total_columns,
             "phase": "llm_sweep",
-            "mc_frontier": len(sweep_columns),
+            "mc_sampled": len(sweep_columns),
         })
 
         state = BootstrapState()
@@ -1186,7 +1144,7 @@ def run_classification_pipeline(
                 elapsed_s = round(time.time() - sweep_started, 1)
                 fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
                     "columns_total": total_columns,
-                    "mc_frontier": len(sweep_columns),
+                    "mc_sampled": len(sweep_columns),
                     "llm_labeled": p.get("columns_labeled", 0),
                     "llm_calls": p.get("llm_calls_total", 0),
                     "sweep_phase": p.get("phase"),
@@ -1204,7 +1162,6 @@ def run_classification_pipeline(
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
             progress_callback=_sweep_progress,
-            category_set=category_set,
         )
 
         # ── Label Propagation ──────────────────────────────────────
@@ -1615,6 +1572,41 @@ def run_classification_pipeline(
             ),
         })
 
+        svm_hierarchical = getattr(cfg, "classify_svm_hierarchical", True)
+        nhsvm_temp = getattr(cfg, "classify_svm_nhsvm_temperature", 1.0)
+        nhsvm_alphas: dict[str, float] | None = None
+        nhsvm_dist_matrix: dict[tuple[str, str], float] | None = None
+
+        svm_is_training_time_nhsvm = False
+        try:
+            from atelier.classify.ml_inference import get_svm
+            _svm = get_svm()
+            if _svm is not None:
+                svm_is_training_time_nhsvm = getattr(_svm, "_hierarchical", False)
+        except Exception:
+            pass
+
+        if svm_hierarchical and not svm_is_training_time_nhsvm:
+            nhsvm_alphas = category_set.compute_nhsvm_alphas()
+            try:
+                from atelier.classify.svm_classifier import build_nhsvm_distance_matrix
+                if _svm is not None and _svm._classes:
+                    nhsvm_dist_matrix = build_nhsvm_distance_matrix(
+                        _svm._classes, nhsvm_alphas, category_set,
+                    )
+                    logger.info(
+                        "NHSVM distance matrix precomputed for %d classes "
+                        "(post-hoc reweighting — legacy flat SVM)",
+                        len(_svm._classes),
+                    )
+            except Exception:
+                pass
+        elif svm_is_training_time_nhsvm:
+            logger.info(
+                "SVM is training-time NHSVM — skipping post-hoc "
+                "reweighting setup (hierarchy baked into training)"
+            )
+
         classifications: list[dict[str, Any]] = []
         for col in all_columns:
             # Cross-table state dicts are keyed by ``qualified_name``
@@ -1636,6 +1628,10 @@ def run_classification_pipeline(
                 resolve_llm_annotation_mnemonic=getattr(
                     cfg, "classify_resolve_llm_annotation_mnemonic", True,
                 ),
+                svm_hierarchical=svm_hierarchical,
+                nhsvm_temperature=nhsvm_temp,
+                nhsvm_alphas=nhsvm_alphas,
+                nhsvm_distance_matrix=nhsvm_dist_matrix,
             )
             classifications.append(result)
 
@@ -1646,13 +1642,13 @@ def run_classification_pipeline(
         # ── Feature analysis (SHAP + SAGE, config-gated) ──────────
         _run_feature_analysis(cfg, classifications, all_samples, category_set, results_dir, mc_plan=mc_plan)
 
-        # ── Cautious-code review — agent-mediated backoff ────────
-        # Runs between FUSING and EVALUATING so accuracy numbers reflect
-        # post-review predictions.  SHAP/SAGE attribute to features-in-
-        # general (not per-column codes), so order doesn't disturb them.
-        # On by default — see classify.cautious_review.enabled.
+        # ── Cautious-code review — PROVEN HARMFUL, default OFF ──
+        # Empirically destroys accuracy: run ce4f3777 measured −13.6pp
+        # vs LLM-only (reroute 76.1% miss, backoff 78.8% miss).
+        # Default disabled + bel_threshold=0.0 (unreachable).  The
+        # code path is retained for controlled re-validation only.
         cautious_audit: dict = {"enabled": False}
-        if getattr(cfg, "classify_cautious_review_enabled", True):
+        if getattr(cfg, "classify_cautious_review_enabled", False):
             from atelier.classify.cautious_review import review_classifications
             def _cautious_progress(p: dict) -> None:
                 try:
@@ -1711,8 +1707,8 @@ def run_classification_pipeline(
         # Monte Carlo sampling metadata
         summary["mc_enabled"] = mc_plan is not None and not mc_plan.is_passthrough
         summary["mc_strata"] = len(mc_plan.strata) if mc_plan else 0
-        summary["mc_frontier_columns"] = (
-            len(mc_plan.frontier_columns) if mc_plan else total_columns
+        summary["mc_sampled_columns"] = (
+            len(mc_plan.sampled_columns) if mc_plan else total_columns
         )
         summary["mc_propagated_columns"] = state.propagated_count
         summary["mc_escalated_columns"] = state.escalated_count
@@ -1847,24 +1843,6 @@ def run_classification_pipeline(
         trajectories_path.write_text(
             json.dumps(trajectories_payload, indent=2, default=str) + "\n",
         )
-
-        # Out-of-vocabulary validation retries — one entry per retry
-        # event recorded by ``classify_batch_with_validation``.  Written
-        # as a separate artifact so post-mortem can answer "did the LLM
-        # hallucinate codes this run, and were they corrected?" without
-        # scanning pod logs.  An empty file = the LLM emitted only
-        # in-taxonomy codes throughout the sweep.
-        try:
-            validation_path = results_dir / "validation_retries.json"
-            validation_payload = {
-                "total_retries": len(state.validation_retries),
-                "events": list(state.validation_retries),
-            }
-            validation_path.write_text(
-                json.dumps(validation_payload, indent=2, default=str) + "\n",
-            )
-        except Exception as exc:
-            logger.debug("validation_retries.json write failed: %s", exc)
 
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
@@ -2367,14 +2345,8 @@ _CONFUSABLE_PAIR_CODES: list[tuple[str, str]] = [
 def _build_confusable_pairs(
     category_set: HierarchicalCategorySet,
 ) -> list[tuple[str, str]]:
-    """Filter confusable pairs to those present in the loaded vocabulary.
-
-    Membership check is over the full tagging vocabulary (every
-    category), not just terminal nodes — confusable pairs may be at
-    any level of the taxonomy now that parent codes are first-class
-    tagging targets.
-    """
-    all_codes = {c.code for c in category_set.categories}
+    """Filter confusable pairs to those present in the loaded vocabulary."""
+    all_codes = frozenset(c.code for c in category_set.all_categories)
     return [
         (a, b) for a, b in _CONFUSABLE_PAIR_CODES
         if a in all_codes and b in all_codes
@@ -2431,6 +2403,10 @@ def _classify_column(
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
     resolve_llm_annotation_mnemonic: bool = True,
+    svm_hierarchical: bool = True,
+    nhsvm_temperature: float = 1.0,
+    nhsvm_alphas: dict[str, float] | None = None,
+    nhsvm_distance_matrix: dict[tuple[str, str], float] | None = None,
 ) -> dict[str, Any]:
     """Classify a single column using Dempster-Shafer evidence fusion.
 
@@ -2594,19 +2570,25 @@ def _classify_column(
         logger.debug("CatBoost unavailable for %s: %s", col.name, exc)
 
     # 6. SVM (if model available).
-    # The per-vocabulary SVM (trained at ``_load_vocabulary`` time via
-    # ``ml_train.train_svm_for_vocab`` against the BFO/CCO synth corpus
-    # relabeled through the ICE.* → user-code alignment) emits user
-    # codes natively, so ``svm_to_mass`` can test frame membership
-    # directly with no runtime translation step.  When the per-vocab
-    # SVM build failed earlier in the pipeline, ``predict_svm`` returns
-    # None and the SVM source is silently absent — strict-mode
+    # The per-vocabulary SVM (trained from an enrichment-derived
+    # synthetic corpus) emits user codes natively, so ``svm_to_mass``
+    # can test frame membership directly with no runtime translation
+    # step.  When the per-vocab SVM build failed earlier in the
+    # pipeline, ``predict_svm`` returns None and the SVM source is
+    # silently absent — strict-mode
     # tightening is deferred per project plan.
     try:
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
         if svm_proba:
-            svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
+            if svm_hierarchical and nhsvm_alphas:
+                svm_mass = nhsvm_to_mass(
+                    svm_proba, frame, category_set, nhsvm_alphas,
+                    discount=discounts.svm, temperature=nhsvm_temperature,
+                    distance_matrix=nhsvm_distance_matrix,
+                )
+            else:
+                svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
     except Exception as exc:
@@ -2651,6 +2633,23 @@ def _classify_column(
     bel, pl = hc.interval_at(best_code)
     belief_path = hc.belief_path()
 
+    # Stage A Rec 6 — surface late-interaction diagnostic state.
+    # top_kind: "leaf" if the final prediction is a leaf in the frame,
+    #          "internal" if it's an internal-node tag.  This is the
+    #          discontinuity boundary identified by Finding 6 of the
+    #          DST sensitivity study (Δmass 0.57 across the switch).
+    # channel_conflict_k / subtree_concentration: read off the cosine
+    #          source mass (populated by late_interaction_to_mass when
+    #          the late path fires; None otherwise).  Per Findings 1+4.
+    top_kind = "leaf" if best_code in frame.singletons else "internal"
+    _cosine_ba = source_masses.get("cosine")
+    late_interaction_channel_conflict_k = (
+        getattr(_cosine_ba, "channel_conflict_k", None) if _cosine_ba else None
+    )
+    subtree_concentration = (
+        getattr(_cosine_ba, "subtree_concentration", None) if _cosine_ba else None
+    )
+
     return {
         "table_name": col.table_name,
         "column_name": col.name,
@@ -2668,6 +2667,23 @@ def _classify_column(
         "uncertainty": round(pl - bel, 4),
         "conflict": hc.conflict,
         "needs_clarification": hc.needs_clarification,
+        # DST sensitivity instrumentation (Stage A Recs 1, 3, 6).
+        # Operators consult these alongside the per-cell sweep scores
+        # so cliff / discontinuity-clustered errors are diagnosed
+        # without re-running.  top1_margin powers the rank-instability
+        # gate in the bootstrap revisit step.
+        "top_kind": top_kind,
+        "top1_margin": round(hc.top1_margin(), 4),
+        "late_interaction_channel_conflict_k": (
+            round(late_interaction_channel_conflict_k, 4)
+            if late_interaction_channel_conflict_k is not None
+            else None
+        ),
+        "subtree_concentration": (
+            round(subtree_concentration, 4)
+            if subtree_concentration is not None
+            else None
+        ),
         "evidence": hc.evidence,
         "evidence_sources": {name: _mass_summary(ba, frame) for name, ba in source_masses.items()},
         # 'late_interaction' (production), 'legacy_explicit' (operator
@@ -2842,8 +2858,9 @@ def _run_feature_analysis(
     contribution to the model's own decisions, not a curated reference.
 
     When MC is active and ``classify_background_analysis`` is true, SHAP runs
-    in a background daemon thread. SAGE runs on the frontier sample only
-    (representative subset).
+    in a background daemon thread.  SAGE runs on the directly-LLM-classified
+    (sampled) subset only — representative of the full corpus by the MC
+    stratification design.
     """
     all_features = [
         extract_features(
@@ -2892,20 +2909,21 @@ def _run_feature_analysis(
             pass
 
     if cfg.classify_sage_enabled or sage_auto:
-        # When MC active, run SAGE on frontier sample only (representative)
+        # When MC active, run SAGE on the directly-classified sampled subset
+        # only — representative of the full corpus by stratification design.
         sage_features = all_features
         sage_classifications = classifications
         if mc_plan and not mc_plan.is_passthrough:
-            frontier_set = mc_plan.frontier_columns
+            sampled_set = mc_plan.sampled_columns
             sage_pairs = [
                 (feat, cls) for feat, cls in zip(all_features, classifications)
-                if cls["column_name"] in frontier_set
+                if cls["column_name"] in sampled_set
             ]
             if sage_pairs:
                 sage_features, sage_classifications = zip(*sage_pairs)
                 sage_features = list(sage_features)
                 sage_classifications = list(sage_classifications)
-                logger.info("SAGE: using %d frontier columns (of %d total)",
+                logger.info("SAGE: using %d sampled columns (of %d total)",
                             len(sage_features), len(all_features))
 
         try:
