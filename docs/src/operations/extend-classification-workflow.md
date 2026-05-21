@@ -326,7 +326,7 @@ tables. Three metrics matter:
   as Atelier misses
 - **Stem-collapsed** — same as strict but ignoring `A_`/`C_`/`S_`
   prefix differences within a code's annotation family
-- **Binary sensitive-vs-public** — predicted INOS vs non-INOS
+- **Binary sensitive-vs-public** — predicted sensitive vs non-sensitive
   matches spreadsheet's `Data Sensitivity` field
 - **Operator-curated recall** — 15 columns the operator explicitly
   flagged as "Atelier got this wrong"; recall counts how many now

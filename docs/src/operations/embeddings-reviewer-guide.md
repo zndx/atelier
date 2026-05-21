@@ -124,7 +124,7 @@ concentrated" → "which feature is driving it."
 | 1 | `belief` | Histogram | Primary quality signal.  The 0.80 cliff is the cautious-review threshold; rows below are the candidate pool.  Brushing this filters the canvas to "weak" predictions. |
 | 2 | `confidence` | Histogram | BetP.  Side-by-side with `belief` builds intuition for the Bel-vs-BetP gap.  Wide gap on a row = mass concentrated on compound focal elements. |
 | 3 | `review_decision` | Count plot | Categorical: `keep` / `backoff` / `reroute` / `""` (untouched).  This is the *audit's central concern* — Finding 1 names reroute as the instability amplifier. |
-| 4 | `predicted_annotation` | Count plot | Compact mnemonic (e.g. `INOS`, `NAMEFULL`, `EMAIL`) — the dot-codes are unreadable in a small chart, but the annotation tells the same story.  The full label appears in the embedding tooltip. |
+| 4 | `predicted_annotation` | Count plot | Compact mnemonic (e.g. `NAMEFULL`, `EMAIL`, `PHONE`) — the dot-codes are unreadable in a small chart, but the annotation tells the same story.  The full label appears in the embedding tooltip. |
 | 5 | `needs_clarification` | 2-bar count | Boolean union of `Bel < 0.80 OR gap > 0.20`.  The "demands attention" set, expressed as a single flag. |
 | 6 | `llm_confidence` | Histogram | LLM's self-reported confidence.  Low-tail rows are the population at risk for reroute amplification — a weakly-asserted LLM code that DST then has to defend. |
 | 7 | `uncertainty` | Histogram | Pl − Bel — gap-driven revisit set.  Bootstrap convergence is on `mean(uncertainty)`; canvas histogram lets reviewers see whether the run actually converged or just hit max-iterations. |
