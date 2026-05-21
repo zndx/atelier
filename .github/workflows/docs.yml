@@ -1,5 +1,14 @@
 name: Deploy mdbook docs
 
+# Opt in to the Node 24 runtime for JavaScript actions. GitHub will
+# force this default on 2026-06-02 and remove Node 20 on 2026-09-16;
+# enabling it now clears the deprecation annotation for the
+# actions/checkout and actions/upload-pages-artifact steps used below,
+# regardless of whether each action has shipped a Node-24-native
+# release yet.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     branches: [trunk]
