@@ -17,6 +17,72 @@ changes; the upgrade notes call them out).
 
 ---
 
+## v0.5.0 — 2026-05-21
+
+Promotes the rc2 soak to a tagged minor.  Consolidates two parallel
+branches onto trunk: the late additions to `deploy/v0.4.0-rc1` (the
+extend-classification workflow + SVM evidence source + LLM emission
+validation) and the `feat/dst-late-interaction-cosine` line of work
+(P1–P3.11 — storage foundation, LLM-mediated enrichment, channel-
+decomposed Dempster combination, SHAP per-decision attribution,
+hierarchical-integrity fixes, and BDD coverage).
+
+### What landed from the merge
+
+- **Late-interaction cosine evidence (P1–P3.8)** —
+  storage foundation (`late_interaction.py`,
+  `late_interaction_bridge.py`, `multi_vector_features.py`,
+  `incremental_scoring.py`), integration into the DST frame
+  (default-on with loud-fallback), channel-decomposed
+  positive/negative Dempster combination, SHAP per-decision
+  attribution surface, and hierarchical integrity for internal-
+  node tags.  Architecture doc:
+  `docs/src/architecture/late-interaction-cosine.md`.
+- **LLM-mediated annotation enrichment pipeline (P2)** — new
+  `src/atelier/enrichment/` package (loop, LLM generator, Qdrant
+  writer, verifiers) feeding the late-interaction stage.
+- **BDD coverage (P3.9–P3.11)** — hierarchical anti-subtree
+  carve-out, DST boundary-condition scenarios, generic-vs-specific
+  same-depth scenarios.
+- **Extend-classification workflow** — `extend_pipeline` wiring for
+  Hive annotations, table denylist, `backfill_extend_annotations`
+  script; operations doc at
+  `docs/src/operations/extend-classification-workflow.md`.
+- **SVM evidence source** — chunked alignment, runtime toggle,
+  per-iteration diagnostics.
+- **LLM emission validation** — targeted retry on malformed
+  emissions during agent-loop classification.
+- **Tagging-vocabulary unification** — leaf-only restriction
+  lifted; internal-node terms are first-class throughout.
+- **Sweep + scoring tooling** — N-axis matrix sweep with
+  harm-aware composite scorer, `sweep_bel_threshold.py`,
+  `score_matrix.py` / `score_sweep.py`, ground-truth review +
+  `apply_review.py`.
+- **DST Reborn academic brief** — `docs/notes/2026-05-16/`.
+
+### Database migration
+
+- `db/migrations/20260516000000_taxonomy_registry.sql` — runs at
+  startup; no operator action required.
+
+### New runtime dependencies
+
+- `qdrant-client 1.18` (enrichment writer)
+- `h2` / `hpack` / `hyperframe` (HTTP/2 transport for gRPC stack)
+- `portalocker` (Qdrant writer file locking)
+
+### Upgrade notes
+
+- No `rc` cycle; promotes directly from `0.4.0-rc2` to `0.5.0`.
+- New config keys land under `classify.late_interaction.*` and
+  `enrichment.*` in `config/base.conf`; defaults are safe.
+- Standing-issue clusters carried over from rc2 (terminal
+  event-loop pollution, evidence-independence ontology-prior
+  bindings, infra scenarios requiring devenv) still apply and
+  are tracked in the rc2 entry below.
+
+---
+
 ## v0.4.0-rc2 — 2026-05-11
 
 Staging branch for the second `v0.4.0` release candidate.  Reconciles
