@@ -2514,7 +2514,7 @@ def _classify_column(
             logger.warning(
                 "late_interaction bridge raised unexpectedly for %s: %s "
                 "(deployment issue; investigate)",
-                col.name, exc,
+                col.name, exc, exc_info=True,
             )
             late_status = "degraded_bridge_error"
 

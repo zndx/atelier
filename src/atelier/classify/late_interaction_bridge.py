@@ -78,6 +78,34 @@ def reset() -> None:
 # ── Resolution helpers ────────────────────────────────────────────
 
 
+def _auto_promote_latest(dao, taxonomy_id: str) -> dict | None:
+    """If no 'current' collection exists, promote the latest 'building' one.
+
+    The enrichment script registers with status='building' and promotes
+    to 'current' on success.  If the pod restarted between registration
+    and promotion — or the enrichment ran an older script version that
+    lacked the promotion step — the row stays stuck at 'building'.
+    Auto-promote so late-interaction works without manual intervention.
+    """
+    try:
+        rows = dao.list_taxonomy_collections(taxonomy_id=taxonomy_id)
+        building = [r for r in rows if r.get("status") == "building"]
+        if not building:
+            return None
+        latest = building[0]  # list_taxonomy_collections returns newest first
+        cid = latest.get("id")
+        if cid and dao.set_current_taxonomy_collection(cid):
+            logger.info(
+                "late_interaction: auto-promoted taxonomy collection %s "
+                "(%s) to 'current'",
+                cid, latest.get("qdrant_collection", "?"),
+            )
+            return latest
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("late_interaction: auto-promote failed: %s", exc)
+    return None
+
+
 def _resolve_taxonomy_id(cfg) -> str:
     if cfg is None:
         return "default"
@@ -103,6 +131,8 @@ def _resolve_qdrant_collection(cfg) -> tuple[str, str] | None:
             taxonomy_id, exc,
         )
         return None
+    if row is None:
+        row = _auto_promote_latest(dao, taxonomy_id)
     if row is None:
         logger.debug(
             "late_interaction: no current collection for taxonomy_id=%s",
