@@ -235,5 +235,6 @@ ui/public/ghostty/
 ui/node_modules/
 scripts/node_modules/
 docs/book/
+docs/src/d2/
 data/*.parquet
 data/*.json
