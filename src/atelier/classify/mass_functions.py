@@ -100,28 +100,37 @@ def _resolve_code_to_fe(
     code: str,
     frame: FrameOfDiscernment,
 ) -> FocalElement | None:
-    """Resolve a predicted code to its focal element in the frame.
+    """Resolve a classifier-predicted code to its focal element.
 
-    Handles three cases that arise when classifiers (CatBoost fit-to-LLM,
-    NHSVM) emit codes outside the leaf-singleton namespace:
+    For internal (parent) codes, returns the **subtree** focal element
+    (``{code} ∪ descendants``) rather than the singleton.  ML classifiers
+    predict internal codes as probabilistic subtree membership — the
+    subtree FE lets this combine productively with leaf-level evidence
+    via Dempster's rule rather than creating spurious singleton-vs-
+    singleton conflict.
 
-      1. Leaf singleton (dot-code in ``frame.singletons``).
-      2. Internal node (dot-code in ``frame.internal_nodes``).
-      3. Annotation mnemonic (``ADDRFULL``, ``SSN``, …) — resolved via
-         ``frame.resolve_annotation`` which walks the category set's
-         ``all_by_abbrev`` index.
+    Check order matters: ``frame.singletons`` contains ALL codes (leaf
+    and internal alike) in the unified frame, so it must be checked
+    AFTER ``frame.internal_nodes`` to avoid shadowing the subtree FE.
 
     Returns None when the code is unresolvable — caller should skip it
     (mass falls through to Theta).
     """
-    if code in frame.singletons:
-        return frame.singletons[code]
     if code in frame.internal_nodes:
         return frame.internal_nodes[code]
+    if code in frame.singletons:
+        return frame.singletons[code]
     fe = frame.resolve_annotation(code)
-    if fe is not None:
-        return fe
-    return None
+    if fe is None:
+        logger.debug("Unresolvable code %r — mass falls to Theta", code)
+        return None
+    # resolve_annotation returns a singleton; upgrade to subtree FE
+    # when the resolved code is an internal node.
+    if len(fe.codes) == 1:
+        resolved_code = next(iter(fe.codes))
+        if resolved_code in frame.internal_nodes:
+            return frame.internal_nodes[resolved_code]
+    return fe
 
 
 def _redistribute_confusable_mass(
@@ -514,10 +523,10 @@ def _late_interaction_positive_mass(
     in_frame: dict[str, tuple[FocalElement, float]] = {}
     for s in scores:
         sim = max(0.0, s.positive_score)
-        if s.code in frame.singletons:
-            in_frame[s.code] = (frame.singletons[s.code], sim)
-        elif s.code in frame.internal_nodes:
+        if s.code in frame.internal_nodes:
             in_frame[s.code] = (frame.internal_nodes[s.code], sim)
+        elif s.code in frame.singletons:
+            in_frame[s.code] = (frame.singletons[s.code], sim)
     if not in_frame:
         return frame.vacuous()
 
@@ -555,9 +564,11 @@ def _late_interaction_positive_mass(
     subtree_fe: FocalElement | None = None
     lca_share = 0.0
     lca_concentration: float | None = None
-    if top1_code in frame.singletons:
+    is_leaf_top1 = top1_code not in frame.internal_nodes
+    if is_leaf_top1:
         leaf_only_probs = {
-            c: p for c, p in softmax_probs.items() if c in frame.singletons
+            c: p for c, p in softmax_probs.items()
+            if c not in frame.internal_nodes
         }
         leaf_total = sum(leaf_only_probs.values())
         if leaf_total > 0:
@@ -1255,9 +1266,9 @@ def _resolve_to_focal_element(
 
     Returns ``None`` for unresolvable / ambiguous codes.
     """
-    if code in frame.singletons:
-        return frame.singletons[code]
-
+    # Check internal_nodes BEFORE singletons: the unified frame puts
+    # every code (leaf + internal) in singletons, so checking singletons
+    # first would shadow the subtree FE that internal-node codes need.
     if code in frame.internal_nodes:
         fe = frame.internal_nodes[code]
         if len(fe.codes) == 1:
@@ -1265,6 +1276,9 @@ def _resolve_to_focal_element(
             if leaf in frame.singletons:
                 return frame.singletons[leaf]
         return fe
+
+    if code in frame.singletons:
+        return frame.singletons[code]
 
     # Prefix-match near-miss leaves
     prefix = code + "."
@@ -1275,6 +1289,12 @@ def _resolve_to_focal_element(
     if allow_annotation_fallback:
         fe = frame.resolve_annotation(code)
         if fe is not None:
+            # resolve_annotation returns a singleton; upgrade to
+            # subtree FE when the resolved code is an internal node.
+            if len(fe.codes) == 1:
+                resolved_code = next(iter(fe.codes))
+                if resolved_code in frame.internal_nodes:
+                    return frame.internal_nodes[resolved_code]
             return fe
 
     return None
@@ -1326,6 +1346,11 @@ def catboost_to_mass(
         fe = _resolve_code_to_fe(code, frame)
         if fe is not None:
             masses[fe] = masses.get(fe, 0.0) + prob * evidence_mass
+        else:
+            logger.debug(
+                "catboost: code %r (prob=%.4f) unresolvable — mass to Theta",
+                code, prob,
+            )
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
@@ -1377,6 +1402,11 @@ def svm_to_mass(
         fe = _resolve_code_to_fe(code, frame)
         if fe is not None:
             masses[fe] = masses.get(fe, 0.0) + prob * evidence_mass
+        else:
+            logger.debug(
+                "svm: code %r (prob=%.4f) unresolvable — mass to Theta",
+                code, prob,
+            )
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
