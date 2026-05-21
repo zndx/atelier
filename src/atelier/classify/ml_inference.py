@@ -8,8 +8,10 @@
 
 """Lazy-loading inference wrappers for CatBoost and SVM classifiers.
 
-Loads model files from configured paths on first use. When model files
-are not present, predict functions return None (graceful degradation).
+CatBoost is loaded from a configured path on first use (pre-trained or
+fit-to-LLM).  SVM is installed in-memory by ``_ensure_per_vocab_svm``
+during the pipeline — there is no disk-load fallback.  When the
+per-vocab SVM build fails, SVM evidence is absent (loud, not silent).
 """
 
 from __future__ import annotations
@@ -25,21 +27,23 @@ _catboost_loaded = False
 _svm = None
 _svm_loaded = False
 _catboost_path: Path | None = None
-_svm_path: Path | None = None
 _lock = threading.Lock()
 
 
 def configure_paths(
     catboost_path: str | Path | None = None,
-    svm_path: str | Path | None = None,
 ) -> None:
-    """Override default model file locations.
+    """Override default CatBoost model file location.
+
+    SVM is not configured here — it is installed in-memory by
+    ``_ensure_per_vocab_svm`` during the pipeline run.  There is no
+    disk-load fallback for SVM; if the per-vocab build fails, SVM
+    evidence is absent (deployment-degraded, logged loudly).
 
     Call ``reset()`` first if models are already loaded.
     """
-    global _catboost_path, _svm_path
+    global _catboost_path
     _catboost_path = Path(catboost_path) if catboost_path else None
-    _svm_path = Path(svm_path) if svm_path else None
 
 
 def get_catboost(model_path: str | Path | None = None):
@@ -68,7 +72,16 @@ def get_catboost(model_path: str | Path | None = None):
 
 
 def get_svm(model_path: str | Path | None = None):
-    """Lazy-load SVM model (thread-safe). Returns None if not available."""
+    """Return the in-memory SVM model, or None.
+
+    The per-vocab SVM is installed by ``_ensure_per_vocab_svm`` during
+    the pipeline via ``install_svm``.  There is no disk-load fallback —
+    if install_svm was never called, this returns None and the SVM
+    evidence source is absent for the run.
+
+    The ``model_path`` parameter is retained for explicit callers
+    (tests, ad-hoc scripts) that want to load a specific model file.
+    """
     global _svm, _svm_loaded
     if _svm_loaded:
         return _svm
@@ -77,19 +90,22 @@ def get_svm(model_path: str | Path | None = None):
         if _svm_loaded:
             return _svm
 
-        _svm_loaded = True
-        path = Path(model_path) if model_path else (_svm_path or Path("build/models/svm.pkl"))
-        if not path.exists():
-            logger.debug("SVM model not found at %s, skipping", path)
-            return None
+        if model_path:
+            _svm_loaded = True
+            path = Path(model_path)
+            if not path.exists():
+                logger.debug("SVM model not found at %s", path)
+                return None
+            try:
+                from atelier.classify.svm_classifier import SVMClassifier
+                _svm = SVMClassifier.load(path)
+                return _svm
+            except Exception as e:
+                logger.warning("Failed to load SVM model: %s", e)
+                return None
 
-        try:
-            from atelier.classify.svm_classifier import SVMClassifier
-            _svm = SVMClassifier.load(path)
-            return _svm
-        except Exception as e:
-            logger.warning("Failed to load SVM model: %s", e)
-            return None
+        # No explicit path and no in-memory install → SVM absent.
+        return None
 
 
 def predict_catboost(features, category_set) -> tuple[dict[str, float], dict[str, float]] | None:
@@ -149,14 +165,13 @@ def predict_svm(features) -> dict[str, float] | None:
 
 def reset():
     """Reset cached models and configured paths (useful for testing)."""
-    global _catboost, _catboost_loaded, _svm, _svm_loaded, _catboost_path, _svm_path
+    global _catboost, _catboost_loaded, _svm, _svm_loaded, _catboost_path
     with _lock:
         _catboost = None
         _catboost_loaded = False
         _svm = None
         _svm_loaded = False
         _catboost_path = None
-        _svm_path = None
 
 
 def install_catboost(model) -> None:
@@ -179,20 +194,14 @@ def install_catboost(model) -> None:
 
 
 def install_svm(model) -> None:
-    """Install an in-memory SVM model, bypassing disk-load.
+    """Install the per-vocab SVM trained during the pipeline.
 
-    Parallel to :func:`install_catboost`.  Currently has no
-    in-pipeline caller — the M9 in-loop SVM-on-LLM-labels hot-swap
-    that consumed this entry point was excised on 2026-05-04
-    (commits 8627c2c, 5199379, cc59d01); the synth-trained SVM at
-    ``build/models/svm.pkl`` is loaded once via the standard disk-load
-    path.  Retained as a
-    public seam for tests and any future code that legitimately needs
-    to swap classifiers without disk I/O.
+    Called by ``_ensure_per_vocab_svm`` after training (or loading
+    from cache) the enrichment-derived per-vocabulary SVM.  This is
+    the ONLY path that populates the SVM for a pipeline run — there
+    is no disk-load fallback.
 
-    Crucially this does NOT touch ``_catboost`` state — earlier code
-    paths called :func:`reset` and silently wiped the fit-to-LLM
-    CatBoost install.
+    Does NOT touch ``_catboost`` state.
     """
     global _svm, _svm_loaded
     with _lock:
@@ -212,8 +221,7 @@ def reset_catboost() -> None:
 
 def reset_svm() -> None:
     """Surgical reset of SVM state only.  CatBoost state preserved."""
-    global _svm, _svm_loaded, _svm_path
+    global _svm, _svm_loaded
     with _lock:
         _svm = None
         _svm_loaded = False
-        _svm_path = None

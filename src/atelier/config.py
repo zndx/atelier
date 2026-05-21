@@ -119,7 +119,6 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.reference_uri": ("classify_reference_uri", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
-    "classify.svm_model_path": ("classify_svm_model_path", str),
     "classify.svm.hierarchical": ("classify_svm_hierarchical", bool),
     "classify.svm.nhsvm_temperature": ("classify_svm_nhsvm_temperature", float),
     "classify.svm.nhsvm_svd_components": ("classify_svm_nhsvm_svd_components", int),
@@ -385,7 +384,6 @@ class AtelierConfig:
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"
-    classify_svm_model_path: str = "build/models/svm.pkl"
     classify_svm_hierarchical: bool = True
     classify_svm_nhsvm_temperature: float = 1.0
     classify_svm_nhsvm_svd_components: int = 200

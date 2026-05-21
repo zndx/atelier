@@ -231,6 +231,33 @@ _VALIDATORS: dict[str, Callable[[str], bool]] = {
 }
 
 
+_COLUMN_TYPE_CANONICAL: dict[str, str] = {
+    "int": "integer", "integer": "integer",
+    "bigint": "integer", "tinyint": "integer",
+    "smallint": "integer", "mediumint": "integer",
+    "long": "integer",
+    "double": "decimal", "float": "decimal",
+    "decimal": "decimal", "numeric": "decimal",
+    "real": "decimal", "number": "decimal",
+}
+
+
+def normalize_column_type(raw_type: str | None) -> str | None:
+    """Canonicalize SQL column types to match training vocabulary.
+
+    Maps the integer family (int, bigint, tinyint, ...) → "integer"
+    and the decimal family (double, float, numeric, ...) → "decimal".
+    Types outside these families pass through lowercased; STRING/VARCHAR
+    return None (excluded from feature text by convention).
+    """
+    if not raw_type:
+        return None
+    upper = raw_type.upper()
+    if upper in ("STRING", "VARCHAR", "CHAR", "TEXT", "NVARCHAR", "NCHAR"):
+        return None
+    return _COLUMN_TYPE_CANONICAL.get(raw_type.lower(), raw_type.lower())
+
+
 FEATURE_NAMES: list[str] = [
     "column_name",
     "column_type",
@@ -770,9 +797,7 @@ def extract_features(
 
     name_humanized = column_name.replace("_", " ")
 
-    col_type: str | None = None
-    if column_type and column_type.upper() not in ("STRING", "VARCHAR"):
-        col_type = column_type.lower()
+    col_type = normalize_column_type(column_type)
 
     sample_text: str | None = None
     if values:

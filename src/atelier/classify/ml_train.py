@@ -23,6 +23,31 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _infer_column_type(values: list[str]) -> str | None:
+    """Infer SQL-like column type from sample values.
+
+    Mirrors the column_type information available at inference time
+    from database metadata.  VARCHAR/STRING columns return None,
+    matching the filter in build_svm_text and extract_features.
+    """
+    non_empty = [v.strip() for v in values if v.strip()]
+    if not non_empty:
+        return None
+    try:
+        for v in non_empty[:10]:
+            int(v)
+        return "integer"
+    except ValueError:
+        pass
+    try:
+        for v in non_empty[:10]:
+            float(v)
+        return "decimal"
+    except ValueError:
+        pass
+    return None
+
+
 def _load_synth_data(synth_dir: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Load synthetic columns and reference labels from a synth directory.
 
@@ -81,7 +106,8 @@ def train_svm(
         code = reference_labels.get(col_name)
         if not code:
             continue
-        text = build_svm_text(col_name, sample_values=values[:5])
+        col_type = _infer_column_type(values[:10])
+        text = build_svm_text(col_name, column_type=col_type, sample_values=values[:5])
         texts.append(text)
         labels.append(code)
 
@@ -140,8 +166,10 @@ def train_catboost(
         code = reference_labels.get(col_name)
         if not code:
             continue
+        col_type = _infer_column_type(values[:10])
         features_list.append(extract_features(
             column_name=col_name,
+            column_type=col_type,
             values=values[:5],
         ))
         labels.append(code)

@@ -96,6 +96,43 @@ def _camel_to_words(name: str) -> str:
     return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name).lower()
 
 
+def _resolve_code_to_fe(
+    code: str,
+    frame: FrameOfDiscernment,
+) -> FocalElement | None:
+    """Resolve a classifier-predicted code to its focal element.
+
+    For internal (parent) codes, returns the **subtree** focal element
+    (``{code} ∪ descendants``) rather than the singleton.  ML classifiers
+    predict internal codes as probabilistic subtree membership — the
+    subtree FE lets this combine productively with leaf-level evidence
+    via Dempster's rule rather than creating spurious singleton-vs-
+    singleton conflict.
+
+    Check order matters: ``frame.singletons`` contains ALL codes (leaf
+    and internal alike) in the unified frame, so it must be checked
+    AFTER ``frame.internal_nodes`` to avoid shadowing the subtree FE.
+
+    Returns None when the code is unresolvable — caller should skip it
+    (mass falls through to Theta).
+    """
+    if code in frame.internal_nodes:
+        return frame.internal_nodes[code]
+    if code in frame.singletons:
+        return frame.singletons[code]
+    fe = frame.resolve_annotation(code)
+    if fe is None:
+        logger.debug("Unresolvable code %r — mass falls to Theta", code)
+        return None
+    # resolve_annotation returns a singleton; upgrade to subtree FE
+    # when the resolved code is an internal node.
+    if len(fe.codes) == 1:
+        resolved_code = next(iter(fe.codes))
+        if resolved_code in frame.internal_nodes:
+            return frame.internal_nodes[resolved_code]
+    return fe
+
+
 def _redistribute_confusable_mass(
     masses: dict[FocalElement, float],
     frame: FrameOfDiscernment,
@@ -428,6 +465,7 @@ def late_interaction_to_mass(
         else:
             normalized.append(_AttenuatedTagScore(
                 code=s.code, positive_score=s.positive_score,
+                negative_score=getattr(s, "negative_score", 0.0),
             ))
 
     return _late_interaction_positive_mass(
@@ -441,6 +479,7 @@ class _AttenuatedTagScore:
     """Internal: minimal interface for late_interaction_to_mass."""
     code: str
     positive_score: float
+    negative_score: float = 0.0
 
 
 def _late_interaction_positive_mass(
@@ -486,10 +525,10 @@ def _late_interaction_positive_mass(
     in_frame: dict[str, tuple[FocalElement, float]] = {}
     for s in scores:
         sim = max(0.0, s.positive_score)
-        if s.code in frame.singletons:
-            in_frame[s.code] = (frame.singletons[s.code], sim)
-        elif s.code in frame.internal_nodes:
+        if s.code in frame.internal_nodes:
             in_frame[s.code] = (frame.internal_nodes[s.code], sim)
+        elif s.code in frame.singletons:
+            in_frame[s.code] = (frame.singletons[s.code], sim)
     if not in_frame:
         return frame.vacuous()
 
@@ -527,9 +566,11 @@ def _late_interaction_positive_mass(
     subtree_fe: FocalElement | None = None
     lca_share = 0.0
     lca_concentration: float | None = None
-    if top1_code in frame.singletons:
+    is_leaf_top1 = top1_code not in frame.internal_nodes
+    if is_leaf_top1:
         leaf_only_probs = {
-            c: p for c, p in softmax_probs.items() if c in frame.singletons
+            c: p for c, p in softmax_probs.items()
+            if c not in frame.internal_nodes
         }
         leaf_total = sum(leaf_only_probs.values())
         if leaf_total > 0:
@@ -553,6 +594,34 @@ def _late_interaction_positive_mass(
 
     masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)
+
+    # Channel conflict K: measures contradiction between positive and
+    # negative evidence for the same codes.  Negative score for code C
+    # implies mass on Θ\{C} (evidence against C); K is the Dempster
+    # conflict between positive mass on {C} and negative mass on Θ\{C}.
+    # Analytically: K = Σ_C m+({C_fe}) × m-(against C), because only
+    # singleton-vs-complement intersections produce the empty set.
+    neg_sims = {
+        s.code: s.negative_score for s in scores
+        if s.negative_score > 0 and s.code in in_frame
+    }
+    if neg_sims:
+        max_neg = max(neg_sims.values())
+        exp_negs = {c: math.exp(n - max_neg) for c, n in neg_sims.items()}
+        total_neg = sum(exp_negs.values())
+        neg_probs = {c: e / total_neg for c, e in exp_negs.items()}
+        sorted_neg = sorted(neg_sims.values(), reverse=True)
+        neg_top2 = sorted_neg[1] if len(sorted_neg) > 1 else None
+        neg_alpha = _cosine_reliability(
+            max_neg, neg_top2, floor=reliability_floor, ceiling=1.0 - discount,
+        )
+        channel_conflict_k = sum(
+            masses.get(in_frame[code][0], 0.0) * neg_alpha * neg_prob
+            for code, neg_prob in neg_probs.items()
+        )
+    else:
+        channel_conflict_k = 0.0
+
     # subtree_concentration captures _significant_subtree's findings even
     # when no subtree concentrated above threshold (returns 0.0).  None
     # means "the aggregation didn't fire" (internal-node top-1 or empty
@@ -561,6 +630,7 @@ def _late_interaction_positive_mass(
     return BeliefAssignment(
         masses=masses,
         subtree_concentration=lca_concentration,
+        channel_conflict_k=channel_conflict_k,
     )
 
 
@@ -1227,9 +1297,9 @@ def _resolve_to_focal_element(
 
     Returns ``None`` for unresolvable / ambiguous codes.
     """
-    if code in frame.singletons:
-        return frame.singletons[code]
-
+    # Check internal_nodes BEFORE singletons: the unified frame puts
+    # every code (leaf + internal) in singletons, so checking singletons
+    # first would shadow the subtree FE that internal-node codes need.
     if code in frame.internal_nodes:
         fe = frame.internal_nodes[code]
         if len(fe.codes) == 1:
@@ -1237,6 +1307,9 @@ def _resolve_to_focal_element(
             if leaf in frame.singletons:
                 return frame.singletons[leaf]
         return fe
+
+    if code in frame.singletons:
+        return frame.singletons[code]
 
     # Prefix-match near-miss leaves
     prefix = code + "."
@@ -1247,6 +1320,12 @@ def _resolve_to_focal_element(
     if allow_annotation_fallback:
         fe = frame.resolve_annotation(code)
         if fe is not None:
+            # resolve_annotation returns a singleton; upgrade to
+            # subtree FE when the resolved code is an internal node.
+            if len(fe.codes) == 1:
+                resolved_code = next(iter(fe.codes))
+                if resolved_code in frame.internal_nodes:
+                    return frame.internal_nodes[resolved_code]
             return fe
 
     return None
@@ -1293,8 +1372,16 @@ def catboost_to_mass(
     masses: dict[FocalElement, float] = {}
     evidence_mass = 1.0 - discount
     for code, prob in proba.items():
-        if code in frame.singletons and prob > 1e-15:
-            masses[frame.singleton(code)] = prob * evidence_mass
+        if prob <= 1e-15:
+            continue
+        fe = _resolve_code_to_fe(code, frame)
+        if fe is not None:
+            masses[fe] = masses.get(fe, 0.0) + prob * evidence_mass
+        else:
+            logger.debug(
+                "catboost: code %r (prob=%.4f) unresolvable — mass to Theta",
+                code, prob,
+            )
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
@@ -1341,8 +1428,16 @@ def svm_to_mass(
     masses: dict[FocalElement, float] = {}
     evidence_mass = 1.0 - discount
     for code, prob in proba.items():
-        if code in frame.singletons and prob > 1e-15:
-            masses[frame.singleton(code)] = prob * evidence_mass
+        if prob <= 1e-15:
+            continue
+        fe = _resolve_code_to_fe(code, frame)
+        if fe is not None:
+            masses[fe] = masses.get(fe, 0.0) + prob * evidence_mass
+        else:
+            logger.debug(
+                "svm: code %r (prob=%.4f) unresolvable — mass to Theta",
+                code, prob,
+            )
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
