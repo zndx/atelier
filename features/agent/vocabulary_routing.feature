@@ -14,10 +14,10 @@ Feature: Vocabulary routing per source type
   classification targets — the LLM reads labels and descriptions and
   classifies into hierarchical dot-codes.
 
-  Scenario: OOTB sample uses 316-leaf ICE vocabulary
+  Scenario: OOTB sample uses 316-category ICE vocabulary
     When I resolve vocabulary for source "ootb-sample"
-    Then the vocabulary has 316 leaves
-    And all leaf codes start with "ICE."
+    Then the vocabulary has 316 categories
+    And all codes start with "ICE."
 
   Scenario: Domain annotations are used directly as classification target
     Given a hive source with vocab_uri "meta.annotations"

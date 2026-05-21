@@ -148,6 +148,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.cautious_review.stability_guard_llm_conf": ("classify_cautious_review_stability_guard_llm_conf", float),
     "classify.resolve_llm_annotation_mnemonic": ("classify_resolve_llm_annotation_mnemonic", bool),
     "classify.exclude_temp_tables": ("classify_exclude_temp_tables", bool),
+    "classify.table_exclude_patterns": ("classify_table_exclude_patterns", str),
+    "classify.svm.enabled": ("classify_svm_enabled", bool),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -414,6 +416,20 @@ class AtelierConfig:
     # R6: skip Hive/Hue temp tables (``__tmp_*`` prefix) at discovery.
     # 14 hallucinations from one such table in 8d67b1ed.
     classify_exclude_temp_tables: bool = True
+    # Per-run table denylist for the extend-classification workflow.
+    # Comma-separated regex patterns matched against table names
+    # (case-sensitive, ``re.search`` semantics).  Empty = no-op.
+    # Operator workflow: set patterns covering the new tables before
+    # the parent classify run; clear before the extend run so the
+    # parent's CatBoost model tags everything (parent + new).
+    classify_table_exclude_patterns: str = ""
+    # Toggle for the per-vocab SVM evidence source.  When false, the
+    # alignment LLM call is skipped, no SVM is trained, and the
+    # classification pipeline runs with 5 evidence sources.  Disabled
+    # by default until the failure-mode-recipe training lands (see
+    # c0ceaf5c regression).  Set true to re-enable the alignment-based
+    # SVM after the new training data is in place.
+    classify_svm_enabled: bool = False
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
@@ -602,6 +618,21 @@ class AtelierConfig:
     def cml_data_connection_names(self) -> list[str]:
         """Parsed list of CAI Data Platform connection names."""
         return [s.strip() for s in self.cml_data_connections.split(",") if s.strip()]
+
+    @property
+    def classify_table_exclude_pattern_list(self) -> list[str]:
+        """Parsed regex patterns from the CSV form.
+
+        Empty list when the HOCON entry is unset — callers can treat
+        that as "no filtering".  Invalid regex syntax is not validated
+        here; ``sampler.discover_tables`` compiles each pattern and
+        logs a warning for any that fail to compile.
+        """
+        return [
+            s.strip()
+            for s in self.classify_table_exclude_patterns.split(",")
+            if s.strip()
+        ]
 
     @property
     def anthropic_model_id(self) -> str:

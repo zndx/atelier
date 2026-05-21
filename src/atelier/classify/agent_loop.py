@@ -198,7 +198,7 @@ so gating convergence on K would be vestigial.  Reason about the gap.
    gap or low Bel — those are the predictions that deserve a revisit.
 3. For source-disagreement columns (high K), examine the evidence — do
    sources agree on the category family but disagree on the specific
-   leaf?  That's a confusable pair worth re-classifying with context.
+   category?  That's a confusable pair worth re-classifying with context.
 4. Prioritize revisiting columns where pattern evidence or name matching
    provides strong signal that the LLM may have missed.
 5. After each revisit batch, check convergence — is mean_gap decreasing?

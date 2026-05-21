@@ -9,20 +9,29 @@
 """Ontology-to-taxonomy alignment for the per-vocabulary SVM.
 
 The BFO/CCO synth corpus (``synth_generators.GENERATORS``) is keyed
-by ICE.* leaf codes.  The pipeline at runtime fuses evidence in the
+by ICE.* codes.  The pipeline at runtime fuses evidence in the
 operator's **user-taxonomy** code space (numeric dot codes from a
 customer ``annotations`` table, ICE.* itself for the OOTB sample,
 an enterprise schema, …).  Bridging the two requires a mapping from
-each synth-generator's ICE leaf to the user code that best
+each synth-generator's ICE code to the user code that best
 represents that concept in the operator's vocabulary.
 
 This module computes that mapping — the alignment — by reusing the
 same ``LLMBackend.classify_batch`` interface the classifier already
-uses.  Each ICE leaf becomes a synthetic column sample (its
+uses.  Each ICE source-code becomes a synthetic column sample (its
 generator's outputs are the values), and the LLM classifies the
 batch into the user vocabulary just as it would any real column.
-Result is cached on disk under a stable (ICE leaves, user codes,
+Result is cached on disk under a stable (ICE codes, user codes,
 model) key, reloaded on subsequent vocab-loads.
+
+Note on terminology: variables here still use ``ice_leaves`` /
+``leaf`` because the current ``synth_generators.GENERATORS`` registry
+is populated only at terminal-node codes — a vestige of the leaf-only
+era.  Variable names will be updated alongside the synth-generator
+registry expansion in a follow-up; the docstrings have been reframed
+to describe the design intent (every user-taxonomy node is a valid
+tagging target, regardless of whether the synth corpus currently
+exercises it).
 
 The alignment is consumed at **training time**, not runtime:
 ``ml_train.train_svm_for_vocab`` projects the synth corpus's ICE
@@ -94,7 +103,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from atelier.classify.llm_backend import LLMBackend
@@ -105,6 +114,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CACHE_DIR = Path("build/cache/alignment")
 _SAMPLES_PER_ICE_LEAF = 5
+_DEFAULT_CHUNK_SIZE = 25
 
 
 def _alignment_cache_key(
@@ -112,7 +122,7 @@ def _alignment_cache_key(
     user_codes: list[str],
     model_name: str,
 ) -> str:
-    """Stable sha256 over (ICE leaves, user codes, model) — cache identity."""
+    """Stable sha256 over (ICE codes, user codes, model) — cache identity."""
     payload = json.dumps(
         {
             "ice_leaves": sorted(ice_leaves),
@@ -143,7 +153,7 @@ def _ice_to_humanized_name(ice_code: str) -> str:
 
 
 def _build_synthetic_samples(ice_leaves: list[str]) -> list:
-    """Create one fake ColumnSample per ICE leaf for the alignment batch.
+    """Create one fake ColumnSample per ICE source-code for the alignment.
 
     Reuses the synth generators (the same source of truth that produces
     ``data/synth/`` for SVM/CatBoost training) so the alignment LLM sees
@@ -151,6 +161,10 @@ def _build_synthetic_samples(ice_leaves: list[str]) -> list:
     failures are tolerated — those ICE codes drop out of the alignment
     and their predictions stay unmapped (silently no-op via
     ``svm_to_mass`` frame check).
+
+    Parameter name kept as ``ice_leaves`` because the current
+    ``GENERATORS`` registry is populated only at terminal-node codes;
+    the rename follows the synth-generator-coverage expansion.
     """
     import random
     from atelier.classify.sampler import ColumnSample
@@ -179,10 +193,10 @@ def _build_synthetic_samples(ice_leaves: list[str]) -> list:
 
 
 def _ice_codes_in_canonical_order(ice_leaves: list[str]) -> list[str]:
-    """Filter to ICE leaves that have a generator and return them stably sorted.
+    """Filter to ICE codes that have a generator and return them stably sorted.
 
     Synth generators are the source-of-truth for "things the SVM was
-    trained on."  Any ICE leaf without a generator can't be predicted
+    trained on."  Any ICE code without a generator can't be predicted
     by the SVM in the first place, so leaving it out of the alignment
     is correct — there's nothing to translate.
     """
@@ -223,22 +237,45 @@ def build_alignment(
     *,
     model_name: str,
     cache_dir: Path = _DEFAULT_CACHE_DIR,
-) -> dict[str, str]:
+    chunk_size: int = _DEFAULT_CHUNK_SIZE,
+) -> tuple[dict[str, str], dict[str, Any]]:
     """Build (or load from cache) the ICE.* → user-taxonomy alignment.
 
-    The alignment is a function of three things — the ICE leaf set
-    (from ``synth_generators.GENERATORS``), the user vocab, and the
-    model — and is cached on disk under that triple's stable key, so
+    The alignment is a function of three things — the ICE source-code
+    set (from ``synth_generators.GENERATORS``), the user vocab, and
+    the model — and is cached on disk under that triple's stable key, so
     a re-run on the same vocab against the same model is a single
-    file read.  When the cache is missing or the build fails, returns
-    the empty dict; callers should treat the empty case as "no
-    translation" — the SVM falls back to its pre-alignment behavior
-    of contributing nothing on user-taxonomy runs.
+    file read.  When the cache is missing or the build fails the
+    alignment may be empty or partial; callers should treat the empty
+    case as "no translation" (the SVM falls back to its pre-alignment
+    behavior of contributing nothing) and inspect the returned
+    ``status`` dict for diagnostics.
+
+    The synthetic-sample batch is split into chunks of ``chunk_size``
+    columns and the backend is invoked once per chunk.  A single
+    unchunked batch of ~318 ICE samples reliably exceeds Bedrock's
+    structured-output ceiling — chunking matches the production
+    ``classify.llm.columns_per_call`` discipline and recovers
+    partial alignment when a subset of chunks fail.
+
+    Returns:
+        Tuple ``(alignment, status)``.  ``alignment`` is the same
+        ``{ice_code: user_code}`` dict as before.  ``status`` carries
+        ``status`` (one of ``ok | partial | failed:<reason> |
+        empty:<reason> | cached``), ``chunks_attempted``,
+        ``chunks_failed``, ``n_samples``, ``n_mapped``, ``model``.
     """
-    user_codes = sorted(getattr(category_set, "leaf_codes", set()))
+    # Alignment target = every category in the user's tagging
+    # vocabulary, terminal and parent alike — under the unified
+    # tagging semantics, all codes are equally first-class targets.
+    user_codes = sorted(c.code for c in getattr(category_set, "categories", []) if c.code)
     ice_leaves = _ice_codes_in_canonical_order(list(_synth_generator_keys()))
     if not user_codes or not ice_leaves:
-        return {}
+        return {}, _status(
+            "empty:no_codes_or_leaves",
+            chunks_attempted=0, chunks_failed=0,
+            n_samples=0, n_mapped=0, model=model_name,
+        )
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = _alignment_cache_key(ice_leaves, user_codes, model_name)
@@ -253,7 +290,13 @@ def build_alignment(
                     "ontology_alignment: loaded %d entries from cache (%s)",
                     len(mapping), cache_path,
                 )
-                return {str(k): str(v) for k, v in mapping.items() if v}
+                aligned = {str(k): str(v) for k, v in mapping.items() if v}
+                return aligned, _status(
+                    "cached",
+                    chunks_attempted=0, chunks_failed=0,
+                    n_samples=len(ice_leaves), n_mapped=len(aligned),
+                    model=model_name, cache_path=str(cache_path),
+                )
         except Exception as exc:
             logger.warning(
                 "ontology_alignment: cache read failed at %s: %s — rebuilding",
@@ -262,24 +305,57 @@ def build_alignment(
 
     samples = _build_synthetic_samples(ice_leaves)
     if not samples:
-        return {}
+        return {}, _status(
+            "empty:no_samples",
+            chunks_attempted=0, chunks_failed=0,
+            n_samples=0, n_mapped=0, model=model_name,
+        )
     humanized_to_ice = {s.name: ice for s, ice in zip(samples, ice_leaves) if s}
 
-    try:
-        response = llm_backend.classify_batch(
-            samples=samples,
-            system_prompt=system_prompt,
-            table_name="_synth_alignment",
-        )
-    except Exception as exc:
-        logger.warning(
-            "ontology_alignment: LLM call failed — proceeding without "
-            "alignment, SVM evidence will be vacuous on this run: %s", exc,
-        )
-        return {}
+    # Chunked classify — a single 318-sample batch reliably exceeds
+    # Bedrock's structured-output token ceiling, which is what kept
+    # the alignment empty (and SVM absent) on every CAI run since
+    # the per-vocab SVM machinery landed.  Matching chunk_size to
+    # ``classify.llm.columns_per_call`` puts alignment requests in
+    # the same envelope the regular sweep already negotiates safely.
+    chunk_size = max(1, int(chunk_size))
+    chunks = [samples[i:i + chunk_size] for i in range(0, len(samples), chunk_size)]
+    alignment: dict[str, str] = {}
+    chunks_failed = 0
+    last_exc: Exception | None = None
+    for idx, chunk in enumerate(chunks):
+        try:
+            response = llm_backend.classify_batch(
+                samples=chunk,
+                system_prompt=system_prompt,
+                table_name="_synth_alignment",
+            )
+        except Exception as exc:
+            chunks_failed += 1
+            last_exc = exc
+            logger.warning(
+                "ontology_alignment: chunk %d/%d (%d samples) failed: %s",
+                idx + 1, len(chunks), len(chunk), exc,
+            )
+            continue
+        alignment.update(_parse_alignment_response(response, humanized_to_ice))
 
-    alignment = _parse_alignment_response(response, humanized_to_ice)
+    if chunks_failed == len(chunks):
+        # All chunks errored — surface the last exception's message but
+        # don't raise; callers are expected to inspect ``status``.
+        reason = f"failed:all_chunks_errored ({last_exc!r})" if last_exc else "failed:all_chunks_errored"
+        return alignment, _status(
+            reason,
+            chunks_attempted=len(chunks), chunks_failed=chunks_failed,
+            n_samples=len(samples), n_mapped=len(alignment), model=model_name,
+        )
 
+    status_label = "ok" if chunks_failed == 0 else "partial"
+
+    # Persist whatever we got — partial alignments are still useful, and
+    # a subsequent run that hits the cache won't repeat the failed
+    # chunks.  The cache key embeds (ICE codes, user codes, model) so
+    # a vocab change naturally invalidates this file.
     try:
         cache_path.write_text(json.dumps({
             "alignment": alignment,
@@ -287,15 +363,44 @@ def build_alignment(
             "user_code_count": len(user_codes),
             "model": model_name,
             "mapped": len(alignment),
+            "chunks_attempted": len(chunks),
+            "chunks_failed": chunks_failed,
+            "status": status_label,
         }, indent=2) + "\n")
         logger.info(
-            "ontology_alignment: built %d/%d entries via %s, cached at %s",
-            len(alignment), len(ice_leaves), model_name, cache_path,
+            "ontology_alignment: %s %d/%d entries via %s in %d chunks (%d failed), cached at %s",
+            status_label, len(alignment), len(ice_leaves), model_name,
+            len(chunks), chunks_failed, cache_path,
         )
     except Exception as exc:
         logger.warning("ontology_alignment: cache write failed: %s", exc)
 
-    return alignment
+    return alignment, _status(
+        status_label,
+        chunks_attempted=len(chunks), chunks_failed=chunks_failed,
+        n_samples=len(samples), n_mapped=len(alignment), model=model_name,
+        cache_path=str(cache_path),
+    )
+
+
+def _status(
+    status: str, *,
+    chunks_attempted: int, chunks_failed: int,
+    n_samples: int, n_mapped: int, model: str,
+    cache_path: str | None = None,
+) -> dict[str, Any]:
+    """Compact status payload returned alongside the alignment dict."""
+    out: dict[str, Any] = {
+        "status": status,
+        "chunks_attempted": chunks_attempted,
+        "chunks_failed": chunks_failed,
+        "n_samples": n_samples,
+        "n_mapped": n_mapped,
+        "model": model,
+    }
+    if cache_path:
+        out["cache_path"] = cache_path
+    return out
 
 
 def _synth_generator_keys():

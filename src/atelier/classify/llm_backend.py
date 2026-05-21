@@ -33,7 +33,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -304,12 +304,14 @@ def config_from_atelier(cfg) -> LLMBackendConfig:
 
 
 def build_category_table(category_set) -> str:
-    """Build a markdown table of leaf categories for the system prompt.
+    """Build a flat markdown table of categories for the system prompt.
 
-    Retained for callers that want a flat leaf-only rendering.  The
-    pipeline has switched to ``build_category_tree`` which renders
-    parents as first-class rows so the LLM can vote at any level of
-    the hierarchy that the evidence supports.
+    Iterates ``category_set.categories``, which under the unified
+    taxonomy semantics is the full tagging vocabulary (terminal and
+    parent nodes alike).  Retained for callers that want a flat
+    rendering; the pipeline default is ``build_category_tree`` which
+    additionally encodes the parent/child structure so the LLM can
+    reason about hierarchy depth when voting.
     """
     lines = [
         "| Code | Label | Aliases | Description |",
@@ -828,6 +830,219 @@ def _parse_structured_response(text: str, expected_names: list[str]) -> list[Col
     data = json.loads(text)
     items = data.get("classifications", [])
     return _dicts_to_classifications(items, expected_names)
+
+
+# ── Emission validation + retry ──────────────────────────────────
+
+
+def validate_emissions(
+    response: "LLMResponse",
+    category_set,
+) -> list[tuple[str, str]]:
+    """Return (column_name, invalid_code) for out-of-vocabulary emissions.
+
+    A ``category_code`` is "valid" if it appears in the deployed
+    taxonomy — i.e. it matches a ``code`` entry (dot-notation) or an
+    ``abbrev`` entry (annotation mnemonic, case-insensitive) on the
+    given category set.  ``None`` / empty codes are passed through
+    (the LLM saying "no category fits" is a valid response).
+
+    Used by ``classify_batch_with_validation`` to detect hallucinated
+    codes that pattern-match the taxonomy's conventions but don't
+    actually exist (e.g. the LLM producing ``A_FD`` because it sees
+    siblings using the ``A_*`` prefix family, even though the real
+    annotation is ``C_FD``).
+    """
+    if category_set is None:
+        return []
+    by_code = getattr(category_set, "by_code", {}) or {}
+    by_abbrev = getattr(category_set, "by_abbrev", {}) or {}
+    # Case-insensitive abbrev index — the LLM occasionally emits
+    # lowercased variants and they should still be valid.
+    abbrev_upper = {k.upper() for k in by_abbrev if k}
+
+    invalid: list[tuple[str, str]] = []
+    for cls in response.classifications:
+        code = cls.category_code
+        if not code:
+            continue
+        if code in by_code:
+            continue
+        if code in by_abbrev:
+            continue
+        if code.upper() in abbrev_upper:
+            continue
+        invalid.append((cls.column_name, code))
+    return invalid
+
+
+def _build_validation_callout(invalid: list[tuple[str, str]]) -> str:
+    """Construct the augmentation appended to system_prompt on retry.
+
+    Names each invalid emission specifically.  Does NOT include "did
+    you mean" lexical suggestions because the system prompt already
+    carries the full taxonomy — pointing at the offender is the
+    entire signal the LLM needs.
+    """
+    lines = [
+        "",
+        "## Re-classification needed",
+        "",
+        "Your previous response included codes that are not in the taxonomy:",
+        "",
+    ]
+    for col, bad in invalid:
+        lines.append(f"  - {col}: {bad!r} not found")
+    lines.extend([
+        "",
+        "Re-classify these columns. Use only the dot-notation Code "
+        "values or the bracketed annotation mnemonics from the "
+        "taxonomy above. Do not invent codes that look like the "
+        "conventions.",
+    ])
+    return "\n".join(lines)
+
+
+def classify_batch_with_validation(
+    backend: "LLMBackend",
+    samples: list,
+    system_prompt: str,
+    *,
+    category_set,
+    revisit_context: dict[str, dict] | None = None,
+    table_name: str | None = None,
+    max_validation_retries: int = 2,
+    on_retry: "Callable[[dict], None] | None" = None,
+) -> "LLMResponse":
+    """``backend.classify_batch`` with out-of-vocabulary retry.
+
+    When ``category_set`` is ``None`` this is a passthrough to
+    ``backend.classify_batch`` (no validation, no retry).  When
+    provided, every emitted ``category_code`` is checked against the
+    taxonomy after the call returns; any code that isn't a known dot-
+    code or annotation triggers a targeted retry of just the
+    offending columns, with the system prompt augmented to name the
+    invalid emissions specifically.
+
+    The retry uses the same backend and same temperature — no model
+    change.  The augmentation is appended to ``system_prompt`` so the
+    full taxonomy stays cached (relevant for Bedrock prompt-cache
+    behavior and Anthropic ephemeral-cache hits).
+
+    After ``max_validation_retries`` exhausted, any residual invalid
+    emissions get their ``category_code`` set to ``None`` and
+    ``confidence`` to ``0.0`` — this guarantees CatBoost training
+    data and bootstrap ``state.labels`` never carry the
+    hallucination, which is the core contamination concern.  A 1–2%
+    column-drop rate is preferable to learning a non-existent
+    category.
+
+    Token counts (input, output, reasoning) are aggregated across
+    the initial call and all retries so cost accounting is honest.
+
+    ``on_retry`` callback is invoked once per retry with a dict
+    ``{retry_idx, invalid_count, column_names, invalid_codes}`` so
+    callers can record trajectory data without coupling this layer
+    to bootstrap state.
+    """
+    import dataclasses
+
+    response = backend.classify_batch(
+        samples=samples, system_prompt=system_prompt,
+        revisit_context=revisit_context, table_name=table_name,
+    )
+    if category_set is None:
+        return response
+
+    invalid = validate_emissions(response, category_set)
+    if not invalid:
+        return response
+
+    total_in = response.input_tokens
+    total_out = response.output_tokens
+    total_reasoning = response.reasoning_tokens
+    classifications = list(response.classifications)
+
+    for retry_idx in range(max_validation_retries):
+        invalid_names = {n for n, _ in invalid}
+        retry_samples = [s for s in samples if s.name in invalid_names]
+        if not retry_samples:
+            break
+
+        if on_retry is not None:
+            try:
+                on_retry({
+                    "retry_idx": retry_idx,
+                    "invalid_count": len(invalid),
+                    "column_names": [n for n, _ in invalid],
+                    "invalid_codes": [c for _, c in invalid],
+                })
+            except Exception:
+                pass  # observability never breaks the sweep
+
+        bad_preview = ", ".join(f"{n}={c!r}" for n, c in invalid[:5])
+        if len(invalid) > 5:
+            bad_preview += f" (+{len(invalid)-5} more)"
+        logger.info(
+            "llm validation: retry %d/%d on %d invalid emission(s): %s",
+            retry_idx + 1, max_validation_retries, len(invalid), bad_preview,
+        )
+
+        augmented_system = system_prompt + _build_validation_callout(invalid)
+        retry_response = backend.classify_batch(
+            samples=retry_samples, system_prompt=augmented_system,
+            revisit_context=revisit_context, table_name=table_name,
+        )
+        total_in += retry_response.input_tokens
+        total_out += retry_response.output_tokens
+        total_reasoning += retry_response.reasoning_tokens
+
+        # Merge retry results back into the response classifications.
+        # Columns the retry didn't return for stay with their original
+        # (invalid) emission and become eligible for the next retry
+        # iteration or, after exhaustion, the blank-out step below.
+        retry_by_name = {cls.column_name: cls for cls in retry_response.classifications}
+        classifications = [
+            retry_by_name.get(cls.column_name, cls)
+            for cls in classifications
+        ]
+
+        merged = dataclasses.replace(
+            response, classifications=classifications,
+            input_tokens=total_in, output_tokens=total_out,
+            reasoning_tokens=total_reasoning,
+        )
+        invalid = validate_emissions(merged, category_set)
+        if not invalid:
+            return merged
+
+    # Exhaustion — clear any residual invalid emissions so downstream
+    # consumers (state.labels, CatBoost fit-to-LLM, evaluation) see
+    # ``None`` rather than the hallucinated code.  Bootstrap's existing
+    # ``if not llm_code: continue`` guard at the training-pair filter
+    # naturally drops these columns from CatBoost training, which is
+    # the desired terminal behavior.
+    if invalid:
+        invalid_names = {n for n, _ in invalid}
+        bad_preview = ", ".join(f"{n}={c!r}" for n, c in invalid[:5])
+        if len(invalid) > 5:
+            bad_preview += f" (+{len(invalid)-5} more)"
+        logger.warning(
+            "llm validation: exhausted %d retries on %d column(s); "
+            "blanking their category_code to prevent contamination: %s",
+            max_validation_retries, len(invalid), bad_preview,
+        )
+        classifications = [
+            dataclasses.replace(cls, category_code=None, confidence=0.0)
+            if cls.column_name in invalid_names else cls
+            for cls in classifications
+        ]
+
+    return dataclasses.replace(
+        response, classifications=classifications,
+        input_tokens=total_in, output_tokens=total_out,
+        reasoning_tokens=total_reasoning,
+    )
 
 
 # ── Abstract backend ─────────────────────────────────────────────

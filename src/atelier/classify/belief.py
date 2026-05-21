@@ -259,11 +259,27 @@ def combine_multiple(
 class FrameOfDiscernment:
     """Restricted frame built from a HierarchicalCategorySet.
 
-    Instead of 2^N focal elements, only tracks:
-    - Singletons (1 per leaf category)
-    - Internal nodes (descendant leaf sets for each parent)
+    Instead of 2^N focal elements, tracks:
+
+    - Singletons (one per category — every code in the tagging
+      vocabulary is a first-class hypothesis, parent and terminal
+      alike)
+    - Internal-node focal elements (each non-terminal category also
+      participates as a "this-subtree" focal element covering itself
+      and all descendants — preserves the subtree-uncertainty
+      representation for evidence sources that vote at the subtree
+      level rather than committing to a specific code)
     - Confusable pairs (manually specified)
-    - Theta (full frame)
+    - Theta (the universe of mutually-exclusive hypotheses — the full
+      set of all category codes)
+
+    The dual nature of parent categories — appearing both as a
+    singleton ({code}) and as an internal-node focal element
+    ({code} ∪ descendants) — lets evidence sources express both
+    "commit to parent-tier classification" and "I'm in this subtree
+    but unsure which specific code" cleanly.  Mass routing
+    (``mass_functions``) decides which interpretation a given
+    source-and-code combination expresses.
     """
 
     def __init__(
@@ -278,24 +294,42 @@ class FrameOfDiscernment:
     def _build_focal_elements(self) -> None:
         cs = self._category_set
 
-        # Theta: full frame of all leaf codes
-        self.theta = FocalElement(cs.leaf_codes, label="Θ")
+        # Θ: the frame's universe of mutually-exclusive hypotheses —
+        # the full set of category codes in the tagging vocabulary.
+        # Every node is a first-class commitable hypothesis.
+        all_codes = frozenset(c.code for c in cs.categories)
+        self.theta = FocalElement(all_codes, label="Θ")
 
-        # Singletons
+        # Per-category singletons — one per code in the tagging
+        # vocabulary.  Parent and terminal categories alike get their
+        # own singleton, representing the commitment "this column is
+        # at this category."
         self._singletons: dict[str, FocalElement] = {}
-        for code in cs.leaf_codes:
-            cat = cs.by_code.get(code) or cs.all_by_code.get(code)
-            label = cat.label if cat else code
-            self._singletons[code] = FocalElement(frozenset({code}), label=label)
+        for cat in cs.categories:
+            self._singletons[cat.code] = FocalElement(
+                frozenset({cat.code}), label=cat.label or cat.code,
+            )
 
-        # Internal nodes
+        # Internal-node focal elements — for each category that has
+        # descendants, build a focal element covering {self} ∪
+        # descendants.  Represents the "I'm in this subtree but
+        # unsure which specific code" interpretation, distinct from
+        # the parent's own singleton commitment.  Categories with no
+        # descendants (terminal nodes) have no internal-node focal
+        # element — the singleton alone carries their support.
         self._internal: dict[str, FocalElement] = {}
-        for cat in cs.all_categories:
-            if cat.code in cs.leaf_codes:
-                continue
+        for cat in cs.categories:
             desc = cs.descendants(cat.code)
-            if desc and desc != cs.leaf_codes:
-                self._internal[cat.code] = FocalElement(desc, label=cat.label)
+            if not desc:
+                continue
+            subtree = frozenset({cat.code}) | desc
+            if subtree == all_codes:
+                # Root-of-projection: the "subtree" focal element
+                # would equal Θ, which is degenerate (no information
+                # over total ignorance).  Skip rather than register a
+                # duplicate of Θ.
+                continue
+            self._internal[cat.code] = FocalElement(subtree, label=cat.label)
 
         # Confusable pairs
         self._confusables: list[FocalElement] = []
@@ -513,13 +547,17 @@ class HierarchicalClassification:
         return bel < 0.80 or (pl - bel) > 0.20
 
     def belief_path(self) -> list[dict]:
-        """Trace [Bel, Pl] from predicted leaf to root.
+        """Trace [Bel, Pl] from the predicted category to the root.
 
-        Returns list of dicts from leaf (most specific) to root (least specific):
+        Returns list of dicts from the prediction (most specific) to
+        the root (least specific):
         [{"code": "ICE...PAN", "label": "...", "bel": 0.45, "pl": 0.90, "depth": 7}, ...]
 
-        Key property: Bel increases (or stays same) ascending — coarser
-        categories are always at least as certain as finer ones.
+        The predicted category may be at any depth in the taxonomy —
+        terminal codes are common but parent-tier predictions are
+        first-class targets too.  Key property: Bel increases (or
+        stays the same) ascending — coarser categories are always at
+        least as certain as finer ones.
         """
         if self.category is None or self._category_set is None:
             return []
@@ -668,18 +706,19 @@ class HierarchicalClassification:
         require_clarification: bool = True,
     ) -> dict:
         """Apply Smets' least-commitment principle to surface a more
-        honest prediction than the leaf-argmax when evidence is
-        conflicted.
+        honest prediction than the most-specific-argmax when evidence
+        is conflicted.
 
         Returns a dict ``{"code", "label", "depth", "bel",
         "promoted_from", "rationale"}`` describing either:
 
-        * the predicted leaf (no promotion) — ``promoted_from`` is
-          None and ``rationale`` explains why no promotion fired; OR
+        * the original prediction (no promotion) — ``promoted_from``
+          is None and ``rationale`` explains why no promotion fired;
+          OR
         * a more-general code (an internal node, possibly in a
-          *different* subtree from the predicted leaf) whose belief
-          is above ``commit_threshold`` and which is the most-
-          specific such code in the frame.
+          *different* subtree from the original prediction) whose
+          belief is above ``commit_threshold`` and which is the
+          most-specific such code in the frame.
 
         Promotion fires only when ``require_clarification`` is True
         AND ``self.needs_clarification`` is True — operators get the

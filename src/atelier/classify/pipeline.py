@@ -928,21 +928,39 @@ def run_classification_pipeline(
         # SVM/CatBoost pair without retraining.  See
         # ``ontology_alignment.py`` for the independence/discount
         # rationale.
-        from atelier.classify.ontology_alignment import build_alignment
-        try:
-            svm_alignment = build_alignment(
-                category_set=category_set,
-                llm_backend=llm_backend,
-                system_prompt=system_prompt,
-                model_name=getattr(cfg, "classify_subagent_model", None) or "unknown",
-            )
-        except Exception as exc:
-            logger.warning(
-                "ontology_alignment: build failed — proceeding without "
-                "(SVM evidence will be vacuous for this run): %s",
-                exc,
-            )
+        # Operator-controlled toggle (classify.svm.enabled).  When the
+        # SVM source is disabled, we skip the alignment LLM call
+        # entirely — the alignment-based per-vocab SVM is degenerate
+        # for narrow alignments (see c0ceaf5c regression: 3-class head
+        # voting on every column inflated K by 51%).  The toggle gates
+        # the whole subsystem; re-enable once recipe-driven training
+        # replaces the LLM-mediated alignment path.
+        alignment_status: dict | None = None
+        svm_enabled = bool(getattr(cfg, "classify_svm_enabled", True))
+        if not svm_enabled:
             svm_alignment = {}
+            alignment_status = {"status": "disabled:classify.svm.enabled=false"}
+            logger.info(
+                "ontology_alignment: skipped — classify.svm.enabled=false"
+            )
+        else:
+            from atelier.classify.ontology_alignment import build_alignment
+            try:
+                svm_alignment, alignment_status = build_alignment(
+                    category_set=category_set,
+                    llm_backend=llm_backend,
+                    system_prompt=system_prompt,
+                    model_name=getattr(cfg, "classify_subagent_model", None) or "unknown",
+                    chunk_size=int(getattr(cfg, "classify_llm_columns_per_call", 25)),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "ontology_alignment: build failed — proceeding without "
+                    "(SVM evidence will be vacuous for this run): %s",
+                    exc,
+                )
+                svm_alignment = {}
+                alignment_status = {"status": f"failed:exception ({exc!r})"}
 
         # Multi-run safety: clear any SVM that a prior pipeline run on
         # this same process installed.  ``_ensure_per_vocab_svm``
@@ -951,6 +969,7 @@ def run_classification_pipeline(
         # prior-vocabulary model into the new frame.
         ml_inference.reset_svm()
 
+        svm_install_status: str | None = None
         if svm_alignment:
             try:
                 _ensure_per_vocab_svm(
@@ -958,6 +977,7 @@ def run_classification_pipeline(
                     cache_dir=build_dir / "cache" / "svm",
                     run_dir=results_dir,
                 )
+                svm_install_status = "installed"
             except Exception as exc:
                 # Don't make per-vocab SVM a hard prerequisite yet —
                 # the strict-mode tightening lands in a follow-up.  Log
@@ -966,6 +986,22 @@ def run_classification_pipeline(
                     "per-vocab SVM build failed — SVM evidence will be "
                     "absent for this run: %s", exc,
                 )
+                svm_install_status = f"failed:{type(exc).__name__}"
+        else:
+            svm_install_status = "skipped:empty_alignment"
+
+        # Persist the diagnostic so missing-SVM regressions are visible
+        # from the on-disk run artifacts alone — no need to grep pod
+        # logs to know whether the 6th evidence source was installed.
+        try:
+            (results_dir / "alignment_status.json").write_text(
+                json.dumps({
+                    "alignment": alignment_status or {"status": "unknown"},
+                    "svm_install": svm_install_status,
+                }, indent=2) + "\n"
+            )
+        except Exception as exc:
+            logger.debug("alignment_status.json write failed: %s", exc)
 
         # Try sentence-transformers for cosine
         has_embeddings = False
@@ -1077,6 +1113,7 @@ def run_classification_pipeline(
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
             progress_callback=_sweep_progress,
+            category_set=category_set,
         )
 
         # ── Label Propagation ──────────────────────────────────────
@@ -1569,6 +1606,24 @@ def run_classification_pipeline(
             json.dumps(trajectories_payload, indent=2, default=str) + "\n",
         )
 
+        # Out-of-vocabulary validation retries — one entry per retry
+        # event recorded by ``classify_batch_with_validation``.  Written
+        # as a separate artifact so post-mortem can answer "did the LLM
+        # hallucinate codes this run, and were they corrected?" without
+        # scanning pod logs.  An empty file = the LLM emitted only
+        # in-taxonomy codes throughout the sweep.
+        try:
+            validation_path = results_dir / "validation_retries.json"
+            validation_payload = {
+                "total_retries": len(state.validation_retries),
+                "events": list(state.validation_retries),
+            }
+            validation_path.write_text(
+                json.dumps(validation_payload, indent=2, default=str) + "\n",
+            )
+        except Exception as exc:
+            logger.debug("validation_retries.json write failed: %s", exc)
+
         parquet_path = _write_parquet(classifications, results_dir / "atelier_embeddings.parquet")
 
         # Order matters here: the ``datasets`` table has a FK on
@@ -2038,11 +2093,17 @@ _CONFUSABLE_PAIR_CODES: list[tuple[str, str]] = [
 def _build_confusable_pairs(
     category_set: HierarchicalCategorySet,
 ) -> list[tuple[str, str]]:
-    """Filter confusable pairs to those present in the loaded vocabulary."""
-    leaf_codes = category_set.leaf_codes
+    """Filter confusable pairs to those present in the loaded vocabulary.
+
+    Membership check is over the full tagging vocabulary (every
+    category), not just terminal nodes — confusable pairs may be at
+    any level of the taxonomy now that parent codes are first-class
+    tagging targets.
+    """
+    all_codes = {c.code for c in category_set.categories}
     return [
         (a, b) for a, b in _CONFUSABLE_PAIR_CODES
-        if a in leaf_codes and b in leaf_codes
+        if a in all_codes and b in all_codes
     ]
 
 

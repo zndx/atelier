@@ -374,6 +374,14 @@ class BootstrapState:
     # Nautilus (the mid-run watcher) observes the length + tail of this
     # list to decide whether to intervene.
     batch_audit: list[BatchAttempt] = field(default_factory=list)
+    # Out-of-vocabulary validation retries.  Each entry records one
+    # retry event triggered when the LLM emitted a ``category_code``
+    # that wasn't in the deployed taxonomy (hallucination class —
+    # ``A_FD`` for Financial Data is the canonical example).
+    # ``classify_batch_with_validation`` populates this via the
+    # ``on_retry`` callback so post-mortem analysis can see which
+    # columns required correction without scanning pod logs.
+    validation_retries: list[dict] = field(default_factory=list)
     failed_columns: list[str] = field(default_factory=list)
     # Cooperative cancellation.  Nautilus sets ``cancelled=True`` when it
     # decides the run isn't worth continuing (stall or accumulated
@@ -445,6 +453,7 @@ def _classify_batch_with_retry(
     _parent_index: int | None = None,
     heartbeat: Callable[[str], None] | None = None,
     cfg: BootstrapConfig | None = None,
+    category_set=None,
 ) -> list:
     """Classify a batch; on truncation OR recoverable failure, halve and recurse.
 
@@ -566,10 +575,40 @@ def _classify_batch_with_retry(
     _beat(f"sweep_call_start_d{_depth}")
 
     try:
-        response = backend.classify_batch(
-            chunk_samples, system_prompt,
+        # Out-of-vocabulary validation + retry: when the LLM emits a
+        # category_code that isn't in the taxonomy (e.g. hallucinated
+        # ``A_FD`` for Financial Data when the actual annotation is
+        # ``C_FD``), targeted retries on just the offending columns
+        # fire here.  The augmented prompt names each offender
+        # specifically; the system prompt already carries every valid
+        # code, so no lexical "did you mean" handling is needed.  On
+        # exhaustion, residual invalid emissions are blanked so
+        # state.labels and the fit-to-LLM CatBoost training data never
+        # carry the hallucination forward.  When ``category_set`` is
+        # None the call is a passthrough — preserves dev/test paths
+        # that don't have a taxonomy in scope.
+        from atelier.classify.llm_backend import classify_batch_with_validation
+
+        def _record_validation_retry(info: dict) -> None:
+            try:
+                state.validation_retries.append({
+                    "ts": time.time(),
+                    "batch_index": batch_index,
+                    "depth": _depth,
+                    **info,
+                })
+            except Exception:
+                pass
+
+        response = classify_batch_with_validation(
+            backend, chunk_samples, system_prompt,
+            category_set=category_set,
             revisit_context=revisit_context,
             table_name=table_name,
+            max_validation_retries=(
+                int(getattr(cfg, "validation_max_retries", 2)) if cfg else 2
+            ),
+            on_retry=_record_validation_retry if category_set is not None else None,
         )
     except Exception as exc:
         kind = _classify_error(exc)
@@ -624,6 +663,7 @@ def _classify_batch_with_retry(
                 _parent_index=batch_index,
                 heartbeat=heartbeat,
                 cfg=cfg,
+                category_set=category_set,
             ))
         return results
 
@@ -674,6 +714,7 @@ def _classify_batch_with_retry(
             _parent_index=batch_index,
             heartbeat=heartbeat,
             cfg=cfg,
+            category_set=category_set,
         ))
     return results
 
@@ -688,6 +729,7 @@ def _llm_sweep(
     column_table: dict[str, str],
     category_count: int = 0,
     progress_callback=None,
+    category_set=None,
 ) -> None:
     """Phase 1: Send all columns to LLM in table-aware batches.
 
@@ -797,6 +839,7 @@ def _llm_sweep(
                     min_batch=cfg.min_columns_per_call,
                     heartbeat=_heartbeat,
                     cfg=cfg,
+                    category_set=category_set,
                 )
             except FatalLLMError as exc:
                 # Halving can't fix auth/permission/invariant failures —
@@ -907,6 +950,7 @@ def _llm_sweep(
                         min_batch=cfg.min_columns_per_call,
                         heartbeat=_heartbeat,
                         cfg=cfg,
+                        category_set=category_set,
                     )
                 except FatalLLMError:
                     raise
@@ -1152,6 +1196,7 @@ def _llm_revisit(
                     table_name=tname,
                     min_batch=cfg.min_columns_per_call,
                     cfg=cfg,
+                    category_set=category_set,
                 )
             except FatalLLMError as exc:
                 logger.error(

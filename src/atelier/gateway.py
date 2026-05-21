@@ -2096,8 +2096,8 @@ def vocabulary_stats(source_id: str | None = None):
         cfg = load_config()
 
         # OOTB sample and local Synthetic both use the expanded
-        # ontology — their reference codes share the 316-leaf ICE
-        # vocabulary.
+        # ontology — their reference codes share the 316-category
+        # ICE vocabulary.
         if source_id in ("ootb-sample", "synthetic"):
             try:
                 sample_vocab = load_sample_vocabulary(hierarchical=True)
@@ -2727,6 +2727,27 @@ def fsm_extend(body: dict):
         cfg = load_config()
         fsm = get_fsm(dao=dao)
 
+        # Resolve source metadata: connection + database for Hive sources.
+        # Mirrors fsm_start's resolution so an Extend run targeting a
+        # hive source_id like ``"hive-poc/reference_corpus"`` reaches
+        # ``discover_tables`` with both halves populated.  Without this,
+        # connection_name/database stay None and Hive receives a
+        # malformed ``SHOW TABLES IN None`` query.
+        connection_name = getattr(cfg, "classify_connection_name", "") or None
+        database = getattr(cfg, "classify_database", "") or "default"
+        if source_id not in ("ootb-sample", "synthetic", "meta-tagging"):
+            src = dao.get_data_source(source_id)
+            if src:
+                uri = src.get("source_uri", "")
+                if "/" in uri:
+                    connection_name, database = uri.split("/", 1)
+                elif uri:
+                    connection_name = uri
+            else:
+                return _error_envelope(
+                    f"Data source {source_id!r} not found", status=404,
+                )
+
         # Refuse to spawn while another run is in flight — the FSM
         # singleton can only carry one run at a time.  Status codes
         # match the pattern used by the bootstrap classify start above.
@@ -2743,6 +2764,8 @@ def fsm_extend(body: dict):
                     source_id=source_id,
                     artifact_set_id=artifact_set_id,
                     parent_dataset_id=parent_dataset_id,
+                    connection_name=connection_name,
+                    database=database,
                 )
             except BaseException as exc:
                 _log.exception("Extend pipeline thread died: %s", exc)

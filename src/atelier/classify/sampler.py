@@ -291,7 +291,7 @@ def probe_table_shape(
 def discover_tables(
     cfg,
     connection_name: str | None = None,
-    database: str = "default",
+    database: str | None = "default",
     limit: int | None = None,
 ) -> list[str]:
     """List tables from a hive database via CAI Data Platform.
@@ -304,6 +304,12 @@ def discover_tables(
     """
     if limit is None:
         limit = cfg.classify_tables_limit
+    if database is None:
+        # Defensive: a caller passing ``None`` positionally would
+        # otherwise override the default and send ``"SHOW TABLES IN
+        # None"`` to Hive.  Coerce so omitted-database callers land on
+        # the same default the signature advertises.
+        database = "default"
 
     try:
         import cml.data_v1 as cmldata
@@ -320,15 +326,46 @@ def discover_tables(
 
     conn = cmldata.get_connection(connection_name)
     df = conn.get_pandas_dataframe(f"SHOW TABLES IN {database}")
-    tables = df.iloc[:, 0].tolist()[:limit]
-    if len(df) > limit:
+    tables = [str(t) for t in df.iloc[:, 0].tolist()]
+    total_discovered = len(tables)
+
+    # ── classify.table_exclude_patterns ───────────────────────────
+    # Operator-supplied regex denylist for the extend-classification
+    # workflow (see config/base.conf).  Applied BEFORE limit
+    # truncation so the limit governs the post-filter set, not the
+    # raw Hive enumeration.
+    patterns = getattr(cfg, "classify_table_exclude_pattern_list", []) or []
+    if patterns:
+        import re as _re
+        compiled = []
+        for p in patterns:
+            try:
+                compiled.append(_re.compile(p))
+            except _re.error as exc:
+                log.warning(
+                    "discover_tables: ignoring invalid regex in "
+                    "classify.table_exclude_patterns (%r): %s", p, exc,
+                )
+        if compiled:
+            kept = [t for t in tables if not any(c.search(t) for c in compiled)]
+            dropped = len(tables) - len(kept)
+            if dropped:
+                log.info(
+                    "discover_tables: dropped %d/%d tables via "
+                    "classify.table_exclude_patterns",
+                    dropped, len(tables),
+                )
+            tables = kept
+
+    truncated = tables[:limit]
+    if len(tables) > limit:
         log.warning(
-            "discover_tables: database %s has %d tables, truncated to %d "
-            "(classify.tables_limit). Increase ATELIER_CLASSIFY_TABLES_LIMIT "
-            "to classify all tables.",
-            database, len(df), limit,
+            "discover_tables: database %s has %d tables (after exclude "
+            "filter; %d raw), truncated to %d (classify.tables_limit). "
+            "Increase ATELIER_CLASSIFY_TABLES_LIMIT to classify all tables.",
+            database, len(tables), total_discovered, limit,
         )
-    return [str(t) for t in tables]
+    return truncated
 
 
 def _strip_table_qualifier(table_name: str, raw_columns: list[str]) -> list[str]:

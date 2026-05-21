@@ -44,9 +44,10 @@ class ReferenceCategory:
         notation: SKOS-style classification code — carries the numeric dot-notation
               as queryable metadata, not structural identity.  May be empty for
               universal vocabulary terms that have no legacy numeric mapping.
-        abbrev: Formal short code / mnemonic for a leaf term ("EMAIL",
-              "PAN", "TXNAMT", "BAN", "SSN").  Parent / class nodes in
-              shipped Atelier vocabularies carry no abbrev — see
+        abbrev: Formal short code / mnemonic for the term ("EMAIL",
+              "PAN", "TXNAMT", "BAN", "SSN", "C_FD", "A_PHN").  Both
+              terminal and parent nodes carry mnemonics in shipped
+              Atelier vocabularies — see
               ``src/atelier/classify/fixtures/PROVENANCE.md``.
         taxonomy: Namespace discriminator ("universal", "annotations", domain name).
         parent_code: Explicit parent in the hierarchy.  When present, tree
@@ -89,18 +90,36 @@ class CategorySet:
 class HierarchicalCategorySet(CategorySet):
     """A CategorySet with full parent-child tree navigation.
 
-    ``categories`` (inherited) returns leaf-only for backward compat.
-    ``all_categories`` includes both leaves and internal (parent) nodes.
+    Every node in the taxonomy is a valid tagging target.  ``categories``
+    is the full vocabulary; the legacy filter that restricted tagging
+    to terminal nodes was a long-standing mistake and has been removed.
+    A column may legitimately be classified at any depth (e.g.
+    ``1.1.1.1 Financial Data`` is a correct classification for a
+    mixed-content monetary column where no more-specific code captures
+    the distribution).
+
+    ``all_categories`` is preserved as an alias of ``categories`` for
+    callers that still reference the old name; new code should prefer
+    ``categories``.  The ``leaf_codes`` property and the ``_is_leaf``
+    constructor helper are retained for internal tree-traversal /
+    Atlas-type-graph mechanics — they describe hierarchy *structure*
+    and do not gate which codes the pipeline can predict.
     """
 
     def __init__(
         self,
         name: str,
         categories: list[ReferenceCategory],
-        all_categories: list[ReferenceCategory],
+        all_categories: list[ReferenceCategory] | None = None,
     ) -> None:
-        super().__init__(name=name, categories=categories)
-        self.all_categories = all_categories
+        # ``all_categories`` is retained as a constructor keyword for
+        # backward compatibility with callers that still supply both
+        # arguments.  When provided it wins because it represents the
+        # full taxonomy; otherwise ``categories`` is taken as the
+        # complete vocabulary.  No filtering happens at construction.
+        unified = all_categories if all_categories is not None else categories
+        super().__init__(name=name, categories=unified)
+        self.all_categories = unified  # alias — same object, not a copy
 
     @cached_property
     def all_by_code(self) -> dict[str, ReferenceCategory]:
@@ -108,9 +127,10 @@ class HierarchicalCategorySet(CategorySet):
 
     @cached_property
     def all_by_abbrev(self) -> dict[str, ReferenceCategory]:
-        # Mnemonic → category over the full tree (leaves + internals).
-        # The leaf-only ``by_abbrev`` (inherited from CategorySet) misses
-        # parent-level mnemonics; this version is what
+        # Mnemonic → category over the full tree.  ``by_abbrev``
+        # (inherited from CategorySet) is now equivalent since
+        # ``categories`` covers the full taxonomy; this property is
+        # retained for API stability and is what
         # ``_resolve_to_focal_element`` consults when the LLM emits an
         # annotation string instead of a numeric dot-code.
         return {c.abbrev: c for c in self.all_categories if c.abbrev}
@@ -129,6 +149,16 @@ class HierarchicalCategorySet(CategorySet):
 
     @cached_property
     def leaf_codes(self) -> frozenset[str]:
+        """Codes with no children in the projected hierarchy.
+
+        A *structural* accessor exposing the set of terminal nodes for
+        tree traversal, Atlas-type-graph generation, and similar
+        hierarchy-mechanics callers.  It does NOT define the tagging
+        vocabulary — every code in ``categories`` (parent or terminal)
+        is independently a valid prediction.  Callers that conflate
+        this set with "the set of predictable codes" are perpetuating
+        the leaf-only mistake the refactor is removing.
+        """
         parents_with_children = set(self.children.keys())
         return frozenset(
             c.code for c in self.all_categories
@@ -136,18 +166,26 @@ class HierarchicalCategorySet(CategorySet):
         )
 
     def descendants(self, code: str) -> frozenset[str]:
-        """All descendant leaf codes of *code*."""
-        if code in self.leaf_codes:
-            return frozenset({code})
+        """All descendants of *code* in the projected hierarchy.
+
+        Returns every code that has *code* as a (transitive) ancestor —
+        both terminal and intermediate nodes.  Does NOT include
+        *code* itself; callers that want self-inclusion construct
+        ``{code} | cs.descendants(code)`` explicitly.
+
+        Used as the subtree-cover for internal-node focal elements
+        (DST), for hierarchical-accuracy scoring, and for any consumer
+        that needs "everything below this point in the tree."  Under
+        the unified tagging-vocabulary semantics, every returned code
+        is independently a valid prediction.
+        """
         result: set[str] = set()
         stack = [code]
         while stack:
             current = stack.pop()
             for child in self.children.get(current, []):
-                if child in self.leaf_codes:
-                    result.add(child)
-                else:
-                    stack.append(child)
+                result.add(child)
+                stack.append(child)
         return frozenset(result)
 
     def ancestors(self, code: str) -> list[str]:
@@ -162,9 +200,18 @@ class HierarchicalCategorySet(CategorySet):
     def atlas_type_graph(self) -> list[dict]:
         """Export as Apache Atlas Classification type definitions.
 
-        Internal nodes map to superTypes chains; leaves become applied
-        classification types. Each type carries the full mnemonic code
-        path, human label, and SKOS notation as attributes.
+        Each category becomes an Atlas type; parent-child relationships
+        in the projected taxonomy become Atlas ``superTypes`` chains.
+        Each type carries the full mnemonic code path, human label,
+        and SKOS notation as attributes.
+
+        The ``entityTypes`` field is currently gated on whether a node
+        has children in the projected tree, restricting *direct*
+        application to terminal categories.  That gate is a vestige
+        of the leaf-only era — every category in the tagging
+        vocabulary is independently a valid tag at the Atelier layer,
+        and Atlas-side enablement of parent application is tracked
+        for Phase 3.
 
         Returns:
             List of Atlas-compatible type definition dicts.
@@ -173,6 +220,8 @@ class HierarchicalCategorySet(CategorySet):
         for cat in self.all_categories:
             parent = self.all_by_code.get(cat.parent_code or "")
             super_types = [parent.atlas_type_name] if parent else []
+            # ``is_leaf`` here is a structural Atlas-export concern,
+            # not an Atelier tagging-vocabulary filter.
             is_leaf = cat.code in self.leaf_codes
 
             type_def = {
@@ -197,11 +246,12 @@ class HierarchicalCategorySet(CategorySet):
 def _nearest_projected_ancestor(code: str, projected_codes: set[str]) -> str | None:
     """Walk dot-notation prefixes up from ``code`` to the nearest projected ancestor.
 
-    The customer's annotations are a *projection* of a larger ontology DAG,
-    so a leaf's structural parent (immediate dot-prefix) may not itself be
-    projected.  This helper returns the nearest *projected* ancestor — or
-    ``None`` when the chain hits the top of the DAG without finding one,
-    in which case ``code`` is a forest root in the projection.
+    The customer's annotations are a *projection* of a larger ontology
+    DAG, so a category's structural parent (immediate dot-prefix) may
+    not itself be projected.  This helper returns the nearest
+    *projected* ancestor — or ``None`` when the chain hits the top of
+    the DAG without finding one, in which case ``code`` is a forest
+    root in the projection.
     """
     if "." not in code:
         return None
@@ -346,8 +396,8 @@ def load_annotations_from_filesystem(
     mnemonics, definitions, common-names, specifics, and the four
     sensitivity flags (NON_CORP / EMP, CONTRACTOR / INDIVIDUAL / CORP)
     map to the same keys ``_build_category_set_from_records`` already
-    understands, so leaf filtering, parent derivation, and embedding-
-    text composition behave identically between Hive- and
+    understands, so category processing, parent derivation, and
+    embedding-text composition behave identically between Hive- and
     filesystem-sourced vocabularies.
 
     The ``taxonomy`` argument stamps the namespace discriminator on
@@ -548,7 +598,10 @@ def _build_category_set_from_records(
     # Determine if records have explicit parent_code fields
     has_explicit_parents = any(r.get("parent_code") is not None for r in records)
 
-    # Build set of codes that are referenced as parents (for leaf detection)
+    # Build set of codes that are referenced as parents.  Used only
+    # for hierarchy *structure* (parent-derivation and the internal
+    # ``_is_leaf`` helper below) — never to filter the tagging
+    # vocabulary, since every category is independently predictable.
     codes_with_children: set[str] = set()
     if has_explicit_parents:
         for r in records:
@@ -565,6 +618,10 @@ def _build_category_set_from_records(
                     break
 
     def _is_leaf(code: str) -> bool:
+        # Structural predicate — "this node has no children in the
+        # projected hierarchy."  Used internally to populate the
+        # ``leaf_codes`` accessor for tree-traversal callers; does NOT
+        # gate which codes the pipeline can predict.
         return code not in codes_with_children
 
     def _derive_parent(code: str, row: dict) -> str | None:
@@ -580,11 +637,12 @@ def _build_category_set_from_records(
     def _build_ref(row: dict, code: str, parent_code: str | None) -> ReferenceCategory:
         """Construct a fully-populated ReferenceCategory from a raw record.
 
-        Used uniformly for leaves and internal nodes so non-leaves carry
-        the same description / common_names / specifics / sensitivity as
-        leaves.  The customer's projection is a slice of the ontology
-        DAG — every projected term is a first-class operator-visible
-        category and deserves the same metadata fidelity.
+        Applied uniformly to every record so each category carries the
+        same description / common_names / specifics / sensitivity
+        regardless of its position in the tree.  The customer's
+        projection is a slice of the ontology DAG; every projected
+        term is a first-class operator-visible category and
+        independently a valid tagging target.
         """
         def _clean(v) -> str:
             # Strip leading/trailing orphan quote chars left over from
@@ -604,11 +662,13 @@ def _build_category_set_from_records(
         label = ontology or annotation
         formal_code = annotation
 
-        # Same rich embedding_text construction for leaves and internal
-        # nodes — ``Financial Data`` (an internal node) gets the full
-        # label + abbrev + description text it has in Hive, not just the
-        # bare label.  Fixes the parent-row impoverishment that biased
-        # cosine toward leaves with richer metadata.
+        # Uniform rich embedding_text for every category — e.g.
+        # ``Financial Data`` (a parent node) gets the full label +
+        # abbrev + description text it has in Hive, not just the bare
+        # label.  Fixes a historical bias where cosine pulled toward
+        # categories that happened to carry richer metadata than their
+        # neighbors; under the current design every category in the
+        # tagging vocabulary is metadata-complete.
         words_label = re.sub(
             r"[^a-z0-9 ]", "",
             label.lower().replace("/", " ").replace("(", "").replace(")", ""),
@@ -660,13 +720,22 @@ def _build_category_set_from_records(
 
         parent_code = _derive_parent(row_code, row)
         ref = _build_ref(row, row_code, parent_code)
+        # Bucket structurally for the hierarchical/flat construction
+        # paths below.  Note: this split is bookkeeping only — both
+        # ``refs`` and ``parent_refs`` end up in the unified
+        # ``categories`` list under the hierarchical path.
         if _is_leaf(row_code):
             refs.append(ref)
         else:
             parent_refs.append(ref)
 
     if not hierarchical:
-        return CategorySet(name="annotations", categories=refs)
+        # Flat construction returns the full tagging vocabulary —
+        # terminal and parent categories alike are first-class
+        # tagging targets.  (Phase 3 of the leaf-only-removal
+        # refactor corrected the historical leaves-only behavior
+        # here.)
+        return CategorySet(name="annotations", categories=refs + parent_refs)
 
     # Forest semantics — sanitize parent_code links so that any reference
     # to a code outside the projection (the gaps that are inevitable in a
@@ -689,12 +758,17 @@ def _build_category_set_from_records(
 
     refs = _sanitize(refs)
     parent_refs = _sanitize(parent_refs)
+    # Single tagging vocabulary — every category is a first-class
+    # prediction target regardless of its tree position.  The internal
+    # split between ``refs`` and ``parent_refs`` is retained only so
+    # the ``leaf_codes`` accessor (structural / tree-traversal /
+    # Atlas-type-graph use cases) can still report which nodes happen
+    # to have no children.
     all_categories = refs + parent_refs
 
     return HierarchicalCategorySet(
         name="annotations",
-        categories=refs,
-        all_categories=all_categories,
+        categories=all_categories,
     )
 
 
@@ -704,8 +778,9 @@ def save_annotations_json(
 ) -> Path:
     """Serialize a CategorySet to JSON for caching.
 
-    Writes the full annotation records (not just leaf refs) so the JSON
-    can round-trip through load_annotations_from_json().
+    Writes every category record so the JSON round-trips through
+    ``load_annotations_from_json`` with the full tagging vocabulary
+    intact.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -981,9 +1056,10 @@ def load_universal_vocabulary(*, hierarchical: bool = True) -> CategorySet:
 def load_sample_vocabulary(*, hierarchical: bool = True) -> CategorySet:
     """Load the expanded OOTB sample vocabulary from data/sample/ontology.json.
 
-    This is the 300-leaf BFO-grounded vocabulary used for the OOTB sample
-    source. It extends the universal vocabulary with domain-specific categories
-    across the CCO ICE trichotomy.
+    This is the 300-node BFO-grounded vocabulary used for the OOTB
+    sample source. It extends the universal vocabulary with
+    domain-specific categories across the CCO ICE trichotomy.  All
+    nodes (parent and terminal alike) are valid tagging targets.
     """
     sample_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "sample"
     path = sample_dir / "ontology.json"
@@ -1002,7 +1078,9 @@ def compose_vocabularies(
     """Compose a universal base vocabulary with domain extensions.
 
     Domain records declare ``parent_code`` referencing universal codes,
-    attaching as new leaves (or subtrees) to the universal hierarchy.
+    attaching as new categories (or subtrees) to the universal
+    hierarchy.  Every attached node — terminal or parent — is a
+    first-class tagging target in the merged vocabulary.
 
     Args:
         base: Universal BFO-grounded vocabulary.
@@ -1019,25 +1097,17 @@ def compose_vocabularies(
     else:
         domain_cs = domain
 
-    # Merge: domain categories extend base, dedup on code
-    base_codes = {c.code for c in base.all_categories}
-
-    merged_leaves = list(base.categories)
+    # Merge: domain categories extend base, dedup on code.  Single
+    # category list now — the legacy leaves/all split has been removed
+    # because parent and terminal nodes are equally first-class
+    # prediction targets.
+    base_codes = {c.code for c in base.categories}
+    merged = list(base.categories)
     for cat in domain_cs.categories:
         if cat.code not in base_codes:
-            merged_leaves.append(cat)
-
-    merged_all = list(base.all_categories)
-    for cat in (
-        domain_cs.all_categories
-        if isinstance(domain_cs, HierarchicalCategorySet)
-        else domain_cs.categories
-    ):
-        if cat.code not in base_codes:
-            merged_all.append(cat)
+            merged.append(cat)
 
     return HierarchicalCategorySet(
         name="composed",
-        categories=merged_leaves,
-        all_categories=merged_all,
+        categories=merged,
     )

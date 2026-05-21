@@ -265,7 +265,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "step": 0.01,
         "default": 0.25,
         "default_focus": True,
-        "caption_template": "Tolerate up to {value_pct}% unclear columns at convergence — parent-aware fusion mechanically inflates leaf gaps, so a higher tolerance avoids grinding through max_iterations for negligible accuracy gain.",
+        "caption_template": "Tolerate up to {value_pct}% unclear columns at convergence — parent-aware fusion mechanically inflates the gap on specific-category predictions, so a higher tolerance avoids grinding through max_iterations for negligible accuracy gain.",
     },
     "classify_bootstrap_gap_threshold": {
         "hocon_path": "classify.bootstrap.gap_threshold",
@@ -277,7 +277,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.25,
         "step": 0.01,
         "default": 0.18,
-        "caption_template": "Converge once mean(Pl − Bel) < {value} — lower = demand tighter belief bands before stopping. Parent-aware fusion adds m(parent) to leaf plausibility, so values below 0.15 are usually unreachable on real corpora.",
+        "caption_template": "Converge once mean(Pl − Bel) < {value} — lower = demand tighter belief bands before stopping. Parent-aware fusion adds m(parent) to the prediction's plausibility, so values below 0.15 are usually unreachable on real corpora.",
     },
     "classify_bootstrap_bel_floor": {
         "hocon_path": "classify.bootstrap.bel_floor",
@@ -289,7 +289,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.70,
         "step": 0.01,
         "default": 0.45,
-        "caption_template": "Mark a prediction 'settled' once Bel ≥ {value} — under parent-aware fusion mass is shared between the leaf and its parent focal element, so settled-but-correct columns commonly land in [0.45, 0.50).",
+        "caption_template": "Mark a prediction 'settled' once Bel ≥ {value} — under parent-aware fusion mass is shared between the prediction and its parent focal element, so settled-but-correct columns commonly land in [0.45, 0.50).",
     },
     "classify_bootstrap_indep_revisit_mass_threshold": {
         "hocon_path": "classify.bootstrap.indep_revisit_mass_threshold",

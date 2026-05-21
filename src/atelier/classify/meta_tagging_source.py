@@ -261,7 +261,7 @@ def load_meta_tagging_vocabulary(mount: Path) -> HierarchicalCategorySet:
         cs = HierarchicalCategorySet(
             name="meta-tagging", categories=list(cs.categories),
         )
-    log.info("meta-tagging vocab: %d leaves from %s", len(cs.categories), mount)
+    log.info("meta-tagging vocab: %d categories from %s", len(cs.categories), mount)
     return cs
 
 
@@ -284,8 +284,9 @@ def _build_name_to_code_index(records: list[dict]) -> dict[str, str]:
     own children in ``common_names`` as examples (``First Name`` as a
     Common Name under ``Name (Full)``).  A naive first-writer-wins
     over CSV row order then incorrectly maps ``first_name`` → parent
-    code.  Canonical Ontology matches and deeper codes take precedence
-    so the leaf with ``Ontology = "First Name"`` wins as it should.
+    code.  Canonical Ontology matches and deeper codes take
+    precedence so the more-specific category with
+    ``Ontology = "First Name"`` wins as it should.
     """
     tiered: dict[str, tuple[int, int, str]] = {}
     TIER = {"ontology": 0, "annotation": 1, "common_names": 2}

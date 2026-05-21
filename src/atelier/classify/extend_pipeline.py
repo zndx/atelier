@@ -194,8 +194,39 @@ def run_extend_classification(
                 )
             samples = load_meta_tagging_source(mount)
             _absorb_categories(load_meta_tagging_vocabulary(mount))
-        # else: hive — discover at runtime below; label_lookup stays empty
-        #       and predictions render code as label
+        else:
+            # Hive source — discover_tables/sample_table_metadata handle
+            # the data side below.  Load the customer's annotations
+            # table here so label_lookup is populated and
+            # ``predicted_annotation`` + ``predicted_label`` resolve
+            # to their semantic forms.
+            #
+            # Annotations live in a *different* database than the data
+            # tables — the data lives at ``<connection>.<database>``
+            # (e.g. ``hive-poc.reference_corpus``) but the deployed
+            # taxonomy is at ``<connection>.<cfg.classify_database>``
+            # (e.g. ``hive-poc.default``).  Mirrors the classify
+            # pipeline's split via ``_load_domain_annotations``.
+            try:
+                from atelier.classify.taxonomy import load_annotations_from_hive
+                annotations_db = (
+                    getattr(cfg, "classify_database", None) or "default"
+                )
+                if connection_name:
+                    domain_cs = load_annotations_from_hive(
+                        cfg, connection_name, annotations_db, hierarchical=True,
+                    )
+                    _absorb_categories(domain_cs)
+                    logger.info(
+                        "extend: loaded %d categories from %s.annotations via %s",
+                        len(getattr(domain_cs, "categories", [])),
+                        annotations_db, connection_name,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "extend: hive annotations load failed — predictions will "
+                    "render with code-as-label and empty annotation: %s", exc,
+                )
 
     # Compute compatibility against the source's known codes when
     # available — when the source vocab is unloaded (hive path before
