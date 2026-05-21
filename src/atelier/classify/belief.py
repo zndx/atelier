@@ -396,11 +396,14 @@ class FrameOfDiscernment:
 
         Resolution chain (R7 — audit_2026-05-06_a_resolution_path):
 
-          1. Singleton hit — return the leaf focal element.
-          2. Internal-node hit — return the curated FE (or coerce to
-             leaf when the FE is a degenerate single-leaf cover).
-          3. Walk down — when the abbrev's code is neither a singleton
-             nor a curated internal node, but in-frame leaves exist
+          1. Internal-node hit — return the curated subtree FE (or
+             coerce to leaf when the FE is a degenerate single-leaf
+             cover).  Checked before singletons because the unified
+             frame puts ALL codes in ``_singletons``; checking
+             singletons first would shadow the subtree FE.
+          2. Leaf singleton hit — return the leaf focal element.
+          3. Walk down — when the abbrev's code is neither a curated
+             internal node nor a singleton, but in-frame leaves exist
              below it, return an ad-hoc FE covering those descendants.
              This handles vocabulary projections where ``cat.code``
              lives between a covered ancestor and covered descendants.
@@ -425,10 +428,8 @@ class FrameOfDiscernment:
         cat = idx.get(annotation)
         if cat is None:
             return None
-        # 1. Singleton.
-        if cat.code in self._singletons:
-            return self._singletons[cat.code]
-        # 2. Curated internal node.
+        # 1. Curated internal node — checked BEFORE singletons because
+        # the unified frame puts every code in _singletons.
         if cat.code in self._internal:
             fe = self._internal[cat.code]
             if len(fe.codes) == 1:
@@ -436,6 +437,9 @@ class FrameOfDiscernment:
                 if leaf in self._singletons:
                     return self._singletons[leaf]
             return fe
+        # 2. Leaf singleton.
+        if cat.code in self._singletons:
+            return self._singletons[cat.code]
         # 3. Walk down — gather in-frame descendants (leaves only;
         #    internal-node coverage is handled in step 2 already).
         prefix = cat.code + "."
@@ -492,10 +496,10 @@ class HierarchicalClassification:
         if self.belief_assignment is None:
             return 0.0
         if self._frame is not None:
-            if code in self._frame.singletons:
-                return self.belief_assignment.belief(self._frame.singletons[code])
             if code in self._frame.internal_nodes:
                 return self.belief_assignment.belief(self._frame.internal_nodes[code])
+            if code in self._frame.singletons:
+                return self.belief_assignment.belief(self._frame.singletons[code])
         # Fallback: construct a focal element from descendants
         if self._category_set is not None and hasattr(self._category_set, "descendants"):
             desc = self._category_set.descendants(code)
@@ -507,10 +511,10 @@ class HierarchicalClassification:
         if self.belief_assignment is None:
             return 0.0
         if self._frame is not None:
-            if code in self._frame.singletons:
-                return self.belief_assignment.plausibility(self._frame.singletons[code])
             if code in self._frame.internal_nodes:
                 return self.belief_assignment.plausibility(self._frame.internal_nodes[code])
+            if code in self._frame.singletons:
+                return self.belief_assignment.plausibility(self._frame.singletons[code])
         if self._category_set is not None and hasattr(self._category_set, "descendants"):
             desc = self._category_set.descendants(code)
             return self.belief_assignment.plausibility(FocalElement(desc))
@@ -554,7 +558,7 @@ class HierarchicalClassification:
         top1_code = self.category.code
         if not top1_code:
             return 1.0
-        top1_fe = self._frame.singletons.get(top1_code) or self._frame.internal_nodes.get(top1_code)
+        top1_fe = self._frame.internal_nodes.get(top1_code) or self._frame.singletons.get(top1_code)
         if top1_fe is None:
             return 1.0
         top1_codes = top1_fe.codes

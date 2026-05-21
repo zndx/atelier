@@ -465,6 +465,7 @@ def late_interaction_to_mass(
         else:
             normalized.append(_AttenuatedTagScore(
                 code=s.code, positive_score=s.positive_score,
+                negative_score=getattr(s, "negative_score", 0.0),
             ))
 
     return _late_interaction_positive_mass(
@@ -478,6 +479,7 @@ class _AttenuatedTagScore:
     """Internal: minimal interface for late_interaction_to_mass."""
     code: str
     positive_score: float
+    negative_score: float = 0.0
 
 
 def _late_interaction_positive_mass(
@@ -592,6 +594,34 @@ def _late_interaction_positive_mass(
 
     masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)
+
+    # Channel conflict K: measures contradiction between positive and
+    # negative evidence for the same codes.  Negative score for code C
+    # implies mass on Θ\{C} (evidence against C); K is the Dempster
+    # conflict between positive mass on {C} and negative mass on Θ\{C}.
+    # Analytically: K = Σ_C m+({C_fe}) × m-(against C), because only
+    # singleton-vs-complement intersections produce the empty set.
+    neg_sims = {
+        s.code: s.negative_score for s in scores
+        if s.negative_score > 0 and s.code in in_frame
+    }
+    if neg_sims:
+        max_neg = max(neg_sims.values())
+        exp_negs = {c: math.exp(n - max_neg) for c, n in neg_sims.items()}
+        total_neg = sum(exp_negs.values())
+        neg_probs = {c: e / total_neg for c, e in exp_negs.items()}
+        sorted_neg = sorted(neg_sims.values(), reverse=True)
+        neg_top2 = sorted_neg[1] if len(sorted_neg) > 1 else None
+        neg_alpha = _cosine_reliability(
+            max_neg, neg_top2, floor=reliability_floor, ceiling=1.0 - discount,
+        )
+        channel_conflict_k = sum(
+            masses.get(in_frame[code][0], 0.0) * neg_alpha * neg_prob
+            for code, neg_prob in neg_probs.items()
+        )
+    else:
+        channel_conflict_k = 0.0
+
     # subtree_concentration captures _significant_subtree's findings even
     # when no subtree concentrated above threshold (returns 0.0).  None
     # means "the aggregation didn't fire" (internal-node top-1 or empty
@@ -600,6 +630,7 @@ def _late_interaction_positive_mass(
     return BeliefAssignment(
         masses=masses,
         subtree_concentration=lca_concentration,
+        channel_conflict_k=channel_conflict_k,
     )
 
 

@@ -308,8 +308,11 @@ def test_r7_walk_down_to_descendants():
     leaves = [c for c in cats if c.code in {"0.1", "1.1.1.9.1", "1.1.1.9.2"}]
     cs = HierarchicalCategorySet(name="r7d", categories=leaves, all_categories=cats)
     frame = FrameOfDiscernment(cs)
-    # Mutate _internal so 1.1.1.9 is dropped — simulates a projection.
+    # Simulate a projection that removes 1.1.1.9 from the active frame
+    # entirely — must pop from BOTH _internal and _singletons since the
+    # unified frame puts all codes in singletons.
     frame._internal.pop("1.1.1.9", None)
+    frame._singletons.pop("1.1.1.9", None)
     fe = frame.resolve_annotation("CONTACT")
     assert fe is not None
     # Walk-down should find both leaves under 1.1.1.9.
@@ -431,8 +434,10 @@ def test_r8_flags_unreachable_abbrev():
     cs = HierarchicalCategorySet(name="r8", categories=leaves, all_categories=cats)
     frame = FrameOfDiscernment(cs)
     # Project STRAND and every ancestor out of the frame entirely so
-    # walk-up has nowhere to land.
+    # walk-up has nowhere to land.  Must pop from BOTH _singletons and
+    # _internal since the unified frame puts all codes in singletons.
     frame._singletons.pop("1.99", None)
+    frame._singletons.pop("1", None)
     frame._internal.pop("1", None)
 
     findings = validate_taxonomy(cs, frame=frame)
@@ -516,14 +521,18 @@ def test_rec6_subtree_concentration_populated_for_leaf_top1(
 
 
 def test_rec6_top_kind_derived_at_pipeline_level(frame: FrameOfDiscernment):
-    """top_kind == 'leaf' when predicted_code is in frame.singletons,
-    'internal' when it's an internal-node code."""
+    """top_kind == 'leaf' when predicted_code is NOT in frame.internal_nodes,
+    'internal' when it IS an internal-node code.  The derivation rule must
+    check internal_nodes (not singletons) because the unified frame puts
+    ALL codes in singletons."""
     # This is a direct test of the derivation rule — used inline at
     # pipeline.py:_classify_column.
-    leaf_code = next(iter(frame.singletons.keys()))
+    leaf_code = next(
+        c for c in frame.singletons if c not in frame.internal_nodes
+    )
     internal_code = next(iter(frame.internal_nodes.keys()))
-    assert ("leaf" if leaf_code in frame.singletons else "internal") == "leaf"
-    assert ("leaf" if internal_code in frame.singletons else "internal") == "internal"
+    assert ("internal" if leaf_code in frame.internal_nodes else "leaf") == "leaf"
+    assert ("internal" if internal_code in frame.internal_nodes else "leaf") == "internal"
 
 
 def test_rec3_top1_margin_below_threshold_triggers_revisit():

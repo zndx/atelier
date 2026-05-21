@@ -2641,7 +2641,7 @@ def _classify_column(
     # channel_conflict_k / subtree_concentration: read off the cosine
     #          source mass (populated by late_interaction_to_mass when
     #          the late path fires; None otherwise).  Per Findings 1+4.
-    top_kind = "leaf" if best_code in frame.singletons else "internal"
+    top_kind = "internal" if best_code in frame.internal_nodes else "leaf"
     _cosine_ba = source_masses.get("cosine")
     late_interaction_channel_conflict_k = (
         getattr(_cosine_ba, "channel_conflict_k", None) if _cosine_ba else None
