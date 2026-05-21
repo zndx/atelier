@@ -179,14 +179,26 @@ Key concepts worth internalizing before editing:
   converges on `mean(Pl − Bel)`, not on K (conflict). Gap is the primary
   signal; K is diagnostic.
 - **Bootstrap loop**: LLM sweep → ML validation → revisit disagreements
-  until gap threshold / bel-floor / max-iterations reached. The
-  *incremental SVM* hot-swap-retrains on accumulated frontier-tier LLM
-  labels during the loop (active-learning idiom — see
-  `docs/src/architecture/pareto-capability-evolution.md` for why
-  "frontier" is reserved for the Pareto sense).
+  until gap threshold / bel-floor / max-iterations reached.  Earlier
+  revisions ran an M9 in-loop SVM-on-LLM-labels retrain (historical
+  function name ``train_svm_on_frontier_labels``); that path was
+  excised on 2026-05-04 for Denoeux-2008 source-independence reasons
+  (see `docs/src/architecture/dst-evidence-independence.md`).  SVM
+  is now trained offline on the synth corpus; going forward,
+  SVM-on-synthetic via the procedural-ML stack (P5).
 - **Monte Carlo stratification** (`monte_carlo.py`, `row_sampler.py`) —
-  for large corpora, only a stratified frontier gets LLM sweeps; the
-  remainder receives label propagation with an elevated discount.
+  for large corpora, a stratified subset is directly LLM-classified;
+  the remainder receives label propagation with an elevated discount.
+  The MCPlan's ``sampled_columns`` set is the directly-classified
+  subset; ``propagation_columns`` is the remainder.
+- **Terminology note**: the term *frontier* is reserved for the Pareto
+  sense (see `docs/src/architecture/pareto-capability-evolution.md`)
+  and the AI-industry "frontier model" sense (capability-leading LLMs).
+  It must NOT be used to describe MC-sampled columns, LLM-classified
+  labels, or the excised M9 SVM retrain — prefer "sampled",
+  "directly-classified", or "LLM-classified" instead.  This rule keeps
+  ``frontier`` distinct enough to carry its capability-evolution
+  meaning unambiguously.
 - **FSM** (`fsm.py`) — authoritative state machine; every phase advances
   through `LOADING_VOCAB → DISCOVERING → SAMPLING → LLM_SWEEP →
   VALIDATING → CLASSIFYING → FUSING → EVALUATING → CONVERGED|ERROR`.

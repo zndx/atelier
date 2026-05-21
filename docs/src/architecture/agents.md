@@ -51,9 +51,9 @@ agent uses to plan its next action.
 > **Historical note (2026-05-04 refactor).** Earlier revisions of
 > the agent loop included a sixth `retrain_svm` tool that retrained
 > the SVM on accumulated LLM labels and hot-swapped the result.
-> That tool was removed alongside the M9 frontier-SVM retrain
-> machinery (commits 8627c2c, 5199379, cc59d01) for the source-
-> independence reasons documented in `ontology_alignment.py`. The
+> That tool was removed alongside the M9 in-loop SVM-on-LLM-labels
+> retrain machinery (commits 8627c2c, 5199379, cc59d01) for the
+> source-independence reasons documented in `ontology_alignment.py`. The
 > SVM is now trained once on synth and translated into the user
 > vocabulary at inference time; there is no per-run SVM retraining
 > for the agent to drive.
@@ -117,8 +117,11 @@ classify {
         k_threshold = 0.2
         coverage_target = 0.95
         max_total_llm_calls = 5000
-        frontier_svm_retrain = true
-        frontier_svm_min_labels = 20
+        # Historical: these knobs gated the excised M9 in-loop SVM
+        # retrain.  Retained here only as illustration of the legacy
+        # config surface; the keys are no longer read by the pipeline.
+        # incremental_svm_retrain = true
+        # incremental_svm_min_labels = 20
     }
 }
 

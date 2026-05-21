@@ -36,36 +36,39 @@ shaping (Haenni-Hartmann 2006) can route mass to ignorance correctly
 in this regime, but it cannot recover the discriminative signal that
 was lost to the compression.
 
-Late interaction over multi-view annotations restores the
-discriminative surface: instead of one comparison per (column, tag)
-pair, K × M structured comparisons with MaxSim aggregation.  Each
-view of the annotation (label, prototype values, name hints, anti-
-examples, …) is its own named vector; each query-side aspect of the
-column (name, per-sample value, table context, pattern hints) is its
-own query vector.  The comparison surface admits structured per-view
-contributions that the prior representation flattened.
+Late interaction via ColBERT restores the discriminative surface:
+instead of one dense-vector comparison per (column, tag) pair, the
+ColBERT encoder produces per-token contextual embeddings (128-d after
+the linear projection) for both entity and annotation texts.  Qdrant's
+native MaxSim comparator computes the token-level cross-alignment
+score directly — no Python-side scoring loop, no per-role weight
+tuning.
 
-The motivating failure modes resolve along distinct channels:
+The entity side feeds `ColumnFeatures.to_embedding_text()` — the same
+text SAGE/SHAP ablate over — through the ColBERT encoder.  The
+annotation side feeds a composed text from the enrichment payload
+(label, description, prototype values, name hints, value patterns,
+parent path, mnemonic) through the same encoder.  Anti-examples are
+excluded from the annotation text (they add noise in the embedding
+space without improving MaxSim discrimination).
 
-- **Anonymized columns** — column-name signal is absent, but per-
-  sample-value query vectors still match annotation `prototype_values`
-  vectors via MaxSim.  Graceful degradation by structure: an absent
-  query vector contributes near-zero MaxSim without polluting the
-  contributions of present query vectors.
+The motivating failure modes resolve through token-level alignment:
+
+- **Anonymized columns** — column-name tokens contribute little
+  MaxSim, but sample-value tokens still align to annotation prototype-
+  value tokens.  Graceful degradation by token structure: weak tokens
+  contribute near-zero MaxSim without polluting strong token matches.
 - **Long-tail distinguishing values** — a single distinctive sample
-  (e.g. one CC-shaped string in a column of mixed values) claims its
-  own MaxSim against an annotation's prototype values, no longer
-  averaged out by the surrounding sample population.
-- **Sibling discrimination** — anti-example vectors stored on the
-  annotation side give explicit "this is NOT X" signal.  High MaxSim
-  against an anti-example *reduces* belief on that tag through the
-  negative-evidence channel below.
-- **Parent-pull** — parent-bucket strings live in their own
-  `parent_path` vector, not blended into the leaf's primary
-  description.  Leaf-level MaxSim can dominate when leaf-level signal
-  is present, and the hierarchical aggregation in
-  `mass_functions.cosine_to_mass` continues to flow residual to
-  internal-node focal elements when subtree-level signal is what's
+  value's tokens claim their own MaxSim against annotation prototype
+  tokens, no longer averaged out by a single dense vector.
+- **Sibling discrimination** — token-level alignment discriminates
+  between semantically adjacent annotations (e.g., "credit card
+  number" vs "bank account number") through fine-grained token
+  matching that dense single-vector cosine collapses.
+- **Parent-pull** — parent-path tokens in the annotation text provide
+  hierarchical context.  The hierarchical aggregation in
+  `_late_interaction_positive_mass` continues to flow residual mass
+  to internal-node focal elements when subtree-level signal is what's
   available.
 
 This is morphologically close to what the upstream
@@ -93,10 +96,11 @@ integration for taxonomies Ægir has not been adapted to.
               │  + deterministic verifiers   │
               └──────────────┬───────────────┘
                              │
-                             ▼  multi-vector + payload
+                             ▼  ColBERT token vectors + payload
          ┌────────────────────────────────────────────┐
          │ Qdrant collection: annotations_<tax>_<ver> │
-         │   - named vectors per view                  │
+         │   - single "colbert" multi-vector field     │
+         │     (per-token 128-d, MaxSim comparator)    │
          │   - structured JSON payload                 │
          │   - operator_edits audit log                │
          └────────────┬───────────────────────────────┘
@@ -108,16 +112,19 @@ integration for taxonomies Ægir has not been adapted to.
                   on-demand snapshots for operator inspection
 
   At classify time:
-       column samples ─▶ column-side multi-vector
-                              │
-                              ▼  Qdrant MaxSim query
-                       per-(column, tag) score breakdown
-                              │
-                              ▼  late_interaction_to_mass
-                       positive_mass(tag) + negative_mass(tag)
-                              │
-                              ▼  DST fusion (existing pipeline)
-                       belief, plausibility, conflict per tag
+       ColumnFeatures.to_embedding_text()
+                 │
+                 ▼  ColBERT encoder (colbert-ir/colbertv2.0)
+          entity token vectors (N × 128)
+                 │
+                 ▼  Qdrant query_points (using="colbert", MaxSim)
+          top-K annotations ranked by MaxSim score
+                 │
+                 ▼  late_interaction_to_mass
+          mass function (Haenni-Hartmann reliability shaping)
+                 │
+                 ▼  DST fusion (existing pipeline)
+          belief, plausibility, conflict per tag
 ```
 
 ## Qdrant payload schema
@@ -125,27 +132,30 @@ integration for taxonomies Ægir has not been adapted to.
 The collection per (taxonomy_id, augmentation_version) is the source
 of truth.  No parallel relational mirror.  One point per annotation.
 
-### Named vectors
+### Vector field
 
-Each annotation point carries the following named vectors.  Vectors
-marked `multi` are themselves multi-vector (a list of embeddings
-addressed under one name); vectors marked `single` are one embedding.
+Each annotation point carries a single multi-vector field:
 
-| Name                | Cardinality | Source                                                                   |
-|---------------------|:-----------:|--------------------------------------------------------------------------|
-| `label_view`        | single      | `embed(label + " — " + mnemonic + " — " + description)`                  |
-| `description_view`  | single      | `embed(description)` standalone                                          |
-| `parent_path_view`  | single      | `embed(parent_chain_text)` — `Root > Parent > … > Self`                  |
-| `prototype_values`  | multi       | `embed(v)` for each generated prototype value (10–20 per annotation)     |
-| `value_patterns`    | multi       | `embed(p)` for each generated format/pattern hint                        |
-| `name_hints`        | multi       | `embed(h)` for each likely column-name surface form (incl. anonymized)   |
-| `anti_examples`     | multi       | `embed(a)` for each explicit anti-example (`this is NOT EMAIL because`)  |
+| Name       | Type         | Source |
+|------------|:------------:|--------|
+| `colbert`  | multi-vector | ColBERT token-level embeddings of the composed annotation text |
 
-Vector dimensionality is determined by the configured embedding
-model — the registry row records `embedding_model` and `embedding_dim`
-so consumers can validate compatibility.  Initial implementation uses
-`sentence-transformers/all-MiniLM-L6-v2` (384-d) to match the
-existing pipeline; nothing in the design assumes that specific model.
+The composed annotation text is produced by
+`qdrant_writer.compose_annotation_text()` from the enrichment
+payload: label, description, prototype values (up to 10), name hints
+(up to 10), value pattern descriptions (up to 5), parent path
+(ontology chain), and mnemonic.  Anti-examples are deliberately
+excluded — they add noise in the embedding space without improving
+MaxSim discrimination.
+
+The ColBERT encoder (`colbert-ir/colbertv2.0`) produces per-token
+128-dimensional vectors via BERT + a learned linear projection
+(768 → 128).  Special tokens ([CLS], [SEP], [PAD]) are stripped;
+only content tokens contribute to MaxSim.
+
+The collection is configured with `MultiVectorConfig(comparator=MAX_SIM)`
+so Qdrant computes token-level late-interaction scoring natively —
+no Python-side scoring loop.
 
 ### Payload (JSON)
 
@@ -173,8 +183,8 @@ existing pipeline; nothing in the design assumes that specific model.
 
   // Provenance + audit
   "augmentation_version":  "v1",                       // prompt template + verifier version
-  "embedding_model":       "sentence-transformers/all-MiniLM-L6-v2",
-  "embedding_dim":         384,
+  "embedding_model":       "colbert-ir/colbertv2.0",
+  "embedding_dim":         128,
   "generated_at":          "2026-05-16T20:00:00Z",
   "generated_by":          "agent-sdk:opus-4.7",       // model + harness identifier
   "verifier_results": {
@@ -235,34 +245,106 @@ comparison and rollback.
 
 ## Enrichment pipeline (high-level)
 
-Detailed in companion scripts (`scripts/enrich_annotations.py`, P2).
+Detailed in `scripts/enrich_annotations.py` (P2) and the
+`atelier.enrichment` package.  Vocabulary identity is *dynamic*:
+operators select a `(connection, database, annotations_table)`
+triple at runtime; the pipeline must not encode the count, names,
+or structure of the currently-loaded set as intrinsic.  The single
+universal is that **every node — leaf or internal — is a first-class
+tagging target**, so both leaf and internal nodes receive enrichment.
+
 The shape:
 
-1. **Read** source taxonomy rows from PGlite (`default.annotations`
-   or user-selected equivalent).
-2. **For each annotation**, run the Agent SDK enrichment loop:
-   - Generate `prototype_values`, validate against any declared
-     `value_patterns`; reject + retry on mismatch.
-   - Generate `value_patterns`, validate that each compiles and that
-     `prototype_values` match at least one.
-   - Generate `name_hints`, validate as non-empty strings; flag
-     overlap with confusable tags' hints.
-   - Generate `anti_examples`, validate that each `confusable_tag`
-     exists in the taxonomy.
-   - Generate `parent_path` from the taxonomy structure (deterministic;
-     no LLM needed) and confirm the LLM's reasoning is consistent
-     with it.
+1. **Read** source taxonomy rows from the active annotations table
+   selected by the operator at runtime.  No vocabulary identity
+   is hardcoded.
+2. **For each node** (leaf or internal), run the enrichment loop:
+   - Build a generation prompt with parent-aware framing for
+     internal nodes (children listed, "what does a column tagged at
+     this generality look like without specializing to a child") or
+     leaf-aware framing for leaves (sibling-discriminative patterns,
+     concrete prototype values).
+   - Call the **provider-co-located** generator (see below) to
+     produce the six-field structured payload.
+   - Run the deterministic verifier suite
+     (`atelier.enrichment.verifiers`).  Failed checks become
+     verifier feedback that is fed back into the next generation
+     attempt up to `enrichment.max_attempts`.
+   - Compute `parent_path` deterministically from the taxonomy
+     structure (no LLM needed) and confirm the LLM's reasoning is
+     consistent with it.
 3. **Compute embeddings** for each named vector using the configured
    embedding model.
 4. **Write** the multi-vector point + payload to Qdrant, keyed by the
-   content-addressed cache key.
-5. **Update** the PGlite `taxonomy_registry` row to record the
-   build (taxonomy_id, augmentation_version, collection name,
-   `built_at`, status).
+   content-addressed cache key.  Idempotent: same `(vocabulary
+   content hash, augmentation_version, embedding_model, source_row
+   hash)` quadruple → same point ID → no redundant work on partial
+   rebuilds.
+5. **Update** the PGlite `taxonomy_registry` row to record the build
+   (taxonomy_id, augmentation_version, collection name, `built_at`,
+   status).  The registry is an *administrative pointer* — it
+   records *that* a collection exists and *where*, never the
+   primary content.
 
 This pipeline satisfies the LLM-mediated reference artifact bar
 (audited via memory): every output is procedurally reproducible from
 its inputs and falsifiable by the verifier suite.
+
+### Provider co-location with classify
+
+The enrichment generator does NOT introduce a separate provider
+knob.  It reads `cfg.classify_llm_backend` and uses the same
+backend the classification path uses — operators manage one set of
+credentials, one cost regime, one billing surface.  Within that
+backend, the generator selects the strongest reasoning model
+available, because per-node generation is single-shot and
+benefits from extended deliberation on structural taxonomy
+judgments (sibling discrimination, prototype induction, regex
+synthesis).
+
+Selection rule (highest priority first), implemented in
+`atelier.enrichment.model_resolver.resolve_enrichment_model`:
+
+1. `cfg.enrichment_model_override` (env: `ATELIER_ENRICHMENT_MODEL`)
+   — explicit operator choice, used verbatim.
+2. Per-backend apex constant when the platform owns the model
+   identity (currently: `anthropic → claude-opus-4-7`).
+3. Fall through to `cfg.classify_llm_model` for backends where the
+   model identity is endpoint-owned (`openai_compatible`,
+   `cerebras`) — the operator's served endpoint *is* the apex
+   available to that deployment.
+4. **Bedrock without `model_override` raises**
+   `EnrichmentModelError` with an operator-facing remediation
+   hint.  Bedrock model identities are AWS account + region +
+   inference-profile specific; no portable default constant would
+   be correct across deployments, and silently degrading to a
+   weaker model would contradict the strongest-reasoning-model
+   discipline.  This is a deployment-readiness gate consistent
+   with the no-silent-DST-degradation principle.
+
+The generator records `{backend}:{model}` in the point's
+`generated_by` provenance field, so verifier pass-rate per node is
+attributable to the exact provider+model combination — the unit of
+replayable experiment.
+
+### Parent-aware vs leaf-aware prompts
+
+Both prompt variants produce the same six-field JSON schema, so
+downstream code treats their outputs identically.  The framing
+difference shapes content quality:
+
+- **Leaf prompt** asks for values, patterns, and name hints
+  describing what a column tagged *exactly* at this leaf would
+  contain.  Patterns are narrow enough to discriminate against
+  sibling leaves under the same parent.
+- **Parent prompt** asks for what a column tagged *at this
+  generality level — without further specificity to a child*
+  looks like.  Children are listed so the model knows what
+  specializations would NOT route here.  Anti-examples are
+  hierarchically aware: the confusable_tag may be a sibling at the
+  same level OR a sibling of an ancestor, because the late-
+  interaction architecture's anti-example evidence applies
+  regardless of where in the tree the confusable target lives.
 
 ## Late-interaction execution
 
@@ -304,88 +386,37 @@ positive_score(col, tag) =
   + ...
 ```
 
-Cross-role comparisons (e.g., `col_sample` against `parent_path_view`)
-are deliberately excluded — MaxSim is computed *within corresponding
-roles*, which preserves the structured-evidence interpretation and
-prevents spurious cross-role hits.
-
-The negative channel is computed in parallel:
-
-```
-negative_score(col, tag) =
-    max(sim(col_sample_i, anti_examples of tag))     * w_anti_per_sample
-```
-
-Per-query-vector normalization (sum of MaxSims divided by query
-vector count) keeps the score comparable across columns with
-different sample counts — standard ColBERT practice (Khattab &
-Zaharia 2020 §3).
-
-Execution happens in-engine via Qdrant's multi-vector named-vector
-query API.  At ~300 tags × ~20 vectors per tag × ~50 query vectors
-per column, naive Python is ~300K comparisons per classification;
-Qdrant's HNSW indexing brings this down to logarithmic in the
-candidate-tag count.
+Execution happens in-engine via Qdrant's multi-vector query API
+with MaxSim comparator.  HNSW indexing brings the cost down to
+logarithmic in the annotation count, which is the dominant cost
+as vocabularies scale across deployments.
 
 ## Mass function construction
 
-`mass_functions.late_interaction_to_mass(positive, negative, frame, …)`
-produces a `MassFunction` over the candidate frame.  Two channels,
-combined per Smets (1990) framing.
+`mass_functions.late_interaction_to_mass(scores, frame)` produces a
+`BeliefAssignment` over the candidate frame from the Qdrant MaxSim
+scores.
 
-### Positive channel — supports a tag
-
-The positive score per tag is calibrated to evidence mass via the
+The MaxSim score per tag is calibrated to evidence mass via the
 same reliability-shaping pattern documented in
 [`dst-evidence-independence.md`](dst-evidence-independence.md):
-α-bounded reliability + margin-aware allocation.  Quality indicators:
+Haenni-Hartmann α-bounded reliability + margin-aware allocation.
 
-- `α_abs` — sigmoid of top-1 positive score around a configurable
-  `τ_pos_abs`.  "Is positive evidence matching anything strongly?"
-- `α_marg` — `tanh((s₁ − s₂) / σ_marg)`.  "Is the top-1 decisive?"
-- `α_verifier` — pass rate from the annotation's payload
-  `verifier_results`.  Verifier-fail annotations have their positive
-  mass attenuated (a witness whose own self-checks failed is less
-  reliable).
+- `α_abs` — sigmoid of top-1 MaxSim score.  "Is the best match
+  strong enough to carry mass?"
+- `α_marg` — `tanh((s₁ − s₂) / σ)`.  "Is the top-1 decisive?"
 
 Allocation:
 
 ```
-m_positive(top-1)         = α · margin_weight + α · (1 − margin_weight) · softmax_top1
-m_positive(top-i, i > 1)  = α · (1 − margin_weight) · softmax_top_i
-m_positive(Θ)             = 1 − α
+m(top-1)         = α · margin_weight + α · (1 − margin_weight) · softmax_top1
+m(top-i, i > 1)  = α · (1 − margin_weight) · softmax_top_i
+m(Θ)             = 1 − α
 ```
 
-This mirrors the existing `cosine_to_mass` allocation shape so
-operators see consistent behavior across both the legacy and the
-late-interaction cosine sources during the A/B comparison window.
-
-### Negative channel — supports against a tag
-
-High negative score → support for the *complement* of that tag,
-encoded per Smets' Transferable Belief Model.  For a singleton `{x}`
-with high negative score `s_neg(x)`:
-
-```
-m_negative({x})       = 0
-m_negative(Θ \ {x})   = β · s_neg(x) / sum_y s_neg(y)
-m_negative(Θ)         = 1 − β · ∑ allocated
-```
-
-`β` is a separate reliability factor governing how aggressively
-negative evidence is allowed to displace mass — defaulted
-conservatively (≤ 0.30) to avoid over-suppression on a single anti-
-example hit.
-
-### Combination
-
-Positive and negative channels combine via Dempster's rule (they
-operate on different focal-element structures and are conditionally
-independent given the truth — positive answers "does this look like
-X?", negative answers "does this look like a known-confusable-with-
-X?").  The result is one `MassFunction` per (column, tag candidate
-set) — drop-in for the existing `cosine` mass slot in the fusion
-combiner.
+Hierarchical subtree aggregation (`_significant_subtree`) routes
+residual mass to internal-node focal elements when subtree-level
+signal dominates leaf-level signal.
 
 ## Storage philosophy
 
@@ -439,8 +470,9 @@ ALTER TABLE fsm_runs ADD COLUMN IF NOT EXISTS
 
 ## Operator inspection and edit surface
 
-The `default.annotations_enriched` *concept* (the runtime collection
-in Qdrant) is operator-facing through two surfaces:
+The active enriched-annotations collection in Qdrant (whatever the
+operator's runtime vocabulary selection happens to produce) is
+operator-facing through two surfaces:
 
 **On-demand export** (`scripts/export_enriched_annotations.py`,
 P2.4): writes the Qdrant payload for a given (taxonomy_id, version)
@@ -539,29 +571,11 @@ classify {
       enabled = true
       enabled = ${?ATELIER_CLASSIFY_COSINE_LATE_INTERACTION}
 
+      model = "colbert-ir/colbertv2.0"
+      model = ${?ATELIER_COLBERT_MODEL}
+
       qdrant_url = "http://127.0.0.1:6333"
       qdrant_url = ${?ATELIER_QDRANT_URL}
-
-      # Per-role weights in the positive channel
-      weight_label              = 0.20
-      weight_name_hints         = 0.15
-      weight_prototype_values   = 0.30
-      weight_value_patterns     = 0.15
-      weight_context            = 0.10
-      weight_parent_path        = 0.10
-
-      # Negative channel
-      weight_anti_examples      = 0.30   # β in the negative-channel allocation
-      negative_reliability_max  = 0.30
-
-      # Reliability shaping (overrides for positive channel)
-      tau_pos_abs               = 0.40
-      sigma_pos_marg            = 0.05
-      verifier_attenuation      = true   # use verifier_results in α
-
-      # Performance / cost
-      column_samples_max        = 50     # cap on per-sample query vectors
-      column_samples_dedup      = true
     }
   }
 }

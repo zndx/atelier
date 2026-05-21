@@ -23,9 +23,10 @@ Promotes the rc2 soak to a tagged minor.  Consolidates two parallel
 branches onto trunk: the late additions to `deploy/v0.4.0-rc1` (the
 extend-classification workflow + SVM evidence source + LLM emission
 validation) and the `feat/dst-late-interaction-cosine` line of work
-(P1–P3.11 — storage foundation, LLM-mediated enrichment, channel-
+(P1–P3.13 — storage foundation, LLM-mediated enrichment, channel-
 decomposed Dempster combination, SHAP per-decision attribution,
-hierarchical-integrity fixes, and BDD coverage).
+hierarchical-integrity fixes, BDD coverage, DST numeric-sensitivity
+study, and training-time NHSVM).
 
 ### What landed from the merge
 
@@ -41,6 +42,19 @@ hierarchical-integrity fixes, and BDD coverage).
 - **LLM-mediated annotation enrichment pipeline (P2)** — new
   `src/atelier/enrichment/` package (loop, LLM generator, Qdrant
   writer, verifiers) feeding the late-interaction stage.
+- **Subsumption-prediction alignment (P7)** — replaces the
+  LLM-classify-batch ICE→user-code alignment with cosine
+  similarity over sentence-transformer embeddings of enriched
+  annotation payloads; alignment is no longer in the training
+  hot path.
+- **Training-time NHSVM** — Structured Shared Frobenius Norm
+  (Choi et al. 2015) per-vocabulary classifier, replacing the
+  alignment-mediated SVM head.
+- **Stage A / Stage B sensitivity instrumentation** — DST
+  numeric sensitivity visibility + turn-key Stage B script;
+  P3.12 numeric sensitivity study + findings; P3.13
+  hierarchical-aggregation interaction battery surfacing
+  parent↔leaf brittleness.
 - **BDD coverage (P3.9–P3.11)** — hierarchical anti-subtree
   carve-out, DST boundary-condition scenarios, generic-vs-specific
   same-depth scenarios.
@@ -48,8 +62,6 @@ hierarchical-integrity fixes, and BDD coverage).
   Hive annotations, table denylist, `backfill_extend_annotations`
   script; operations doc at
   `docs/src/operations/extend-classification-workflow.md`.
-- **SVM evidence source** — chunked alignment, runtime toggle,
-  per-iteration diagnostics.
 - **LLM emission validation** — targeted retry on malformed
   emissions during agent-loop classification.
 - **Tagging-vocabulary unification** — leaf-only restriction
@@ -58,7 +70,59 @@ hierarchical-integrity fixes, and BDD coverage).
   harm-aware composite scorer, `sweep_bel_threshold.py`,
   `score_matrix.py` / `score_sweep.py`, ground-truth review +
   `apply_review.py`.
-- **DST Reborn academic brief** — `docs/notes/2026-05-16/`.
+- **Operational fixes** — late-interaction bridge self-supplies
+  embedder + CAI venv fix; `top1_margin` disjoint-FE traversal
+  Stage A regression repair; `bootstrap-environment` +
+  `curate-agent-mediated` skills landed under
+  `.claude/commands/`.
+- **DST Reborn academic brief** + sprint summary 2026-05-06
+  to 2026-05-20 (`docs/src/appendix/sprint-2026-05-20.md`).
+
+### Terminology cleanup — "frontier" no longer overloaded
+
+The token *frontier* was overloaded across MC sampling, the excised
+M9 in-loop SVM-on-LLM-labels retrain, and the legitimate Pareto /
+"frontier model" senses.  Multiple prior attempts to dial back the
+MC and M9 uses left the codebase mid-rename; this pass completes
+the cleanup.
+
+Renamed (operator-visible):
+
+- HOCON key `classify.monte_carlo.max_frontier_columns` →
+  `classify.monte_carlo.max_sampled_columns`.
+- Env var `ATELIER_MC_MAX_FRONTIER` → `ATELIER_MC_MAX_SAMPLED`.
+- Overlay key `mc_max_frontier_columns` → `mc_max_sampled_columns`.
+
+Renamed (internal):
+
+- `MCPlan.frontier_columns` → `MCPlan.sampled_columns`.
+- `MCConfig.max_frontier_columns` → `MCConfig.max_sampled_columns`.
+- `AtelierConfig.mc_max_frontier_columns` →
+  `AtelierConfig.mc_max_sampled_columns`.
+- `BootstrapState.frontier_columns` → `BootstrapState.sampled_columns`.
+- Result-dict keys `mc_frontier` / `mc_frontier_columns` → `mc_sampled` /
+  `mc_sampled_columns`.
+- BDD step text "frontier columns" → "sampled columns";
+  "frontier-tier labels" → "LLM-classified labels"; etc.
+
+Preserved (legitimate Sense A — AI-industry "frontier model" +
+Pareto-capability-evolution senses):
+
+- `terminal_catalog.py`, `gateway.py`, `terminal_models.feature` —
+  "frontier model" as the standard AI-industry term for
+  capability-leading LLMs.
+- `docs/src/architecture/pareto-capability-evolution.md` — the Pareto
+  sense the term is reserved for in CLAUDE.md.
+
+Preserved (literal disk artifact names):
+
+- `svm_frontier.pkl` filename + `LEGACY_SVM_FILENAME` constant in
+  `artifact_set.py`.  Surrounding docstrings reframed.
+
+Preserved (historical identifiers, qualified inline):
+
+- `train_svm_on_frontier_labels` — referenced as the historical M9
+  function name in deprecation notes.
 
 ### Database migration
 
@@ -74,6 +138,10 @@ hierarchical-integrity fixes, and BDD coverage).
 ### Upgrade notes
 
 - No `rc` cycle; promotes directly from `0.4.0-rc2` to `0.5.0`.
+- Operator-visible renames: update any deployment that sets
+  `ATELIER_MC_MAX_FRONTIER` or references
+  `classify.monte_carlo.max_frontier_columns` — see the
+  "Terminology cleanup" subsection above.
 - New config keys land under `classify.late_interaction.*` and
   `enrichment.*` in `config/base.conf`; defaults are safe.
 - Standing-issue clusters carried over from rc2 (terminal
@@ -342,8 +410,8 @@ smoke before promoting to `v0.3.0` GA.
 - SOPS + age encrypted CAI deployment defaults — minimal AMP config
   surface (4 required vars after the consolidation).
 - `bake-everything-in` posture for fresh CAI deployments — Opus / Sonnet
-  / Haiku ARNs, overwatch settings, and ground-truth fixture all
-  delivered via the encrypted dotenv.
+  / Haiku ARNs, overwatch settings, and agent-mediated reference fixture
+  all delivered via the encrypted dotenv.
 - LICENSE prep + snapshot scripts.
 - `apply_cloudera_header.py` — proprietary header stamper for release
   branches.  Idempotent, with `--dry-run` / `--check` modes.
@@ -379,7 +447,10 @@ smoke before promoting to `v0.3.0` GA.
 - `frontier SVM` → `incremental SVM` (terminology only; no code or
   filename rename).
 - `seam_a_review` → `cautious_review`.
-- `ground_truth` → `curated_reference` (parity scripts + fixture rename).
+- `ground_truth` → `curated_reference` (parity scripts + fixture rename);
+  subsequently `ground_truth` → `agent_mediated` (docs, memory, path
+  references — `reference_code`/`reference_label`/`matches_reference`
+  JSON keys preserved).
 - FAIR-aligned overwatch review prompts (no suppressive language).
 
 ### Stability & Bugfixes

@@ -52,9 +52,17 @@ class BeliefAssignment:
     """A mass function m: 2^Θ → [0,1] with Σ m(A) = 1.
 
     Only focal elements (m(A) > 0) are stored.
+
+    Optional diagnostic fields are populated by specific source-mass
+    constructors (e.g. :func:`mass_functions.late_interaction_to_mass`).
+    They carry per-call observability — DST channel-conflict and
+    subtree-concentration values that would otherwise be log-only —
+    to make sweep outputs self-diagnosing.  None means "not measured".
     """
 
     masses: dict[FocalElement, float] = field(default_factory=dict)
+    channel_conflict_k: float | None = None
+    subtree_concentration: float | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -519,6 +527,51 @@ class HierarchicalClassification:
             return 0.0
         code = self.category.code
         return self.plausibility_at(code) - self.belief_at(code)
+
+    def top1_margin(self) -> float:
+        """Difference between top-1 and top-2 belief across the frame.
+
+        The top-2 search restricts to focal elements DISJOINT from the
+        top-1's focal element — ancestors (supersets) and descendants
+        (subsets) accumulate the same mass via DST's hierarchy, so
+        including them in the search would collapse the margin to 0
+        whenever the top-1 has a non-empty ancestry/descendant set in
+        the frame.  Disjoint focal elements represent genuinely
+        competing evidence regions.
+
+        Used by the bootstrap revisit gate to catch rank-instability:
+        a column whose top-1 vs disjoint top-2 belief is within ε is
+        unstable by construction regardless of the gap / bel-floor
+        gates.  Recommendation 3 from the DST sensitivity study
+        (``docs/notes/2026-05-16/dst-sensitivity-findings.md``).
+
+        Returns 1.0 when no disjoint competitor exists — interpreted
+        as "maximally stable" (the top-1 has the entire frame to
+        itself once overlapping FEs are excluded).
+        """
+        if self.belief_assignment is None or self._frame is None or self.category is None:
+            return 1.0
+        top1_code = self.category.code
+        if not top1_code:
+            return 1.0
+        top1_fe = self._frame.singletons.get(top1_code) or self._frame.internal_nodes.get(top1_code)
+        if top1_fe is None:
+            return 1.0
+        top1_codes = top1_fe.codes
+        top1_bel = self.belief_assignment.belief(top1_fe)
+        competitors: list[float] = []
+        for fe in list(self._frame.singletons.values()) + list(self._frame.internal_nodes.values()):
+            if fe.codes == top1_codes:
+                continue
+            # Disjoint check: no overlap with top-1's focal element.
+            # Excludes ancestors (top1_codes ⊂ fe.codes) and descendants
+            # (fe.codes ⊂ top1_codes) and partial overlaps.
+            if fe.codes & top1_codes:
+                continue
+            competitors.append(self.belief_assignment.belief(fe))
+        if not competitors:
+            return 1.0
+        return max(0.0, top1_bel - max(competitors))
 
     @property
     def needs_clarification(self) -> bool:

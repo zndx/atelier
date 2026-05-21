@@ -62,6 +62,9 @@ class SVMConfig:
     # Number of CV folds for calibration
     calibration_cv: int = 5
 
+    # SVD components for NHSVM Kronecker expansion
+    nhsvm_svd_components: int = 200
+
 
 def build_svm_text(
     column_name: str,
@@ -80,18 +83,208 @@ def build_svm_text(
     return " | ".join(parts)
 
 
+def build_nhsvm_distance_matrix(
+    codes: list[str],
+    alphas: dict[str, float],
+    category_set,
+) -> dict[tuple[str, str], float]:
+    """Precompute pairwise normalized tree distances for a set of codes.
+
+    Call once per taxonomy + code set (e.g. at pipeline start), then
+    pass the result to ``nhsvm_reweight`` via ``distance_matrix=``.
+    """
+    import math
+
+    ancestor_sets: dict[str, set[str]] = {}
+    for c in codes:
+        ancestor_sets[c] = set(category_set.ancestors(c)) | {c}
+
+    matrix: dict[tuple[str, str], float] = {}
+    for i, a in enumerate(codes):
+        for b in codes[i + 1:]:
+            sym = (ancestor_sets[a] ^ ancestor_sets[b]) - {None}
+            d = math.sqrt(max(sum(alphas.get(n, 0.0) for n in sym), 0.0))
+            matrix[(a, b)] = d
+            matrix[(b, a)] = d
+    return matrix
+
+
+def nhsvm_reweight(
+    proba: dict[str, float],
+    alphas: dict[str, float],
+    category_set,
+    temperature: float = 1.0,
+    distance_matrix: dict[tuple[str, str], float] | None = None,
+) -> dict[str, float]:
+    """Reweight flat SVM probabilities using NHSVM tree-distance normalization.
+
+    For each candidate code, computes its expected normalized tree
+    distance to the rest of the probability distribution (Eq. 9,
+    Choi et al. 2015).  Codes that are structurally isolated from
+    the bulk of the probability mass — like a shallow catch-all
+    (INOS) when most mass sits in a deep sensitive subtree — receive
+    a higher distance penalty and lose probability to structurally
+    coherent alternatives.
+
+    Pass a precomputed ``distance_matrix`` (from
+    ``build_nhsvm_distance_matrix``) to avoid recomputing ancestor
+    sets on every call.
+    """
+    import math
+
+    if not proba or not alphas:
+        return proba
+    codes = list(proba.keys())
+    if len(codes) < 2:
+        return proba
+
+    if distance_matrix is not None:
+        def _dist(a: str, b: str) -> float:
+            return distance_matrix.get((a, b), 0.0)
+    else:
+        ancestor_sets: dict[str, set[str]] = {}
+        for c in codes:
+            ancestor_sets[c] = set(category_set.ancestors(c)) | {c}
+
+        def _dist(a: str, b: str) -> float:
+            sym = (ancestor_sets[a] ^ ancestor_sets[b]) - {None}
+            return math.sqrt(max(sum(alphas.get(n, 0.0) for n in sym), 0.0))
+
+    weighted_dist: dict[str, float] = {}
+    for c in codes:
+        wd = 0.0
+        for other in codes:
+            if other != c:
+                wd += proba[other] * _dist(c, other)
+        weighted_dist[c] = wd
+
+    reweighted: dict[str, float] = {}
+    for c in codes:
+        reweighted[c] = proba[c] * math.exp(-weighted_dist[c] / temperature)
+
+    total = sum(reweighted.values())
+    if total > 0:
+        reweighted = {c: v / total for c, v in reweighted.items()}
+    return reweighted
+
+
+class HierarchicalFeatureExpander:
+    """Kronecker product feature expansion for NHSVM (Choi et al. 2015, Eq. 5).
+
+    Expands a d-dimensional feature vector into d×M dimensions by
+    replicating it into per-node blocks scaled by ``sqrt(alpha_n)``.
+    Standard L2 regularization on the expanded space equals the
+    Structured Shared Frobenius Norm on the original space.
+    """
+
+    def __init__(
+        self,
+        alphas: dict[str, float],
+        paths: dict[str, list[str]],
+        node_index: dict[str, int],
+        n_features_in: int,
+    ) -> None:
+        self.alphas = alphas
+        self.paths = paths
+        self.node_index = node_index
+        self.n_nodes = len(node_index)
+        self.n_features_in = n_features_in
+        self._sqrt_alphas = {code: np.sqrt(a) for code, a in alphas.items()}
+
+    def expand_with_labels(self, X: np.ndarray, labels: list[str]):
+        """Training-time expansion: populate only the label's path blocks."""
+        from scipy.sparse import csr_matrix
+
+        n_samples, d = X.shape
+        n_expanded = d * self.n_nodes
+
+        rows, cols, data = [], [], []
+        for i in range(n_samples):
+            path = self.paths.get(labels[i], [])
+            for node in path:
+                idx = self.node_index.get(node)
+                if idx is None:
+                    continue
+                scale = self._sqrt_alphas.get(node, 0.0)
+                if scale <= 0:
+                    continue
+                block_start = idx * d
+                for j in range(d):
+                    val = X[i, j] * scale
+                    if abs(val) > 1e-12:
+                        rows.append(i)
+                        cols.append(block_start + j)
+                        data.append(val)
+
+        return csr_matrix(
+            (np.array(data, dtype=np.float64),
+             (np.array(rows, dtype=np.int32),
+              np.array(cols, dtype=np.int32))),
+            shape=(n_samples, n_expanded),
+        )
+
+    def expand_universal(self, X: np.ndarray):
+        """Inference-time expansion: populate all node blocks."""
+        from scipy.sparse import csr_matrix
+
+        n_samples, d = X.shape
+        n_expanded = d * self.n_nodes
+
+        rows, cols, data = [], [], []
+        for i in range(n_samples):
+            for code, idx in self.node_index.items():
+                scale = self._sqrt_alphas.get(code, 0.0)
+                if scale <= 0:
+                    continue
+                block_start = idx * d
+                for j in range(d):
+                    val = X[i, j] * scale
+                    if abs(val) > 1e-12:
+                        rows.append(i)
+                        cols.append(block_start + j)
+                        data.append(val)
+
+        return csr_matrix(
+            (np.array(data, dtype=np.float64),
+             (np.array(rows, dtype=np.int32),
+              np.array(cols, dtype=np.int32))),
+            shape=(n_samples, n_expanded),
+        )
+
+    @classmethod
+    def from_category_set(cls, category_set, alphas: dict[str, float], n_features_in: int):
+        node_index = {cat.code: i for i, cat in enumerate(category_set.all_categories)}
+        paths = {cat.code: category_set.path_from_root(cat.code) for cat in category_set.all_categories}
+        return cls(alphas, paths, node_index, n_features_in)
+
+
 class SVMClassifier:
     """TF-IDF + LinearSVC classifier with calibrated probabilities.
 
     Combines character n-gram and word n-gram TF-IDF features into a
     single sparse feature matrix, then trains a LinearSVC with Platt
     scaling for probability output.
+
+    When ``hierarchical=True`` and a ``category_set`` is provided,
+    trains with the Structured Shared Frobenius Norm (Choi et al. 2015):
+    TF-IDF → SVD → Kronecker expansion → LinearSVC.  The hierarchy is
+    baked into training, not applied post-hoc.
     """
 
-    def __init__(self, config: SVMConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: SVMConfig | None = None,
+        category_set=None,
+        hierarchical: bool = False,
+    ) -> None:
         self._config = config or SVMConfig()
         self._pipeline = None
         self._classes: list[str] = []
+        self._category_set = category_set
+        self._hierarchical = hierarchical and category_set is not None
+        self._feature_union = None
+        self._svd = None
+        self._expander: HierarchicalFeatureExpander | None = None
 
     @property
     def is_fitted(self) -> bool:
@@ -107,18 +300,10 @@ class SVMClassifier:
         Returns:
             self, for method chaining.
         """
-        from sklearn.calibration import CalibratedClassifierCV
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.pipeline import FeatureUnion, Pipeline
-        from sklearn.svm import LinearSVC
-
         from collections import Counter
 
         cfg = self._config
 
-        # Drop singleton classes — StratifiedKFold requires every class
-        # to have >= 2 samples.  With many categories and few tables,
-        # some categories will inevitably have only one example.
         min_count = self._min_class_count(labels)
         if min_count < 2:
             counts = Counter(labels)
@@ -126,7 +311,7 @@ class SVMClassifier:
             logger.warning(
                 "SVM: dropping %d singleton classes (< 2 examples): %s",
                 len(singletons),
-                sorted(singletons)[:20],  # log first 20 to avoid spam
+                sorted(singletons)[:20],
             )
             filtered = [
                 (t, l) for t, l in zip(texts, labels)
@@ -139,17 +324,21 @@ class SVMClassifier:
             texts, labels = [t for t, _ in filtered], [l for _, l in filtered]
             min_count = self._min_class_count(labels)
 
-        # Character n-gram vectorizer — captures subword patterns
-        # (abbreviations, camelCase fragments, digit sequences)
+        if self._hierarchical:
+            return self._fit_hierarchical(texts, labels, min_count)
+        return self._fit_flat(texts, labels, min_count)
+
+    def _build_feature_union(self):
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.pipeline import FeatureUnion
+
+        cfg = self._config
         char_tfidf = TfidfVectorizer(
             analyzer="char_wb",
             ngram_range=(cfg.char_ngram_min, cfg.char_ngram_max),
             max_features=cfg.max_features,
             sublinear_tf=True,
         )
-
-        # Word n-gram vectorizer — captures multi-word patterns
-        # ("payment card", "email address")
         word_tfidf = TfidfVectorizer(
             analyzer="word",
             ngram_range=(cfg.word_ngram_min, cfg.word_ngram_max),
@@ -157,39 +346,80 @@ class SVMClassifier:
             sublinear_tf=True,
             token_pattern=r"(?u)\b\w+\b",
         )
+        return FeatureUnion([("char", char_tfidf), ("word", word_tfidf)])
 
-        # Union of both feature spaces
-        features = FeatureUnion([
-            ("char", char_tfidf),
-            ("word", word_tfidf),
-        ])
+    def _fit_flat(self, texts, labels, min_count) -> SVMClassifier:
+        from sklearn.calibration import CalibratedClassifierCV
+        from sklearn.pipeline import Pipeline
+        from sklearn.svm import LinearSVC
 
-        # LinearSVC — maximum-margin classifier on sparse features
+        cfg = self._config
+        features = self._build_feature_union()
         svc = LinearSVC(
-            C=cfg.svc_C,
-            max_iter=10_000,
-            class_weight="balanced",
-            dual="auto",
+            C=cfg.svc_C, max_iter=10_000,
+            class_weight="balanced", dual="auto",
         )
-
-        # Wrap in CalibratedClassifierCV for probability estimates
         calibrated = CalibratedClassifierCV(
-            svc,
-            cv=min(cfg.calibration_cv, min_count),
+            svc, cv=min(cfg.calibration_cv, min_count),
             method=cfg.calibration_method,
         )
-
         self._pipeline = Pipeline([
             ("features", features),
             ("classifier", calibrated),
         ])
         self._pipeline.fit(texts, labels)
         self._classes = list(self._pipeline.classes_)
+        logger.info("SVM (flat) trained: %d samples, %d classes",
+                     len(texts), len(self._classes))
+        return self
 
-        logger.info(
-            "SVM trained: %d samples, %d classes",
-            len(texts), len(self._classes),
+    def _fit_hierarchical(self, texts, labels, min_count) -> SVMClassifier:
+        from sklearn.calibration import CalibratedClassifierCV
+        from sklearn.decomposition import TruncatedSVD
+        from sklearn.svm import LinearSVC
+
+        cfg = self._config
+        cs = self._category_set
+        svd_components = getattr(cfg, "nhsvm_svd_components", None) or 200
+
+        # Step 1: TF-IDF
+        self._feature_union = self._build_feature_union()
+        X_tfidf = self._feature_union.fit_transform(texts)
+        logger.info("NHSVM: TF-IDF shape %s", X_tfidf.shape)
+
+        # Step 2: SVD reduction
+        n_components = min(svd_components, X_tfidf.shape[1] - 1, X_tfidf.shape[0] - 1)
+        self._svd = TruncatedSVD(n_components=n_components, random_state=42)
+        X_reduced = self._svd.fit_transform(X_tfidf)
+        logger.info("NHSVM: SVD reduced to %d components (%.1f%% variance)",
+                     n_components, self._svd.explained_variance_ratio_.sum() * 100)
+
+        # Step 3: Directionally-constrained alphas
+        alphas = cs.compute_nhsvm_alphas()
+
+        # Step 4: Kronecker expansion
+        self._expander = HierarchicalFeatureExpander.from_category_set(
+            cs, alphas, n_features_in=n_components,
         )
+        X_expanded = self._expander.expand_with_labels(X_reduced, labels)
+        logger.info("NHSVM: expanded shape %s, nnz %d",
+                     X_expanded.shape, X_expanded.nnz)
+
+        # Step 5: LinearSVC + calibration on expanded features
+        svc = LinearSVC(
+            C=cfg.svc_C, max_iter=10_000,
+            class_weight="balanced", dual="auto",
+        )
+        calibrated = CalibratedClassifierCV(
+            svc, cv=min(cfg.calibration_cv, min_count),
+            method=cfg.calibration_method, ensemble=False,
+        )
+        calibrated.fit(X_expanded, labels)
+
+        self._pipeline = calibrated
+        self._classes = list(calibrated.classes_)
+        logger.info("SVM (NHSVM) trained: %d samples, %d classes, %d expanded features",
+                     len(texts), len(self._classes), X_expanded.shape[1])
         return self
 
     @staticmethod
@@ -211,7 +441,25 @@ class SVMClassifier:
         if not self.is_fitted:
             raise RuntimeError("SVMClassifier must be fitted before prediction")
 
+        if self._hierarchical and self._feature_union is not None:
+            return self._predict_proba_hierarchical(texts)
+
         proba_matrix = self._pipeline.predict_proba(texts)
+        results = []
+        for row in proba_matrix:
+            prob_dict = {
+                code: float(p)
+                for code, p in zip(self._classes, row)
+                if p > 1e-6
+            }
+            results.append(prob_dict)
+        return results
+
+    def _predict_proba_hierarchical(self, texts: list[str]) -> list[dict[str, float]]:
+        X_tfidf = self._feature_union.transform(texts)
+        X_reduced = self._svd.transform(X_tfidf)
+        X_expanded = self._expander.expand_universal(X_reduced)
+        proba_matrix = self._pipeline.predict_proba(X_expanded)
         results = []
         for row in proba_matrix:
             prob_dict = {
@@ -229,40 +477,69 @@ class SVMClassifier:
     def save(self, path: str | Path) -> None:
         """Persist the trained pipeline to disk.
 
-        Saves:
-          - {path}.pkl — sklearn pipeline (joblib)
-          - {path}.classes.json — class label mapping
+        Flat models save as a bare sklearn pipeline (joblib).
+        Hierarchical models save as a dict containing all components
+        needed to reconstruct the Kronecker expansion path.
+        Both write a ``.classes.json`` sidecar for quick introspection.
         """
         import joblib
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self._pipeline, str(path))
+
+        if self._hierarchical:
+            bundle = {
+                "hierarchical": True,
+                "feature_union": self._feature_union,
+                "svd": self._svd,
+                "expander": self._expander,
+                "classifier": self._pipeline,
+                "classes": list(self._classes),
+            }
+            joblib.dump(bundle, str(path))
+        else:
+            joblib.dump(self._pipeline, str(path))
 
         classes_path = path.with_suffix(".classes.json")
         classes_path.write_text(json.dumps(self._classes))
 
-        logger.info("SVM saved to %s (%d classes)", path, len(self._classes))
+        logger.info("SVM saved to %s (%d classes, hierarchical=%s)",
+                     path, len(self._classes), self._hierarchical)
 
     @classmethod
     def load(cls, path: str | Path, config: SVMConfig | None = None) -> SVMClassifier:
-        """Load a persisted SVM pipeline from disk."""
+        """Load a persisted SVM pipeline from disk.
+
+        Detects hierarchical bundles (dict with ``hierarchical: True``)
+        and restores all Kronecker expansion components.  Legacy flat
+        ``.pkl`` files load as before.
+        """
         import joblib
 
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"SVM model not found: {path}")
 
-        obj = cls(config=config)
-        obj._pipeline = joblib.load(str(path))
-        obj._classes = list(obj._pipeline.classes_)
+        loaded = joblib.load(str(path))
 
-        # Also try classes JSON for consistency
+        obj = cls(config=config)
+        if isinstance(loaded, dict) and loaded.get("hierarchical"):
+            obj._hierarchical = True
+            obj._feature_union = loaded["feature_union"]
+            obj._svd = loaded["svd"]
+            obj._expander = loaded["expander"]
+            obj._pipeline = loaded["classifier"]
+            obj._classes = loaded.get("classes", list(obj._pipeline.classes_))
+        else:
+            obj._pipeline = loaded
+            obj._classes = list(obj._pipeline.classes_)
+
         classes_path = path.with_suffix(".classes.json")
         if classes_path.exists():
             obj._classes = json.loads(classes_path.read_text())
 
-        logger.info("SVM loaded from %s (%d classes)", path, len(obj._classes))
+        logger.info("SVM loaded from %s (%d classes, hierarchical=%s)",
+                     path, len(obj._classes), obj._hierarchical)
         return obj
 
     def feature_importances(self, top_n: int = 20) -> list[tuple[str, float]]:

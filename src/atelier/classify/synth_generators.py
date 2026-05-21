@@ -927,6 +927,69 @@ def build_generators() -> dict[str, Callable[[random.Random], str]]:
     g["ICE.METADATA.IS_DELETED"] = lambda rng: rng.choice(["false", "false", "false", "true"])
     g["ICE.METADATA.TENANT_ID"] = lambda rng: f"tenant-{rng.randint(1, 50):03d}"
 
+    # ── Contact subtypes (phone, address) ──
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.MOBILE"] = lambda rng: gen_phone(rng)
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.HOME"] = lambda rng: gen_phone(rng)
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.WORK"] = lambda rng: gen_phone(rng)
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.OTHER"] = lambda rng: gen_phone(rng)
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.EXTENSION"] = lambda rng: str(rng.randint(100, 99999))
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.SUBSCRIBER"] = lambda rng: f"{rng.randint(200, 999)}-{rng.randint(1000, 9999)}"
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.PAGER"] = lambda rng: gen_phone(rng)
+    g["ICE.SENSITIVE.PID.CONTACT.PHONE.EMERGENCY"] = lambda rng: gen_phone(rng)
+    g["ICE.SENSITIVE.PID.CONTACT.ADDRESS.BILLING"] = gen_address
+    g["ICE.SENSITIVE.PID.CONTACT.ADDRESS.SHIPPING"] = gen_address
+    g["ICE.SENSITIVE.PID.CONTACT.ADDRESS.HOME"] = gen_address
+    g["ICE.SENSITIVE.PID.CONTACT.ADDRESS.OFFICE"] = gen_address
+
+    # ── Geographic subtypes ──
+    g["ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.BILLING"] = gen_country
+    g["ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.SHIPPING"] = gen_country
+    g["ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.RESIDENCE"] = gen_country
+    g["ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.CITIZENSHIP"] = gen_country
+    g["ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION.BILLING"] = gen_region
+    g["ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION.SHIPPING"] = gen_region
+
+    # ── Identity subtypes ──
+    g["ICE.SENSITIVE.PID.IDENTITY.NAME.ALIAS"] = lambda rng: rng.choice(FIRST_NAMES) + " " + rng.choice(LAST_NAMES)
+    g["ICE.SENSITIVE.PID.IDENTITY.PLATFORM_ID.ORGANIZATION_ID"] = lambda rng: f"ORG-{rng.randint(100000, 999999)}"
+    g["ICE.SENSITIVE.PID.IDENTITY.GOVID.TAX_JURISDICTION"] = lambda rng: rng.choice(["US-CA", "US-NY", "US-TX", "US-FL", "DE-BY", "GB-ENG", "FR-IDF", "JP-13"])
+    g["ICE.SENSITIVE.PID.IDENTITY.PLATFORM_ID.CONTRACTOR_ID"] = lambda rng: f"CTR-{rng.randint(10000, 99999)}"
+
+    # ── Device identifiers ──
+    g["ICE.SENSITIVE.TECHNICAL.DEVID.IMEI"] = lambda rng: "".join(str(rng.randint(0, 9)) for _ in range(15))
+    g["ICE.SENSITIVE.TECHNICAL.DEVID.MAC"] = lambda rng: ":".join(f"{rng.randint(0, 255):02x}" for _ in range(6))
+
+    # ── Data lifecycle / quality ──
+    g["ICE.METADATA.LIFECYCLE.NULLIFIED"] = lambda rng: rng.choice(["NULL", "VOID", "NULLIFIED", "N/A", "CANCELLED", "INVALID"])
+    g["ICE.METADATA.LIFECYCLE.DEPRECATED"] = lambda rng: rng.choice(["DEPRECATED", "OBSOLETE", "RETIRED", "LEGACY", "EOL", "SUPERSEDED"])
+    g["ICE.METADATA.LIFECYCLE.MASKED"] = lambda rng: rng.choice(["***MASKED***", "XXXX-XXXX", "[REDACTED]", "****", "##MASKED##"])
+    g["ICE.METADATA.LIFECYCLE.HASHED"] = lambda rng: gen_hash(rng)
+
+    # ── Encryption methods ──
+    g["ICE.METADATA.ENCRYPTION.E2E"] = lambda rng: rng.choice(["AES-256-GCM", "ChaCha20-Poly1305", "RSA-OAEP-256", "X25519"])
+    g["ICE.METADATA.ENCRYPTION.AT_REST"] = lambda rng: rng.choice(["AES-256", "TDE", "LUKS", "BitLocker", "FileVault"])
+    g["ICE.METADATA.ENCRYPTION.IN_TRANSIT"] = lambda rng: rng.choice(["TLS 1.3", "TLS 1.2", "mTLS", "IPsec", "WireGuard"])
+
+    # ── Runtime / execution ──
+    g["ICE.NONSENSITIVE.DESIGNATIVE.REF.EXECUTABLE"] = lambda rng: f"/usr/{rng.choice(['bin', 'local/bin', 'sbin'])}/{rng.choice(['python3', 'java', 'node', 'nginx', 'postgres'])}"
+    g["ICE.NONSENSITIVE.DESIGNATIVE.CODE.RUNTIME"] = lambda rng: f"RUN-{rng.randint(10000, 99999)}-{rng.choice(string.ascii_uppercase)}"
+
+    # ── Access control ──
+    g["ICE.SENSITIVE.TECHNICAL.ACCESS.TRUSTED_IP"] = gen_ipv4
+    g["ICE.SENSITIVE.TECHNICAL.ACCESS.GROUP_ID"] = lambda rng: rng.choice(["CN=Domain Admins", "CN=Engineering", "role-admin", "sg-prod-readers", "arn:aws:iam::123:group/devops"])
+    g["ICE.SENSITIVE.TECHNICAL.SECRET"] = lambda rng: f"vault:secret/{rng.choice(['db', 'api', 'service'])}/{rng.choice(['password', 'key', 'token'])}"
+
+    # ── Transaction identifiers ──
+    g["ICE.NONSENSITIVE.DESIGNATIVE.CODE.SUBSCRIPTION_ID"] = lambda rng: f"SUB-{rng.randint(100000, 999999)}"
+    g["ICE.NONSENSITIVE.DESIGNATIVE.CODE.ORDER_ID"] = lambda rng: f"ORD-{rng.randint(100000, 999999)}"
+
+    # ── User-generated content ──
+    g["ICE.SENSITIVE.PID.UGC.FREE_TEXT"] = gen_comment
+    g["ICE.SENSITIVE.PID.UGC.BUG_REPORT"] = lambda rng: f"Bug: {rng.choice(['Crash on', 'Error in', 'Slow', 'Missing'])} {rng.choice(['login', 'search', 'checkout', 'upload'])} - {gen_error_message(rng)}"
+
+    # ── OS type ──
+    g["ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.OS_TYPE"] = lambda rng: rng.choice(["iOS", "Android", "Windows", "macOS", "Linux", "ChromeOS"])
+
     # ── Legacy compatibility (synth.py core codes) ──
     g["ICE.NONSENSITIVE"] = gen_internal_code
     g["ICE.SENSITIVE.TECHNICAL.URL"] = gen_url

@@ -1,20 +1,18 @@
-<!--
-Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
-This file contains material proprietary to Cloudera, Inc., and is provided
-to authorized licensees solely for use in connection with the Cloudera AI
-(CAI) Application from which it was obtained.  It may not be copied,
-modified, redistributed, or used in any other manner without the express
-written consent of Cloudera, Inc.
--->
+# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
+#
+# This file contains material proprietary to Cloudera, Inc., and is provided
+# to authorized licensees solely for use in connection with the Cloudera AI
+# (CAI) Application from which it was obtained.  It may not be copied,
+# modified, redistributed, or used in any other manner without the express
+# written consent of Cloudera, Inc.
 
 # Monte Carlo Sampling
 
 At small corpus sizes (< 200 columns), every column receives direct
-frontier-LLM classification. As the corpus scales to thousands or millions
+LLM classification. As the corpus scales to thousands or millions
 of columns, this becomes prohibitively expensive. Monte Carlo stratified
-sampling selects a representative subset for LLM inference and propagates
-labels cheaply via embedding similarity.
+sampling selects a representative subset for direct LLM inference and
+propagates labels cheaply via embedding similarity to the remainder.
 
 This is a **zero-cost optimization**: below the threshold, the pipeline
 behaves identically to before. The MC layer activates transparently at scale.
@@ -32,7 +30,7 @@ SAMPLING
   └─ Select MC sample: importance-weighted within strata
 
 LLM_SWEEP
-  ├─ [existing] Frontier LLM classifies MC sample (not all columns)
+  ├─ [existing] LLM classifies the MC sample (not all columns)
   └─ Propagate: extend labels to remaining corpus via embedding similarity
 
 VALIDATING
@@ -73,14 +71,14 @@ w = (1 - confidence) × (1 + uncertainty)
 where `confidence` = max cosine similarity, `uncertainty` = ratio of
 2nd-best to 1st-best similarity (ambiguity measure).
 
-Total budget: `min(max_frontier_columns, total × sample_fraction)`
+Total budget: `min(max_sampled_columns, total × sample_fraction)`
 
 ## Label Propagation
 
-After the LLM sweep on frontier columns:
+After the LLM sweep on the sampled subset:
 
-1. For each propagation column, find nearest frontier column by cosine
-   similarity (stratum-local to limit search space)
+1. For each propagation column, find the nearest directly-classified
+   column by cosine similarity (stratum-local to limit search space)
 2. If similarity >= `propagation_threshold`: assign same label with
    discounted confidence
 3. If similarity < threshold: column gets no LLM evidence in DST
@@ -88,7 +86,8 @@ After the LLM sweep on frontier columns:
 Propagated labels enter DST fusion with a higher discount factor (0.30 vs
 0.10 for direct LLM) — they carry less evidential mass. If M0 sources
 disagree with the propagated label, conflict K rises and the existing
-targeted-revisit loop automatically escalates the column to the frontier model.
+targeted-revisit loop automatically escalates the column for direct
+LLM classification.
 
 ## Why This Works with DST
 
@@ -96,7 +95,7 @@ The evidence fusion framework makes MC sampling robust:
 
 - **Propagated evidence** carries less mass (more goes to Theta/ignorance)
 - **M0 agreement** with propagated label → high belief, narrow gap (good)
-- **M0 disagreement** with propagated label → wide gap → frontier revisit
+- **M0 disagreement** with propagated label → wide gap → revisit-via-LLM
 - **Escalation is automatic** — no special MC-aware revisit logic needed
 
 ## Scaling Projections
@@ -104,8 +103,8 @@ The evidence fusion framework makes MC sampling robust:
 GitTables corpus: **1.7M tables today, 10M+ near-term**. Average 8-12
 columns per table = **15M-120M columns** at full scale.
 
-| Corpus | MC Mode | Frontier Calls | Propagated | Cost Reduction |
-|--------|---------|---------------:|-----------:|---------------:|
+| Corpus | MC Mode | Direct LLM Calls | Propagated | Cost Reduction |
+|--------|---------|-----------------:|-----------:|---------------:|
 | 50 | Passthrough | 50 (all) | 0 | 0% |
 | 500 | Active | ~75 (15%) | ~425 | 85% |
 | 5,000 | Active | ~500 (cap) | ~4,500 | 90% |
@@ -114,7 +113,7 @@ columns per table = **15M-120M columns** at full scale.
 | 15M | Active | ~500 (cap) | ~15M | >99.99% |
 | 120M | Active | ~500 (cap) | ~120M | >99.99% |
 
-At the `max_frontier_columns=500` cap, stratified importance sampling ensures
+At the `max_sampled_columns=500` cap, stratified importance sampling ensures
 every category stratum gets at least `min_per_stratum=3` exemplars. Uniform
 random sampling at 500/15M would miss rare categories entirely.
 
@@ -126,8 +125,8 @@ random sampling at 500/15M would miss rare categories entirely.
   (not across the full corpus) to limit memory and compute.
 - **Memory**: 15M columns × 200B = ~3GB for metadata; 15M × 1.5KB = ~22GB
   for embeddings. Requires streaming/chunked processing.
-- **Escalation budget**: ~50-100 additional frontier calls from revisit.
-  Total frontier budget: ~600 LLM API calls for a 15M-column corpus.
+- **Escalation budget**: ~50-100 additional direct-LLM calls from revisit.
+  Total LLM call budget: ~600 calls for a 15M-column corpus.
 
 ## Configuration
 
@@ -136,11 +135,11 @@ classify {
   monte_carlo {
     min_corpus_size = 200              # Below this, classify everything
     min_corpus_size = ${?ATELIER_MC_MIN_CORPUS_SIZE}
-    sample_fraction = 0.15             # Fraction for frontier model
+    sample_fraction = 0.15             # Fraction directly classified by LLM
     sample_fraction = ${?ATELIER_MC_SAMPLE_FRACTION}
     min_per_stratum = 3                # Minimum samples per category stratum
-    max_frontier_columns = 500         # Hard cap on frontier columns
-    max_frontier_columns = ${?ATELIER_MC_MAX_FRONTIER}
+    max_sampled_columns = 500          # Hard cap on directly-classified columns
+    max_sampled_columns = ${?ATELIER_MC_MAX_SAMPLED}
     propagation_threshold = 0.85       # Cosine sim for propagation
     propagation_threshold = ${?ATELIER_MC_PROPAGATION_THRESHOLD}
     propagation_discount = 0.30        # LLM mass discount for propagated labels
@@ -155,7 +154,7 @@ src/atelier/classify/monte_carlo.py
 ├── MCConfig          — Frozen dataclass with from_cfg() factory
 ├── PreClassification — Per-column M0 result (code + confidence + uncertainty)
 ├── Stratum           — Column group by preliminary category
-├── MCPlan            — Sampling plan (frontier + propagation sets)
+├── MCPlan            — Sampling plan (sampled + propagation sets)
 ├── pre_classify()    — Run M0 evidence for all columns
 ├── stratify()        — Group by preliminary category + uncertainty
 ├── select_sample()   — Importance-weighted selection within strata

@@ -31,13 +31,14 @@ in 1–3 s with a cost around $0.007.
 health-check sitrep.  Prior silent-run symptom was the
 `.claude/settings.json` marker missing; shipped in `382172d`.
 
-**Ground truth CSV (optional but recommended)** — point
-`ATELIER_GROUND_TRUTH_URI` at a CSV with columns
+**Agent-mediated reference CSV (optional but recommended)** — point
+`ATELIER_AGENT_MEDIATED_PATH` at a CSV with columns
 `column_name,code[,annotation]` (qualified names) OR
 `table_name,column_name,code[,annotation]`.  Tailing-`/annotations`
 table + `ice_t1` are excluded automatically.  When the CSV resolves,
 `evaluation_report.json` gets real accuracy numbers and overwatch's
-"Mispredictions vs ground truth" section activates.
+"Mispredictions vs agent-mediated reference" section activates.
+(Historical env var name: `ATELIER_GROUND_TRUTH_URI`.)
 
 ## 2. Kick off the pipeline (defaults already baked)
 
@@ -81,7 +82,7 @@ K drops materially vs the `0a32f0bf` baseline of 0.756.
 - `classifications.json` — per-column predictions, including
   `predicted_annotation` (the mnemonic), `llm_code` (the LLM's own
   top pick), `llm_confidence`, and `is_correct` as `null` when no
-  ground truth (not `false`).  Evidence sources should show
+  agent-mediated reference (not `false`).  Evidence sources should show
   `cosine + svm + catboost + llm` as 100% presence, `name_match`
   on ~50% of columns, `pattern` absent (ICE codes not in vocab).
 - `settings_snapshot.json` — the resolved config at run start.
@@ -93,13 +94,14 @@ K drops materially vs the `0a32f0bf` baseline of 0.756.
 - `overwatch.md` — written by the prompt-refreshed agent.  Should
   lead with LLM Coverage + LLM Agreement, NOT K.  Shouldn't
   recommend `max_iterations` bumps or pattern tuning anymore.
-- `evaluation_report.json` — if ground-truth CSV is plumbed,
-  `columns_with_gt > 0` and `exact_accuracy` populates.  Without
-  GT, these are 0 (not an error, just no reference).
+- `evaluation_report.json` — if agent-mediated reference CSV is
+  plumbed, `columns_with_gt > 0` and `exact_accuracy` populates.
+  Without a reference, these are 0 (not an error, just no
+  reference).
 
 ## 5. Measuring against the Gopala xlsx baseline
 
-For the CAI deployment, the Gopala xlsx IS the ground truth.
+For the CAI deployment, the Gopala xlsx IS the agent-mediated reference.
 Simplest flow:
 
 ```bash
@@ -125,7 +127,7 @@ for sn in ('business_data','customer_data','customer_pii_pci_data',
         )
         if tag:
             rows.append({"column_name": col, "annotation": tag})
-with open("build/data/ground_truth.csv", "w", newline="") as f:
+with open("build/data/agent_mediated.csv", "w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=["column_name","annotation"])
     w.writeheader()
     w.writerows(rows)
@@ -133,11 +135,11 @@ print(f"wrote {len(rows)} rows")
 PY
 
 # 2. Set env + re-run
-export ATELIER_GROUND_TRUTH_URI=build/data/ground_truth.csv
+export ATELIER_AGENT_MEDIATED_PATH=build/data/agent_mediated.csv
 devenv up   # or equivalent on CAI
 ```
 
-The ground-truth loader indexes the CSV under multiple key forms
+The agent-mediated reference loader indexes the CSV under multiple key forms
 (qualified, bare, stripped) so both the Hive-backed and
 meta-tagging-source loaders resolve correctly without extra work.
 

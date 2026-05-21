@@ -69,7 +69,7 @@ Once the manifest lands::
 
     uv run python scripts/score_sweep.py \\
         --manifest build/sweeps/bel_x_gap-2026-05-16T...Z.json \\
-        --ground-truth build/data/ground_truth/ground_truth.json \\
+        --agent-mediated build/data/agent_mediated/agent_mediated.json \\
         --harm-aware
 """
 

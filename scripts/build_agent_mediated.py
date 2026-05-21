@@ -7,12 +7,12 @@
 # modified, redistributed, or used in any other manner without the express
 # written consent of Cloudera, Inc.
 
-"""Assemble the per-column working set for ground-truth review.
+"""Assemble the per-column working set for agent-mediated reference review.
 
 This script does NO classification.  It only gathers inputs so that an
 independent reviewer (this session's Opus 4.7 + ultrathink, per the
-project's ground-truth-principles memory) can produce a defensible
-ground_truth.json — see ``project_ground_truth_principles.md``.
+project's agent-mediated reference principles memory) can produce a defensible
+agent_mediated.json — see ``project_agent_mediated_principles.md``.
 
 Inputs gathered per column
 --------------------------
@@ -29,7 +29,7 @@ Inputs gathered per column
 Output
 ------
 
-``build/data/ground_truth/working_set.json`` shaped as::
+``build/data/agent_mediated/working_set.json`` shaped as::
 
   {
     "metadata": {
@@ -67,7 +67,7 @@ Output
   }
 
 Then the reviewer (this Opus session) walks ``columns`` table-by-table
-and writes the ground-truth + audit artifacts.
+and writes the agent-mediated reference + audit artifacts.
 """
 
 from __future__ import annotations
@@ -305,7 +305,7 @@ def main() -> int:
     parser.add_argument(
         "--data-database",
         default="reference_corpus",
-        help="Hive database holding the corpus tables to ground-truth (when "
+        help="Hive database holding the corpus tables for agent-mediated reference (when "
              "--include-all-hive is set).",
     )
     parser.add_argument(
@@ -322,7 +322,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("build/data/ground_truth/working_set.json"),
+        default=Path("build/data/agent_mediated/working_set.json"),
     )
     args = parser.parse_args()
 

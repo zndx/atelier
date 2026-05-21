@@ -43,14 +43,25 @@ def _load_source_taxonomy(path: Path) -> list[dict]:
     return data
 
 
-def _load_from_pglite() -> list[dict]:
-    """Load the active taxonomy from PGlite (default.annotations).
+def _load_from_connection(
+    *,
+    connection_name: str,
+    database: str,
+    table_name: str = "annotations",
+    limit: int | None = None,
+) -> list[dict]:
+    """Load the active source-taxonomy from a CAI Data connection.
 
-    Deferred — wire to AtelierDao or a direct SELECT when needed.  For
-    initial phases the JSON path is the supported entry point.
+    Thin wrapper over
+    :func:`atelier.enrichment.source_loader.load_from_connection` so
+    the script-level CLI can stay as a simple imperative composition.
     """
-    raise NotImplementedError(
-        "Loading from PGlite is deferred; pass --source-json for now"
+    from atelier.enrichment.source_loader import load_from_connection
+    return load_from_connection(
+        connection_name=connection_name,
+        database=database,
+        table_name=table_name,
+        limit=limit,
     )
 
 
@@ -123,12 +134,35 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to a JSON file containing the source taxonomy rows.",
     )
     parser.add_argument(
-        "--from-pglite", action="store_true",
-        help="(Deferred) Load source taxonomy from PGlite default.annotations.",
+        "--from-connection", default=None,
+        help=(
+            "Load source taxonomy from a CAI Data connection (Hive/Impala "
+            "via cml.data_v1).  Pass the connection name and use "
+            "--database to specify the schema."
+        ),
+    )
+    parser.add_argument(
+        "--database", default="default",
+        help="Database/schema name when using --from-connection.",
+    )
+    parser.add_argument(
+        "--annotations-table", default="annotations",
+        help="Annotations table name when using --from-connection.",
+    )
+    parser.add_argument(
+        "--row-limit", type=int, default=None,
+        help=(
+            "Cap source rows (useful for smoke tests).  Default is no "
+            "limit — production runs enrich the full table."
+        ),
     )
     parser.add_argument(
         "--source-table", default="default.annotations",
-        help="Source table name to record in the registry.",
+        help=(
+            "Source table label recorded in the registry.  Auto-derived "
+            "from --database/--annotations-table when --from-connection "
+            "is used."
+        ),
     )
     parser.add_argument(
         "--embedding-model",
@@ -140,8 +174,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Qdrant URL (default: http://127.0.0.1:6333).",
     )
     parser.add_argument(
-        "--generator", choices=["stub", "anthropic"], default="stub",
-        help="Enrichment generator implementation. 'stub' is deterministic (test-only).",
+        "--generator", choices=["backend", "stub"], default="backend",
+        help=(
+            "Enrichment generator implementation.  'backend' (default) uses "
+            "the same LLM backend as the classify pipeline (provider co-"
+            "location, apex reasoning model per provider — see "
+            "atelier.enrichment.model_resolver).  'stub' is the "
+            "deterministic stub for test/CI runs that don't spend on real "
+            "LLM calls."
+        ),
     )
     parser.add_argument(
         "--max-attempts", type=int, default=3,
@@ -160,6 +201,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-enrich every row even when its content-addressed point already exists.",
     )
     parser.add_argument(
+        "--checkpoint-path", default=None,
+        help=(
+            "Per-row JSONL checkpoint path.  Default auto-derives to "
+            "build/enrichment/{collection}-{started_at}.jsonl so a long "
+            "run is inspectable mid-flight via tail -f.  Pass an empty "
+            "string to disable explicitly (not recommended for "
+            "production runs)."
+        ),
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
@@ -171,29 +222,61 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger = logging.getLogger("enrich_annotations")
 
-    # 1. Load source taxonomy
+    # 1. Load source taxonomy.  Two paths:
+    #    --source-json:    pre-exported JSON snapshot (offline/dev/CI)
+    #    --from-connection: live read via cml.data_v1 on a CAI runtime
     if args.source_json:
         source_rows = _load_source_taxonomy(args.source_json)
-        logger.info("Loaded %d source rows from %s", len(source_rows), args.source_json)
-    elif args.from_pglite:
-        source_rows = _load_from_pglite()
+        logger.info(
+            "Loaded %d source rows from %s",
+            len(source_rows), args.source_json,
+        )
+    elif args.from_connection:
+        source_rows = _load_from_connection(
+            connection_name=args.from_connection,
+            database=args.database,
+            table_name=args.annotations_table,
+            limit=args.row_limit,
+        )
+        if args.source_table == "default.annotations":
+            # Auto-derive a meaningful registry label from the connection
+            # path so a hive-poc default run produces
+            # "hive-poc/default.annotations" rather than the placeholder.
+            args.source_table = (
+                f"{args.from_connection}/{args.database}.{args.annotations_table}"
+            )
+        logger.info(
+            "Loaded %d source rows from %s",
+            len(source_rows), args.source_table,
+        )
     else:
-        parser.error("one of --source-json or --from-pglite is required")
+        parser.error(
+            "one of --source-json or --from-connection NAME is required"
+        )
 
     valid_tag_codes = {
         r.get("code") or r.get("mnemonic") for r in source_rows if r.get("code") or r.get("mnemonic")
     }
 
-    # 2. Build generator
+    # 2. Build generator — default 'backend' uses the same LLM backend as
+    #    the classify pipeline and the strongest reasoning model available
+    #    on that provider.  See atelier.enrichment.model_resolver for the
+    #    selection rule.  The stub remains for test/CI runs.
     from atelier.enrichment.llm_generator import (
-        AnthropicEnrichmentGenerator,
+        ClassifyBackedEnrichmentGenerator,
         DeterministicStubGenerator,
     )
 
     if args.generator == "stub":
         generator = DeterministicStubGenerator()
     else:
-        generator = AnthropicEnrichmentGenerator(model="claude-opus-4-7")
+        from atelier.config import load_config
+        cfg = load_config()
+        generator = ClassifyBackedEnrichmentGenerator(cfg)
+        logger.info(
+            "Enrichment generator: %s (backend co-located with classify)",
+            generator.name,
+        )
 
     # 3. Build embedder
     embed_fn, embedding_dim = _build_embedder(args.embedding_model)
@@ -230,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_on_cache_hit=not args.no_skip_cache,
         recreate_collection=args.recreate_collection,
         dry_run=args.dry_run,
+        checkpoint_path=args.checkpoint_path,
     )
 
     result = run_enrichment(

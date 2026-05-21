@@ -44,7 +44,7 @@ Feature: Runtime overlay — full parameter surface
       | mc_min_corpus_size                | 500             |
       | mc_sample_fraction                | 0.35            |
       | mc_min_per_stratum                | 5               |
-      | mc_max_frontier_columns           | 1000            |
+      | mc_max_sampled_columns            | 1000            |
       | row_mc_k                          | 15              |
       | row_mc_strategy                   | "random"        |
 

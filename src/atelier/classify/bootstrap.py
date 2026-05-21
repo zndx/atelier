@@ -177,6 +177,13 @@ class BootstrapConfig:
     gap_threshold: float = 0.18
     clarity_target: float = 0.25
     bel_floor: float = 0.45
+    # Rank-instability gate (DST sensitivity Rec 3).  When the gap
+    # between top-1 and top-2 belief is below this floor, the column
+    # joins the revisit list independently of the gap/bel-floor gates
+    # — small input perturbations near a tight margin flip the
+    # prediction even though gap/bel look acceptable.  Default 0.05;
+    # raise to widen the revisit net.
+    top1_margin_threshold: float = 0.05
     # Minimum independent-tier consensus mass required to fire a revisit
     # on the basis of indep-tier vs LLM disagreement.  Below this floor
     # the cosine/pattern/name_match signal is too diffuse to act on
@@ -223,6 +230,9 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         indep_revisit_mass_threshold=getattr(
             cfg, "classify_bootstrap_indep_revisit_mass_threshold", 0.45,
         ),
+        top1_margin_threshold=getattr(
+            cfg, "classify_bootstrap_top1_margin_threshold", 0.05,
+        ),
     )
 
 
@@ -252,7 +262,7 @@ class IterationMetrics:
     coverage: float
     llm_calls: int
     # MC-aware metrics (populated when MC sampling is active)
-    frontier_columns: int = 0
+    sampled_columns: int = 0  # directly LLM-classified
     propagated_columns: int = 0
     escalated_columns: int = 0
     # Belief-gap convergence (primary convergence measure)
@@ -346,6 +356,11 @@ class BootstrapState:
     ml_uncertainty: dict[str, float] = field(default_factory=dict)
     ml_belief: dict[str, float] = field(default_factory=dict)
     ml_plausibility: dict[str, float] = field(default_factory=dict)
+    # Top-1 vs top-2 belief gap per column (DST sensitivity Rec 3).
+    # Populated alongside ml_belief from the column classification
+    # result.  Consumed by `_identify_uncertain_columns` as a rank-
+    # instability signal independent of gap / bel-floor.
+    ml_top1_margin: dict[str, float] = field(default_factory=dict)
     # Independent-tier consensus (cosine + pattern + name_match) per
     # column.  Populated alongside ml_prediction in _run_ml_validation.
     # The revisit gate compares these against the LLM vote without the
@@ -1024,6 +1039,11 @@ def _run_ml_validation(
             state.ml_uncertainty[name] = result["uncertainty"]
             state.ml_belief[name] = result["belief"]
             state.ml_plausibility[name] = result["plausibility"]
+            # Rec 3 instrumentation — top-1 margin feeds the rank-
+            # instability gate in _identify_uncertain_columns.  Default
+            # 1.0 (maximally stable) when the field is missing — i.e.,
+            # pre-Stage-A result dicts; callers default to stable.
+            state.ml_top1_margin[name] = float(result.get("top1_margin", 1.0) or 1.0)
 
         indep_code = result.get("independent_top1_code")
         if indep_code:
@@ -1305,9 +1325,18 @@ def _identify_uncertain_columns(
     """Find columns where the prediction is uncertain.
 
     Targets columns for LLM revisit based on belief-gap metrics rather
-    than K-based disagreement. A column is uncertain when:
-    - Pl - Bel > 0.3 (wide belief interval), OR
-    - Bel < bel_floor (insufficient supporting evidence)
+    than K-based disagreement. A column is uncertain when ANY of:
+
+    - ``Pl - Bel > cfg.gap_threshold`` — wide belief interval (evidence
+      is spread, not concentrated)
+    - ``Bel < cfg.bel_floor`` — insufficient supporting evidence on
+      the winner
+    - ``top1_margin < cfg.top1_margin_threshold`` — rank instability:
+      top-1 and top-2 belief are within ε, so small perturbations
+      flip the prediction (DST sensitivity Rec 3).  Captures a
+      failure mode the gap/bel gates miss: a column can have high
+      bel and tight gap, yet be one perturbation away from a
+      different top-1.
 
     Sorted by gap descending (most uncertain first).
     """
@@ -1317,7 +1346,12 @@ def _identify_uncertain_columns(
             continue
         gap = state.ml_plausibility.get(name, 1.0) - state.ml_belief.get(name, 0.0)
         bel = state.ml_belief.get(name, 0.0)
-        if gap > 0.3 or bel < cfg.bel_floor:
+        margin = state.ml_top1_margin.get(name, 1.0)
+        if (
+            gap > cfg.gap_threshold
+            or bel < cfg.bel_floor
+            or margin < cfg.top1_margin_threshold
+        ):
             uncertain.append(name)
     uncertain.sort(
         key=lambda n: -(state.ml_plausibility.get(n, 1.0) - state.ml_belief.get(n, 0.0))

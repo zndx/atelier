@@ -5,7 +5,7 @@
     "parent_code": null,
     "taxonomy": "universal",
     "abbrev": "ICE",
-    "description": "BFO: Generically Dependent Continuant — copyable information content whose identity is the pattern, not the carrier."
+    "description": "BFO: Generically Dependent Continuant \u2014 copyable information content whose identity is the pattern, not the carrier."
   },
   {
     "code": "ICE.NONSENSITIVE",
@@ -21,7 +21,7 @@
     "parent_code": "ICE.NONSENSITIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Information that designates — names, identifiers, codes, and references. Maps to cco:DesignativeICE."
+    "description": "Information that designates \u2014 names, identifiers, codes, and references. Maps to cco:DesignativeICE."
   },
   {
     "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME",
@@ -29,7 +29,7 @@
     "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Designates an entity by name — a natural language label for identification."
+    "description": "Designates an entity by name \u2014 a natural language label for identification."
   },
   {
     "code": "ICE.NONSENSITIVE.DESIGNATIVE.NAME.PERSON",
@@ -566,7 +566,7 @@
     "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "References to external entities — citations, versions, sources."
+    "description": "References to external entities \u2014 citations, versions, sources."
   },
   {
     "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.CITATION",
@@ -673,7 +673,7 @@
     "parent_code": "ICE.NONSENSITIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Information that describes — text, measurements, categories, temporal values. Maps to cco:DescriptiveICE."
+    "description": "Information that describes \u2014 text, measurements, categories, temporal values. Maps to cco:DescriptiveICE."
   },
   {
     "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEXT",
@@ -851,7 +851,7 @@
     "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Categorical descriptors — types, classes, ranks, enumerations."
+    "description": "Categorical descriptors \u2014 types, classes, ranks, enumerations."
   },
   {
     "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.TYPE",
@@ -1138,7 +1138,7 @@
     "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Quantitative descriptions — measurements of BFO:Quality instances."
+    "description": "Quantitative descriptions \u2014 measurements of BFO:Quality instances."
   },
   {
     "code": "ICE.NONSENSITIVE.DESCRIPTIVE.MEASUREMENT.LENGTH",
@@ -1533,7 +1533,7 @@
     "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Temporal descriptions — dates, times, periods, durations."
+    "description": "Temporal descriptions \u2014 dates, times, periods, durations."
   },
   {
     "code": "ICE.NONSENSITIVE.DESCRIPTIVE.TEMPORAL.DATE",
@@ -1817,7 +1817,7 @@
     "parent_code": "ICE.NONSENSITIVE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Information that prescribes — specifications, formulas, rules, and plans. Maps to cco:PrescriptiveICE."
+    "description": "Information that prescribes \u2014 specifications, formulas, rules, and plans. Maps to cco:PrescriptiveICE."
   },
   {
     "code": "ICE.NONSENSITIVE.PRESCRIPTIVE.FORMAT_SPEC",
@@ -2896,7 +2896,7 @@
     "parent_code": "ICE",
     "taxonomy": "universal",
     "abbrev": "",
-    "description": "Data about data — timestamps, identifiers, and structural information."
+    "description": "Data about data \u2014 timestamps, identifiers, and structural information."
   },
   {
     "code": "ICE.METADATA.TIMESTAMP",
@@ -3122,5 +3122,398 @@
     "abbrev": "TENANTID",
     "description": "A multi-tenant partition identifier.",
     "common_names": "tenant, tenant id, org id, workspace, account"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.MOBILE",
+    "label": "Mobile Phone Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "MOBILE_PHONE",
+    "description": "A mobile or cellular telephone number.",
+    "common_names": "mobile, cell, cellphone, mobile phone, cellular"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.HOME",
+    "label": "Home Phone Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "HOME_PHONE",
+    "description": "A residential landline telephone number.",
+    "common_names": "home phone, landline, residence phone"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.WORK",
+    "label": "Work Phone Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "WORK_PHONE",
+    "description": "A business or office telephone number.",
+    "common_names": "work phone, office phone, business phone, direct line"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.OTHER",
+    "label": "Other Phone Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "OTHER_PHONE",
+    "description": "An alternate or secondary telephone number.",
+    "common_names": "other phone, alternate phone, secondary phone, alt phone"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.EXTENSION",
+    "label": "Phone Extension",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "PHONE_EXT",
+    "description": "A telephone extension number within a PBX or organizational phone system.",
+    "common_names": "extension, ext, phone extension, pbx extension"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.SUBSCRIBER",
+    "label": "Subscriber Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "SUBSCRIBER_NUM",
+    "description": "The subscriber portion of a telephone number (local number within an area code).",
+    "common_names": "subscriber number, local number, subscriber line"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.PAGER",
+    "label": "Pager Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "PAGER",
+    "description": "A pager or beeper number.",
+    "common_names": "pager, beeper, pager number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.PHONE.EMERGENCY",
+    "label": "Emergency Contact Number",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.PHONE",
+    "taxonomy": "universal",
+    "abbrev": "EMERGENCY_PHONE",
+    "description": "An emergency contact telephone number.",
+    "common_names": "emergency contact, emergency phone, ICE number"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS.BILLING",
+    "label": "Billing Address",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS",
+    "taxonomy": "universal",
+    "abbrev": "BILLING_ADDR",
+    "description": "A billing or invoicing postal address.",
+    "common_names": "billing address, invoice address, bill to address"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS.SHIPPING",
+    "label": "Shipping Address",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS",
+    "taxonomy": "universal",
+    "abbrev": "SHIPPING_ADDR",
+    "description": "A shipping or delivery postal address.",
+    "common_names": "shipping address, delivery address, ship to address"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS.HOME",
+    "label": "Home Address",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS",
+    "taxonomy": "universal",
+    "abbrev": "HOME_ADDR",
+    "description": "A residential home postal address.",
+    "common_names": "home address, residence address, residential address"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS.OFFICE",
+    "label": "Office Address",
+    "parent_code": "ICE.SENSITIVE.PID.CONTACT.ADDRESS",
+    "taxonomy": "universal",
+    "abbrev": "OFFICE_ADDR",
+    "description": "A business or office postal address.",
+    "common_names": "office address, business address, work address, corporate address"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.BILLING",
+    "label": "Billing Country",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY",
+    "taxonomy": "universal",
+    "abbrev": "BILLING_COUNTRY",
+    "description": "The country associated with a billing address.",
+    "common_names": "billing country, invoice country, bill to country"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.SHIPPING",
+    "label": "Shipping Country",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY",
+    "taxonomy": "universal",
+    "abbrev": "SHIPPING_COUNTRY",
+    "description": "The country associated with a shipping or delivery address.",
+    "common_names": "shipping country, delivery country, ship to country, destination country"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.RESIDENCE",
+    "label": "Country of Residence",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY",
+    "taxonomy": "universal",
+    "abbrev": "RESIDENCE_COUNTRY",
+    "description": "The country where a person currently resides.",
+    "common_names": "country of residence, residence country, home country"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY.CITIZENSHIP",
+    "label": "Country of Citizenship",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.COUNTRY",
+    "taxonomy": "universal",
+    "abbrev": "CITIZENSHIP_COUNTRY",
+    "description": "The country of which a person holds citizenship or nationality.",
+    "common_names": "citizenship country, country of nationality, passport country"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION.BILLING",
+    "label": "Billing State",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION",
+    "taxonomy": "universal",
+    "abbrev": "BILLING_STATE",
+    "description": "The state or province associated with a billing address.",
+    "common_names": "billing state, billing province, bill to state"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION.SHIPPING",
+    "label": "Shipping State",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.GEO.REGION",
+    "taxonomy": "universal",
+    "abbrev": "SHIPPING_STATE",
+    "description": "The state or province associated with a shipping address.",
+    "common_names": "shipping state, shipping province, ship to state"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.NAME.ALIAS",
+    "label": "Alias or Other Name",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY.NAME",
+    "taxonomy": "universal",
+    "abbrev": "ALIAS_NAME",
+    "description": "An alternate name, alias, pseudonym, or other name variant for a person.",
+    "common_names": "alias, other name, aka, also known as, alternate name, nickname, pseudonym"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.PLATFORM_ID.ORGANIZATION_ID",
+    "label": "Organization Identifier",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY.PLATFORM_ID",
+    "taxonomy": "universal",
+    "abbrev": "ORG_ID",
+    "description": "A unique identifier for an organization, company, or institutional entity.",
+    "common_names": "organization id, org id, company id, entity id, institution id"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.GOVID.TAX_JURISDICTION",
+    "label": "Tax Jurisdiction",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY.GOVID",
+    "taxonomy": "universal",
+    "abbrev": "TAX_JUR",
+    "description": "A tax jurisdiction code identifying the governmental authority with taxing power.",
+    "common_names": "tax jurisdiction, tax authority, tax district, nexus"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.DEVID.IMEI",
+    "label": "Mobile Equipment Identifier",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL.DEVID",
+    "taxonomy": "universal",
+    "abbrev": "IMEI",
+    "description": "An International Mobile Equipment Identity (IMEI) number uniquely identifying a mobile device.",
+    "common_names": "IMEI, mobile equipment id, device IMEI, handset identifier"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.DEVID.MAC",
+    "label": "MAC Address",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL.DEVID",
+    "taxonomy": "universal",
+    "abbrev": "MAC_ADDR",
+    "description": "A Media Access Control (MAC) hardware address identifying a network interface.",
+    "common_names": "MAC address, hardware address, ethernet address, physical address"
+  },
+  {
+    "code": "ICE.METADATA.LIFECYCLE",
+    "label": "Data Lifecycle State",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "LIFECYCLE",
+    "description": "Metadata indicating the lifecycle state or quality disposition of a data record."
+  },
+  {
+    "code": "ICE.METADATA.LIFECYCLE.NULLIFIED",
+    "label": "Nullified Record",
+    "parent_code": "ICE.METADATA.LIFECYCLE",
+    "taxonomy": "universal",
+    "abbrev": "NULLIFIED",
+    "description": "A data record that has been nullified, voided, or marked as invalid.",
+    "common_names": "nullified, voided, null, invalidated, cancelled"
+  },
+  {
+    "code": "ICE.METADATA.LIFECYCLE.DEPRECATED",
+    "label": "Deprecated Record",
+    "parent_code": "ICE.METADATA.LIFECYCLE",
+    "taxonomy": "universal",
+    "abbrev": "DEPRECATED",
+    "description": "A data record or field that has been deprecated and is scheduled for removal.",
+    "common_names": "deprecated, obsolete, retired, phased out, legacy"
+  },
+  {
+    "code": "ICE.METADATA.LIFECYCLE.MASKED",
+    "label": "Masked Data",
+    "parent_code": "ICE.METADATA.LIFECYCLE",
+    "taxonomy": "universal",
+    "abbrev": "MASKED",
+    "description": "Data that has been masked or redacted for privacy or security purposes.",
+    "common_names": "masked, redacted, obscured, anonymized, de-identified"
+  },
+  {
+    "code": "ICE.METADATA.LIFECYCLE.HASHED",
+    "label": "Hashed Data",
+    "parent_code": "ICE.METADATA.LIFECYCLE",
+    "taxonomy": "universal",
+    "abbrev": "HASHED",
+    "description": "Data that has been cryptographically hashed (one-way transformed).",
+    "common_names": "hashed, hash, digest, checksum, fingerprint"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.REF.EXECUTABLE",
+    "label": "Executable Path",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.REF",
+    "taxonomy": "universal",
+    "abbrev": "EXEC_PATH",
+    "description": "A file path to an executable binary, script, or runnable artifact.",
+    "common_names": "executable, binary path, program path, script path"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.RUNTIME",
+    "label": "Runtime Code",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "RUNTIME_CODE",
+    "description": "An identifier for a runtime execution context, job, or process.",
+    "common_names": "run code, runtime id, job code, execution id, process code"
+  },
+  {
+    "code": "ICE.METADATA.ENCRYPTION",
+    "label": "Encryption Method",
+    "parent_code": "ICE.METADATA",
+    "taxonomy": "universal",
+    "abbrev": "ENCRYPTION",
+    "description": "Metadata about the encryption method or state applied to data."
+  },
+  {
+    "code": "ICE.METADATA.ENCRYPTION.E2E",
+    "label": "End-to-End Encrypted",
+    "parent_code": "ICE.METADATA.ENCRYPTION",
+    "taxonomy": "universal",
+    "abbrev": "E2E",
+    "description": "Data protected by end-to-end encryption where only endpoints hold keys.",
+    "common_names": "e2e, end-to-end, e2ee, client-side encryption"
+  },
+  {
+    "code": "ICE.METADATA.ENCRYPTION.AT_REST",
+    "label": "Encrypted at Rest",
+    "parent_code": "ICE.METADATA.ENCRYPTION",
+    "taxonomy": "universal",
+    "abbrev": "ENC_REST",
+    "description": "Data encrypted while stored on disk or in a database.",
+    "common_names": "encrypted at rest, disk encryption, storage encryption, TDE"
+  },
+  {
+    "code": "ICE.METADATA.ENCRYPTION.IN_TRANSIT",
+    "label": "Encrypted in Transit",
+    "parent_code": "ICE.METADATA.ENCRYPTION",
+    "taxonomy": "universal",
+    "abbrev": "ENC_TRANSIT",
+    "description": "Data encrypted during network transmission.",
+    "common_names": "encrypted in transit, TLS, transport encryption, wire encryption"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL.OS_TYPE",
+    "label": "Operating System Type",
+    "parent_code": "ICE.NONSENSITIVE.DESCRIPTIVE.CATEGORICAL",
+    "taxonomy": "universal",
+    "abbrev": "OS_TYPE",
+    "description": "The type or family of operating system (mobile, desktop, server, etc.).",
+    "common_names": "operating system, os, platform os, os type, os name"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.IDENTITY.PLATFORM_ID.CONTRACTOR_ID",
+    "label": "Contractor Identifier",
+    "parent_code": "ICE.SENSITIVE.PID.IDENTITY.PLATFORM_ID",
+    "taxonomy": "universal",
+    "abbrev": "CONTRACTOR_ID",
+    "description": "An identifier for an external contractor or contingent worker.",
+    "common_names": "contractor id, vendor id, contingent worker id, consultant id"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.UGC",
+    "label": "User-Generated Content",
+    "parent_code": "ICE.SENSITIVE.PID",
+    "taxonomy": "universal",
+    "abbrev": "UGC",
+    "description": "Content created or submitted by end users that may contain embedded PII."
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.UGC.FREE_TEXT",
+    "label": "Free Text Input",
+    "parent_code": "ICE.SENSITIVE.PID.UGC",
+    "taxonomy": "universal",
+    "abbrev": "FREE_TEXT",
+    "description": "Unstructured free-text input from a user (comments, notes, descriptions).",
+    "common_names": "free text, user comment, notes, description, remarks, feedback"
+  },
+  {
+    "code": "ICE.SENSITIVE.PID.UGC.BUG_REPORT",
+    "label": "Bug Report Content",
+    "parent_code": "ICE.SENSITIVE.PID.UGC",
+    "taxonomy": "universal",
+    "abbrev": "BUG_REPORT",
+    "description": "Content of a software bug report, issue, or defect description.",
+    "common_names": "bug report, issue description, defect, ticket body, bug description"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.SUBSCRIPTION_ID",
+    "label": "Subscription Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "SUBSCRIPTION_ID",
+    "description": "A unique identifier for a subscription or recurring service agreement.",
+    "common_names": "subscription id, sub id, membership id, recurring id"
+  },
+  {
+    "code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE.ORDER_ID",
+    "label": "Order Identifier",
+    "parent_code": "ICE.NONSENSITIVE.DESIGNATIVE.CODE",
+    "taxonomy": "universal",
+    "abbrev": "ORDER_ID",
+    "description": "A unique identifier for a purchase order or transaction order.",
+    "common_names": "order id, order number, purchase order, po number"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.ACCESS.TRUSTED_IP",
+    "label": "Trusted IP Address",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "TRUSTED_IP",
+    "description": "An IP address designated as trusted in access control lists or allowlists.",
+    "common_names": "trusted ip, whitelisted ip, allowed ip, safe ip"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.ACCESS.GROUP_ID",
+    "label": "Access Group Identifier",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "ACCESS_GROUP",
+    "description": "An identifier for a security group, role, or access control group.",
+    "common_names": "security group, ad group, role id, permission group, access group"
+  },
+  {
+    "code": "ICE.SENSITIVE.TECHNICAL.SECRET",
+    "label": "System Secret",
+    "parent_code": "ICE.SENSITIVE.TECHNICAL",
+    "taxonomy": "universal",
+    "abbrev": "SYS_SECRET",
+    "description": "A system-level secret, credential, or key material.",
+    "common_names": "system secret, credential, service key, vault secret, secret key"
   }
 ]

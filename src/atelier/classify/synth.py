@@ -8,10 +8,11 @@
 
 """Synthetic data generation for CatBoost/SVM classifier training.
 
-Generates synthetic columns with known reference labels for each leaf
-category in the controlled vocabulary. Each category gets both semantic
-column names (human-readable variants) and opaque names (coded/random)
-to force classifiers to learn from VALUE PATTERNS, not just names.
+Generates synthetic columns with known reference labels for every
+taggable node (leaf and internal) in the controlled vocabulary.  Each
+category gets both semantic column names (human-readable variants) and
+opaque names (coded/random) to force classifiers to learn from VALUE
+PATTERNS, not just names.
 
 Value generators are sourced from synth_generators.py (shared with
 generate_sample_source.py). The GeneratorRegistry from synth_registry.py
@@ -211,12 +212,12 @@ def generate_synth_tables(
 ) -> list[dict[str, Any]]:
     """Generate synthetic training tables with a known reference label per column.
 
-    For each leaf category, generates semantic + opaque column name variants
-    with category-appropriate values. Outputs CSV files and
-    reference_labels.json.
+    For every taggable category (leaf and internal), generates semantic +
+    opaque column name variants with category-appropriate values.  Outputs
+    CSV files and reference_labels.json.
 
     Args:
-        category_set: HierarchicalCategorySet with leaf categories.
+        category_set: HierarchicalCategorySet (uses all_categories).
         output_dir: Directory to write CSV + reference_labels.json.
         value_templates: Optional {code: [values...]} for template-based generators.
         registry: Optional GeneratorRegistry. When provided, uses registry's
@@ -237,10 +238,11 @@ def generate_synth_tables(
 
     # Build merged generator lookup: registry > hand-coded > template fallbacks
     generators: dict[str, Callable[[random.Random], str]] = {}
+    all_cats = getattr(category_set, "all_categories", category_set.categories)
 
     if registry is not None:
         # Use registry generators
-        for cat in category_set.categories:
+        for cat in all_cats:
             spec = registry.get(cat.code)
             if spec:
                 generators[cat.code] = spec.generator
@@ -259,9 +261,9 @@ def generate_synth_tables(
                     template_count, len(GENERATORS), template_count, len(generators),
                 )
 
-    # Collect leaf categories that have generators
+    # Collect all categories (leaf + internal) that have generators
     leaf_specs: list[dict] = []
-    for cat in category_set.categories:
+    for cat in all_cats:
         code = cat.code
         if code not in generators:
             continue
@@ -345,29 +347,26 @@ def generate_synth_tables(
     return results
 
 
-def generate_for_vocabulary(
+def generate_user_taxonomy_corpus(
     category_set,
+    payloads: dict[str, dict],
     output_dir: str | Path,
     *,
-    value_templates: dict[str, list[str]] | None = None,
     seed: int = 42,
     rows_per_table: int = 100,
     columns_per_table: int = 50,
     variants_per_category: int = 30,
+    name_hints: dict[str, list[str]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    """Generate synthetic data for any vocabulary using the full registry.
+    """Generate synthetic corpus labeled with user-taxonomy codes.
 
-    Convenience function that builds a GeneratorRegistry, generates data,
-    and returns both the table metadata and a coverage report.
-
-    Returns:
-        (table_metadata, coverage_report) where coverage_report maps
-        each leaf code to its generator source ("hand-coded", "template",
-        "inferred", or "missing").
+    Uses enrichment payloads as the primary generator source.
+    Returns ``(table_metadata, coverage_report)`` where coverage maps
+    every taggable code (leaf + internal) to its generator source.
     """
     from atelier.classify.synth_registry import GeneratorRegistry
 
-    registry = GeneratorRegistry.from_vocabulary(category_set, value_templates)
+    registry = GeneratorRegistry.from_enrichment_payloads(payloads, category_set)
     coverage = registry.coverage_report(category_set)
 
     results = generate_synth_tables(

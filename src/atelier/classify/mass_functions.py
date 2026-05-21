@@ -403,157 +403,44 @@ def late_interaction_to_mass(
     *,
     discount: float = 0.20,
     reliability_floor: float = 0.10,
-    negative_beta: float = 0.30,
-    negative_top_k: int = 5,
-    negative_min_score: float = 0.10,
-    use_verifier_pass_rate: bool = True,
 ) -> BeliefAssignment:
-    """Convert late-interaction :class:`TagScore` outputs to a mass function.
+    """Convert ColBERT MaxSim scores to a DST mass function.
 
-    Channel-decomposed construction per Smets 1990 § TBM and the
-    architecture note: positive evidence (label / description /
-    prototype / name-hints / value-patterns MaxSim) produces a mass
-    function on **singletons**; negative evidence (anti-examples
-    MaxSim) produces a mass function on **complements** (Θ \\ {x} for
-    each tag with anti-example support).  The two are
-    conditionally independent given the truth — positive answers
-    "does this look like X?", negative answers "does this look like a
-    known-confusable-with-X?" — so they combine via Dempster's rule.
+    Accepts ``(code, score)`` tuples from the Qdrant late-interaction
+    bridge.  Each score is a MaxSim similarity between the entity's
+    ColBERT token vectors and an annotation's ColBERT token vectors,
+    computed natively by Qdrant.
 
-    Why channel-decomposed rather than net-score
-    --------------------------------------------
-
-    The earlier net-score approximation collapsed the two channels
-    via ``net = positive - β · negative`` and fed the result to
-    :func:`cosine_to_mass`.  That approach silently lost a real
-    epistemic signal: "high positive AND high negative" was treated
-    as cancellation, when it should surface as DST **conflict K** —
-    the fusion system's native flag for "evidence sources disagree
-    about this tag, the operator should look".  Channel-decomposed
-    construction restores that signal so downstream mechanisms
-    (cross-subtree visibility, cautious_promoted_code, the indep-tier
-    revisit gate) can act on it.
-
-    Implementation
-    --------------
-
-    - **Verifier-pass-rate attenuation**: when
-      ``use_verifier_pass_rate`` is True, each tag's positive and
-      negative scores are scaled by its annotation's
-      ``verifier_pass_rate``.  An annotation whose own self-checks
-      failed contributes proportionally less in *both* channels —
-      epistemically appropriate (untrusted witness should be quiet),
-      and matches the α_verifier factor in the architecture note.
-    - **Positive mass** is built via :func:`cosine_to_mass`, which
-      keeps the Haenni-Hartmann reliability shaping, margin-aware
-      allocation, and hierarchical-subtree aggregation already in
-      use across the pipeline.
-    - **Negative mass** assigns the top-K (by negative score) tags
-      to their respective **complement** focal elements ``Θ \\ {x}``,
-      proportional to their share of the total top-K negative score.
-      ``β`` (``negative_beta``) caps the total negative mass.  The
-      remainder is ignorance.
-    - **Combination**: Dempster's rule.  K (conflict) is logged when
-      non-trivial — operators see when anti-examples are firing
-      against the positive top-1.  On total conflict (K = 1), the
-      combiner falls through to Yager's rule per Smets'
-      least-commitment principle: route conflict mass to ignorance
-      rather than amplify either channel.  This is a *DST math
-      edge case*, not a deployment-degraded fallback to the
-      collapsed-DST state.
-
-    Parameters
-    ----------
-    scores
-        Per-tag late-interaction breakdowns from
-        :func:`late_interaction.score_column_against_index`.  Each
-        entry carries ``code``, ``positive_score``, ``negative_score``,
-        ``per_role`` (diagnostic), ``verifier_pass_rate``.
-    frame
-        Frame of discernment over candidate codes.
-    discount
-        Complement of the positive-channel reliability ceiling, as
-        in :func:`cosine_to_mass`.  Default 0.20.
-    reliability_floor
-        Minimum α even under noisy signal.
-    negative_beta
-        Total mass budget for the negative channel (sum of allocations
-        to complement focal elements).  Bounded conservatively to
-        avoid over-suppression on a single anti-example hit.
-    negative_top_k
-        Cap on the number of complement focal elements emitted by the
-        negative channel.  Keeps Dempster combination cheap and
-        focuses attention on the most informative anti-example hits.
-    negative_min_score
-        Negative scores below this threshold contribute nothing —
-        prevents noise-floor anti-example hits from inflating the
-        focal-element count.
-    use_verifier_pass_rate
-        When True, scale each tag's positive and negative scores by
-        its annotation's verifier_pass_rate.
+    Uses Haenni-Hartmann reliability shaping, margin-aware allocation,
+    and hierarchical-subtree aggregation via
+    :func:`_late_interaction_positive_mass`.
     """
     if not scores:
         return frame.vacuous()
 
-    # Per-tag verifier-aware attenuation: untrusted annotations get
-    # quieter on *both* channels.  Applied as a multiplier on raw
-    # scores rather than as a discount on α so the attenuation is
-    # localized per tag, not smeared globally.
-    if use_verifier_pass_rate:
-        scores_eff = [_AttenuatedTagScore(
-            code=s.code,
-            positive_score=s.positive_score * getattr(s, "verifier_pass_rate", 1.0),
-            negative_score=s.negative_score * getattr(s, "verifier_pass_rate", 1.0),
-        ) for s in scores]
-    else:
-        scores_eff = [_AttenuatedTagScore(
-            code=s.code,
-            positive_score=s.positive_score,
-            negative_score=s.negative_score,
-        ) for s in scores]
+    # Accept both legacy TagScore objects and the new (code, score)
+    # tuples from the Qdrant MaxSim bridge.
+    normalized: list[_AttenuatedTagScore] = []
+    for s in scores:
+        if isinstance(s, tuple):
+            code, sim = s
+            normalized.append(_AttenuatedTagScore(code=code, positive_score=float(sim)))
+        else:
+            normalized.append(_AttenuatedTagScore(
+                code=s.code, positive_score=s.positive_score,
+            ))
 
-    m_positive = _late_interaction_positive_mass(
-        scores_eff, frame,
+    return _late_interaction_positive_mass(
+        normalized, frame,
         discount=discount, reliability_floor=reliability_floor,
     )
-    m_negative = _late_interaction_negative_mass(
-        scores_eff, frame,
-        beta=negative_beta, top_k=negative_top_k, min_score=negative_min_score,
-    )
-
-    # If the negative channel has nothing to say, the combination
-    # reduces to the positive channel (vacuous ⊕ X = X).  Short-circuit
-    # to skip the Dempster machinery in that common case.
-    if all(fe == frame.theta for fe in m_negative.masses):
-        return m_positive
-
-    # Conjunctive combination — Dempster's rule.  Yager's rule on
-    # total conflict per Smets least-commitment.
-    from atelier.classify.belief import dempster_combine, yager_combine
-    try:
-        combined, k = dempster_combine(m_positive, m_negative)
-        if k > 0.5:
-            logger.info(
-                "late_interaction channel conflict K=%.3f "
-                "(positive evidence vs anti-example evidence disagree)", k,
-            )
-        return combined
-    except ValueError:
-        # K = 1 (total conflict): Yager redirects K to ignorance.
-        logger.info(
-            "late_interaction Dempster K=1; using Yager combination "
-            "(conflict mass routes to ignorance per Smets 1990 §6)"
-        )
-        combined, _ = yager_combine(m_positive, m_negative, frame.theta)
-        return combined
 
 
 @dataclass(frozen=True)
 class _AttenuatedTagScore:
-    """Internal: minimal interface late_interaction_to_mass needs after attenuation."""
+    """Internal: minimal interface for late_interaction_to_mass."""
     code: str
     positive_score: float
-    negative_score: float
 
 
 def _late_interaction_positive_mass(
@@ -598,7 +485,7 @@ def _late_interaction_positive_mass(
     # below as vacuous when nothing is in-frame).
     in_frame: dict[str, tuple[FocalElement, float]] = {}
     for s in scores:
-        sim = max(0.0, min(1.0, s.positive_score))
+        sim = max(0.0, s.positive_score)
         if s.code in frame.singletons:
             in_frame[s.code] = (frame.singletons[s.code], sim)
         elif s.code in frame.internal_nodes:
@@ -639,6 +526,7 @@ def _late_interaction_positive_mass(
     # subtree concentration).
     subtree_fe: FocalElement | None = None
     lca_share = 0.0
+    lca_concentration: float | None = None
     if top1_code in frame.singletons:
         leaf_only_probs = {
             c: p for c, p in softmax_probs.items() if c in frame.singletons
@@ -665,80 +553,15 @@ def _late_interaction_positive_mass(
 
     masses[frame.theta] = max(0.0, 1.0 - alpha)
     masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
-
-
-def _late_interaction_negative_mass(
-    scores: list,
-    frame: FrameOfDiscernment,
-    *,
-    beta: float,
-    top_k: int,
-    min_score: float,
-) -> BeliefAssignment:
-    """Negative channel: per-tag anti-example scores → mass on complements.
-
-    Honors the every-tag-is-first-class policy.  For each top-K tag
-    with non-trivial anti-example evidence, allocate a share of ``β``
-    to the **complement** focal element relative to the tag's full
-    coverage in the frame:
-
-    - For a **leaf** tag $x$, the complement is $\\Theta \\setminus \\{x\\}$.
-    - For an **internal-node** tag $X$ with descendant leaf set $D$,
-      the complement is $\\Theta \\setminus D$ — "the truth is not
-      anywhere in this subtree."
-
-    The leaf case is the previous behavior; the internal-node case is
-    the correctness fix for the audit.  Both reduce to the same form
-    when leaves are the only tags in the annotation collection.
-
-    Combined with positive evidence supporting the same tag, the
-    empty intersection produces conflict K — the DST-native signal
-    that the channels disagree.
-    """
-    # Accept any in-frame tag (leaf singleton OR internal node).  Tags
-    # absent from the active frame are skipped.
-    candidates: list[tuple[str, frozenset[str], float]] = []
-    for s in scores:
-        if s.negative_score < min_score:
-            continue
-        if s.code in frame.singletons:
-            tag_codes = frame.singletons[s.code].codes
-        elif s.code in frame.internal_nodes:
-            tag_codes = frame.internal_nodes[s.code].codes
-        else:
-            continue
-        candidates.append((s.code, tag_codes, s.negative_score))
-    if not candidates:
-        return frame.vacuous()
-
-    # Top-K by negative score.  Deterministic tie-break by code.
-    candidates.sort(key=lambda triple: (-triple[2], triple[0]))
-    top = candidates[:top_k]
-
-    total_neg = sum(neg for _, _, neg in top)
-    if total_neg <= 0:
-        return frame.vacuous()
-
-    masses: dict[FocalElement, float] = {}
-    allocated = 0.0
-    theta_codes = frame.theta.codes
-    for code, tag_codes, neg in top:
-        share = beta * (neg / total_neg)
-        complement_codes = theta_codes - tag_codes
-        if not complement_codes:
-            # Tag covers the entire frame (Θ itself, or a degenerate
-            # frame).  No complement to allocate to; skip.
-            continue
-        complement_fe = FocalElement(
-            frozenset(complement_codes),
-            label=f"¬{code}",
-        )
-        masses[complement_fe] = masses.get(complement_fe, 0.0) + share
-        allocated += share
-
-    masses[frame.theta] = max(0.0, 1.0 - allocated)
-    return BeliefAssignment(masses=masses)
+    # subtree_concentration captures _significant_subtree's findings even
+    # when no subtree concentrated above threshold (returns 0.0).  None
+    # means "the aggregation didn't fire" (internal-node top-1 or empty
+    # leaf projection); distinguishable from "fired with no qualifying
+    # subtree" (returns 0.0).  See Stage A Rec 6 in the alignment plan.
+    return BeliefAssignment(
+        masses=masses,
+        subtree_concentration=lca_concentration,
+    )
 
 
 # ── Pattern detection ────────────────────────────────────────────────
@@ -1525,3 +1348,28 @@ def svm_to_mass(
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
     masses = _redistribute_confusable_mass(masses, frame)
     return BeliefAssignment(masses=masses)
+
+
+def nhsvm_to_mass(
+    proba: dict[str, float],
+    frame: FrameOfDiscernment,
+    category_set,
+    alphas: dict[str, float],
+    discount: float = 0.20,
+    temperature: float = 1.0,
+    distance_matrix: dict[tuple[str, str], float] | None = None,
+) -> BeliefAssignment:
+    """Convert SVM probabilities to mass via NHSVM tree-distance reweighting.
+
+    Applies normalized hierarchical reweighting (Choi et al. 2015) before
+    the standard ``svm_to_mass`` conversion.  The reweighting penalizes
+    cross-subtree probability flow proportionally to normalized tree
+    distance, structurally discouraging shallow catch-all assignments.
+    """
+    from atelier.classify.svm_classifier import nhsvm_reweight
+
+    reweighted = nhsvm_reweight(
+        proba, alphas, category_set, temperature,
+        distance_matrix=distance_matrix,
+    )
+    return svm_to_mass(reweighted, frame, discount=discount)

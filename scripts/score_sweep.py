@@ -7,18 +7,18 @@
 # modified, redistributed, or used in any other manner without the express
 # written consent of Cloudera, Inc.
 
-"""Score a bel_threshold sweep against a ground-truth annotation set.
+"""Score a bel_threshold sweep against an agent-mediated reference set.
 
 Consumes a sweep manifest produced by ``sweep_bel_threshold.py`` and a
-ground-truth JSON, and produces two artifacts:
+agent-mediated reference JSON, and produces two artifacts:
 
   1. ``scoring-<utc-iso>.json`` — per-threshold aggregate scores.
   2. ``per_column_diff-<utc-iso>.csv`` — wide table with one row per
      scored column and one prediction column per threshold (plus the
-     ground-truth annotation and a ``flipped_vs_baseline`` flag).
+     agent-mediated reference annotation and a ``flipped_vs_baseline`` flag).
 
-Ground-truth JSON formats accepted
-----------------------------------
+Agent-mediated reference JSON formats accepted
+-----------------------------------------------
 
 Flat (preferred for review-driven curation, easy to diff in git)::
 
@@ -44,7 +44,7 @@ toward accuracy.
 What "strict match" means
 -------------------------
 
-``predicted_annotation == ground_truth_annotation`` (case-sensitive,
+``predicted_annotation == agent_mediated_annotation`` (case-sensitive,
 whitespace-stripped).  We score the post-cautious-review annotation
 because that's what reaches production.  Pre-review predictions live
 in ``predicted_code_pre_review`` if your build emits them — the
@@ -56,7 +56,7 @@ Sensitive-vs-public binary
 --------------------------
 
 Optional second scoring axis.  A column is "sensitive" if its
-ground-truth annotation starts with one of ``A_``, ``C_``, ``S_``,
+agent-mediated reference annotation starts with one of ``A_``, ``C_``, ``S_``,
 ``P_`` (the prefix families that denote regulated / personally
 identifiable / commercially sensitive).  Treats any prediction with
 the same coarse prefix family as a binary match.  Enable with
@@ -69,7 +69,7 @@ Usage
 
   uv run python scripts/score_sweep.py \\
       --manifest build/sweeps/bel_threshold-2026-05-15T...Z.json \\
-      --ground-truth path/to/ground_truth.json \\
+      --agent-mediated path/to/agent_mediated.json \\
       --baseline 0.80
 
 The ``--baseline`` flag selects which threshold's predictions are
@@ -104,11 +104,11 @@ def _is_sensitive(annotation: str) -> bool:
     return annotation.startswith(SENSITIVE_PREFIXES)
 
 
-def _load_ground_truth(path: Path) -> dict[str, str | None]:
+def _load_agent_mediated(path: Path) -> dict[str, str | None]:
     """Return a flat ``{table.col: annotation_or_None}`` map."""
     data = json.loads(path.read_text())
     if not isinstance(data, dict):
-        raise ValueError(f"Ground truth root must be an object, got {type(data)}")
+        raise ValueError(f"Agent-mediated reference root must be an object, got {type(data)}")
 
     flat: dict[str, str | None] = {}
     for k, v in data.items():
@@ -138,7 +138,7 @@ def _load_classifications(run_dir: Path) -> dict[str, dict]:
 
 def _score_one_run(
     classifications: dict[str, dict],
-    ground_truth: dict[str, str | None],
+    agent_mediated: dict[str, str | None],
     *,
     also_pre_review: bool,
     binary_sensitivity: bool,
@@ -150,7 +150,7 @@ def _score_one_run(
     pre_review_hits = 0
     missing_in_run = 0
 
-    for key, expected in ground_truth.items():
+    for key, expected in agent_mediated.items():
         if expected is None:
             continue
         row = classifications.get(key)
@@ -193,7 +193,7 @@ def _score_one_run(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
-    parser.add_argument("--ground-truth", required=True, type=Path)
+    parser.add_argument("--agent-mediated", required=True, type=Path)
     parser.add_argument(
         "--results-dir", type=Path, default=Path("build/results"),
         help="Where run dirs live (default: build/results).",
@@ -216,10 +216,10 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest = json.loads(args.manifest.read_text())
-    ground_truth = _load_ground_truth(args.ground_truth)
+    agent_mediated = _load_agent_mediated(args.agent_mediated)
     print(
-        f"Loaded {sum(1 for v in ground_truth.values() if v is not None)} "
-        f"scoreable columns from {args.ground_truth.name}",
+        f"Loaded {sum(1 for v in agent_mediated.values() if v is not None)} "
+        f"scoreable columns from {args.agent_mediated.name}",
         file=sys.stderr,
     )
 
@@ -260,7 +260,7 @@ def main() -> int:
         run_id, classifications = runs_by_threshold[t]
         score = _score_one_run(
             classifications,
-            ground_truth,
+            agent_mediated,
             also_pre_review=args.also_score_pre_review,
             binary_sensitivity=args.binary_sensitivity,
         )
@@ -270,7 +270,7 @@ def main() -> int:
     summary = {
         "scored_at": _utc_iso(),
         "manifest": str(args.manifest),
-        "ground_truth": str(args.ground_truth),
+        "agent_mediated": str(args.agent_mediated),
         "baseline_threshold": baseline_threshold,
         "thresholds": thresholds_sorted,
         "per_threshold": per_threshold,
@@ -284,7 +284,7 @@ def main() -> int:
     # ── Per-column diff CSV ───────────────────────────────────────
     baseline_classifications = runs_by_threshold[baseline_threshold][1]
     csv_path = args.output_dir / f"per_column_diff-{ts}.csv"
-    fieldnames = ["table_column", "ground_truth"]
+    fieldnames = ["table_column", "agent_mediated"]
     for t in thresholds_sorted:
         fieldnames.append(f"pred@{t:.2f}")
     fieldnames.append("baseline_correct")
@@ -295,8 +295,8 @@ def main() -> int:
     with csv_path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
-        for key, expected in sorted(ground_truth.items()):
-            row = {"table_column": key, "ground_truth": expected or ""}
+        for key, expected in sorted(agent_mediated.items()):
+            row = {"table_column": key, "agent_mediated": expected or ""}
             preds_by_t: dict[float, str] = {}
             for t in thresholds_sorted:
                 pred = _norm(

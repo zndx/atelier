@@ -12,13 +12,13 @@ written consent of Cloudera, Inc.
 
 > **Post-hoc correction (2026-04-19):** this note frames UAT's
 > meta-tagging corpus labels as ground truth.  They aren't —
-> the authoritative GT is now at
-> `build/meta-tagging-clean/ground_truth.csv`, built from direct
-> reference-column evidence plus priority-fixed name-index lookup.
-> "Obfuscated columns" as used below are now called **reference
-> columns** (answer keys, excluded from all train/test/eval
-> sample sets by invariant).  The phase-gate numbers here were
-> scored against UAT's provisional labels; the objective
+> the authoritative agent-mediated reference is now at
+> `build/meta-tagging-clean/ground_truth.csv` (historical filename),
+> built from direct reference-column evidence plus priority-fixed
+> name-index lookup.  "Obfuscated columns" as used below are now
+> called **reference columns** (answer keys, excluded from all
+> train/test/eval sample sets by invariant).  The phase-gate numbers
+> here were scored against UAT's provisional labels; the objective
 > re-scored comparison lives at
 > `build/results/parity/delta_report.md`.
 
@@ -33,8 +33,8 @@ meta-tagging source after four targeted changes:
    (retained for provenance, dormant for evidence mass). Keeps the
    14 anchored-prefix-or-validator-guarded patterns active.
 3. Private meta-tagging source mounted at `~/local/tmp/meta-tagging/`
-   with ground truth derived from the obfuscated column-name
-   encoding convention.  Data stays outside the repository by
+   with agent-mediated reference derived from the obfuscated
+   column-name encoding convention.  Data stays outside the repository by
    construction.
 4. `classify.catboost.fit_to_llm` mode — after LLM sweep, an
    in-memory CatBoost trains on `(embedding_text, llm_predicted_code)`
@@ -71,9 +71,9 @@ both the prior Atelier run (+61.6 pts) and the third-party reference
 
 9 errors total.  Breakdown:
 - 6 `0.1 → 0.0` hierarchy-level disagreements on `row_id`-style
-  columns (ground truth "Internal Non-Sensitive" vs predicted
-  "Not Sensitive" — parent code).  Could be accepted as
-  hierarchy-equivalent or fixed by adjusting the ground-truth
+  columns (agent-mediated reference "Internal Non-Sensitive" vs
+  predicted "Not Sensitive" -- parent code).  Could be accepted as
+  hierarchy-equivalent or fixed by adjusting the reference
   derivation to prefer the parent.
 - 1 depth-4 miss.
 - 2 depth-5 misses, one of which is `1.7.5.3 → 1.7.5.3.1` —
@@ -86,7 +86,7 @@ Net semantic (ignore-hierarchy) accuracy is ≈ 99%.
 
 Fused accuracy equals LLM-only accuracy at 97.8%.  **DST neither
 helped nor hurt** on this dataset.  Cleared the phase-gate bar
-(don't drag the frontier model down).  DST still provides the
+(don't degrade the frontier model).  DST still provides the
 transparency layer: per-column belief/plausibility intervals,
 per-source evidence attribution, and the "why did this happen"
 story through SHAP/SAGE.

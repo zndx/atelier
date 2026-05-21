@@ -140,7 +140,7 @@ specific but less certain ones.
 The bootstrap pipeline iterates three phases until the **belief gap**
 (\\( \text{Pl}(A) - \text{Bel}(A) \\)) stabilizes:
 
-1. **LLM sweep** — classify all frontier columns via batch LLM calls
+1. **LLM sweep** — classify each directly-targeted column via batch LLM calls
 2. **ML validation** — run the full 6-source DST pipeline; compute
    per-column belief, plausibility, and gap
 3. **Targeted revisit** — re-classify only **uncertain** columns
@@ -155,12 +155,15 @@ prediction.  Conflict \\( K \\) is tracked as a **diagnostic signal**
 column can have \\( K = 0.9 \\) but \\( \text{Bel} = 0.95 \\): the
 sources fought, but the winner is clear.
 
-An **agent-driven** variant (via Claude Agent SDK with 6 tools) delegates
-the revisit strategy to an LLM that reasons about uncertainty patterns,
-calls `retrain_svm` to progressively improve the SVM on accumulated
-frontier labels, and declares convergence when diminishing returns are
-reached. The **programmatic** variant uses gap + coverage thresholds
-for environments where tool-use isn't available.
+An **agent-driven** variant (via Claude Agent SDK) delegates the
+revisit strategy to an LLM that reasons about uncertainty patterns
+and declares convergence when diminishing returns are reached.
+(Earlier revisions exposed a `retrain_svm` tool that progressively
+improved the SVM on accumulated LLM labels — excised on 2026-05-04
+for source-independence reasons; see
+[DST Evidence Independence](./architecture/dst-evidence-independence.md).)
+The **programmatic** variant uses gap + coverage thresholds for
+environments where tool-use isn't available.
 
 ### SVM with Vocabulary Alignment
 
@@ -180,10 +183,10 @@ for the full design rationale and the BM25-reranker future-work plan.
 
 The pipeline handles corpora from 50 columns (OOTB sample) to 120M+ columns
 (full GitTables at 10M+ tables). **Monte Carlo stratified sampling** selects
-a representative frontier subset for LLM classification and propagates labels
+a representative subset for direct LLM classification and propagates labels
 to the remaining corpus via embedding similarity.
 
-With `max_frontier_columns = 500`, classifying a 120M-column corpus requires
+With `max_sampled_columns = 500`, classifying a 120M-column corpus requires
 LLM inference on only 0.0004% of columns — a **>99.99% cost reduction** while
 preserving classification quality through DST conflict-driven escalation of
 uncertain propagations.

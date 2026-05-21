@@ -22,7 +22,7 @@ execution path.
 | Hierarchy depth | Known (5 levels for ICE, ~3 for DBpedia subset, varying for Schema.org) | Unknown — could be 1 (flat) or 8+ (deep regulatory taxonomy) |
 | Hierarchy shape | Tree, single root | Tree assumed; multi-root forest, cycles, unbalanced subtrees all plausible |
 | Validation labels | Curated reference (synth, meta-tagging UAT, GitTables CTA gold) | Often absent.  Sometimes a small spot-check set; sometimes none. |
-| Accuracy bar | Track records over time on published benchmarks | Customer-stated objective; calibration + sample review when no ground truth exists |
+| Accuracy bar | Track records over time on published benchmarks | Customer-stated objective; calibration + sample review when no agent-mediated reference exists |
 | BFO / CCO grounding | Available — we mapped 360 terms ourselves | Opportunistic — only if the customer's ontology happens to carry a `bfo_anchor` / `cco_anchor` / `schema_org_class` / `dbpedia_class` column |
 | Iteration latency | Tight (re-run with overlay tweaks; soak on devenv) | Wide (CAI session lifecycle; nautilus + overwatch loops the only mid-run feedback) |
 
@@ -166,7 +166,7 @@ these.  Wiring them lets us:
 the loader populates them on `ReferenceCategory` and the embedding +
 LLM-prompt builders consume them.  When absent, no behavior change.
 
-### 5. Accuracy reporting without ground truth
+### 5. Accuracy reporting without an agent-mediated reference
 
 The customer often has *no* per-column gold-standard labels.  Our
 v0.4.0-rc1 evaluation pipeline assumes a `curated_reference` table
@@ -178,7 +178,7 @@ depth distribution, cross-source agreement counts, reasoning-trace
 attribution analyzer.  These are *calibration* metrics, not accuracy.
 
 **What we need**: a deployment-mode evaluation report that's honest
-about the absence of ground truth.  Three-tier report:
+about the absence of an agent-mediated reference.  Three-tier report:
 
 - **Internal consistency** — DST K stats, belief-gap distribution,
   contraction rate.  Always available.  Tells the operator the

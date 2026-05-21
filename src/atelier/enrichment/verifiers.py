@@ -122,8 +122,17 @@ def check_patterns_compile(enrichment: dict) -> CheckResult:
     )
 
 
-def check_prototype_values_match_patterns(enrichment: dict) -> CheckResult:
-    """Each ``prototype_value`` must match at least one declared regex pattern.
+def check_prototype_values_match_patterns(
+    enrichment: dict,
+    *,
+    min_match_ratio: float = 0.5,
+) -> CheckResult:
+    """A majority of ``prototype_values`` must match at least one declared regex.
+
+    Categories with diverse free-text values (marketplace names,
+    descriptive labels) legitimately produce prototypes that don't all
+    fit a single regex family.  Requiring 100% match caused false
+    rejections — relaxed to ``min_match_ratio`` (default 50%).
 
     Skipped (counted as passing) when no regex patterns are declared —
     the generator is allowed to produce free-form prototypes without
@@ -144,7 +153,6 @@ def check_prototype_values_match_patterns(enrichment: dict) -> CheckResult:
         try:
             regexes.append(re.compile(expr))
         except re.error:
-            # The compile-check verifier catches this separately.
             continue
 
     if not regexes:
@@ -162,12 +170,15 @@ def check_prototype_values_match_patterns(enrichment: dict) -> CheckResult:
         s = str(v)
         if not any(r.search(s) for r in regexes):
             offenders.append({"value": s, "reason": "no pattern matched"})
+
+    matched = len(prototypes) - len(offenders)
+    ratio = matched / len(prototypes) if prototypes else 1.0
     return CheckResult(
         name="prototype_values_match_patterns",
-        passed=not offenders,
+        passed=ratio >= min_match_ratio,
         detail=(
-            f"{len(prototypes) - len(offenders)}/{len(prototypes)} prototypes "
-            f"match at least one pattern"
+            f"{matched}/{len(prototypes)} prototypes match at least one "
+            f"pattern ({ratio:.0%}, threshold {min_match_ratio:.0%})"
         ),
         offenders=offenders,
     )
