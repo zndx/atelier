@@ -557,22 +557,29 @@ def fuse(
     llm_code: str,
     llm_conf: float,
     llm_disc: float,
-    svm_proba: dict[str, float],
+    svm_proba: dict[str, float] | None,
     svm_disc: float,
     fusion_strategy: str,
     frame,
     category_set,
 ) -> tuple[str, float]:
-    """Single fusion: returns (head_code, top1_margin)."""
+    """Single fusion: returns (head_code, top1_margin).
+
+    When ``svm_proba is None``, fuses with LLM mass only — the SVM-
+    ablation baseline used to characterize the SVM's authentic
+    contribution against the LLM-alone reference point.
+    """
     from atelier.classify.belief import HierarchicalClassification
     from atelier.classify.mass_functions import llm_to_mass, svm_to_mass
 
     llm_mass = llm_to_mass(
         llm_code, llm_conf, alternatives=[], frame=frame, discount=llm_disc,
     )
-    svm_mass = svm_to_mass(svm_proba, frame, discount=svm_disc)
+    source_masses: dict = {"llm": llm_mass}
+    if svm_proba is not None:
+        source_masses["svm"] = svm_to_mass(svm_proba, frame, discount=svm_disc)
     hc = HierarchicalClassification.from_combined_evidence(
-        {"llm": llm_mass, "svm": svm_mass}, frame, category_set,
+        source_masses, frame, category_set,
         fusion_strategy=fusion_strategy,
     )
     head = getattr(hc.category, "code", "?") if hc.category else "?"
@@ -659,7 +666,16 @@ def run_sweep(
         tier_variant_counts: dict[tuple[str, str], list[int]] = {}
         for query_text, expected, tier, llm_vote_code in test_cases:
             pa, pb, pc = proba_cache[query_text]
-            for variant, proba in [("A", pa), ("B", pb), ("C", pc)]:
+            # Include the SVM-ablation baseline ("LLM" — no SVM mass)
+            # alongside the three SVM variants.  This characterizes the
+            # SVM's authentic contribution: LLM-only is the reference
+            # point against which A / B / C are measured.
+            for variant, proba in [
+                ("LLM", None),  # ablation: no SVM evidence
+                ("A", pa),
+                ("B", pb),
+                ("C", pc),
+            ]:
                 head, _ = fuse(
                     llm_vote_code, params["llm_conf"], params["llm_disc"],
                     proba, params["svm_disc"], params["fusion"],
@@ -683,7 +699,10 @@ def run_sweep(
 # ────────────────────────────────────────────────────────────────────
 
 TIERS = ["easy", "hard", "contested", "sparse", "semantic-conflict", "svm-was-right"]
-VARIANTS = ["A", "B", "C"]
+# LLM is the SVM-ablation baseline (no SVM mass in fusion).  Placed
+# first so the table reads "what does LLM alone do" before "what does
+# each SVM variant add."  A / B / C as before.
+VARIANTS = ["LLM", "A", "B", "C"]
 SHORT_CODE = {
     "ROOT": "ROOT",
     "ROOT.SENSITIVE": "SENS",
@@ -746,13 +765,14 @@ def aggregate_tier_accuracy(per_case_table: dict) -> dict:
 
 
 def print_default_fusion_table(default_per_tier_acc: dict[tuple[str, str], float]) -> None:
-    print(f"{'tier':<22} {'A acc':<10} {'B acc':<10} {'C acc':<10}")
-    print("─" * 55)
+    print(f"{'tier':<22} {'LLM acc':<10} {'A acc':<10} {'B acc':<10} {'C acc':<10}")
+    print("─" * 65)
     for tier in TIERS:
+        l = default_per_tier_acc.get((tier, "LLM"), 0.0)
         a = default_per_tier_acc.get((tier, "A"), 0.0)
         b = default_per_tier_acc.get((tier, "B"), 0.0)
         c = default_per_tier_acc.get((tier, "C"), 0.0)
-        print(f"{tier:<22} {a:.2f}       {b:.2f}       {c:.2f}")
+        print(f"{tier:<22} {l:.2f}       {a:.2f}       {b:.2f}       {c:.2f}")
 
 
 def print_sweep_table(sweep: dict, param_label: str) -> None:
@@ -852,7 +872,12 @@ def main() -> int:
     default_per_tier: dict[tuple[str, str], list[int]] = {}
     for query_text, expected, tier, llm_vote_code in test_cases:
         pa, pb, pc = proba_cache[query_text]
-        for variant, proba in [("A", pa), ("B", pb), ("C", pc)]:
+        for variant, proba in [
+            ("LLM", None),  # SVM-ablation baseline
+            ("A", pa),
+            ("B", pb),
+            ("C", pc),
+        ]:
             head, _ = fuse(
                 llm_vote_code, LLM_CONF_DEFAULT, LLM_DISC_DEFAULT,
                 proba, SVM_DISC_DEFAULT, FUSION_DEFAULT,
@@ -869,6 +894,9 @@ def main() -> int:
         f"  (SVM disc={SVM_DISC_DEFAULT}, LLM conf={LLM_CONF_DEFAULT}, "
         f"LLM disc={LLM_DISC_DEFAULT}, fusion={FUSION_DEFAULT})\n"
     )
+    print("LLM = SVM-ablation baseline (LLM mass only, no SVM evidence in fusion).")
+    print("A / B / C = LLM + SVM under each NHSVM inference geometry.")
+    print("Per-tier delta between LLM and A/B/C is the authentic SVM contribution.\n")
     print_default_fusion_table(default_acc)
 
     # ── Sweeps ──
@@ -913,7 +941,12 @@ def main() -> int:
         tier_variant_counts: dict[tuple[str, str], list[int]] = {}
         for query_text, expected, tier, llm_vote_code in test_cases:
             pa, pb, pc = proba_cache[query_text]
-            for variant, proba in [("A", pa), ("B", pb), ("C", pc)]:
+            for variant, proba in [
+                ("LLM", None),
+                ("A", pa),
+                ("B", pb),
+                ("C", pc),
+            ]:
                 head, _ = fuse(
                     llm_vote_code, LLM_CONF_DEFAULT, LLM_DISC_DEFAULT,
                     proba, SVM_DISC_DEFAULT, strat, frame, category_set,
