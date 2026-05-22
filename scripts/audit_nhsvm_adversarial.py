@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """DST sensitivity analysis for the NHSVM evidence path.
 
-Three variants of the per-vocabulary SVM are compared as candidates
-for the production NHSVM implementation:
+Three variants of the per-vocabulary SVM are compared.  Variant C
+matches what production now ships; A and B are historical references
+inlined here so the comparison remains interpretable after the
+roll-forward to Crammer-Singer:
 
-  A  ovr-universal      Current production: one-vs-rest LinearSVC
-                        trained on label-conditional Kronecker-expanded
+  A  ovr-universal      *Pre-Crammer-Singer production* — one-vs-rest
+                        LinearSVC trained on label-conditional Kronecker
                         features; inference universally populates all
                         node blocks with ``sqrt(alpha_n)`` scaling.
+                        Frozen here as a historical reference for
+                        regression comparison.
 
   B  ovr-per-class      Same trained model as A; at inference, for each
                         candidate ``y`` build ``Lambda(y) ⊗ x`` with only
                         ``path(y)`` blocks active and read the model's
                         ``p_y`` under that expansion.  Normalize across y.
+                        Historical hypothetical — never shipped.
 
-  C  joint-per-class    Crammer-Singer joint multi-class LinearSVC
-                        trained on the same Kronecker-expanded features;
-                        per-class inference like B.  Closest sklearn-
-                        expressible approximation to Choi et al. (2015)
-                        Structured Shared Frobenius Norm SVM.
+  C  joint-per-class    *Current production* (since roll-forward to
+                        Crammer-Singer).  Crammer-Singer joint multi-
+                        class LinearSVC + per-class inference like B.
+                        Closest sklearn-expressible approximation to
+                        Choi et al. (2015) Structured Shared Frobenius
+                        Norm SVM.
 
 Four DST factor sweeps characterize the parameter sensitivity of each
 variant's fused-headline outcomes:
@@ -300,11 +306,90 @@ def build_adversarial_test_set():
 
 
 # ────────────────────────────────────────────────────────────────────
-# 3.  Variant B: per-class inference on Variant-A trained model
+# 3.  Variant A (historical OvR) — frozen reference
 # ────────────────────────────────────────────────────────────────────
 
-def predict_proba_per_class(svm_classifier, text: str) -> dict[str, float]:
-    """Variant B: per-class inference expansion on Variant-A's trained model.
+def train_variant_a_historical(texts: list[str], labels: list[str], category_set):
+    """Variant A (historical): pre-Crammer-Singer OvR + universal inference.
+
+    Inlined here as a frozen reference for regression comparison.  The
+    production ``SVMClassifier(hierarchical=True)`` path used to do this;
+    after the roll-forward to Crammer-Singer it no longer does.  Keeping
+    the inline copy lets the A/B/C audit comparison continue to run.
+
+    Returns a ``SimpleNamespace`` carrying the same attribute names the
+    production ``SVMClassifier`` exposed (``_feature_union``, ``_svd``,
+    ``_expander``, ``_pipeline``, ``_classes``) so the per-class
+    inference helper below can operate on it identically.
+    """
+    from collections import Counter
+    from types import SimpleNamespace
+
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.decomposition import TruncatedSVD
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.pipeline import FeatureUnion
+    from sklearn.svm import LinearSVC
+
+    from atelier.classify.svm_classifier import HierarchicalFeatureExpander
+
+    char_tfidf = TfidfVectorizer(
+        analyzer="char_wb", ngram_range=(3, 6),
+        max_features=50_000, sublinear_tf=True,
+    )
+    word_tfidf = TfidfVectorizer(
+        analyzer="word", ngram_range=(1, 2),
+        max_features=50_000, sublinear_tf=True,
+        token_pattern=r"(?u)\b\w+\b",
+    )
+    feature_union = FeatureUnion([("char", char_tfidf), ("word", word_tfidf)])
+    X_tfidf = feature_union.fit_transform(texts)
+
+    n_components = min(200, X_tfidf.shape[1] - 1, X_tfidf.shape[0] - 1)
+    svd = TruncatedSVD(n_components=n_components, random_state=42)
+    X_reduced = svd.fit_transform(X_tfidf)
+
+    alphas = category_set.compute_nhsvm_alphas()
+    expander = HierarchicalFeatureExpander.from_category_set(
+        category_set, alphas, n_features_in=n_components,
+    )
+    X_expanded = expander.expand_with_labels(X_reduced, labels)
+
+    min_count = min(Counter(labels).values())
+    svc = LinearSVC(
+        C=1.0, max_iter=10_000,
+        class_weight="balanced", dual="auto",
+    )
+    calibrated = CalibratedClassifierCV(
+        svc, cv=min(5, min_count), method="sigmoid", ensemble=False,
+    )
+    calibrated.fit(X_expanded, labels)
+
+    return SimpleNamespace(
+        _feature_union=feature_union,
+        _svd=svd,
+        _expander=expander,
+        _pipeline=calibrated,
+        _classes=list(calibrated.classes_),
+    )
+
+
+def predict_proba_universal(model, text: str) -> dict[str, float]:
+    """Variant A inference: universal-expansion (every node block populated).
+
+    Mirrors the pre-Crammer-Singer production inference: every node
+    block is populated by ``sqrt(alpha_n) * x``, fed to the OvR multi-
+    class ``predict_proba`` in one shot.
+    """
+    X_tfidf = model._feature_union.transform([text])
+    X_reduced = model._svd.transform(X_tfidf)
+    X_expanded = model._expander.expand_universal(X_reduced)
+    proba_row = model._pipeline.predict_proba(X_expanded)[0]
+    return {c: float(p) for c, p in zip(model._classes, proba_row)}
+
+
+def predict_proba_per_class(model, text: str) -> dict[str, float]:
+    """Variant B inference: per-class expansion on the historical OvR model.
 
     For each candidate ``y`` the inference feature is rebuilt with only
     ``path(y)`` blocks active (matching the training-time expansion
@@ -313,11 +398,11 @@ def predict_proba_per_class(svm_classifier, text: str) -> dict[str, float]:
     set.  Same trained weights as Variant A; only inference geometry
     differs.
     """
-    feat_union = svm_classifier._feature_union
-    svd = svm_classifier._svd
-    expander = svm_classifier._expander
-    calibrated = svm_classifier._pipeline
-    classes = svm_classifier._classes
+    feat_union = model._feature_union
+    svd = model._svd
+    expander = model._expander
+    calibrated = model._pipeline
+    classes = model._classes
 
     X_tfidf = feat_union.transform([text])
     X_reduced = svd.transform(X_tfidf)
@@ -721,7 +806,6 @@ def main() -> int:
     import json
 
     from atelier.classify.mass_functions import FrameOfDiscernment
-    from atelier.classify.svm_classifier import SVMClassifier
 
     # ── Setup ──
     category_set = build_adversarial_taxonomy()
@@ -738,19 +822,20 @@ def main() -> int:
     print_alpha_table(alphas)
 
     # ── Train variants ──
+    # Production NHSVM is now Crammer-Singer (Variant C).  We train the
+    # historical OvR model here as a script-local frozen reference so
+    # Variants A and B can still be evaluated on the same test set.
     print("\n─── Training variants ───")
-    model_a = SVMClassifier(category_set=category_set, hierarchical=True)
-    model_a.fit(texts, labels)
-    print("  Variant A (ovr-universal): trained")
+    model_ovr_historical = train_variant_a_historical(texts, labels, category_set)
+    print("  Variants A (universal inference) + B (per-class inference): historical OvR trained")
     model_c = train_variant_c(texts, labels, category_set)
-    print("  Variant C (joint-per-class): trained")
-    print("  Variant B (ovr-per-class): inference path on A's model — no separate training")
+    print("  Variant C (joint-per-class): trained (matches current production NHSVM)")
 
     # ── Cache predict_probas across variants ──
     proba_cache: dict[str, tuple[dict, dict, dict]] = {}
     for query_text, *_ in test_cases:
-        pa = model_a.predict_proba_single(query_text)
-        pb = predict_proba_per_class(model_a, query_text)
+        pa = predict_proba_universal(model_ovr_historical, query_text)
+        pb = predict_proba_per_class(model_ovr_historical, query_text)
         pc = predict_proba_per_class_c(model_c, query_text)
         proba_cache[query_text] = (pa, pb, pc)
 

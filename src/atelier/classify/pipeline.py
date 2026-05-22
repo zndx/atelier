@@ -346,7 +346,11 @@ def _ensure_per_vocab_svm(
             "cannot key cache or train"
         )
     vocab_sig = compute_vocab_signature(all_codes)
-    suffix = "_nhsvm" if svm_hierarchical else ""
+    # Roll-forward cache namespace: training-time NHSVM bundles produced
+    # under the Crammer-Singer regime live under ``_nhsvm_cs``.  Legacy
+    # ``_nhsvm.pkl`` files from the pre-Crammer-Singer (OvR) era remain
+    # on disk but are not read — see ``SVMClassifier.load``.
+    suffix = "_nhsvm_cs" if svm_hierarchical else ""
 
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)

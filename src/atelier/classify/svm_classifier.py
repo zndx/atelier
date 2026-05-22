@@ -374,6 +374,21 @@ class SVMClassifier:
         return self
 
     def _fit_hierarchical(self, texts, labels, min_count) -> SVMClassifier:
+        """Train training-time NHSVM per Choi et al. (2015) Eq. 5.
+
+        Crammer-Singer joint multi-class LinearSVC on Kronecker-expanded
+        features.  Joint training optimizes per-class weights against the
+        structured multi-class margin — closer to the structured-output
+        objective the paper specifies than one-vs-rest training.  Paired
+        with per-class expansion at inference (``_predict_proba_hierarchical``)
+        for the geometry the paper's ``argmax_y <w, Lambda(y) ⊗ x>`` rule
+        implies.
+
+        Roll-forward posture: this is the single hierarchical training
+        path.  No one-vs-rest fallback.  Operators tuning the previous
+        OvR-trained models will hit a fresh cache miss on the new
+        ``_nhsvm_cs`` suffix and retrain into the Crammer-Singer regime.
+        """
         from sklearn.calibration import CalibratedClassifierCV
         from sklearn.decomposition import TruncatedSVD
         from sklearn.svm import LinearSVC
@@ -385,19 +400,26 @@ class SVMClassifier:
         # Step 1: TF-IDF
         self._feature_union = self._build_feature_union()
         X_tfidf = self._feature_union.fit_transform(texts)
-        logger.info("NHSVM: TF-IDF shape %s", X_tfidf.shape)
+        logger.info("NHSVM (Crammer-Singer): TF-IDF shape %s", X_tfidf.shape)
 
         # Step 2: SVD reduction
         n_components = min(svd_components, X_tfidf.shape[1] - 1, X_tfidf.shape[0] - 1)
+        if n_components < svd_components:
+            logger.warning(
+                "NHSVM: SVD components clamped to %d (requested %d) — "
+                "small corpus or vocabulary; per-block features will be "
+                "lower-dimensional than configured.",
+                n_components, svd_components,
+            )
         self._svd = TruncatedSVD(n_components=n_components, random_state=42)
         X_reduced = self._svd.fit_transform(X_tfidf)
         logger.info("NHSVM: SVD reduced to %d components (%.1f%% variance)",
                      n_components, self._svd.explained_variance_ratio_.sum() * 100)
 
-        # Step 3: Directionally-constrained alphas
+        # Step 3: Directionally-constrained alphas (Choi Eq. 7)
         alphas = cs.compute_nhsvm_alphas()
 
-        # Step 4: Kronecker expansion
+        # Step 4: Label-conditional Kronecker expansion (Choi Eq. 5)
         self._expander = HierarchicalFeatureExpander.from_category_set(
             cs, alphas, n_features_in=n_components,
         )
@@ -405,21 +427,33 @@ class SVMClassifier:
         logger.info("NHSVM: expanded shape %s, nnz %d",
                      X_expanded.shape, X_expanded.nnz)
 
-        # Step 5: LinearSVC + calibration on expanded features
+        # Step 5: Crammer-Singer requires dense data.  Convert.
+        X_dense = X_expanded.toarray() if hasattr(X_expanded, "toarray") else X_expanded
+
+        # Step 6: Crammer-Singer joint multi-class LinearSVC + calibration.
+        # The CS objective requires loss="hinge", dual=True, and dense
+        # input.  Calibration follows the standard sigmoid-on-decision-
+        # function path (LinearSVC doesn't expose predict_proba natively).
         svc = LinearSVC(
-            C=cfg.svc_C, max_iter=10_000,
-            class_weight="balanced", dual="auto",
+            C=cfg.svc_C, max_iter=20_000,
+            multi_class="crammer_singer",
+            loss="hinge",
+            dual=True,
+            class_weight="balanced",
         )
         calibrated = CalibratedClassifierCV(
             svc, cv=min(cfg.calibration_cv, min_count),
             method=cfg.calibration_method, ensemble=False,
         )
-        calibrated.fit(X_expanded, labels)
+        calibrated.fit(X_dense, labels)
 
         self._pipeline = calibrated
         self._classes = list(calibrated.classes_)
-        logger.info("SVM (NHSVM) trained: %d samples, %d classes, %d expanded features",
-                     len(texts), len(self._classes), X_expanded.shape[1])
+        logger.info(
+            "NHSVM (Crammer-Singer) trained: %d samples, %d classes, "
+            "%d expanded features (dense)",
+            len(texts), len(self._classes), X_expanded.shape[1],
+        )
         return self
 
     @staticmethod
@@ -456,31 +490,64 @@ class SVMClassifier:
         return results
 
     def _predict_proba_hierarchical(self, texts: list[str]) -> list[dict[str, float]]:
+        """Per-class inference expansion (Choi Eq. 5 ``argmax_y`` rule).
+
+        For each candidate ``y`` the inference feature is built with only
+        ``path(y)`` blocks active, scaled by ``sqrt(alpha_n)`` — matching
+        the training-time expansion shape for label ``y``.  The model's
+        ``p_y`` under that y-specific expansion is the model's answer to
+        "if y were the right label, how confident would you be?", and we
+        normalize across the candidate set to produce a proper
+        distribution.
+
+        This is the inference geometry the paper's structured-output
+        rule implies, paired with the Crammer-Singer joint training in
+        ``_fit_hierarchical``.  No universal-expansion fallback — the
+        roll-forward posture is single-path.
+        """
         X_tfidf = self._feature_union.transform(texts)
         X_reduced = self._svd.transform(X_tfidf)
-        X_expanded = self._expander.expand_universal(X_reduced)
-        proba_matrix = self._pipeline.predict_proba(X_expanded)
-        results = []
-        for row in proba_matrix:
-            prob_dict = {
-                code: float(p)
-                for code, p in zip(self._classes, row)
-                if p > 1e-6
-            }
-            results.append(prob_dict)
+
+        class_to_index = {c: i for i, c in enumerate(self._classes)}
+        results: list[dict[str, float]] = []
+        for sample_idx in range(X_reduced.shape[0]):
+            X_one = X_reduced[sample_idx:sample_idx + 1]
+            raw_p_y: dict[str, float] = {}
+            for y in self._classes:
+                X_y = self._expander.expand_with_labels(X_one, [y])
+                X_y_dense = X_y.toarray() if hasattr(X_y, "toarray") else X_y
+                proba_row = self._pipeline.predict_proba(X_y_dense)[0]
+                raw_p_y[y] = float(proba_row[class_to_index[y]])
+            total = sum(raw_p_y.values())
+            if total <= 0:
+                # Degenerate — model produced no positive class mass under
+                # any expansion.  Roll-forward posture: surface as uniform
+                # rather than silently dropping the prediction.
+                n = len(self._classes)
+                normalized = {y: 1.0 / n for y in self._classes}
+            else:
+                normalized = {y: p / total for y, p in raw_p_y.items()}
+            results.append({code: p for code, p in normalized.items() if p > 1e-6})
         return results
 
     def predict_proba_single(self, text: str) -> dict[str, float]:
         """Return calibrated probability distribution for a single text."""
         return self.predict_proba([text])[0]
 
+    # Bundle-shape version for hierarchical NHSVM saves.  Bumped on any
+    # change to the bundle's structural contract.  Old bundles fail-fast
+    # on load (roll-forward posture: no compatibility shims).
+    _NHSVM_BUNDLE_VERSION = "crammer_singer.v1"
+
     def save(self, path: str | Path) -> None:
         """Persist the trained pipeline to disk.
 
         Flat models save as a bare sklearn pipeline (joblib).
         Hierarchical models save as a dict containing all components
-        needed to reconstruct the Kronecker expansion path.
-        Both write a ``.classes.json`` sidecar for quick introspection.
+        needed to reconstruct the per-class Kronecker expansion path,
+        plus a ``nhsvm_variant`` tag identifying the training-time
+        objective (currently always ``crammer_singer.v1``).  Both write
+        a ``.classes.json`` sidecar for quick introspection.
         """
         import joblib
 
@@ -490,6 +557,7 @@ class SVMClassifier:
         if self._hierarchical:
             bundle = {
                 "hierarchical": True,
+                "nhsvm_variant": self._NHSVM_BUNDLE_VERSION,
                 "feature_union": self._feature_union,
                 "svd": self._svd,
                 "expander": self._expander,
@@ -503,16 +571,25 @@ class SVMClassifier:
         classes_path = path.with_suffix(".classes.json")
         classes_path.write_text(json.dumps(self._classes))
 
-        logger.info("SVM saved to %s (%d classes, hierarchical=%s)",
-                     path, len(self._classes), self._hierarchical)
+        logger.info(
+            "SVM saved to %s (%d classes, hierarchical=%s, variant=%s)",
+            path, len(self._classes), self._hierarchical,
+            self._NHSVM_BUNDLE_VERSION if self._hierarchical else "flat",
+        )
 
     @classmethod
     def load(cls, path: str | Path, config: SVMConfig | None = None) -> SVMClassifier:
         """Load a persisted SVM pipeline from disk.
 
-        Detects hierarchical bundles (dict with ``hierarchical: True``)
-        and restores all Kronecker expansion components.  Legacy flat
-        ``.pkl`` files load as before.
+        Hierarchical bundles must carry the ``nhsvm_variant`` tag matching
+        :attr:`_NHSVM_BUNDLE_VERSION`.  Bundles without this tag — or with
+        a stale tag — fail loudly with ``RuntimeError``.  This is the
+        roll-forward enforcement: legacy ``_nhsvm.pkl`` files from the
+        pre-Crammer-Singer era will not silently load as if they were
+        compatible.  Operators should clear the cache (or change the
+        cache suffix) so a fresh training pass produces a current bundle.
+
+        Flat (non-hierarchical) ``.pkl`` files load unchanged.
         """
         import joblib
 
@@ -524,6 +601,19 @@ class SVMClassifier:
 
         obj = cls(config=config)
         if isinstance(loaded, dict) and loaded.get("hierarchical"):
+            # Roll-forward: bundle must declare the current variant tag.
+            # Pre-Crammer-Singer bundles (no ``nhsvm_variant`` key) are
+            # rejected here — silently loading them would let an OvR-
+            # trained pipeline drive the per-class inference path with
+            # weights that were never fit for that geometry.
+            variant = loaded.get("nhsvm_variant")
+            if variant != cls._NHSVM_BUNDLE_VERSION:
+                raise RuntimeError(
+                    f"NHSVM bundle at {path} has nhsvm_variant={variant!r}; "
+                    f"expected {cls._NHSVM_BUNDLE_VERSION!r}.  Clear the "
+                    f"cache and retrain — legacy bundles are not loaded "
+                    f"under the roll-forward Crammer-Singer regime."
+                )
             obj._hierarchical = True
             obj._feature_union = loaded["feature_union"]
             obj._svd = loaded["svd"]
