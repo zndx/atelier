@@ -72,10 +72,16 @@ Non-negotiable rules in this skill:
    artifact paths, costs, and decisions. Resume reads this and skips
    completed phases.
 
-2. **Back-pressure gates.** Before any phase that spends > $0.50 of LLM
-   calls, print the expected cost and the decision criteria; halt
-   pending acknowledgement when running interactively (skip the halt
-   under `--scope full` when state already shows operator opted in).
+2. **Back-pressure gates.** The Agent SDK proceeds by default — these
+   gates are informational visibility, not approval-by-default.
+   Thresholds:
+     - **Announce** expected LLM cost + decision criteria before any
+       phase exceeding **$5**.
+     - **Halt-and-confirm** before any phase exceeding **$20** when
+       running interactively; under autonomous mode the SDK records
+       the warning in state and proceeds.
+   Skip the halt under `--scope full` when state already shows operator
+   opted in for the current run_id.
 
 3. **No silent applies on subtle corrections.** The reference update's
    color-aware routing already enforces this; do NOT add bypass
@@ -217,7 +223,8 @@ using the color-aware extraction + correction-type routing:
 | Light red (`FFF4CCCC`) on col D | LLM taxonomy-review prompt (allows TAXONOMY_GAP) | Never auto-apply; goes to taxonomy_review queue |
 | Yellow (`FFFFFF00`) on cols A-E | No LLM call | Goes to row_review queue |
 
-**Cost gate: ~$1-2 for a 45-row xlsx. Halt-and-confirm if `> $2`.**
+**Cost gate: ~$1-2 for a 45-row xlsx (well under the $5 announce
+threshold).  Halt-and-confirm only if `> $20`.**
 
 ```python
 xlsx = "$xlsx"  # parsed from $ARGUMENTS
@@ -245,8 +252,10 @@ for sn in wb.sheetnames:
             n_flagged += 1
 est_cost = n_flagged * 0.04  # Opus, subset mode, single call per row
 print(f"\nPhase 2: ~{n_flagged} flagged rows × ~$0.04 = ~${est_cost:.2f}")
-if est_cost > 2.0:
-    print("WARNING: estimated cost exceeds $2. Halt and confirm if interactive.")
+if est_cost > 5.0:
+    print(f"NOTICE: estimated cost ${est_cost:.2f} exceeds $5 announce threshold.")
+if est_cost > 20.0:
+    print(f"HALT: estimated cost ${est_cost:.2f} exceeds $20. Confirm if interactive.")
 
 # Invoke
 import subprocess
@@ -376,8 +385,9 @@ state_path.write_text(json.dumps(state, indent=2))
 Runs the GEPA-shaped reflective rewrite proposal step against the
 chosen cohort. Default cohort = 32 umbrella-template nodes.
 
-**Cost gate: ~$1-2 for the umbrella cohort × Opus subset mode.
-Halt-and-confirm under interactive mode if the cohort is wider.**
+**Cost gate: ~$1-2 for the umbrella cohort × Opus subset mode
+(well under the $5 announce threshold).  Halt-and-confirm only when
+estimated cost exceeds $20 (e.g. a much larger cohort).**
 
 ```python
 cohort = "$cohort"  # default "umbrellas"
@@ -392,6 +402,10 @@ else:
     n_nodes = 50
 est_cost = n_nodes * 0.05  # Opus, ~3K-4K input + 600 output tokens per node
 print(f"\nPhase 4 cohort '{cohort}': ~{n_nodes} nodes × ~$0.05 = ~${est_cost:.2f}")
+if est_cost > 5.0:
+    print(f"NOTICE: estimated cost ${est_cost:.2f} exceeds $5 announce threshold.")
+if est_cost > 20.0:
+    print(f"HALT: estimated cost ${est_cost:.2f} exceeds $20. Confirm if interactive.")
 if dry_run:
     print("  --dry-run: skipping LLM calls; producing prompts + traces only.")
 
@@ -611,8 +625,10 @@ fresh: delete the entire `build/evolution_state/<run_id>/` directory.
   `agent_mediated.json.bak` (always written before any apply).
 - **Qdrant unreachable** → Phase 3 live mode degrades to Audits 1+3
   only. Phase 4 doesn't need Qdrant. Phase 5 (when built) does.
-- **Cost overrun** → halt at the back-pressure gate before the next LLM
-  phase; resume after operator decision.
+- **Cost overrun** → only halts when estimated phase cost exceeds $20.
+  Lower-cost overruns are announced (>$5) but not gated; the SDK
+  proceeds and records the warning in state.  Under autonomous mode
+  even the $20 halt is downgraded to a warning + proceed.
 
 ## What this skill does NOT do
 
