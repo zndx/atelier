@@ -297,6 +297,8 @@ def _handle_revisit_columns(
     frame: FrameOfDiscernment,
     has_embeddings: bool,
     discounts: DiscountConfig | None = None,
+    *,
+    atelier_cfg=None,
 ) -> dict[str, Any]:
     """Revisit selected columns then revalidate ML on all columns."""
     from atelier.classify.bootstrap import (
@@ -318,6 +320,7 @@ def _handle_revisit_columns(
     _run_ml_validation(
         state, boot_cfg, all_column_names, samples,
         category_set, frame, has_embeddings, discounts=discounts,
+        atelier_cfg=atelier_cfg,
     )
 
     disagreements = _identify_disagreements(state, all_column_names, boot_cfg)
@@ -410,6 +413,8 @@ def _handle_get_column_detail(
     frame: FrameOfDiscernment,
     boot_cfg: BootstrapConfig,
     discounts: DiscountConfig | None = None,
+    *,
+    atelier_cfg=None,
 ) -> dict[str, Any]:
     """Deep-dive: re-run _classify_column and return full evidence breakdown."""
     col = samples.get(col_name)
@@ -423,6 +428,7 @@ def _handle_get_column_detail(
 
     result = _classify_column(
         col, category_set, frame,
+        cfg=atelier_cfg,
         llm_code=llm_code,
         llm_confidence=llm_conf,
         llm_discount=boot_cfg.llm_discount,
@@ -593,6 +599,7 @@ def _dispatch_tool(
             state, boot_cfg, backend, system_prompt,
             valid_cols, column_names, samples, column_table,
             category_set, frame, has_embeddings, discounts,
+            atelier_cfg=cfg,
         )
 
     elif tool_name == "check_convergence":
@@ -603,6 +610,7 @@ def _dispatch_tool(
         return _handle_get_column_detail(
             state, col_name, samples, category_set,
             frame, boot_cfg, discounts,
+            atelier_cfg=cfg,
         )
 
     elif tool_name == "declare_converged":

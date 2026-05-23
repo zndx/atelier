@@ -1003,6 +1003,7 @@ def _run_ml_validation(
     has_embeddings: bool,
     discounts: DiscountConfig | None = None,
     propagation_discount: float | None = None,
+    atelier_cfg=None,
 ) -> None:
     """Phase 2: Run ML classification on all columns, compute K.
 
@@ -1025,6 +1026,7 @@ def _run_ml_validation(
 
         result = _classify_column(
             col, category_set, frame,
+            cfg=atelier_cfg,
             llm_code=llm_code,
             llm_confidence=llm_conf,
             llm_discount=llm_disc,

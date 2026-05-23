@@ -15,9 +15,13 @@ ablate over.  Qdrant performs the late-interaction MaxSim; the bridge
 converts top-K scores to a DST mass function.
 
 When the flag is true and the late-interaction path cannot run, the
-bridge returns ``None`` so the caller can record the run as
-**degraded**.  That condition is a deployment issue, not a normal
-operating mode.
+bridge raises ``LateInteractionUnavailable`` so the pipeline fails
+fast in the FSM rather than silently falling back to legacy
+single-vector cosine.  Silent fallback is the no-silent-DST-
+degradation anti-pattern: it has historically destroyed accuracy by
+mixing a weaker evidence source into DST fusion without the operator
+knowing.  The only ``None`` return is when ``is_enabled(cfg)`` is
+``False`` — operator-explicit disable.
 """
 
 from __future__ import annotations
@@ -30,6 +34,31 @@ if TYPE_CHECKING:
     from atelier.classify.belief import BeliefAssignment, FrameOfDiscernment
 
 logger = logging.getLogger(__name__)
+
+
+# ── Fail-fast contract ────────────────────────────────────────────
+
+
+class LateInteractionUnavailable(RuntimeError):
+    """Raised when the late-interaction path is enabled but cannot run.
+
+    Per the no-silent-DST-degradation rule, the pipeline does NOT fall
+    back to legacy single-vector cosine when late-interaction fails.
+    Silent fallback historically ate accuracy (−13.6pp in measured runs)
+    by mixing a weaker evidence source into DST fusion without the
+    operator's knowledge.  Instead, the bridge raises this exception so
+    the run fails loudly in the FSM and the operator restores the
+    intended pathway (re-enrich, restart Qdrant, etc.).
+
+    Attributes:
+        status: machine-readable failure label
+                (e.g. ``"degraded_no_collection"``,
+                ``"degraded_namespace_mismatch"``, ``"degraded_score_error"``).
+    """
+
+    def __init__(self, status: str, message: str | None = None) -> None:
+        self.status = status
+        super().__init__(message or status)
 
 
 # ── Public config probe ───────────────────────────────────────────
@@ -188,21 +217,36 @@ def try_compute_cosine_mass(
     """
     _ = embed  # legacy param — ColBERT encoder is self-supplied
     if not is_enabled(cfg):
+        # Operator-explicit disable — only path that returns None.  All
+        # other failure modes raise LateInteractionUnavailable so the
+        # pipeline fails fast rather than silently degrading DST.
         return None, "explicit_disable", None
 
     resolved = _resolve_qdrant_collection(cfg)
     if resolved is None:
-        return None, "degraded_no_collection", None
+        raise LateInteractionUnavailable(
+            "degraded_no_collection",
+            "No 'current' Qdrant collection registered for the active "
+            "taxonomy.  Run scripts/enrich_annotations.py to populate "
+            "taxonomy_registry, then restart the Application.",
+        )
     qdrant_url, collection = resolved
 
     try:
         import qdrant_client as _qdrant  # noqa: F401
-    except ImportError:
-        return None, "degraded_no_qdrant_client", None
+    except ImportError as exc:
+        raise LateInteractionUnavailable(
+            "degraded_no_qdrant_client",
+            "qdrant_client is not importable — deployment is missing "
+            "a required dependency.",
+        ) from exc
 
     client = _get_qdrant_client(qdrant_url)
     if client is None:
-        return None, "degraded_qdrant_connect", None
+        raise LateInteractionUnavailable(
+            "degraded_qdrant_connect",
+            f"QdrantClient could not connect to {qdrant_url!r}.",
+        )
 
     try:
         from qdrant_client.http import models as qm
@@ -242,7 +286,12 @@ def try_compute_cosine_mass(
         )
 
         if not results.points:
-            return None, "degraded_empty_results", None
+            raise LateInteractionUnavailable(
+                "degraded_empty_results",
+                f"Qdrant returned zero points for collection "
+                f"{collection!r}; the taxonomy collection is empty or "
+                f"the query vector failed to match anything.",
+            )
 
         # Normalize MaxSim scores to [0, 1].  Qdrant's MaxSim sums
         # per-query-token max-cosines; dividing by the query token
@@ -262,14 +311,14 @@ def try_compute_cosine_mass(
             sample_codes = [
                 (p.payload or {}).get("code", "?") for p in results.points[:3]
             ]
-            logger.warning(
-                "late_interaction: CODE NAMESPACE MISMATCH — Qdrant returned "
-                "%d results but none are in the frame (sample codes: %s; "
-                "sample frame: %s).  Re-enrich against the current taxonomy.",
-                len(results.points), sample_codes,
-                list(frame.singletons.keys())[:3],
+            raise LateInteractionUnavailable(
+                "degraded_namespace_mismatch",
+                f"CODE NAMESPACE MISMATCH — Qdrant returned "
+                f"{len(results.points)} results but none are in the "
+                f"frame (sample Qdrant codes: {sample_codes}; sample "
+                f"frame codes: {list(frame.singletons.keys())[:3]}).  "
+                f"Re-enrich against the current taxonomy.",
             )
-            return None, "degraded_namespace_mismatch", None
 
         mass = late_interaction_to_mass(scored_tags, frame)
 
@@ -280,13 +329,23 @@ def try_compute_cosine_mass(
         )
         return mass, "ok", attribution
 
-    except Exception as exc:  # noqa: BLE001
+    except LateInteractionUnavailable:
+        # Already a typed fail-fast exception — propagate as-is so the
+        # pipeline sees the status string intact.
+        raise
+    except Exception as exc:
         logger.warning(
-            "late_interaction: scoring raised for %s.%s: %s; "
-            "this is a deployment issue (investigate), not a normal flow",
-            table_name, column_name, exc,
+            "late_interaction: scoring raised for %s.%s — re-raising as "
+            "LateInteractionUnavailable so the pipeline fails fast "
+            "(no silent fallback to legacy single-vector cosine)",
+            table_name, column_name, exc_info=True,
         )
-        return None, "degraded_score_error", None
+        raise LateInteractionUnavailable(
+            "degraded_score_error",
+            f"Late-interaction scoring raised "
+            f"{type(exc).__name__}: {exc!r} for "
+            f"{table_name}.{column_name}",
+        ) from exc
 
 
 def _build_attribution(

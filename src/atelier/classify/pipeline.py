@@ -610,6 +610,12 @@ def run_classification_pipeline(
     results_dir = build_dir / "results" / run_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # Export run dir so deep call sites (e.g., the late-interaction
+    # bridge error handler in _classify_column) can dump per-run
+    # diagnostics without threading results_dir through every signature.
+    import os as _os
+    _os.environ["ATELIER_RUN_DIR"] = str(results_dir)
+
     # Disk-space guard — refuse to start if projected free space falls
     # short of mean+2σ of historical run sizes (with headroom).  Better
     # to bail at iteration 0 than to die mid-run with a corrupt
@@ -1222,6 +1228,7 @@ def run_classification_pipeline(
             state, boot_cfg, column_names, samples_by_name,
             category_set, frame, has_embeddings, discounts=discounts,
             propagation_discount=prop_discount,
+            atelier_cfg=cfg,
         )
 
         disagreements = _identify_disagreements(state, column_names, boot_cfg)
@@ -1308,6 +1315,7 @@ def run_classification_pipeline(
                         state, boot_cfg, column_names, samples_by_name,
                         category_set, frame, has_embeddings,
                         discounts=discounts,
+                        atelier_cfg=cfg,
                     )
                     fallback_candidates = list(_identify_uncertain_columns(
                         state, column_names, boot_cfg,
@@ -1441,6 +1449,7 @@ def run_classification_pipeline(
                     state, boot_cfg, column_names, samples_by_name,
                     category_set, frame, has_embeddings, discounts=discounts,
                     propagation_discount=prop_discount,
+                    atelier_cfg=cfg,
                 )
 
                 # Row MC: record label history for stability tracking
@@ -1636,6 +1645,7 @@ def run_classification_pipeline(
             llm_conf = state.confidence.get(qkey, 0.0)
             result = _classify_column(
                 col, category_set, frame,
+                cfg=cfg,
                 llm_code=llm_code,
                 llm_confidence=llm_conf,
                 llm_discount=boot_cfg.llm_discount,
@@ -2412,6 +2422,7 @@ def _classify_column(
     category_set: HierarchicalCategorySet,
     frame: FrameOfDiscernment,
     *,
+    cfg=None,
     llm_code: str | None = None,
     llm_confidence: float = 0.0,
     llm_alternatives: list[dict] | None = None,
@@ -2481,21 +2492,23 @@ def _classify_column(
         source_masses["pattern"] = pattern_mass
 
     # 3. Cosine evidence — late-interaction multi-vector via Qdrant is the
-    # production path (default on); the legacy single-vector path remains
-    # as a transitional emergency fallback only.  See
-    # docs/src/architecture/late-interaction-cosine.md.
-    cosine_path = "unused"  # 'late_interaction' | 'legacy_explicit' |
-                            # 'legacy_degraded:<reason>' | 'unused'
+    # ONLY supported path.  Per the no-silent-DST-degradation rule, the
+    # legacy single-vector fallback was removed: silent fallback to a
+    # weaker evidence source historically destroyed accuracy by mixing
+    # a non-equivalent signal into DST fusion without the operator
+    # knowing.  If late-interaction can't run, the pipeline raises
+    # LateInteractionUnavailable and the FSM fails the run loudly.
+    # See docs/src/architecture/late-interaction-cosine.md.
+    cosine_path = "unused"  # 'late_interaction' | 'explicit_disable' | 'unused'
     cosine_attribution: dict | None = None  # per-decision SHAP surface;
                                             # populated only when
                                             # late-interaction ran cleanly
     if use_cosine:
-        late_mass = None
-        late_status = "explicit_disable"
+        from atelier.classify.late_interaction_bridge import (
+            LateInteractionUnavailable,
+            try_compute_cosine_mass as _try_late_interaction,
+        )
         try:
-            from atelier.classify.late_interaction_bridge import (
-                try_compute_cosine_mass as _try_late_interaction,
-            )
             late_mass, late_status, cosine_attribution = _try_late_interaction(
                 cfg=cfg,
                 column_features=features,
@@ -2507,55 +2520,52 @@ def _classify_column(
                 frame=frame,
                 embed=getattr(cfg, "_embedder", None),
             )
-        except Exception as exc:
-            # The bridge owns its own error handling; reaching here means
-            # the bridge module itself failed to import or its top-level
-            # call raised.  Treat as a deployment issue, log loudly.
-            logger.warning(
-                "late_interaction bridge raised unexpectedly for %s: %s "
-                "(deployment issue; investigate)",
-                col.name, exc, exc_info=True,
+        except LateInteractionUnavailable as exc:
+            # Persist the first occurrence per process to a run-dir
+            # artifact so the failure status (and any chained traceback)
+            # survives independent of stdout capture.  Subsequent
+            # occurrences are skipped to avoid IO churn.  Then re-raise
+            # so the FSM advances to ERROR — no silent legacy fallback.
+            logger.error(
+                "late_interaction unavailable for %s.%s (status=%s); "
+                "failing the run rather than degrading DST silently",
+                getattr(col, "table_name", "?"), col.name, exc.status,
+                exc_info=True,
             )
-            late_status = "degraded_bridge_error"
+            try:
+                import os
+                import traceback as _tb
+                run_dir = os.environ.get("ATELIER_RUN_DIR") or os.environ.get("ATELIER_CURRENT_RUN_DIR")
+                if run_dir:
+                    err_path = os.path.join(run_dir, "late_interaction_error.txt")
+                    if not os.path.exists(err_path):
+                        with open(err_path, "w") as _f:
+                            _f.write(f"column: {getattr(col, 'table_name', '?')}.{col.name}\n")
+                            _f.write(f"status: {exc.status}\n")
+                            _f.write(f"exception_repr: {exc!r}\n\n")
+                            _f.write(_tb.format_exc())
+            except Exception:  # noqa: BLE001 — best-effort diag, never mask the raise
+                pass
+            raise
 
         if late_mass is not None:
             source_masses["cosine"] = late_mass
             cosine_path = "late_interaction"
         else:
-            # Fallback to legacy single-vector cosine.  When the operator
-            # explicitly disabled late-interaction, this is silent.  When
-            # the flag is on but the late path failed, emit a WARNING and
-            # tag the column result as degraded so the run artifact
-            # surfaces the issue — leaving the pipeline in degraded mode
-            # is a deployment problem, not a normal operating state.
-            if late_status == "explicit_disable":
-                cosine_path = "legacy_explicit"
-            else:
-                cosine_path = f"legacy_degraded:{late_status}"
-                logger.warning(
-                    "late_interaction unavailable for %s.%s (status=%s); "
-                    "falling back to legacy single-vector cosine — this "
-                    "is a transitional emergency fallback only, not a "
-                    "normal operating mode.  Investigate and restore the "
-                    "late-interaction path (run scripts/enrich_annotations.py "
-                    "or check Qdrant connectivity).",
-                    getattr(col, "table_name", "?"), col.name, late_status,
-                )
+            # The only path that returns late_mass is None is when the
+            # operator explicitly disabled the flag (``explicit_disable``).
+            # In that case the cosine evidence source is simply absent
+            # from DST fusion — by operator choice, not by silent
+            # degradation.
+            assert late_status == "explicit_disable", (
+                f"unexpected None mass from late-interaction bridge "
+                f"with status {late_status!r}"
+            )
+            cosine_path = "explicit_disable"
 
-            try:
-                from atelier.classify.embedding import classify_cosine as _cosine
-                similarities = _cosine(features, category_set)
-                cosine_mass = cosine_to_mass(
-                    similarities, frame, discount=discounts.cosine,
-                )
-                source_masses["cosine"] = cosine_mass
-            except Exception as exc:
-                logger.warning(
-                    "Cosine evidence unavailable for %s.%s "
-                    "(legacy fallback also failed: %s); "
-                    "fusion proceeds without cosine for this column.",
-                    getattr(col, "table_name", "?"), col.name, exc,
-                )
+        # Legacy single-vector cosine fallback (``embedding.classify_cosine``)
+        # was removed here.  Do NOT reintroduce — it would silently
+        # degrade DST and re-open the no-silent-DST-degradation footgun.
 
     # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
     if llm_code:
