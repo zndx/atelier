@@ -330,6 +330,74 @@ def _drain_with_log() -> None:
         logger.error("Queue drain crashed: %s", exc, exc_info=True)
 
 
+# ── Gate helpers ─────────────────────────────────────────────────
+
+
+def check_queue_clean() -> tuple[bool, str | None, dict]:
+    """Inspect the queue for blockers that should refuse downstream actions.
+
+    "Clean" means: no failed tasks, no pending tasks whose dependencies
+    have failed (i.e., unrunnable pending).  An empty queue is clean.
+    A queue with done-only tasks is clean (those are historical record).
+
+    Returns ``(is_clean, error_message_or_None, state_summary)``.
+    Callers that gate on queue state (e.g. fsm_start) call this AFTER
+    draining and refuse the action if not clean — operator must resolve
+    via ``python -m atelier.task_queue {retry|cancel}``.
+    """
+    _ensure_dirs()
+    failed = _scan("failed")
+    pending = _scan("pending")
+    running = _scan("running")
+    state = {
+        "pending": len(pending),
+        "running": len(running),
+        "failed": len(failed),
+    }
+
+    if failed:
+        ids_preview = ", ".join(
+            f"{t['task_id'][:8]} ({t['task_type']})" for t in failed[:3]
+        )
+        more = "" if len(failed) <= 3 else f" (+{len(failed) - 3} more)"
+        msg = (
+            f"Task queue has {len(failed)} failed task(s): {ids_preview}"
+            f"{more}.  Inspect via `python -m atelier.task_queue list`; "
+            f"resolve root cause then `retry <task_id>` or `cancel <task_id>`."
+        )
+        return False, msg, state
+
+    if pending:
+        # If pending tasks remain after a drain attempt, their dependencies
+        # are unsatisfied (dep failed previously, or dep is in running)
+        # OR drain wasn't run yet.  Either way: not clean.
+        ids_preview = ", ".join(
+            f"{t['task_id'][:8]} ({t['task_type']})" for t in pending[:3]
+        )
+        more = "" if len(pending) <= 3 else f" (+{len(pending) - 3} more)"
+        msg = (
+            f"Task queue has {len(pending)} pending task(s) waiting to run: "
+            f"{ids_preview}{more}.  Run `python -m atelier.task_queue run-once` "
+            f"to drain, or `cancel <task_id>` to skip."
+        )
+        return False, msg, state
+
+    return True, None, state
+
+
+def drain_then_check(*, max_iterations: int = 100) -> tuple[bool, str | None, dict]:
+    """Atomically drain pending tasks and report whether the queue is clean.
+
+    Convenience wrapper for gate-callers (e.g. fsm_start): runs drain(),
+    then check_queue_clean().  Returns the (is_clean, error, state) tuple
+    from check_queue_clean, with the drain summary merged into state.
+    """
+    drain_summary = drain(max_iterations=max_iterations)
+    is_clean, msg, state = check_queue_clean()
+    state["drain"] = drain_summary
+    return is_clean, msg, state
+
+
 # ── CLI ──────────────────────────────────────────────────────────
 
 
