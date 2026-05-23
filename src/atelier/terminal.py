@@ -109,6 +109,7 @@ _HELP_TEXT = f"""\r
   {_WHITE}help{_RESET}      {_DIM}Show this message{_RESET}
   {_WHITE}status{_RESET}    {_DIM}SDK, credentials, and model info{_RESET}
   {_WHITE}chk{_RESET}       {_DIM}Discovery sitrep — probe all reachable services{_RESET}
+  {_WHITE}evolve{_RESET}    {_DIM}Run evolve-classification skill (reference + audit + enrichment){_RESET}
   {_WHITE}clear{_RESET}     {_DIM}Clear the screen{_RESET}
 
 {_DIM}Anything else is sent to the Claude Agent SDK as a prompt.{_RESET}
@@ -640,6 +641,17 @@ class TerminalSession:
             await self._send(_PROMPT)
             return
 
+        # ``evolve`` invokes the /evolve-classification skill via a
+        # regular SDK prompt (not a slash command), preserving agentic
+        # phase-by-phase execution while bypassing the same client-side
+        # slash-command resolution bug that motivated ``chk``.  The
+        # short command reads the skill markdown, embeds it in a user
+        # prompt with the operator's parsed arguments, and dispatches
+        # through the normal query path.
+        if cmd == "evolve":
+            await self._handle_evolve(line[len("evolve"):].strip())
+            return
+
         # Everything else goes to the SDK as a background task.
         self._current_task = asyncio.create_task(self._run_query_task(line))
 
@@ -844,6 +856,87 @@ class TerminalSession:
 
         lines.append("\r\n")
         await self._send("".join(lines))
+
+    # ── Evolve-classification skill invocation ───────────────────
+
+    async def _handle_evolve(self, args_line: str) -> None:
+        """Invoke the /evolve-classification skill via a regular SDK prompt.
+
+        The skill markdown is the agentic source-of-truth: it defines
+        phase-by-phase reasoning, back-pressure gates, decision criteria,
+        and the final report.  We send its content as a normal user
+        prompt rather than as ``/evolve-classification <args>`` because
+        the bundled CLI resolves slash commands client-side and (on at
+        least Bedrock 4.6) returns 0-turn / 0-duration silent
+        completions — the same failure mode that motivated ``chk`` for
+        ``/health-check``.
+
+        The agentic execution is fully preserved: the model reads the
+        skill, executes each phase's code blocks, applies back-pressure
+        gates, reasons about audit results, makes accept/reject
+        decisions on proposals, and produces the operator report.  Only
+        the invocation pathway changes.
+        """
+        from pathlib import Path
+
+        # Strip a leading ``/`` if the operator typed ``evolve /...``
+        args_line = args_line.lstrip("/").strip()
+        if not args_line:
+            await self._send(
+                f"\r\n  {_RED}✗{_RESET} evolve: missing run_id argument\r\n"
+                f"  {_DIM}usage: evolve <run_id> [--xlsx <path>] "
+                f"[--scope full|audit-only|reference-only|evolve-only|report] "
+                f"[--cohort <name>] [--mode subset|full] [--dry-run]{_RESET}\r\n"
+            )
+            return
+
+        # Locate the skill — same project_root computation as the SDK
+        # invocation block uses for ``cwd``.
+        project_root = Path(__file__).resolve().parent.parent.parent
+        skill_path = project_root / ".claude" / "commands" / "evolve-classification.md"
+        if not skill_path.is_file():
+            await self._send(
+                f"\r\n  {_RED}✗{_RESET} skill file not found at "
+                f"{skill_path}\r\n"
+                f"  {_DIM}check that the branch with the skill is "
+                f"checked out at {project_root}{_RESET}\r\n"
+            )
+            return
+
+        skill_md = skill_path.read_text()
+
+        await self._send(
+            f"\r\n  {_BOLD}{_WHITE}evolve{_RESET} "
+            f"{_DIM}— dispatching skill via regular SDK prompt "
+            f"(bypassing slash-command resolution){_RESET}\r\n"
+            f"  {_DIM}args: {args_line}{_RESET}\r\n\r\n"
+        )
+
+        prompt = (
+            "You are about to execute the evolve-classification skill.  "
+            "Treat the markdown below as your operational guide: follow "
+            "its phase-by-phase structure exactly, execute each phase's "
+            "code blocks in order, apply the back-pressure gates as "
+            "described, and produce the final operator report in Phase "
+            "7.\n\n"
+            f"$ARGUMENTS = {args_line!r}\n\n"
+            "Parse $ARGUMENTS per the skill's `## Argument: $ARGUMENTS` "
+            "section.  When a code block references a variable like "
+            '`run_id = "$run_id"`, substitute the actual parsed value.\n\n'
+            "Begin with Phase 1 (Environment probe).  Do not skip "
+            "phases unless the requested --scope excludes them.\n\n"
+            "---\n\n"
+            f"{skill_md}"
+        )
+
+        # Force a fresh conversation — phase 1 environment probe must
+        # not see stale state from a prior conversation.
+        self._has_conversed = False
+        self._sdk_session_id = None
+
+        # Dispatch through the regular query path.  This goes to the
+        # API as a normal user message (no client-side slash resolution).
+        self._current_task = asyncio.create_task(self._run_query_task(prompt))
 
     # ── Spinner ───────────────────────────────────────────────────
 
