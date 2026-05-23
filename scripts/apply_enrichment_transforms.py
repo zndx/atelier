@@ -356,15 +356,19 @@ def main() -> int:
     # ── Derive target collection name + aug_version ──────────────
     #
     # Naming convention (Atelier 2026-05-23+):
-    #   * collection name:    <source_table_norm>_<uuid7>
-    #   * augmentation_version: <uuid7>  (same UUID as in the name)
+    #   * collection name:       <source_table_norm>_<uuid7>
+    #   * augmentation_version:  <source_table_norm>_<uuid7>  (identical)
     #
-    # UUIDv7 IS the version: monotonic, unique, naturally ordered by
-    # generation time.  No ``_evolve_<cohort>`` suffix, no ``_attemptN``
-    # counter — re-applying the same cohort just generates a new uuid7
-    # and produces a new collection.  Lineage lives in the registry
-    # (built_at + augmentation_version) and the per-transform records,
-    # not in the collection name.
+    # The two fields are kept *equal* so registry rows are self-
+    # describing: a glance at ``augmentation_version`` tells you which
+    # source the row indexes and which version of it (the uuid7
+    # naturally orders multiple versions of the same source).  No
+    # additional ``_evolve_<cohort>`` suffix, no ``_attemptN`` counter
+    # — re-applying just generates a new uuid7 and produces a new
+    # collection.  Per-evolution lineage (which transforms were applied,
+    # from which cohort, by which model) lives in the per-transform
+    # records under ``build/data/transforms/`` and is amenable to
+    # downstream OpenLineage emission.
     from atelier.enrichment.qdrant_writer import (
         collection_name_v2, ensure_collection, upsert_point, point_cache_key,
         EnrichedAnnotationPoint, AnnotationVectors, source_row_hash,
@@ -383,13 +387,11 @@ def main() -> int:
         source_table=source_table_for_naming,
         uuid_v7=new_uuid_v7,
     )
-    # Aug_version equals the uuid7 — the registry's compound uniqueness
-    # constraint (taxonomy_id, augmentation_version) is satisfied by
-    # the uuid7's monotonic uniqueness.  If --target-collection is an
-    # operator-supplied override, we still use the freshly generated
-    # uuid7 for aug_version (the two diverge only when the operator
-    # intentionally bypasses default naming).
-    new_aug_version = new_uuid_v7
+    # aug_version mirrors target_collection.  The registry's compound
+    # uniqueness constraint (taxonomy_id, augmentation_version) is
+    # satisfied by the uuid7's monotonic uniqueness — embedded in the
+    # name and therefore the version.
+    new_aug_version = target_collection
     accepted_codes_list = [r.get("target_code") for r in accepted if r.get("target_code")]
     manifest_id = compute_manifest_id(cohort_dir, accepted_codes_list, new_aug_version)
     # Duplicate-manifest detection is vestigial under uuid7-as-version
