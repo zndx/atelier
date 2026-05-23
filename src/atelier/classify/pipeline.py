@@ -42,6 +42,7 @@ from atelier.classify.belief import (
 from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
+from atelier.classify.phase_heartbeat import phase_heartbeat
 from atelier.classify.mass_functions import (
     DEFAULT_PATTERN_MAP,
     DiscountConfig,
@@ -672,7 +673,9 @@ def run_classification_pipeline(
         # while the work runs so nautilus's stall detector can
         # distinguish "actively waiting on Hive" from "thread died."
         # See atelier.classify.phase_heartbeat for the design.
-        from atelier.classify.phase_heartbeat import phase_heartbeat
+        # (phase_heartbeat is now hoisted to top-of-file imports so the
+        # post-sweep heartbeat wraps below can share it without a local
+        # re-import.)
         from atelier.classify.sampler import probe_connection
 
         # ── LOADING_VOCAB ────────────────────────────────────────
@@ -1194,6 +1197,19 @@ def run_classification_pipeline(
         if mc_plan and not mc_plan.is_passthrough:
             from atelier.classify.monte_carlo import propagate_labels as _propagate
             _propagate(state, mc_plan, samples_by_name, mc_cfg)
+            # Refresh the UI count: propagation fills the un-sampled
+            # tail, but _sweep_progress only fires from inside
+            # _llm_sweep — without this the Status card freezes at the
+            # sweep's final llm_labeled value (e.g. 1148/1149 for a
+            # 1149-column corpus with 1148 directly sampled).
+            _sweep_progress({
+                "phase": "propagation_complete",
+                "columns_labeled": len(state.labels),
+                "llm_calls_total": state.llm_calls_total,
+                "truncation_count": state.truncation_count,
+                "failed_columns": len(state.failed_columns),
+                "batches_attempted": 0,
+            })
 
         coverage = _coverage(state, column_names)
         logger.info(
@@ -1208,12 +1224,25 @@ def run_classification_pipeline(
         # evidence fusion + SHAP/SAGE attribute against the model that
         # agrees with the LLM by construction.  Replaces the pre-trained
         # classify_catboost_model_path for the rest of this run only.
+        #
+        # Wrapped in phase_heartbeat so FSM.updated_at advances every
+        # 5s while training runs — distinguishes "actively training a
+        # large CatBoost" from "thread died."  Training on a 1149-column
+        # corpus is 30-50 min on this hardware; without the heartbeat
+        # the Status UI freezes at the last LLM_SWEEP heartbeat
+        # ("sweep_success_d0") for that entire window.  State stays
+        # LLM_SWEEP — only the sub-phase label changes.
         if getattr(cfg, "classify_catboost_fit_to_llm", False):
             try:
-                _install_fit_to_llm_catboost(
-                    cfg, state, samples_by_name, category_set,
-                    save_path=results_dir / "catboost_fit_to_llm.cbm",
-                )
+                with phase_heartbeat(
+                    fsm, run_id, FSMState.LLM_SWEEP,
+                    interval_s=heartbeat_interval,
+                    label="fit_to_llm_training",
+                ):
+                    _install_fit_to_llm_catboost(
+                        cfg, state, samples_by_name, category_set,
+                        save_path=results_dir / "catboost_fit_to_llm.cbm",
+                    )
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
 
@@ -1227,12 +1256,27 @@ def run_classification_pipeline(
         # MC-aware discount: propagated labels get higher discount
         prop_discount = mc_cfg.propagation_discount if mc_plan and not mc_plan.is_passthrough else None
 
-        _run_ml_validation(
-            state, boot_cfg, column_names, samples_by_name,
-            category_set, frame, has_embeddings, discounts=discounts,
-            propagation_discount=prop_discount,
-            atelier_cfg=cfg,
-        )
+        # Wrap the initial ML validation pass in a phase_heartbeat —
+        # iterating _classify_column over 1149 columns takes many
+        # minutes (Qdrant query + DST fusion per column).  Without the
+        # 5s heartbeat tick, FSM.updated_at would only move when the
+        # whole pass completes, indistinguishable from a hung daemon.
+        # State is already VALIDATING (advanced just above); the
+        # "ml_validation" label matches the sub-phase the manual
+        # fsm.advance writes.  Per-column granularity is a separate
+        # change (signature ripples through bootstrap._run_ml_validation
+        # call sites in agent_loop.py).
+        with phase_heartbeat(
+            fsm, run_id, FSMState.VALIDATING,
+            interval_s=heartbeat_interval,
+            label="ml_validation",
+        ):
+            _run_ml_validation(
+                state, boot_cfg, column_names, samples_by_name,
+                category_set, frame, has_embeddings, discounts=discounts,
+                propagation_discount=prop_discount,
+                atelier_cfg=cfg,
+            )
 
         disagreements = _identify_disagreements(state, column_names, boot_cfg)
         mean_k = _mean_k(state, column_names)
