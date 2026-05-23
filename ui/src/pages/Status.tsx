@@ -888,10 +888,31 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             </Descriptions.Item>
           )}
       </Descriptions>
+      {/* Iteration banner — surfaces the bootstrap revisit loop's
+          outer cycle ("Iteration 2 of 5") above the phase tree.  See
+          .claude/plans/lovely-doodling-badger.md.  Server emits
+          iteration_max via _convergence_progress; iteration is at
+          each revisit-emission call site. */}
+      {fsm && state !== "IDLE" && progress.iteration_max != null && progress.iteration != null && (
+        <div style={{ marginTop: 12 }}>
+          <Alert
+            type={progress.convergence_reason ? "success" : "info"}
+            showIcon
+            message={`Iteration ${progress.iteration} of ${progress.iteration_max}`}
+            description={
+              progress.convergence_reason
+                ? `Converged: ${String(progress.convergence_reason)}`
+                : progress.disagreements_count != null
+                  ? `Revisiting ${progress.disagreements_count} disagreement${Number(progress.disagreements_count) === 1 ? "" : "s"}`
+                  : null
+            }
+          />
+        </div>
+      )}
       {/* Nested progress tree (see .claude/plans/lovely-doodling-badger.md).
-          Replaces the prior single-bar block; renders one row per FSM
-          phase that's been encountered + a depth-2 sub-phase row under
-          the active phase. */}
+          Replaces the prior single-bar block; renders depth-0 pipeline
+          aggregate + one row per FSM phase + a depth-2 sub-phase row
+          under the active phase. */}
       {fsm && state !== "IDLE" && (() => {
         const tasks = buildTaskTree(fsm);
         if (tasks.length === 0) return null;

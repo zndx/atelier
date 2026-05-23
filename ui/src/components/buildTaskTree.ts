@@ -181,10 +181,10 @@ function statusFor(
  * Build the ordered flat list of ProgressTask rows for the current
  * FSM snapshot.  Caller renders each via <PhaseProgress depth={...}>.
  *
- * The tree shape is currently 2-level: depth-1 = FSM phase rows,
- * depth-2 = active sub-phase (sweep_call_start_d0, fit_to_llm_training,
- * ml_validation, etc).  Depth-0 (aggregate pipeline progress) is added
- * by Commit 5 (banner + polish).
+ * Tree shape:
+ *   depth-0: aggregate pipeline-overall progress (one row, top)
+ *   depth-1: per-FSM-phase rows
+ *   depth-2: active sub-phase row under the currently active phase
  */
 export function buildTaskTree(fsm: FSMStatusLike | null): ProgressTask[] {
   if (!fsm) return [];
@@ -193,6 +193,37 @@ export function buildTaskTree(fsm: FSMStatusLike | null): ProgressTask[] {
   const isError = currentState === "ERROR";
 
   const tasks: ProgressTask[] = [];
+
+  // Depth-0 aggregate row: counts how many ordered phases have
+  // completed.  CONVERGED is the terminal sentinel, not a phase,
+  // so it's excluded from both denominator and "done" tally —
+  // when the FSM is CONVERGED, all real phases register done.
+  const realPhases = PIPELINE_ORDER.filter((p) => p !== "CONVERGED");
+  const curIdx = PIPELINE_ORDER.indexOf(currentState);
+  const donePhases =
+    currentState === "CONVERGED"
+      ? realPhases.length
+      : Math.max(0, curIdx);
+  const overallStatus: TaskStatus =
+    isError
+      ? "error"
+      : currentState === "CONVERGED"
+        ? "done"
+        : currentState === "IDLE"
+          ? "pending"
+          : "active";
+  tasks.push({
+    id: "pipeline:root",
+    depth: 0,
+    parentId: null,
+    name: "Pipeline",
+    status: overallStatus,
+    determinate: {
+      current: donePhases,
+      total: realPhases.length,
+      unit: "phases",
+    },
+  });
 
   for (const phase of PIPELINE_ORDER) {
     const status = statusFor(phase, currentState, isError);
