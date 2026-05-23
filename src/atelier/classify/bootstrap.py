@@ -1004,6 +1004,7 @@ def _run_ml_validation(
     discounts: DiscountConfig | None = None,
     propagation_discount: float | None = None,
     atelier_cfg=None,
+    progress_callback=None,
 ) -> None:
     """Phase 2: Run ML classification on all columns, compute K.
 
@@ -1011,10 +1012,18 @@ def _run_ml_validation(
     == "propagated") use a higher discount factor, giving less mass to
     LLM evidence and more to Theta. This lets DST conflict detection
     automatically escalate uncertain propagations.
+
+    ``progress_callback`` (optional): called every 25 columns with
+    ``{"current": <int>, "total": <int>}``.  Pipeline call sites pass
+    a closure that writes those values into the phase_heartbeat ctx,
+    so the UI tree-builder renders a determinate bar through this
+    multi-minute pass.  Defaults to None for non-pipeline callers.
     """
     from atelier.classify.pipeline import _classify_column
 
-    for name in column_names:
+    progress_every = 25
+    total = len(column_names)
+    for idx, name in enumerate(column_names):
         col = samples[name]
         llm_code = state.labels.get(name)
         llm_conf = state.confidence.get(name, 0.0)
@@ -1056,6 +1065,18 @@ def _run_ml_validation(
             state.independent_top1_conflict[name] = float(
                 result.get("independent_top1_conflict", 0.0) or 0.0,
             )
+
+        # Periodic progress emission for the UI tree-builder.  Every
+        # progress_every columns + once at the end so partial-batch
+        # tails still register a final tick.  Exception-safe — never
+        # let observability abort the validation pass.
+        if progress_callback is not None and (
+            (idx + 1) % progress_every == 0 or (idx + 1) == total
+        ):
+            try:
+                progress_callback({"current": idx + 1, "total": total})
+            except Exception:
+                pass
 
 
 def _identify_disagreements(

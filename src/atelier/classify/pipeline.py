@@ -1284,19 +1284,25 @@ def run_classification_pipeline(
         # whole pass completes, indistinguishable from a hung daemon.
         # State is already VALIDATING (advanced just above); the
         # "ml_validation" label matches the sub-phase the manual
-        # fsm.advance writes.  Per-column granularity is a separate
-        # change (signature ripples through bootstrap._run_ml_validation
-        # call sites in agent_loop.py).
+        # fsm.advance writes.
         with phase_heartbeat(
             fsm, run_id, FSMState.VALIDATING,
             interval_s=heartbeat_interval,
             label="ml_validation",
-        ):
+        ) as val_ctx:
+            # Per-column progress: bootstrap._run_ml_validation calls
+            # this every 25 columns with {current, total}.  Phase_heartbeat
+            # reads those into the structured sub_phase block on each
+            # 5s tick so the UI tree-builder renders a determinate bar.
+            def _ml_validate_progress(p: dict) -> None:
+                val_ctx["current"] = p.get("current", 0)
+                val_ctx["total"] = p.get("total", 0)
             _run_ml_validation(
                 state, boot_cfg, column_names, samples_by_name,
                 category_set, frame, has_embeddings, discounts=discounts,
                 propagation_discount=prop_discount,
                 atelier_cfg=cfg,
+                progress_callback=_ml_validate_progress,
             )
 
         disagreements = _identify_disagreements(state, column_names, boot_cfg)
@@ -1702,33 +1708,47 @@ def run_classification_pipeline(
             )
 
         classifications: list[dict[str, Any]] = []
-        for col in all_columns:
-            # Cross-table state dicts are keyed by ``qualified_name``
-            # (see the keying note above where ``samples_by_name`` is
-            # built); ``col.name`` is the bare canonical column id and
-            # would silently miss every entry past the first cross-
-            # table collision.
-            qkey = col.qualified_name
-            llm_code = state.labels.get(qkey)
-            llm_conf = state.confidence.get(qkey, 0.0)
-            result = _classify_column(
-                col, category_set, frame,
-                cfg=cfg,
-                llm_code=llm_code,
-                llm_confidence=llm_conf,
-                llm_discount=boot_cfg.llm_discount,
-                use_cosine=has_embeddings,
-                discounts=discounts,
-                fusion_strategy=cfg.classify_fusion_strategy,
-                resolve_llm_annotation_mnemonic=getattr(
-                    cfg, "classify_resolve_llm_annotation_mnemonic", True,
-                ),
-                svm_hierarchical=svm_hierarchical,
-                nhsvm_temperature=nhsvm_temp,
-                nhsvm_alphas=nhsvm_alphas,
-                nhsvm_distance_matrix=nhsvm_dist_matrix,
-            )
-            classifications.append(result)
+        # Wrap the final-classification pass in phase_heartbeat for
+        # the same reason VALIDATING is wrapped — _classify_column on
+        # ~1149 columns runs many minutes (Qdrant query + DST fusion
+        # per column).  Without the tick, FSM.updated_at only moves
+        # at phase entry/exit.  The progress ctx populates the
+        # structured sub_phase block; UI renders a determinate bar
+        # via the tree-builder.
+        with phase_heartbeat(
+            fsm, run_id, FSMState.CLASSIFYING,
+            interval_s=heartbeat_interval,
+            label="final_classification",
+        ) as cls_ctx:
+            cls_ctx["total"] = len(all_columns)
+            for cls_idx, col in enumerate(all_columns):
+                # Cross-table state dicts are keyed by ``qualified_name``
+                # (see the keying note above where ``samples_by_name`` is
+                # built); ``col.name`` is the bare canonical column id and
+                # would silently miss every entry past the first cross-
+                # table collision.
+                qkey = col.qualified_name
+                llm_code = state.labels.get(qkey)
+                llm_conf = state.confidence.get(qkey, 0.0)
+                result = _classify_column(
+                    col, category_set, frame,
+                    cfg=cfg,
+                    llm_code=llm_code,
+                    llm_confidence=llm_conf,
+                    llm_discount=boot_cfg.llm_discount,
+                    use_cosine=has_embeddings,
+                    discounts=discounts,
+                    fusion_strategy=cfg.classify_fusion_strategy,
+                    resolve_llm_annotation_mnemonic=getattr(
+                        cfg, "classify_resolve_llm_annotation_mnemonic", True,
+                    ),
+                    svm_hierarchical=svm_hierarchical,
+                    nhsvm_temperature=nhsvm_temp,
+                    nhsvm_alphas=nhsvm_alphas,
+                    nhsvm_distance_matrix=nhsvm_dist_matrix,
+                )
+                classifications.append(result)
+                cls_ctx["current"] = cls_idx + 1
 
         fsm.advance(run_id, FSMState.FUSING, progress={
             "columns_classified": len(classifications),
