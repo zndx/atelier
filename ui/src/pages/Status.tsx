@@ -16,7 +16,6 @@ import {
   Descriptions,
   message,
   Popconfirm,
-  Progress,
   Radio,
   Row,
   Select,
@@ -38,6 +37,8 @@ import {
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { useDataset } from "../contexts/DatasetContext";
+import { buildTaskTree } from "../components/buildTaskTree";
+import { PhaseProgress } from "../components/PhaseProgress";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -887,27 +888,21 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             </Descriptions.Item>
           )}
       </Descriptions>
-      {state === "LLM_SWEEP" &&
-        progress.columns_total != null &&
-        progress.llm_labeled != null && (
+      {/* Nested progress tree (see .claude/plans/lovely-doodling-badger.md).
+          Replaces the prior single-bar block; renders one row per FSM
+          phase that's been encountered + a depth-2 sub-phase row under
+          the active phase. */}
+      {fsm && state !== "IDLE" && (() => {
+        const tasks = buildTaskTree(fsm);
+        if (tasks.length === 0) return null;
+        return (
           <div style={{ marginTop: 12 }}>
-            <Progress
-              percent={
-                Number(progress.columns_total) > 0
-                  ? Math.round(
-                      (Number(progress.llm_labeled) /
-                        Number(progress.columns_total)) *
-                        100,
-                    )
-                  : 0
-              }
-              format={() =>
-                `${progress.llm_labeled} / ${progress.columns_total} columns`
-              }
-              status="active"
-            />
+            {tasks.map((task) => (
+              <PhaseProgress key={task.id} task={task} />
+            ))}
           </div>
-        )}
+        );
+      })()}
       {fsm?.error && (
         <div style={{ marginTop: 12 }}>
           <Text type="danger">{fsm.error}</Text>
