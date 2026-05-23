@@ -91,16 +91,65 @@ CONFUSABLE_ANCHORS = [
 # ── xlsx extraction ───────────────────────────────────────────────
 
 
-def _is_red(cell) -> bool:
+# ── Color conventions in scoring xlsx ─────────────────────────────
+#
+# Reviewers use distinct fill colors to encode different verdicts:
+#
+#   * Red (FFFF0000) on column D (predicted_annotation) — the prediction
+#     is wrong; reviewer expects a correction.  Primary actionable signal.
+#   * Light red (FFF4CCCC) on column D — "nominally-incorrect": the
+#     prediction is technically wrong but mitigating circumstances apply
+#     (taxonomy may not distinguish the cases at the needed granularity,
+#     the distinction is genuinely subtle, or there are cross-cutting
+#     concerns).  Reviewer wants a taxonomy-review pass, not a quick fix.
+#   * Yellow (FFFFFF00) covering the prediction block — row-level review
+#     flag with no specific verdict.  Operator should examine.
+
+COLOR_RED = "red"
+COLOR_LIGHT_RED = "light_red"
+COLOR_YELLOW = "yellow"
+
+_COLOR_BY_RGB = {
+    "FFFF0000": COLOR_RED,
+    "FFF4CCCC": COLOR_LIGHT_RED,
+    "FFFFFF00": COLOR_YELLOW,
+}
+
+
+def _cell_color(cell) -> str | None:
     if not cell.fill or not cell.fill.start_color:
-        return False
+        return None
     rgb = str(cell.fill.start_color.rgb or "")
-    return ("FF0000" in rgb) or ("FFC7" in rgb) or ("FF9999" in rgb)
+    return _COLOR_BY_RGB.get(rgb)
+
+
+def _row_flag(row) -> str | None:
+    """Determine the strongest flag color on a row.
+
+    Priority: red on D > light_red on D > yellow on any of A-E.
+    Returns None if the row has no flag.
+    """
+    d_cell = next((c for c in row if c.column_letter == "D"), None)
+    if d_cell:
+        d_color = _cell_color(d_cell)
+        if d_color in (COLOR_RED, COLOR_LIGHT_RED):
+            return d_color
+    for c in row:
+        if c.column_letter in "ABCDE" and _cell_color(c) == COLOR_YELLOW:
+            return COLOR_YELLOW
+    return None
 
 
 def extract_flagged_rows(xlsx_path: Path) -> list[dict]:
-    """Walk every table sheet, return rows where col D (predicted_annotation)
-    is red-highlighted, along with surrounding context."""
+    """Walk every table sheet, return flagged rows tagged with flag_color
+    plus surrounding context.
+
+    Each entry carries ``flag_color`` ∈ {"red", "light_red", "yellow"}.
+    The downstream pipeline routes by color: red goes through correction-
+    proposal LLM; light_red gets a different system prompt that frames
+    the task as taxonomy review; yellow skips LLM and writes to a row-
+    review queue for operator examination.
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
@@ -110,7 +159,8 @@ def extract_flagged_rows(xlsx_path: Path) -> list[dict]:
             continue
         ws = wb[sn]
         for row in ws.iter_rows(min_row=2):
-            if not any(_is_red(c) for c in row):
+            flag = _row_flag(row)
+            if flag is None:
                 continue
             rd = {c.column_letter: c.value for c in row}
             col_name = rd.get("A")
@@ -119,6 +169,7 @@ def extract_flagged_rows(xlsx_path: Path) -> list[dict]:
             rows.append({
                 "table": sn,
                 "column": str(col_name),
+                "flag_color": flag,
                 "atelier_pred": {
                     "code": rd.get("B"),
                     "label": rd.get("C"),
@@ -282,6 +333,44 @@ def load_classifications_lookup(run_dir: Path) -> dict:
 # ── prompt construction ──────────────────────────────────────────
 
 
+# ── Correction-type classification by code relationship ─────────
+
+
+def correction_type(current_code: str | None, proposed_code: str | None) -> str:
+    """Classify the *shape* of a proposed correction by the code
+    relationship between current and proposed.
+
+    Returns one of:
+
+    * ``no_current``: current_code missing — can't characterize.
+    * ``confirm_current``: same code (the flag was confirmatory).
+    * ``granularity_tightening``: proposed is a descendant of current
+      (more specific).  Generally safe to auto-apply.
+    * ``granularity_loosening``: proposed is an ancestor of current
+      (less specific).  Risky — loosening loses information.
+    * ``sibling_distinction``: same parent, different leaf.  Often
+      taxonomy-subtle; review preferred.
+    * ``subtree_correction``: different branch entirely.  The most
+      decisive correction shape.
+    """
+    if not current_code or not proposed_code:
+        return "no_current"
+    if current_code == proposed_code:
+        return "confirm_current"
+    if proposed_code.startswith(current_code + "."):
+        return "granularity_tightening"
+    if current_code.startswith(proposed_code + "."):
+        return "granularity_loosening"
+    cur_parent = current_code.rsplit(".", 1)[0] if "." in current_code else ""
+    pro_parent = proposed_code.rsplit(".", 1)[0] if "." in proposed_code else ""
+    if cur_parent and cur_parent == pro_parent:
+        return "sibling_distinction"
+    return "subtree_correction"
+
+
+# ── System prompts ────────────────────────────────────────────────
+
+
 SYSTEM_PROMPT = """\
 You are an ontology curation reviewer for a data classification system.
 A human reviewer has flagged a column's reference annotation as wrong.
@@ -311,6 +400,45 @@ Output STRICT JSON only:
   "proposed_mnemonic": "<mnemonic from taxonomy>" | "INSUFFICIENT_EVIDENCE",
   "confidence": "high" | "medium" | "low",
   "reasoning": "<2-4 sentences>",
+  "alternatives_considered": ["<mnemonic> — <why rejected>"],
+  "current_assessment": "current_reference_is_wrong" | "current_reference_is_correct" | "ambiguous"
+}
+
+No markdown, no preamble.
+"""
+
+
+SYSTEM_PROMPT_LIGHT_RED = """\
+You are an ontology curation reviewer evaluating a "nominally-incorrect"
+classification.  The human reviewer flagged the prediction in LIGHT RED
+rather than dark red — meaning: the current prediction is technically
+wrong, BUT the reviewer signaled mitigating circumstances.  Typically
+one of:
+
+* The taxonomy may not be granular enough to distinguish the correct
+  case (e.g. the reviewer's source taxonomy has a finer distinction
+  that doesn't exist here).
+* The semantic distinction between the predicted code and the "right"
+  code is genuinely subtle (e.g. sibling-leaf disambiguation under
+  the same parent, where both could be defended).
+* There are cross-cutting concerns that make a confident pick
+  impractical without more domain context.
+
+Your task:
+1. Diagnose whether the current taxonomy CAN distinguish the right
+   classification at the appropriate granularity.
+2. If yes, propose the correct mnemonic with reasoning.
+3. If no, set ``proposed_mnemonic`` to ``TAXONOMY_GAP`` and explain
+   what's missing in the ``taxonomy_observation`` field — concrete
+   enough that a curator can act on it.
+
+Output STRICT JSON only:
+{
+  "proposed_mnemonic": "<mnemonic>" | "TAXONOMY_GAP" | "INSUFFICIENT_EVIDENCE",
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "<2-4 sentences>",
+  "taxonomy_observation": "<what's missing or what makes this subtle, "
+                         "or empty if taxonomy is sufficient>",
   "alternatives_considered": ["<mnemonic> — <why rejected>"],
   "current_assessment": "current_reference_is_wrong" | "current_reference_is_correct" | "ambiguous"
 }
@@ -547,20 +675,39 @@ def process_row(
     mode: str,
     cfg, model: str,
 ) -> dict:
-    """Call LLM in the requested mode(s); return enriched proposal record."""
+    """Branch on flag_color and call LLM in the requested taxonomy-
+    presentation mode(s).  Returns enriched proposal record.
+
+    * **red** → standard correction prompt (SYSTEM_PROMPT).
+    * **light_red** → taxonomy-review prompt (SYSTEM_PROMPT_LIGHT_RED)
+      that allows the LLM to flag TAXONOMY_GAP rather than forcing
+      a mnemonic pick.
+    * **yellow** → no LLM call; the row is captured as a review-queue
+      observation for the operator.
+    """
     base = {
         "table": flagged["table"],
         "column": flagged["column"],
+        "flag_color": flagged.get("flag_color"),
         "current_ref_code": flagged.get("current_ref_code"),
         "atelier_pred": flagged["atelier_pred"],
         "llm_sol_tag": flagged.get("llm_sol_tag"),
         "side_note": flagged.get("side_note"),
     }
 
+    flag = flagged.get("flag_color")
+    if flag == COLOR_YELLOW:
+        # No LLM call — yellow is "operator notice", not a correction.
+        return base
+
+    sys_prompt = (
+        SYSTEM_PROMPT_LIGHT_RED if flag == COLOR_LIGHT_RED else SYSTEM_PROMPT
+    )
+
     if mode in ("full", "ab"):
         prompt = build_user_prompt(flagged, taxonomy, by_code)
         try:
-            base["full"] = call_llm(SYSTEM_PROMPT, prompt, cfg, model)
+            base["full"] = call_llm(sys_prompt, prompt, cfg, model)
         except Exception as exc:  # noqa: BLE001
             base["full"] = {"error": f"{type(exc).__name__}: {exc}"}
 
@@ -568,7 +715,7 @@ def process_row(
         subset = build_subset(flagged, by_code, by_mnem, parent_of)
         prompt = build_user_prompt(flagged, subset, by_code)
         try:
-            base["subset"] = call_llm(SYSTEM_PROMPT, prompt, cfg, model)
+            base["subset"] = call_llm(sys_prompt, prompt, cfg, model)
         except Exception as exc:  # noqa: BLE001
             base["subset"] = {"error": f"{type(exc).__name__}: {exc}"}
         base["subset_size"] = len(subset)
@@ -576,22 +723,68 @@ def process_row(
     return base
 
 
-def classify_proposal(record: dict, mode: str) -> tuple[str, dict]:
-    """Decide apply-status for a proposal record.  Returns (status, primary)."""
+def classify_proposal(
+    record: dict, mode: str, by_mnem: dict,
+) -> tuple[str, dict]:
+    """Decide apply-status for a proposal record.
+
+    Status taxonomy:
+
+    * ``row_review`` — yellow flag, no LLM call, operator notice only.
+    * ``taxonomy_review`` — light_red flag.  Never auto-apply; the
+      proposal becomes a taxonomy-curation candidate.  TAXONOMY_GAP
+      results route here explicitly.
+    * ``high_apply`` — red + high confidence + subtree_correction OR
+      granularity_tightening.
+    * ``manual_review`` — red + (low/medium confidence) OR red + high
+      confidence on a sibling_distinction / granularity_loosening
+      (these are reference-altering moves that deserve human eyes).
+    * ``confirm_current`` — LLM verdict matches current reference.
+    * ``insufficient_evidence`` — LLM declined to propose.
+    * ``error`` — LLM call failed.
+
+    Returns (status, primary_proposal_dict).
+    """
+    flag = record.get("flag_color")
+
+    if flag == COLOR_YELLOW:
+        return ("row_review", {})
+
     primary = record.get(mode if mode != "ab" else "full") or {}
     if "error" in primary:
         return ("error", primary)
+
     mn = primary.get("proposed_mnemonic")
     conf = primary.get("confidence")
-    if mn == "INSUFFICIENT_EVIDENCE":
+
+    if mn in ("INSUFFICIENT_EVIDENCE", None):
         return ("insufficient_evidence", primary)
+    if mn == "TAXONOMY_GAP":
+        return ("taxonomy_review", primary)
     if primary.get("current_assessment") == "current_reference_is_correct":
         return ("confirm_current", primary)
+
+    # Compute correction shape for routing
+    cur_code = record.get("current_ref_code")
+    pro_entry = by_mnem.get((mn or "").strip().upper())
+    pro_code = pro_entry["code"] if pro_entry else None
+    ctype = correction_type(cur_code, pro_code)
+    primary["correction_type"] = ctype
+
+    if flag == COLOR_LIGHT_RED:
+        # Light red never auto-applies; goes to taxonomy review even
+        # when a concrete mnemonic was proposed.  The proposal is
+        # surfaced as a curator-actionable suggestion.
+        return ("taxonomy_review", primary)
+
     if conf == "high":
-        return ("high_apply", primary)
-    if conf in ("medium", "low"):
+        if ctype in ("subtree_correction", "granularity_tightening"):
+            return ("high_apply", primary)
+        # sibling_distinction / granularity_loosening / no_current
+        # deserve human eyes even at high confidence.
         return ("manual_review", primary)
-    return ("unknown", primary)
+
+    return ("manual_review", primary)
 
 
 # ── CLI ──────────────────────────────────────────────────────────
@@ -700,7 +893,7 @@ def main() -> int:
             f, taxonomy, by_code, by_mnem, parent_of,
             args.mode, cfg, model,
         )
-        status, primary = classify_proposal(rec, args.mode)
+        status, primary = classify_proposal(rec, args.mode, by_mnem)
         rec["status"] = status
         rec["proposed_mnemonic"] = primary.get("proposed_mnemonic")
         rec["confidence"] = primary.get("confidence")
@@ -729,23 +922,89 @@ def main() -> int:
     for st, n in status_counts.most_common():
         print(f"  {st}: {n}")
 
-    # Manual review queue
-    review = [r for r in records if r["status"] in ("manual_review", "insufficient_evidence", "error")]
+    # Manual review queue (red-flag rows that didn't reach high-confidence
+    # auto-apply: low/medium confidence, sibling/loosening at high conf,
+    # insufficient_evidence, or LLM error).
+    review = [
+        r for r in records
+        if r["status"] in ("manual_review", "insufficient_evidence", "error")
+    ]
     if review:
         review_path = out_dir / f"manual_review_{xlsx_basename}.md"
         lines = [f"# Manual review queue — {xlsx_basename}", ""]
         for r in review:
+            primary = r.get(args.mode if args.mode != "ab" else "full") or {}
+            ctype = primary.get("correction_type", "—")
             lines.append(f"## {r['table']}.{r['column']}  ({r['status']})")
             lines.append(f"- Atelier: `{r['atelier_pred'].get('mnemonic')}` "
                          f"({r['atelier_pred'].get('code')})")
             lines.append(f"- LLM-sol: `{r.get('llm_sol_tag')}`")
             lines.append(f"- Side-note: {r.get('side_note')}")
             lines.append(f"- Proposed: `{r['proposed_mnemonic']}`  "
-                         f"conf=`{r['confidence']}`")
+                         f"conf=`{r['confidence']}`  type=`{ctype}`")
             lines.append(f"- Reasoning: {r['reasoning']}")
             lines.append("")
         review_path.write_text("\n".join(lines))
         print(f"Wrote {review_path}")
+
+    # Taxonomy review queue (light_red rows + TAXONOMY_GAP results).
+    # These are curator-actionable suggestions, not pipeline corrections.
+    tax = [r for r in records if r["status"] == "taxonomy_review"]
+    if tax:
+        tax_path = out_dir / f"taxonomy_review_{xlsx_basename}.md"
+        lines = [
+            f"# Taxonomy review queue — {xlsx_basename}",
+            "",
+            "Light-red flags ('nominally-incorrect') or LLM-declared "
+            "TAXONOMY_GAP results.  These are taxonomy-curator-actionable "
+            "items, not reference corrections.  The current prediction is "
+            "wrong but mitigating circumstances apply — review the "
+            "taxonomy_observation for what's missing.",
+            "",
+        ]
+        for r in tax:
+            primary = r.get(args.mode if args.mode != "ab" else "full") or {}
+            obs = primary.get("taxonomy_observation", "")
+            ctype = primary.get("correction_type", "—")
+            lines.append(f"## {r['table']}.{r['column']}")
+            lines.append(f"- Atelier: `{r['atelier_pred'].get('mnemonic')}` "
+                         f"({r['atelier_pred'].get('code')})")
+            lines.append(f"- LLM-sol: `{r.get('llm_sol_tag')}`")
+            lines.append(f"- Side-note: {r.get('side_note')}")
+            lines.append(f"- Proposed: `{r['proposed_mnemonic']}`  "
+                         f"conf=`{r['confidence']}`  type=`{ctype}`")
+            lines.append(f"- Reasoning: {r['reasoning']}")
+            if obs:
+                lines.append(f"- Taxonomy observation: {obs}")
+            lines.append("")
+        tax_path.write_text("\n".join(lines))
+        print(f"Wrote {tax_path}")
+
+    # Row-review queue (yellow flags — operator-notice rows; no LLM call,
+    # no corrections proposed).
+    yellow = [r for r in records if r["status"] == "row_review"]
+    if yellow:
+        yellow_path = out_dir / f"row_review_{xlsx_basename}.md"
+        lines = [
+            f"# Row review queue — {xlsx_basename}",
+            "",
+            "Reviewer flagged these rows for examination without a "
+            "specific verdict.  Useful as adjacent context for nearby "
+            "corrections and for spotting categorically problematic "
+            "rows; no pipeline action is taken.",
+            "",
+        ]
+        for r in yellow:
+            lines.append(f"## {r['table']}.{r['column']}")
+            lines.append(f"- Atelier: `{r['atelier_pred'].get('mnemonic')}` "
+                         f"({r['atelier_pred'].get('code')})")
+            lines.append(f"- LLM-sol: `{r.get('llm_sol_tag')}`")
+            lines.append(f"- Side-note: {r.get('side_note')}")
+            lines.append(f"- LLM-sol explanation: {r.get('llm_sol_explanation')}")
+            lines.append(f"- Current ref: `{r.get('current_ref_code')}`")
+            lines.append("")
+        yellow_path.write_text("\n".join(lines))
+        print(f"Wrote {yellow_path}")
 
     # AB comparison report
     if args.mode == "ab":
