@@ -244,22 +244,25 @@ def _handle_pipeline(params: dict) -> TaskResult:
         from atelier.gateway import fsm_start, _last_user_selected_source_id
     except ImportError as exc:
         raise RuntimeError(f"gateway not importable: {exc}")
-    from atelier.fsm import get_state
 
-    # In-flight guard: skip if a run is currently active
+    # In-flight guard: skip if a run is currently active.  Pattern matches
+    # the gateway's own check in fsm_start.
     try:
-        state = get_state()
-        active_states = {"LOADING_VOCAB", "DISCOVERING", "SAMPLING",
-                         "LLM_SWEEP", "VALIDATING", "CLASSIFYING",
-                         "FUSING", "EVALUATING"}
-        if state and state.get("state") in active_states:
-            return TaskResult(skipped=True, outcome={
-                "fsm_state": state.get("state"),
-                "reason": "pipeline already running",
-            })
+        from atelier.classify import get_fsm
+        from atelier.db.dao import AtelierDao
+        fsm = get_fsm(dao=AtelierDao())
+        status = fsm.get_status()
+        if status is not None:
+            state_value = getattr(getattr(status, "state", None), "value", None)
+            if state_value and state_value not in ("IDLE", "CONVERGED", "ERROR"):
+                return TaskResult(skipped=True, outcome={
+                    "fsm_state": state_value,
+                    "run_id": getattr(status, "id", None),
+                    "reason": "pipeline already running",
+                })
     except Exception:  # noqa: BLE001
         # If we can't probe FSM state, proceed anyway — fsm_start has
-        # its own in-flight check via the lifespan_start guard.
+        # its own in-flight check internally.
         pass
 
     source_id = params.get("source_id") or _last_user_selected_source_id()

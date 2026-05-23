@@ -132,12 +132,34 @@ def _norm(v: Any) -> str:
     return str(v).strip()
 
 
+def _is_dual_format_entry(v: object) -> bool:
+    """Dual-format entry has ``mnemonic`` and/or ``code`` keys.
+
+    Distinguishes the new {"mnemonic": "EMAIL", "code": "1.1.1.9.3.1",
+    "captured_at": "...", "source": "..."} shape from the legacy
+    nested-by-table {table: {col: mnemonic}} shape (whose values are
+    plain strings, never dicts).
+    """
+    return isinstance(v, dict) and ("mnemonic" in v or "code" in v)
+
+
 def load_reference_artifact(path: Path) -> dict[str, str | None]:
     """Load and flatten the Opus-crafted reference artifact.
 
-    Returns ``{table_name.column_name: annotation_or_None}``.  Keys with
+    Returns ``{table_name.column_name: mnemonic_or_None}``.  Keys with
     ``null`` values are kept so the scoring path can distinguish
     "explicitly unreviewed" from "missing from the reference".
+
+    Three supported entry shapes:
+
+    * **Dual-format** (preferred): ``{"mnemonic": "EMAIL", "code":
+      "...", "captured_at": "...", "source": "..."}`` — extracts
+      ``mnemonic`` for vocab-validation purposes.  The captured code
+      is consulted by drift-stable scoring through a separate path
+      (see ``atelier.classify.reference.load_reference_agent_mediated``).
+    * **Legacy mnemonic-only string**: ``"EMAIL"`` — used as-is.
+    * **Legacy nested-by-table**: ``{"table": {"col": "MNEMONIC"}}`` —
+      flattened to qualified keys.
 
     Raises:
         FileNotFoundError: when ``path`` does not exist.
@@ -165,7 +187,13 @@ def load_reference_artifact(path: Path) -> dict[str, str | None]:
 
     flat: dict[str, str | None] = {}
     for k, v in raw.items():
-        if isinstance(v, dict):
+        if _is_dual_format_entry(v):
+            # Dual format — extract the mnemonic string only (captured
+            # code is consumed elsewhere for drift-stable scoring).
+            mn = v.get("mnemonic")
+            flat[_norm(k)] = None if mn in (None, "") else _norm(mn)
+        elif isinstance(v, dict):
+            # Legacy nested-by-table: {table: {col: mnemonic}}
             for col, ann in v.items():
                 flat[f"{k}.{col}"] = (
                     None if ann in (None, "") else _norm(ann)
