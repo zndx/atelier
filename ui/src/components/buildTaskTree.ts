@@ -177,6 +177,20 @@ function statusFor(
   return "pending";
 }
 
+export interface BuildTaskTreeOptions {
+  /**
+   * When true, omit depth-1 phase rows whose status is ``pending``,
+   * ``done``, or ``skipped``.  The depth-0 Pipeline aggregate row
+   * (overall context) and the active phase + its depth-2 sub-phase
+   * remain visible.  Error rows are kept (semantically active).
+   *
+   * Focus-mode UX — operators tracking a long-running phase don't
+   * need to see eight completed checkmarks above and four pending
+   * dots below the one row that's actually moving.
+   */
+  hideInactive?: boolean;
+}
+
 /**
  * Build the ordered flat list of ProgressTask rows for the current
  * FSM snapshot.  Caller renders each via <PhaseProgress depth={...}>.
@@ -185,8 +199,14 @@ function statusFor(
  *   depth-0: aggregate pipeline-overall progress (one row, top)
  *   depth-1: per-FSM-phase rows
  *   depth-2: active sub-phase row under the currently active phase
+ *
+ * With ``hideInactive: true``, only the depth-0 aggregate, the active
+ * depth-1 phase, and its depth-2 sub-phase render.
  */
-export function buildTaskTree(fsm: FSMStatusLike | null): ProgressTask[] {
+export function buildTaskTree(
+  fsm: FSMStatusLike | null,
+  options?: BuildTaskTreeOptions,
+): ProgressTask[] {
   if (!fsm) return [];
   const currentState = fsm.state || "IDLE";
   const progress = (fsm.progress || {}) as Record<string, unknown>;
@@ -225,6 +245,8 @@ export function buildTaskTree(fsm: FSMStatusLike | null): ProgressTask[] {
     },
   });
 
+  const hideInactive = options?.hideInactive === true;
+
   for (const phase of PIPELINE_ORDER) {
     const status = statusFor(phase, currentState, isError);
     if (status === "pending" && phase === "CONVERGED") {
@@ -233,6 +255,12 @@ export function buildTaskTree(fsm: FSMStatusLike | null): ProgressTask[] {
       continue;
     }
     const isActive = status === "active" || status === "error";
+    // Focus-mode: skip inactive depth-1 phase rows.  Sub-phase rows
+    // are already gated on isActive below, so they ride along
+    // automatically.
+    if (hideInactive && !isActive) {
+      continue;
+    }
     const determinate = isActive ? readDeterminate(phase, progress) : undefined;
     const elapsedS = isActive
       ? asNumber(progress["sweep_elapsed_s"]) ??
