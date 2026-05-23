@@ -81,6 +81,15 @@ async def _lifespan(app: FastAPI):
             await asyncio.to_thread(_maybe_auto_start_classify)
         except Exception as exc:
             _log.warning("Classify auto-start skipped: %s", exc)
+        # Kick off the restart-ready task queue.  Idempotent and crash-
+        # safe: tasks pre-enqueued from the Session pod (apply forward
+        # transforms, verify, render change-management guide, optionally
+        # trigger a fresh pipeline run) drain here without operator
+        # intervention.  See src/atelier/task_queue.py.
+        try:
+            await asyncio.to_thread(_kick_task_queue)
+        except Exception as exc:
+            _log.warning("Task queue dispatch skipped: %s", exc)
 
     seed_task = asyncio.create_task(_seed_with_retry())
 
@@ -696,6 +705,34 @@ def _maybe_auto_start_classify() -> None:
         "Classify auto-start dispatched (env default — no prior runs): %s → %s",
         source_id, result,
     )
+
+
+def _kick_task_queue() -> None:
+    """Drain the restart-ready task queue in a daemon thread.
+
+    See src/atelier/task_queue.py.  Tasks pre-enqueued from the Session
+    pod (typically via scripts/enqueue_evolution_chain.py) run here
+    without operator involvement.  Idempotent: handlers detect
+    already-completed work and short-circuit.  Crash-safe: orphaned
+    ``running`` entries left behind by an AMP restart are recovered
+    back to ``pending`` on the next boot.
+
+    Non-blocking: the gateway is ready to serve requests immediately;
+    the queue drains in the background.  Failed tasks are recorded
+    under build/data/task_queue/failed/ for operator review; surface
+    via ``python -m atelier.task_queue list``.
+    """
+    try:
+        from atelier import task_handlers  # noqa: F401  — registers handlers
+        from atelier.task_queue import drain_async, list_handlers
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Task queue module unavailable: %s", exc)
+        return
+    _log.info(
+        "Task queue: %d handlers registered; draining pending tasks in "
+        "background", len(list_handlers()),
+    )
+    drain_async()
 
 
 def _discover_and_register_hive_sources() -> None:
