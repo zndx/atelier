@@ -956,12 +956,15 @@ def run_classification_pipeline(
         # var_26).  The original assumption that "the pattern doesn't
         # match production column names" was incorrect.
         #
-        # Gated by ``classify_exclude_reference_columns`` so UAT
-        # reviewers can demonstrate accuracy in both configurations
-        # (the toggle lives on the Status page).  Default ON; flag
-        # exists purely for the UAT synth corpus that motivated it
-        # and will be removed once that dataset is retired.
-        if cfg.classify_exclude_reference_columns and not _samples_from_hive:
+        # Reference-column exclusion is DISABLED at the pipeline level.
+        # The UAT synth corpus that motivated it pairs every natural-named
+        # column with an answer-key twin (attr_*, code_*, ...) whose numeric
+        # suffix encodes the expected code — but the current configuration
+        # requires ALL columns (both natural and reference) to flow through
+        # the classifier.  The flag (``cfg.classify_exclude_reference_columns``)
+        # and its Settings-overlay entry are retained as inert schema for
+        # back-compat with snapshots and external tooling, but never consulted.
+        if False and cfg.classify_exclude_reference_columns and not _samples_from_hive:
             from atelier.classify.meta_tagging_source import exclude_reference_columns
             pre_filter_cols = sum(len(t.columns) for t in all_samples)
             all_samples = exclude_reference_columns(all_samples)

@@ -357,11 +357,12 @@ class AtelierConfig:
     classify_sample_size: int = 50
     classify_column_sample_limit: int = 1000
     classify_tables_limit: int = 100
-    # Reference-column exclusion — see config/base.conf for the
-    # regex pattern and rationale.  Kept as a toggle so UAT reviewers
-    # can demonstrate classifier quality in both configurations on
-    # the synth corpus that motivated it.
-    classify_exclude_reference_columns: bool = True
+    # Reference-column exclusion — DISABLED.  All columns (natural and
+    # reference) are required for the current configuration.  The field
+    # is retained as inert schema so historical snapshots still parse
+    # and external tooling that reads the dataclass keeps working; the
+    # pipeline never consults this value (see classify/pipeline.py).
+    classify_exclude_reference_columns: bool = False
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_embedding_device: str = "auto"
     classify_embedding_batch_size: int = 32
