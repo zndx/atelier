@@ -213,6 +213,7 @@ def _install_fit_to_llm_catboost(
     samples_by_name: dict[str, ColumnSample],
     category_set: HierarchicalCategorySet,
     save_path: Path | None = None,
+    progress_ctx: dict | None = None,
 ) -> None:
     """Fit an in-memory CatBoost on LLM-labeled columns and install it.
 
@@ -280,6 +281,7 @@ def _install_fit_to_llm_catboost(
         iterations=int(cfg.classify_catboost_iterations),
         depth=int(cfg.classify_catboost_depth),
         learning_rate=float(cfg.classify_catboost_learning_rate),
+        progress_ctx=progress_ctx,
     )
     if classifier is None:
         return
@@ -856,8 +858,15 @@ def run_classification_pipeline(
                 fsm, run_id, FSMState.SAMPLING,
                 interval_s=heartbeat_interval, label="sampling",
             ) as sampling_ctx:
+                # Determinate progress for the nested UI tree:
+                # ``current`` + ``total`` populate phase_heartbeat's
+                # structured sub_phase block.  ``tables_sampled`` /
+                # ``current_table`` kept for backcompat with the
+                # flat-rendering UI fields.
+                sampling_ctx["total"] = len(table_names)
                 for i, tname in enumerate(table_names):
                     sampling_ctx["tables_sampled"] = i
+                    sampling_ctx["current"] = i + 1
                     sampling_ctx["current_table"] = tname
                     try:
                         ts = sample_table_metadata(
@@ -867,6 +876,7 @@ def run_classification_pipeline(
                     except Exception as exc:
                         logger.warning("Failed to sample %s: %s", tname, exc)
                 sampling_ctx["tables_sampled"] = len(table_names)
+                sampling_ctx["current"] = len(table_names)
 
         # Strip tables that shouldn't be classified (vocabulary tables,
         # internal test leftovers).  The annotations table IS the vocab,
@@ -1242,10 +1252,17 @@ def run_classification_pipeline(
                     fsm, run_id, FSMState.LLM_SWEEP,
                     interval_s=heartbeat_interval,
                     label="fit_to_llm_training",
-                ):
+                ) as catboost_ctx:
+                    # Thread the heartbeat ctx into CatBoost's training
+                    # loop so the per-iteration callback can populate
+                    # current/total — phase_heartbeat reads those into
+                    # the structured sub_phase block on each tick,
+                    # giving the UI a determinate bar throughout the
+                    # ~30-50 min training window.
                     _install_fit_to_llm_catboost(
                         cfg, state, samples_by_name, category_set,
                         save_path=results_dir / "catboost_fit_to_llm.cbm",
+                        progress_ctx=catboost_ctx,
                     )
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
@@ -1754,7 +1771,13 @@ def run_classification_pipeline(
                 cautious_audit = {"enabled": True, "error": str(exc)}
 
         # ── EVALUATING ───────────────────────────────────────────
+        # Two emissions bookend the phase: one at entry (so the UI's
+        # tree-builder gets a phase-started row immediately) and one
+        # after evaluation completes (carrying the final summary).
+        # Per-column granularity is overkill — the phase is seconds-
+        # to-tens-of-seconds on the largest corpora.
         fsm.advance(run_id, FSMState.EVALUATING, progress={
+            "phase": "scoring_start",
             "columns_fused": len(classifications),
         })
 

@@ -67,6 +67,7 @@ class CatBoostColumnClassifier:
         depth: int = 6,
         learning_rate: float = 0.1,
         verbose: int = 0,
+        progress_ctx: dict | None = None,
     ) -> CatBoostColumnClassifier:
         """Train CatBoost on structured per-feature inputs.
 
@@ -146,8 +147,32 @@ class CatBoostColumnClassifier:
             params["posterior_sampling"] = True
 
         self._model = CatBoostClassifier(**params)
+
+        # Build per-iteration progress callback when progress_ctx is
+        # supplied AND we're on CPU.  CatBoost's GPU trainer doesn't
+        # accept the Python callbacks API; on GPU the phase_heartbeat
+        # outer tick is the only signal (fine — GPU runs are fast).
+        fit_kwargs: dict = {}
+        if progress_ctx is not None and not use_gpu:
+            class _ProgressCallback:
+                """Writes per-iteration counts into the phase_heartbeat ctx
+                so the UI tree-builder renders a determinate sub-phase bar
+                while CatBoost trains.  No-op on GPU (callbacks unsupported).
+                """
+                def __init__(self, ctx: dict, total: int) -> None:
+                    self._ctx = ctx
+                    self._total = total
+                def after_iteration(self, info) -> bool:
+                    try:
+                        self._ctx["current"] = int(getattr(info, "iteration", 0)) + 1
+                        self._ctx["total"] = self._total
+                    except Exception:
+                        pass
+                    return True  # continue training
+            fit_kwargs["callbacks"] = [_ProgressCallback(progress_ctx, iterations)]
+
         try:
-            self._model.fit(pool)
+            self._model.fit(pool, **fit_kwargs)
         except Exception as exc:
             if use_gpu:
                 # GPU trainer can fail for version/feature combinations —
@@ -159,7 +184,11 @@ class CatBoostColumnClassifier:
                 params.pop("devices", None)
                 params["posterior_sampling"] = True
                 self._model = CatBoostClassifier(**params)
-                self._model.fit(pool)
+                # CPU fallback path: attach the progress callback (we're
+                # no longer on GPU so it's safe to install).
+                if progress_ctx is not None and "callbacks" not in fit_kwargs:
+                    fit_kwargs["callbacks"] = [_ProgressCallback(progress_ctx, iterations)]
+                self._model.fit(pool, **fit_kwargs)
             else:
                 raise
 

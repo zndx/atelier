@@ -194,6 +194,7 @@ def fit_catboost_to_llm_labels(
     iterations: int = 1000,
     depth: int = 6,
     learning_rate: float = 0.10,
+    progress_ctx: dict | None = None,
 ):
     """Fit an in-memory CatBoost on ``(ColumnFeatures, llm_predicted_code)`` pairs.
 
@@ -255,6 +256,7 @@ def fit_catboost_to_llm_labels(
     classifier.fit(
         feats, codes,
         iterations=iterations, depth=depth, learning_rate=learning_rate,
+        progress_ctx=progress_ctx,
     )
     return classifier
 
