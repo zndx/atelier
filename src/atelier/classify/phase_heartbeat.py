@@ -105,6 +105,21 @@ def phase_heartbeat(
             }
             if label:
                 payload["phase_label"] = label
+                # Structured sub-phase block consumed by the nested
+                # progress UI's tree-builder.  Reads ``current`` /
+                # ``total`` from the body's ``ctx`` when present —
+                # otherwise the row renders as indeterminate (spinner
+                # only, no bar).  See
+                # ``.claude/plans/lovely-doodling-badger.md`` (nested
+                # progress visibility plan).
+                sub_phase: dict[str, Any] = {
+                    "id": label,
+                    "elapsed_s": elapsed,
+                }
+                if "current" in ctx and "total" in ctx:
+                    sub_phase["current"] = ctx["current"]
+                    sub_phase["total"] = ctx["total"]
+                payload["sub_phase"] = sub_phase
             for k, v in ctx.items():
                 payload[f"phase_{k}"] = v
             fsm.advance(run_id, state, progress=payload)

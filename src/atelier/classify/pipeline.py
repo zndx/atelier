@@ -119,6 +119,10 @@ def _convergence_progress(
         "gap_threshold": boot_cfg.gap_threshold,
         "bel_floor": boot_cfg.bel_floor,
         "clarity_target": boot_cfg.clarity_target,
+        # Iteration ceiling for the UI's "Iteration N of M" banner.
+        # Surfaced here (not at each call site) so every revisit
+        # emission inherits it via the **_convergence_progress spread.
+        "iteration_max": boot_cfg.max_iterations,
         # Thesis core: the LLM-labeled fraction *f* in the operator's
         # thesis, rendered explicitly.
         "llm_fit_labels": len(state.labels),
