@@ -910,12 +910,14 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
         </div>
       )}
       {/* Nested progress tree (see .claude/plans/lovely-doodling-badger.md).
-          Focus-mode rendering: depth-0 Pipeline aggregate (overall
-          context) + the active depth-1 phase + its depth-2 sub-phase
-          row.  Pending and complete phases are intentionally hidden so
-          the operator's eye stays on the row that's actually moving. */}
+          Default focus-mode: depth-0 Pipeline aggregate + the active
+          depth-1 phase + its depth-2 sub-phase row.  Pending and
+          complete phases are hidden so the operator's eye stays on
+          the row that's actually moving.  Pass ``showLineage: true``
+          to render the full pipeline tree (e.g. for retrospective
+          views). */}
       {fsm && state !== "IDLE" && (() => {
-        const tasks = buildTaskTree(fsm, { hideInactive: true });
+        const tasks = buildTaskTree(fsm);
         if (tasks.length === 0) return null;
         return (
           <div style={{ marginTop: 12 }}>

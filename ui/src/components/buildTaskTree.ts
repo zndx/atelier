@@ -179,16 +179,19 @@ function statusFor(
 
 export interface BuildTaskTreeOptions {
   /**
-   * When true, omit depth-1 phase rows whose status is ``pending``,
-   * ``done``, or ``skipped``.  The depth-0 Pipeline aggregate row
-   * (overall context) and the active phase + its depth-2 sub-phase
-   * remain visible.  Error rows are kept (semantically active).
+   * When true, include depth-1 phase rows that are ``pending``,
+   * ``done``, or ``skipped`` — the full pipeline lineage.  When
+   * false (the default), only the depth-0 Pipeline aggregate row
+   * plus the active phase and its depth-2 sub-phase render.
    *
-   * Focus-mode UX — operators tracking a long-running phase don't
-   * need to see eight completed checkmarks above and four pending
-   * dots below the one row that's actually moving.
+   * The default is focus-mode: operators tracking a long-running
+   * phase don't need to see eight completed checkmarks above and
+   * four pending dots below the one row that's actually moving.
+   * Set ``showLineage: true`` for retrospective views (post-run
+   * timelines, debugging, etc.).  Error rows are always shown
+   * (semantically active).
    */
-  hideInactive?: boolean;
+  showLineage?: boolean;
 }
 
 /**
@@ -197,11 +200,9 @@ export interface BuildTaskTreeOptions {
  *
  * Tree shape:
  *   depth-0: aggregate pipeline-overall progress (one row, top)
- *   depth-1: per-FSM-phase rows
+ *   depth-1: per-FSM-phase rows (active-only by default;
+ *            full lineage when ``showLineage: true``)
  *   depth-2: active sub-phase row under the currently active phase
- *
- * With ``hideInactive: true``, only the depth-0 aggregate, the active
- * depth-1 phase, and its depth-2 sub-phase render.
  */
 export function buildTaskTree(
   fsm: FSMStatusLike | null,
@@ -245,7 +246,7 @@ export function buildTaskTree(
     },
   });
 
-  const hideInactive = options?.hideInactive === true;
+  const showLineage = options?.showLineage === true;
 
   for (const phase of PIPELINE_ORDER) {
     const status = statusFor(phase, currentState, isError);
@@ -255,10 +256,11 @@ export function buildTaskTree(
       continue;
     }
     const isActive = status === "active" || status === "error";
-    // Focus-mode: skip inactive depth-1 phase rows.  Sub-phase rows
-    // are already gated on isActive below, so they ride along
-    // automatically.
-    if (hideInactive && !isActive) {
+    // Default: focus-mode (skip inactive depth-1 phase rows).
+    // ``showLineage: true`` opts into the full pipeline tree.  Sub-
+    // phase rows are gated on isActive below, so they pass through
+    // automatically either way.
+    if (!showLineage && !isActive) {
       continue;
     }
     const determinate = isActive ? readDeterminate(phase, progress) : undefined;
