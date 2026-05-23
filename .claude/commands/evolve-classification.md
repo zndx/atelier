@@ -10,8 +10,11 @@ Runs **inside the App pod** where Qdrant (`127.0.0.1:6333`), PGlite
 (`127.0.0.1:5440`), and the live taxonomy collection are reachable.
 The Session pod does not have these on localhost.
 
-This skill chains five existing scripts and one optional transform-layer
-step (deferred until the apply path is built):
+This skill chains seven scripts end-to-end and produces a change
+management guide as its operator deliverable.  Roll-forward only:
+every apply produces a new versioned Qdrant collection; previous
+collections become `stale` (not archived/deleted) via the registry's
+atomic demote-then-promote.
 
 | Phase | Script | Purpose |
 |---|---|---|
@@ -19,9 +22,9 @@ step (deferred until the apply path is built):
 | 2 | `scripts/update_reference_from_xlsx.py` | Absorb reviewer corrections |
 | 3 | `scripts/audit_cosine_signal.py --live` | Cosine signal quality baseline |
 | 4 | `scripts/enrichment_evolution.py --llm` | Reflective rewrite proposals |
-| 5 | *(transform layer — deferred)* | Apply proposals + re-encode |
-| 6 | (re-score) | Verify against drift-stable reference |
-| 7 | (report) | Summarize state, deltas, next steps |
+| 5 | `scripts/apply_enrichment_transforms.py` | Apply forward → new Qdrant collection |
+| 6 | `scripts/verify_transform_apply.py` | Subset deltas on affected columns |
+| 7 | `scripts/render_change_management_guide.py` | Operator change management guide |
 
 ## Argument: $ARGUMENTS
 
@@ -459,94 +462,126 @@ Phase 5.
 
 ---
 
-## Phase 5 — Transform-layer application *(deferred)*
+## Phase 5 — Apply enrichment transforms (roll forward)
 
-**This phase is not yet implemented.** The transform-layer machinery
-that converts accepted enrichment proposals into structured records,
-re-encodes the affected ColBERT vectors, and writes to a versioned
-Qdrant collection is still in design. See conversation 2026-05-23 for
-the design sketch.
+**Skip under `reference-only` or `audit-only` scope; skip when Phase 4
+produced no accepted proposals.**
 
-Until built, Phase 5 prints a placeholder report and exits without
-applying. The operator can review Phase 4 proposals manually in
-`build/enrichment_evolution/cohort_<cohort>_v<N>/nodes/` and apply via
-whatever side-channel they have for editing the enrichment payloads
-(direct Qdrant payload PATCH, regeneration via `enrich_annotations.py`,
-etc.).
+Reads accepted proposals from Phase 4's cohort artifact, derives a new
+versioned augmentation_version + target collection name, registers a
+`building` row in `taxonomy_registry`, scrolls the current collection,
+applies transforms to accepted codes (re-encodes via ColBERT), upserts
+into the new collection, then atomically promotes — previous `current`
+becomes `stale` (not archived/deleted).
 
-```python
-print("\nPhase 5: transform layer not yet wired.")
-print(f"  Review proposals at: {state['phases']['4_evolution']['nodes_dir']}/")
-print(f"  Pick acceptance set; apply via your enrichment-edit pathway.")
-state["phases"]["5_apply"] = {"status": "deferred"}
-state_path.write_text(json.dumps(state, indent=2))
-```
-
-When Phase 5 lands: it should snapshot the current Qdrant collection
-(versioned), apply accepted proposals via re-encoding, swap the
-"current" pointer in `taxonomy_registry` only after Phase 6 verifies
-no regression.
-
----
-
-## Phase 6 — Verification re-score *(partial, baseline-only until Phase 5)*
-
-**Until Phase 5 is built, this phase only re-scores the current
-classifications.json against the (possibly updated) reference.** That
-captures the lift from Phase 2 alone, not from enrichment evolution.
+**Cost: ~$0 LLM, ~30s ColBERT re-encode per ~32 cohort members.**
 
 ```python
-ref_path = Path("build/data/agent_mediated/agent_mediated.json")
-ref = json.loads(ref_path.read_text())
+import subprocess
+cohort_dir = state["phases"]["4_evolution"]["nodes_dir"].replace("/nodes", "")
+dry_run_flag = ["--dry-run"] if dry_run else []
+cmd = [
+    "python", "scripts/apply_enrichment_transforms.py", cohort_dir,
+] + dry_run_flag
+result = subprocess.run(cmd, capture_output=True, text=True)
+print(result.stdout)
+if result.returncode != 0:
+    print(result.stderr)
+    sys.exit(3)
 
-# Extract captured codes (dual-format)
-ref_codes = {}
-for qkey, entry in ref.items():
-    if isinstance(entry, dict) and entry.get("code"):
-        ref_codes[qkey] = entry["code"]
-
-cls = json.loads(cls_path.read_text())
-scorable = 0
-strict = 0
-for c in cls:
-    qkey = f"{c.get('table_name')}.{c.get('column_name')}"
-    r = ref_codes.get(qkey)
-    if not r: continue
-    scorable += 1
-    if c.get("predicted_code") == r:
-        strict += 1
-pct = 100 * strict / max(scorable, 1)
-print(f"\nDrift-stable re-score: {strict}/{scorable} = {pct:.2f}%")
-
-state["phases"]["6_rescore"] = {
-    "status": "complete_baseline_only",
-    "strict": strict,
-    "scorable": scorable,
-    "strict_pct": pct,
-    "note": "Phase 5 not yet wired; this is reference-update-only lift",
+# Discover the manifest just produced (most recent under manifests/)
+from pathlib import Path as _P
+mdir = _P("build/data/transforms/manifests")
+mpath = sorted(mdir.glob(f"{cohort_dir.split('/')[-1]}_*.json"),
+               key=lambda p: p.stat().st_mtime)[-1]
+manifest = json.loads(mpath.read_text())
+state["phases"]["5_apply"] = {
+    "status": "complete",
+    "manifest_path": str(mpath),
+    "target_collection": manifest.get("target_collection"),
+    "registry_id": manifest.get("target_registry_id"),
+    "accepted_n": manifest.get("counts", {}).get("accepted"),
+    "rewritten_n": manifest.get("counts", {}).get("rewritten"),
+    "skipped_n": manifest.get("counts", {}).get("skipped_missing"),
+    "promoted": manifest.get("promoted"),
+    "dry_run": dry_run,
 }
 state_path.write_text(json.dumps(state, indent=2))
+print(f"\nPhase 5 complete. Manifest: {mpath}")
 ```
 
-When Phase 5 lands: this phase should re-encode and re-run the pipeline
-on the affected subset (cheap: just the columns whose targeted-nodes
-changed), then compute the delta over the Phase 6 baseline captured
-above. That's the verifier signal that drives Phase 5's per-transform
-accept/reject loop.
+After Phase 5: the new collection is `current` and the next pipeline
+run will use it.  If `--dry-run`, the manifest is written but no Qdrant
+or registry writes happened.
 
 ---
 
-## Phase 7 — Report
+## Phase 6 — Subset verification
+
+**Skip under `reference-only` or `audit-only` scope; skip when Phase 5
+was dry-run or skipped.**
+
+Runs `verify_transform_apply.py` to compute concrete deltas on the
+columns whose baseline cosine top-1 was a transformed target.  Not a
+full pipeline re-run — that's a separate user-triggered action.
+
+```python
+import subprocess
+manifest_path = state["phases"]["5_apply"]["manifest_path"]
+cmd = [
+    "python", "scripts/verify_transform_apply.py", manifest_path,
+    "--baseline-run", f"build/results/{run_id}",
+]
+result = subprocess.run(cmd, capture_output=True, text=True)
+print(result.stdout)
+if result.returncode != 0:
+    print(result.stderr)
+    sys.exit(3)
+
+# Discover the verify file
+from pathlib import Path as _P
+import json as _json
+manifest = _json.loads(_P(manifest_path).read_text())
+vpath = _P("build/data/transforms") / f"verify_{manifest['manifest_id']}.json"
+verify = _json.loads(vpath.read_text())
+counts = verify.get("counts", {})
+state["phases"]["6_verify"] = {
+    "status": "complete",
+    "verify_path": str(vpath),
+    "n_columns_affected": counts.get("n_columns_affected"),
+    "n_top1_changed": counts.get("n_top1_changed"),
+    "n_rank_improved": counts.get("n_rank_improved"),
+    "n_rank_regressed": counts.get("n_rank_regressed"),
+    "subset_match_delta": counts.get("subset_match_delta"),
+}
+state_path.write_text(json.dumps(state, indent=2))
+print(f"\nPhase 6 complete. Verify: {vpath}")
+```
+
+---
+
+## Phase 7 — Change management guide
+
+Invokes `render_change_management_guide.py` to produce the operator
+deliverable: a markdown report with what was applied, material deltas,
+production state (registry + Qdrant lineage), and three forward-only
+remediation options (corrective forward, inverse-transform-as-forward,
+continue forward).  When Phase 5 / Phase 6 were skipped (under
+`reference-only` / `audit-only` scopes), the guide degrades gracefully
+and prints what state it does have.
 
 ```python
 print("\n" + "=" * 60)
 print(f"Evolve-classification report — run {run_id}")
 print("=" * 60)
+
+# State summary
 for k in sorted(state["phases"].keys()):
     p = state["phases"][k]
-    print(f"\n{k}:  status={p['status']}")
+    print(f"\n{k}:  status={p.get('status')}")
     for kk, vv in p.items():
-        if kk in ("status",): continue
+        if kk == "status":
+            continue
         if isinstance(vv, dict):
             print(f"  {kk}:")
             for kkk, vvv in vv.items():
@@ -554,7 +589,25 @@ for k in sorted(state["phases"].keys()):
         else:
             print(f"  {kk}: {vv}")
 
-# Recommended next moves
+# Invoke the change management guide renderer if Phase 5 produced a manifest
+guide_path = None
+if "5_apply" in state["phases"] and state["phases"]["5_apply"].get("manifest_path"):
+    import subprocess
+    manifest_path = state["phases"]["5_apply"]["manifest_path"]
+    cmd = ["python", "scripts/render_change_management_guide.py", manifest_path]
+    if "6_verify" in state["phases"]:
+        cmd.extend(["--verify", state["phases"]["6_verify"]["verify_path"]])
+    if "3_audit" in state["phases"]:
+        cmd.extend(["--audit", state["phases"]["3_audit"]["audit_path"]])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+    # Derive guide path from manifest path
+    from pathlib import Path as _P
+    guide_path = str(_P(manifest_path).with_suffix(".md"))
+
+# Recommended next moves (heuristics not covered by the guide itself)
 print("\nRecommended next moves:")
 if "2_reference_update" in state["phases"]:
     p = state["phases"]["2_reference_update"]
@@ -562,18 +615,29 @@ if "2_reference_update" in state["phases"]:
     if queues:
         print("  - Review the manual_review queue + apply accepted items")
         print("  - Triage the taxonomy_review queue with the ontology curator")
-if "4_evolution" in state["phases"]:
-    p = state["phases"]["4_evolution"]
-    print(f"  - Review {p['n_nodes']} enrichment proposals at {p['nodes_dir']}/")
-    print( "  - When Phase 5 transform layer lands, apply the acceptance set + verify")
+if "5_apply" in state["phases"]:
+    p = state["phases"]["5_apply"]
+    if p.get("promoted"):
+        print(f"  - New `current` collection {p['target_collection']!r} is live; "
+              f"next pipeline run will use it")
+    if guide_path:
+        print(f"  - Change management guide: {guide_path}")
 if "3_audit" in state["phases"]:
     p = state["phases"]["3_audit"]
-    if p.get("cross_subtree_pct", 0) < 40:
-        print("  - Cross-subtree rate is low; consider shifting focus to SVM / CatBoost work")
+    if (p.get("cross_subtree_pct") or 0) < 40:
+        print("  - Cross-subtree rate is low; consider shifting focus to "
+              "SVM / CatBoost work")
     if (p.get("top_centroid_pct") or 0) > 15:
-        print(f"  - Centroid bias on {p['top_centroid_code']} is the highest-leverage rewrite target")
+        print(f"  - Centroid bias on {p['top_centroid_code']} is the "
+              f"highest-leverage rewrite target")
 
-print("\nState persisted to", state_path)
+state["phases"]["7_report"] = {
+    "status": "complete",
+    "guide_path": guide_path,
+}
+state_path.write_text(json.dumps(state, indent=2))
+
+print(f"\nState persisted to {state_path}")
 ```
 
 ---
@@ -595,9 +659,9 @@ fresh: delete the entire `build/evolution_state/<run_id>/` directory.
     "2_reference_update": {"status": "complete", "xlsx": "...", ...},
     "3_audit": {"status": "complete", "productive_pct": ..., ...},
     "4_evolution": {"status": "complete", "cohort": "umbrellas", ...},
-    "5_apply": {"status": "deferred"},
-    "6_rescore": {"status": "complete_baseline_only", ...},
-    "7_report": {"status": "complete"}
+    "5_apply": {"status": "complete", "manifest_path": "...", "target_collection": "...", "promoted": true},
+    "6_verify": {"status": "complete", "verify_path": "...", "subset_match_delta": +N},
+    "7_report": {"status": "complete", "guide_path": "..."}
   },
   "decisions": {}
 }
@@ -611,10 +675,10 @@ fresh: delete the entire `build/evolution_state/<run_id>/` directory.
 | 2 — reference update (45 rows × Opus) | ~$1-2 | ~3-5 min |
 | 3 — audit (live K=25) | ~$0 (Qdrant only) | ~10-30s |
 | 4 — evolution (32 nodes × Opus) | ~$1-2 | ~3-5 min |
-| 5 — transform apply (deferred) | TBD | TBD |
-| 6 — rescore (baseline-only until Phase 5) | $0 | <5s |
-| 7 — report | $0 | <5s |
-| **Full run** | **~$2-4** | **~8-15 min** |
+| 5 — apply transforms (ColBERT re-encode + Qdrant upsert) | ~$0 LLM | ~30-60s |
+| 6 — verify (subset Qdrant queries) | ~$0 | ~30-60s |
+| 7 — change management guide | $0 | <5s |
+| **Full run** | **~$2-4** | **~10-20 min** |
 
 ## Failure modes + recovery
 
@@ -624,7 +688,15 @@ fresh: delete the entire `build/evolution_state/<run_id>/` directory.
 - **Reference file corrupted by interrupted apply** → restore from
   `agent_mediated.json.bak` (always written before any apply).
 - **Qdrant unreachable** → Phase 3 live mode degrades to Audits 1+3
-  only. Phase 4 doesn't need Qdrant. Phase 5 (when built) does.
+  only.  Phase 5 fails fast (it needs Qdrant to write the new
+  collection).  Phase 6 needs Qdrant for the rank queries.
+- **Encoder model drift** → Phase 5 verifies `get_encoder().model_name`
+  matches the source collection's `embedding_model` and aborts before
+  any writes if mismatched.  A re-encode-all transform is a future
+  cohort kind, not a Phase 5 capability.
+- **Partial Phase 5 crash before promote** → re-running Phase 5 reuses
+  the existing `building` row for the target collection (resume-safe),
+  re-scrolls source, and promotes on completion.  No duplicate rows.
 - **Cost overrun** → only halts when estimated phase cost exceeds $20.
   Lower-cost overruns are announced (>$5) but not gated; the SDK
   proceeds and records the warning in state.  Under autonomous mode
@@ -632,15 +704,22 @@ fresh: delete the entire `build/evolution_state/<run_id>/` directory.
 
 ## What this skill does NOT do
 
-- Does not invoke a full pipeline re-run (that's `bin/start-app.sh`
-  territory + the operator restart workflow).
+- Does not invoke a full pipeline re-run.  Phase 5 produces a new
+  `current` collection; the *next* pipeline run picks it up via the
+  bridge's `get_current_taxonomy_collection`.  Trigger that run via
+  the Status UI or the gateway's classify API.
 - Does not write to `default.annotations` — that source is immutable;
-  all curation goes via the transform layer (Phase 5, deferred).
-- Does not promote a new Qdrant collection to "current" — that's a
-  taxonomy_registry write that Phase 5 will own once built.
+  all curation goes via the transform layer.  Phase 5's transforms
+  overlay on a *scroll-and-copy* of the current collection, leaving
+  the source taxonomy untouched.
+- Does not delete or archive stale collections.  Roll-forward only:
+  previous `current` rows transition to `stale` via the registry's
+  atomic demote-then-promote and stay queryable for forensics.  A
+  separate operator-confirmed prune skill (out of scope here) is the
+  only path that removes a stale collection's Qdrant data.
 - Does not curate the agent-mediated reference from scratch — use
-  `/curate-agent-mediated` for that. This skill only absorbs reviewer
-  corrections via xlsx feedback.
+  `/curate-agent-mediated` for that.  This skill only absorbs reviewer
+  corrections via xlsx feedback (Phase 2).
 
 ## Related skills
 
