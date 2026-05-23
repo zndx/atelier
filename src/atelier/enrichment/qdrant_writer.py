@@ -302,15 +302,96 @@ def compose_annotation_text(payload: dict) -> str:
 
 
 def collection_name_for(taxonomy_id: str, augmentation_version: str) -> str:
-    """Compute the Qdrant collection name for a (taxonomy, version) pair.
+    """Compute the legacy Qdrant collection name for a (taxonomy, version) pair.
 
     Convention: ``annotations_<taxonomy_id>_<augmentation_version>``.
     Non-alphanumeric characters in either component are replaced with
     underscores to satisfy Qdrant's naming rules.
+
+    Retained for legacy enrichment paths.  New collections produced by
+    the evolve-classification roll-forward loop use ``collection_name_v2``
+    (UUIDv7-suffixed, opaque-identifier-style names whose semantic
+    versioning lives in the ``taxonomy_registry.augmentation_version``
+    field rather than embedded in the name).
     """
     safe_tax = "".join(c if c.isalnum() else "_" for c in taxonomy_id).strip("_")
     safe_ver = "".join(c if c.isalnum() else "_" for c in augmentation_version).strip("_")
     return f"annotations_{safe_tax}_{safe_ver}"
+
+
+# Qdrant collection name limit per docs.  We pre-check rather than
+# letting a confusing 4xx surface mid-apply.
+_QDRANT_NAME_MAX = 255
+
+
+def _normalize_name_component(s: str, *, what: str) -> str:
+    """Normalize one naming component to ``[A-Za-z0-9-]+``.
+
+    Maps ``.``, ``_``, ``/`` to ``-`` (the canonical separator inside a
+    component).  Raises ``ValueError`` on un-normalizable characters
+    (whitespace, punctuation outside the allowed set) or empty result.
+    The fail-fast posture is intentional — we'd rather refuse a build
+    than ship a collection name that Qdrant later rejects mid-iteration.
+    """
+    if not isinstance(s, str) or not s.strip():
+        raise ValueError(f"{what} must be a non-empty string, got {s!r}")
+    out: list[str] = []
+    for c in s:
+        if c.isalnum() or c == "-":
+            out.append(c)
+        elif c in (".", "_", "/", " "):
+            out.append("-")
+        else:
+            raise ValueError(
+                f"{what}={s!r}: character {c!r} cannot be normalized "
+                f"(allowed: alphanumerics, '-'; mapped: '.', '_', '/', ' ')"
+            )
+    result = "".join(out).strip("-")
+    # Collapse runs of hyphens introduced by the mapping above
+    while "--" in result:
+        result = result.replace("--", "-")
+    if not result:
+        raise ValueError(f"{what}={s!r} normalized to empty string")
+    return result
+
+
+def collection_name_v2(*, connection: str, source_table: str,
+                      uuid_v7: str | None = None) -> str:
+    """Generate an opaque UUIDv7-suffixed collection name.
+
+    Convention: ``<connection>_<source_table>_<uuidv7>``.  Each
+    component is normalized to ``[A-Za-z0-9-]`` (dots and underscores
+    in the source table become hyphens — e.g. ``default.annotations``
+    → ``default-annotations``).  Components are joined with ``_``.
+
+    The collection name is *opaque*: it carries no semantic versioning.
+    Lineage and meaning live in the taxonomy_registry row's
+    ``augmentation_version`` and ``built_at`` fields, plus the manifest
+    artifacts under ``build/data/transforms/``.
+
+    Args:
+        connection: data-source connection identifier (e.g. ``"hive-poc"``).
+        source_table: fully-qualified source table (e.g. ``"default.annotations"``).
+        uuid_v7: pre-generated UUIDv7 string; when omitted, one is
+            generated via ``uuid_utils.uuid7()``.
+
+    Raises:
+        ValueError: if any component fails normalization, or if the
+            resulting name exceeds Qdrant's 255-character limit.
+    """
+    conn_norm = _normalize_name_component(connection, what="connection")
+    tbl_norm = _normalize_name_component(source_table, what="source_table")
+    if uuid_v7 is None:
+        import uuid_utils
+        uuid_v7 = str(uuid_utils.uuid7())
+    uuid_norm = _normalize_name_component(uuid_v7, what="uuid_v7")
+    name = f"{conn_norm}_{tbl_norm}_{uuid_norm}"
+    if len(name) > _QDRANT_NAME_MAX:
+        raise ValueError(
+            f"collection name length {len(name)} exceeds Qdrant's "
+            f"{_QDRANT_NAME_MAX}-character limit: {name!r}"
+        )
+    return name
 
 
 def ensure_collection(

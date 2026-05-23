@@ -230,6 +230,9 @@ def main() -> int:
         help="Register building row + upsert points but don't promote")
     parser.add_argument("--allow-duplicate", action="store_true",
         help="Override duplicate-manifest detection")
+    parser.add_argument("--annotations-connection", default="hive-poc",
+        help="Data-source connection used to name the new Qdrant "
+             "collection (default: hive-poc)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -293,8 +296,16 @@ def main() -> int:
     records = cohort.get("candidates")
     # candidates.json shape varies (older shape uses "records"; newer uses
     # "candidates" dict keyed by code).  Normalize.
+    #
+    # CRITICAL: when the shape is a dict, the candidate's CODE is the dict
+    # KEY — not a field on the value.  Dropping the key loses the only
+    # identifier we have for matching against Qdrant payloads.  Inject it
+    # back as ``target_code`` on each record so the downstream normalization
+    # finds it (r.get("code") or r.get("target_code") in the loop below).
+    # First production run lost all 32 rewrites because of this — see
+    # commit log for cohort_umbrellas_v3_20260523T181519.
     if isinstance(records, dict):
-        records = list(records.values())
+        records = [{**v, "target_code": k} for k, v in records.items()]
     elif records is None:
         records = cohort.get("records", [])
     if not records:
@@ -345,18 +356,58 @@ def main() -> int:
         sys.exit("Nothing to apply (acceptance set is empty).  Adjust "
                  "--acceptance or rebuild the cohort.")
 
-    # ── Derive target collection name + manifest id ─────────────
+    # ── Derive target collection name + aug_version ──────────────
+    #
+    # Naming convention (Atelier 2026-05-23+):
+    #   collection name: <connection>_<source_table_norm>_<uuid7>  (opaque)
+    #   augmentation_version: <source_aug>_evolve_<cohort_tag>     (semantic)
+    #
+    # The collection name carries no semantics — lineage and meaning
+    # live in the registry's augmentation_version + manifest artifacts.
+    # Re-applying the same cohort produces a new collection (new uuid7)
+    # and an auto-suffixed aug_version (..._attemptN) to satisfy the
+    # taxonomy_registry's (taxonomy_id, augmentation_version) compound
+    # uniqueness constraint without violating roll-forward.
     cohort_version_tag = cohort_name.replace("cohort_", "").replace("/", "_")
-    new_aug_version = args.target_collection or f"{source_aug}_evolve_{cohort_version_tag}"
+    base_aug = args.target_collection or f"{source_aug}_evolve_{cohort_version_tag}"
+
+    # Auto-suffix attemptN when the base aug_version already exists in
+    # the registry — covers the bug-fix retry path without operator
+    # intervention.
+    if not args.dry_run:
+        existing_versions = {
+            r["augmentation_version"]
+            for r in dao.list_taxonomy_collections(
+                taxonomy_id="default", include_archived=True,
+            )
+        }
+        new_aug_version = base_aug
+        attempt = 1
+        while new_aug_version in existing_versions:
+            attempt += 1
+            new_aug_version = f"{base_aug}_attempt{attempt}"
+        if attempt > 1:
+            print(f"Auto-suffix: aug_version {base_aug!r} already in "
+                  f"registry; using {new_aug_version!r}")
+    else:
+        new_aug_version = base_aug
+
     from atelier.enrichment.qdrant_writer import (
-        collection_name_for, ensure_collection, upsert_point, point_cache_key,
+        collection_name_v2, ensure_collection, upsert_point, point_cache_key,
         EnrichedAnnotationPoint, AnnotationVectors, source_row_hash,
         COLBERT_VECTOR_NAME,
     )
+    source_table_for_naming = (
+        source.get("source_table") or "default.annotations"
+    )
     target_collection = (
         args.target_collection
-        if args.target_collection and args.target_collection.startswith("annotations_")
-        else collection_name_for("default", new_aug_version)
+        if args.target_collection and not args.target_collection.startswith(
+            (source_aug, "v"))
+        else collection_name_v2(
+            connection=args.annotations_connection,
+            source_table=source_table_for_naming,
+        )
     )
     accepted_codes_list = [r.get("target_code") for r in accepted if r.get("target_code")]
     manifest_id = compute_manifest_id(cohort_dir, accepted_codes_list, new_aug_version)
