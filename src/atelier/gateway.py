@@ -108,7 +108,22 @@ async def _lifespan(app: FastAPI):
                 pass
 
     cleanup_task = asyncio.create_task(_session_cleanup_loop())
+
+    # Forensics sampler: append memory/load/FSM/queue/RSS state to
+    # .app/forensics/samples.jsonl every 10s (override via
+    # ATELIER_FORENSICS_INTERVAL_S).  Survives across runs (appends;
+    # rotates at 50 MB).  Reader: .app/forensics/digest.py.  See
+    # src/atelier/forensics.py.
+    try:
+        from atelier import forensics as _forensics
+        forensics_task = _forensics.start_sampling_task()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Forensics sampler skipped: %s", exc)
+        forensics_task = None
+
     yield
+    if forensics_task is not None:
+        forensics_task.cancel()
     seed_task.cancel()
     cleanup_task.cancel()
 
