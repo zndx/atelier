@@ -230,9 +230,6 @@ def main() -> int:
         help="Register building row + upsert points but don't promote")
     parser.add_argument("--allow-duplicate", action="store_true",
         help="Override duplicate-manifest detection")
-    parser.add_argument("--annotations-connection", default="hive-poc",
-        help="Data-source connection used to name the new Qdrant "
-             "collection (default: hive-poc)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -359,58 +356,47 @@ def main() -> int:
     # ── Derive target collection name + aug_version ──────────────
     #
     # Naming convention (Atelier 2026-05-23+):
-    #   collection name: <connection>_<source_table_norm>_<uuid7>  (opaque)
-    #   augmentation_version: <source_aug>_evolve_<cohort_tag>     (semantic)
+    #   * collection name:    <source_table_norm>_<uuid7>
+    #   * augmentation_version: <uuid7>  (same UUID as in the name)
     #
-    # The collection name carries no semantics — lineage and meaning
-    # live in the registry's augmentation_version + manifest artifacts.
-    # Re-applying the same cohort produces a new collection (new uuid7)
-    # and an auto-suffixed aug_version (..._attemptN) to satisfy the
-    # taxonomy_registry's (taxonomy_id, augmentation_version) compound
-    # uniqueness constraint without violating roll-forward.
-    cohort_version_tag = cohort_name.replace("cohort_", "").replace("/", "_")
-    base_aug = args.target_collection or f"{source_aug}_evolve_{cohort_version_tag}"
-
-    # Auto-suffix attemptN when the base aug_version already exists in
-    # the registry — covers the bug-fix retry path without operator
-    # intervention.
-    if not args.dry_run:
-        existing_versions = {
-            r["augmentation_version"]
-            for r in dao.list_taxonomy_collections(
-                taxonomy_id="default", include_archived=True,
-            )
-        }
-        new_aug_version = base_aug
-        attempt = 1
-        while new_aug_version in existing_versions:
-            attempt += 1
-            new_aug_version = f"{base_aug}_attempt{attempt}"
-        if attempt > 1:
-            print(f"Auto-suffix: aug_version {base_aug!r} already in "
-                  f"registry; using {new_aug_version!r}")
-    else:
-        new_aug_version = base_aug
-
+    # UUIDv7 IS the version: monotonic, unique, naturally ordered by
+    # generation time.  No ``_evolve_<cohort>`` suffix, no ``_attemptN``
+    # counter — re-applying the same cohort just generates a new uuid7
+    # and produces a new collection.  Lineage lives in the registry
+    # (built_at + augmentation_version) and the per-transform records,
+    # not in the collection name.
     from atelier.enrichment.qdrant_writer import (
         collection_name_v2, ensure_collection, upsert_point, point_cache_key,
         EnrichedAnnotationPoint, AnnotationVectors, source_row_hash,
         COLBERT_VECTOR_NAME,
     )
-    source_table_for_naming = (
-        source.get("source_table") or "default.annotations"
-    )
-    target_collection = (
-        args.target_collection
-        if args.target_collection and not args.target_collection.startswith(
-            (source_aug, "v"))
-        else collection_name_v2(
-            connection=args.annotations_connection,
-            source_table=source_table_for_naming,
+    import uuid_utils as _uuid_utils
+    source_table_for_naming = source.get("source_table")
+    if not source_table_for_naming:
+        sys.exit(
+            "source row is missing 'source_table'; cannot derive a "
+            "collection name (expected connection-qualified identifier "
+            "like 'hive-poc/default.annotations')"
         )
+    new_uuid_v7 = str(_uuid_utils.uuid7())
+    target_collection = args.target_collection or collection_name_v2(
+        source_table=source_table_for_naming,
+        uuid_v7=new_uuid_v7,
     )
+    # Aug_version equals the uuid7 — the registry's compound uniqueness
+    # constraint (taxonomy_id, augmentation_version) is satisfied by
+    # the uuid7's monotonic uniqueness.  If --target-collection is an
+    # operator-supplied override, we still use the freshly generated
+    # uuid7 for aug_version (the two diverge only when the operator
+    # intentionally bypasses default naming).
+    new_aug_version = new_uuid_v7
     accepted_codes_list = [r.get("target_code") for r in accepted if r.get("target_code")]
     manifest_id = compute_manifest_id(cohort_dir, accepted_codes_list, new_aug_version)
+    # Duplicate-manifest detection is vestigial under uuid7-as-version
+    # (manifest_id is uniquely derived from a fresh uuid7 each run, so
+    # collisions are impossible by construction).  Kept as a defensive
+    # guard against future shape changes; --allow-duplicate is honored
+    # but never expected to fire.
     dup = find_duplicate_manifest(manifest_id)
     if dup and not args.allow_duplicate:
         sys.exit(

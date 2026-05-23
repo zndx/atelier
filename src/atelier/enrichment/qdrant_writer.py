@@ -325,13 +325,20 @@ _QDRANT_NAME_MAX = 255
 
 
 def _normalize_name_component(s: str, *, what: str) -> str:
-    """Normalize one naming component to ``[A-Za-z0-9-]+``.
+    """Normalize one naming component to ``[A-Za-z0-9_-]+``.
 
-    Maps ``.``, ``_``, ``/`` to ``-`` (the canonical separator inside a
-    component).  Raises ``ValueError`` on un-normalizable characters
-    (whitespace, punctuation outside the allowed set) or empty result.
-    The fail-fast posture is intentional — we'd rather refuse a build
-    than ship a collection name that Qdrant later rejects mid-iteration.
+    Two-tier separator mapping preserves the semantic boundary between
+    sub-parts of a compound identifier:
+
+    * ``/`` and space → ``_``  (structural boundary, e.g. the slash
+      between connection and schema.table in ``hive-poc/default.annotations``)
+    * ``.`` and ``_`` → ``-``  (intra-part punctuation, e.g. the dot
+      between schema and table)
+
+    Raises ``ValueError`` on un-normalizable characters (punctuation
+    outside the allowed set) or empty result.  The fail-fast posture is
+    intentional — we'd rather refuse a build than ship a collection
+    name that Qdrant later rejects mid-iteration.
     """
     if not isinstance(s, str) or not s.strip():
         raise ValueError(f"{what} must be a non-empty string, got {s!r}")
@@ -339,30 +346,41 @@ def _normalize_name_component(s: str, *, what: str) -> str:
     for c in s:
         if c.isalnum() or c == "-":
             out.append(c)
-        elif c in (".", "_", "/", " "):
+        elif c in ("/", " "):
+            out.append("_")
+        elif c in (".", "_"):
             out.append("-")
         else:
             raise ValueError(
                 f"{what}={s!r}: character {c!r} cannot be normalized "
-                f"(allowed: alphanumerics, '-'; mapped: '.', '_', '/', ' ')"
+                f"(allowed: alphanumerics, '-'; mapped: '/', ' ' → '_'; "
+                f"'.', '_' → '-')"
             )
-    result = "".join(out).strip("-")
-    # Collapse runs of hyphens introduced by the mapping above
+    result = "".join(out).strip("-_")
+    # Collapse runs of identical separators introduced by the mapping
     while "--" in result:
         result = result.replace("--", "-")
+    while "__" in result:
+        result = result.replace("__", "_")
     if not result:
         raise ValueError(f"{what}={s!r} normalized to empty string")
     return result
 
 
-def collection_name_v2(*, connection: str, source_table: str,
+def collection_name_v2(*, source_table: str,
                       uuid_v7: str | None = None) -> str:
     """Generate an opaque UUIDv7-suffixed collection name.
 
-    Convention: ``<connection>_<source_table>_<uuidv7>``.  Each
-    component is normalized to ``[A-Za-z0-9-]`` (dots and underscores
-    in the source table become hyphens — e.g. ``default.annotations``
-    → ``default-annotations``).  Components are joined with ``_``.
+    Convention: ``<source_table>_<uuidv7>``.  ``source_table`` is
+    expected to be the fully-qualified, connection-prefixed identifier
+    (e.g. ``"hive-poc/default.annotations"``) — it is already compound
+    by requirement, so the connection is not passed separately.
+    Each component is normalized to ``[A-Za-z0-9_-]``: ``/`` and
+    spaces become ``_`` (preserving the structural connection/table
+    boundary), while ``.`` and ``_`` inside a part become ``-``.
+    Example: ``hive-poc/default.annotations`` →
+    ``hive-poc_default-annotations``.  The source_table and the uuid
+    are joined with ``_``.
 
     The collection name is *opaque*: it carries no semantic versioning.
     Lineage and meaning live in the taxonomy_registry row's
@@ -370,8 +388,8 @@ def collection_name_v2(*, connection: str, source_table: str,
     artifacts under ``build/data/transforms/``.
 
     Args:
-        connection: data-source connection identifier (e.g. ``"hive-poc"``).
-        source_table: fully-qualified source table (e.g. ``"default.annotations"``).
+        source_table: fully-qualified, connection-prefixed source table
+            identifier (e.g. ``"hive-poc/default.annotations"``).
         uuid_v7: pre-generated UUIDv7 string; when omitted, one is
             generated via ``uuid_utils.uuid7()``.
 
@@ -379,13 +397,12 @@ def collection_name_v2(*, connection: str, source_table: str,
         ValueError: if any component fails normalization, or if the
             resulting name exceeds Qdrant's 255-character limit.
     """
-    conn_norm = _normalize_name_component(connection, what="connection")
     tbl_norm = _normalize_name_component(source_table, what="source_table")
     if uuid_v7 is None:
         import uuid_utils
         uuid_v7 = str(uuid_utils.uuid7())
     uuid_norm = _normalize_name_component(uuid_v7, what="uuid_v7")
-    name = f"{conn_norm}_{tbl_norm}_{uuid_norm}"
+    name = f"{tbl_norm}_{uuid_norm}"
     if len(name) > _QDRANT_NAME_MAX:
         raise ValueError(
             f"collection name length {len(name)} exceeds Qdrant's "
