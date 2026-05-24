@@ -81,11 +81,19 @@ gateway:
 #
 # Both `agent` and `--agent` forms are accepted for ergonomic flexibility.
 #
-# Invocation uses `uv run --frozen` so the lockfile is the source of truth
-# (no re-resolution at runtime).  Optional `[gpu]` extras stay un-installed
-# unless explicitly requested via `uv sync --extra gpu` separately —
-# matching the production install pattern in scripts/install_deps.py,
-# which conditionally adds [gpu] only when nvidia-smi is present.
+# CAI-WORKAROUND: invocations use bare `python` (NOT `uv run python`) for
+# the same reason scripts/install_deps.py pip-installs RAPIDS directly:
+# uv's resolver cannot model cuml-cu12's wheel-stub, and `uv run` triggers
+# resolution on every invocation that the CAI Session pod cannot complete
+# (no GPU available, no operator-controllable way to add one).  Bare
+# `python` runs against the system Python that install_deps.py provisions
+# — same invocation pattern as bin/start-app.sh.  When the Session-pod
+# runtime gains GPU access — or cuml ships uv-resolvable wheels — restore
+# `uv run --frozen python ...` here so all just recipes share one
+# uv-native invocation discipline.  Tracked as a deferred architectural
+# ideal.  Other just recipes (`up`, `test`, `behave`, `proto`, `migrate`,
+# etc.) intentionally keep `uv run` because they target dev-time
+# orchestration with a uv-managed `.venv`, not in-situ CAI ops.
 optimize mode="help" *ARGS="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -93,9 +101,9 @@ optimize mode="help" *ARGS="":
     # script's argparse help and stop — don't cascade into a real run.
     if [[ " {{ARGS}} " == *" --help "* ]] || [[ " {{ARGS}} " == *" -h "* ]]; then
       case "{{mode}}" in
-        agent|--agent)  uv run --frozen python scripts/build_agent_mediated.py --help ;;
-        cosine|--cosine) uv run --frozen python scripts/semantic_optimize.py --help ;;
-        svm|--svm)      uv run --frozen python scripts/svm_generator_experiment.py --help ;;
+        agent|--agent)  python scripts/build_agent_mediated.py --help ;;
+        cosine|--cosine) python scripts/semantic_optimize.py --help ;;
+        svm|--svm)      python scripts/svm_generator_experiment.py --help ;;
       esac
       exit 0
     fi
@@ -106,14 +114,14 @@ optimize mode="help" *ARGS="":
         # progressive enhancement to also include operator-review context.
         # Persistence happens INSIDE the skill (curate-agent-mediated.md
         # invokes apply_review.py per table), so no separate apply call.
-        uv run --frozen python scripts/build_agent_mediated.py {{ARGS}}
-        uv run --frozen python scripts/run_curate_agent_sdk.py
+        python scripts/build_agent_mediated.py {{ARGS}}
+        python scripts/run_curate_agent_sdk.py
         ;;
       cosine|--cosine)
-        uv run --frozen python scripts/semantic_optimize.py {{ARGS}}
+        python scripts/semantic_optimize.py {{ARGS}}
         ;;
       svm|--svm)
-        uv run --frozen python scripts/svm_generator_experiment.py {{ARGS}}
+        python scripts/svm_generator_experiment.py {{ARGS}}
         ;;
       ""|help|--help|-h)
         echo "Usage: just optimize <agent|cosine|svm> [args...]"

@@ -290,8 +290,11 @@ UMAP 2D projection onto GPU kernels — full CPU fallback preserved.
   defaults to 200K because MiniLM-L6 saturates a single 4090 before
   GIL-bound thread coordination pays off. Lower it for larger embedding
   models (BGE-large, E5-mistral).
-- **RAPIDS extra**: `uv sync --extra gpu` installs `cuml` + `cupy` for
-  `cuml.UMAP`. Pipeline falls back to `umap-learn` when absent.
+- **RAPIDS install**: `scripts/install_deps.py` pip-installs `cuml-cu12`
+  + `cupy-cuda12x` directly (via `pypi.nvidia.com`) when `nvidia-smi`
+  detects a GPU. NOT a pyproject `[gpu]` extra — CAI-WORKAROUND because
+  cuml's wheel-stub can't be modeled by uv's resolver. Pipeline falls
+  back to `umap-learn` when cuml is absent (CPU runtimes).
 - **Settings**: `classify.gpu.{enabled,shard_threshold,sage_chunk_permutations}`
   in `config/base.conf`. Runtime status at `GET /api/acceleration`;
   visible in the UI's Settings page.

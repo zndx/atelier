@@ -3364,9 +3364,10 @@ def _compute_projection(
     fired — Extend handles the None case by re-fitting with a warning.
     """
     # Try UMAP + sentence-transformers for high-quality projection.
-    # When the optional [gpu] extra is installed and a GPU is available,
-    # prefer cuml.UMAP (an order of magnitude faster on large corpora);
-    # otherwise fall back to umap-learn (CPU).
+    # When cuml is installed (via scripts/install_deps.py's GPU-detected
+    # pip-direct block — see CAI-WORKAROUND there) and a GPU is
+    # available, prefer cuml.UMAP (an order of magnitude faster on
+    # large corpora); otherwise fall back to umap-learn (CPU).
     try:
         from atelier.classify.embedding import _get_model, get_batch_size
         import numpy as np

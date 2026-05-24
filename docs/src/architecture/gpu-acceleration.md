@@ -24,7 +24,7 @@ unchanged on CPU hosts — every GPU path has a CPU fallback.
 | PermutationSHAP (embedding) | Same kernel; per-item aggregation; replaces `shap.PermutationExplainer` on GPU hosts |
 | TreeSHAP (CatBoost) | Native CatBoost; already fast, unchanged |
 | CatBoost training | `task_type="GPU"`; `posterior_sampling` disabled on GPU (not supported); try/except CPU fallback |
-| UMAP 2D projection | `cuml.manifold.UMAP` when the optional `[gpu]` extra is installed, else `umap-learn` |
+| UMAP 2D projection | `cuml.manifold.UMAP` when `scripts/install_deps.py` has pip-installed RAPIDS on a GPU host, else `umap-learn` |
 
 ## Why SAGE/SHAP are fast on GPU
 
@@ -72,12 +72,32 @@ Environment overrides: `ATELIER_GPU_ENABLED`,
 - `/settings` page shows an "Acceleration" card with active methods and warnings
 - `preflight_gpu().to_dict()` — same shape, programmatically
 
-## Optional RAPIDS extra
+## Optional RAPIDS install
 
-```bash
-uv sync --extra gpu
+`scripts/install_deps.py` pip-installs RAPIDS directly when
+`nvidia-smi` detects a GPU:
+
+```python
+subprocess.run([*pip, "install",
+                "--extra-index-url", "https://pypi.nvidia.com/",
+                "cuml-cu12>=24.10", "cupy-cuda12x>=13.0"], check=True)
 ```
 
-Installs `cuml-cu12` and `cupy-cuda12x`. The pipeline imports `cuml`
-at UMAP projection time with an `ImportError` fallback to
-`umap-learn`.
+This is a **CAI-WORKAROUND** for the deferred ideal of a uv-native
+`[gpu]` extra in `pyproject.toml` (see comment block in pyproject and
+install_deps for the full rationale): cuml-cu12's wheel-stub install
+mechanism downloads the real wheel from `pypi.nvidia.com` gated on
+nvidia-smi presence at install time, which uv's resolver cannot
+model.  When the CAI Session-pod runtime gains GPU access — or cuml
+ships uv-resolvable wheels — the install moves back into the
+pyproject `[gpu]` extra.
+
+For manual install on a GPU host:
+
+```bash
+pip install --extra-index-url https://pypi.nvidia.com/ \
+    cuml-cu12>=24.10 cupy-cuda12x>=13.0
+```
+
+The pipeline imports `cuml` at UMAP projection time with an
+`ImportError` fallback to `umap-learn`.
