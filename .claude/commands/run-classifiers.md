@@ -14,10 +14,19 @@ Run three parallel classification methods against column feature vectors: cosine
 - Pre-trained CatBoost model outputs per-class probabilities
 - Handles categorical features natively (no one-hot encoding needed)
 
-### 3. SVM (LinearSVC + Platt Scaling)
-- TF-IDF vectorization of embedding text
-- LinearSVC trained on the same label set
-- Platt scaling via `CalibratedClassifierCV` converts margins to probabilities
+### 3. SVM (NHSVM — Normalized Hierarchical SVM, Choi et al. 2015)
+- Feature pipeline: TF-IDF char-3-6 + word 1-2 → TruncatedSVD reduction
+- Hierarchical expansion: each training example is Kronecker-expanded over
+  its ancestor chain in the category set, scaled by per-node `sqrt(α)`
+  weights (Structured Shared Frobenius Norm)
+- Classifier: LinearSVC over the expanded feature space + Platt scaling
+  via `CalibratedClassifierCV`
+- **Hierarchical training is the contract.** Every SVM in Atelier — prod,
+  experimental, ablation — uses NHSVM with the full vocabulary (leaves +
+  internal nodes). Feature-pipeline swaps (e.g., sentence-transformer
+  encoders in place of TF-IDF+SVD) substitute *under* the NHSVM head;
+  they do not replace it with a flat classifier. See
+  `feedback_hierarchical_svm_only.md` in memory.
 
 ## Procedure
 

@@ -82,19 +82,13 @@ def train_svm(
     output_path: Path,
     *,
     category_set=None,
-    hierarchical: bool = False,
+    hierarchical: bool = True,
 ) -> Path:
-    """Train SVM classifier on synthetic data.
+    """Train NHSVM classifier on synthetic data.
 
-    Args:
-        synth_dir: Directory with synth CSVs + reference_labels.json.
-        output_path: Where to save the .pkl model file.
-        category_set: When provided with ``hierarchical=True``, trains
-            with the Structured Shared Frobenius Norm (Choi et al. 2015).
-        hierarchical: Enable training-time NHSVM via Kronecker expansion.
-
-    Returns:
-        Path to the saved model.
+    Default is hierarchical=True; see [[feedback-hierarchical-svm-only]]
+    — feature-pipeline swaps go UNDER the NHSVM head, never replace it
+    with a flat classifier.
     """
     from atelier.classify.svm_classifier import SVMClassifier, build_svm_text
 
@@ -270,7 +264,7 @@ def train_all(
     catboost_iterations: int = 1000,
     catboost_depth: int = 6,
     catboost_learning_rate: float = 0.10,
-    hierarchical: bool = False,
+    hierarchical: bool = True,
 ) -> dict[str, Path]:
     """Train both CatBoost and SVM classifiers.
 

@@ -275,12 +275,20 @@ class SVMClassifier:
         self,
         config: SVMConfig | None = None,
         category_set=None,
-        hierarchical: bool = False,
+        hierarchical: bool = True,
     ) -> None:
         self._config = config or SVMConfig()
         self._pipeline = None
         self._classes: list[str] = []
         self._category_set = category_set
+        if hierarchical and category_set is None:
+            raise ValueError(
+                "SVMClassifier(hierarchical=True) requires a category_set. "
+                "Atelier trains hierarchically by default — pass the full "
+                "vocabulary (leaves + internal nodes). If you have a "
+                "structural reason to train flat (e.g., Atlas sync), pass "
+                "hierarchical=False explicitly with a comment explaining why."
+            )
         self._hierarchical = hierarchical and category_set is not None
         self._feature_union = None
         self._svd = None
