@@ -80,20 +80,40 @@ gateway:
 #   just optimize svm    [args]   # NHSVM domain adaptation (procedural generators)
 #
 # Both `agent` and `--agent` forms are accepted for ergonomic flexibility.
+#
+# Invocation uses `uv run --frozen` so the lockfile is the source of truth
+# (no re-resolution at runtime).  Optional `[gpu]` extras stay un-installed
+# unless explicitly requested via `uv sync --extra gpu` separately —
+# matching the production install pattern in scripts/install_deps.py,
+# which conditionally adds [gpu] only when nvidia-smi is present.
 optimize mode="help" *ARGS="":
     #!/usr/bin/env bash
     set -euo pipefail
+    # If the operator passes --help/-h to a mode, surface the backing
+    # script's argparse help and stop — don't cascade into a real run.
+    if [[ " {{ARGS}} " == *" --help "* ]] || [[ " {{ARGS}} " == *" -h "* ]]; then
+      case "{{mode}}" in
+        agent|--agent)  uv run --frozen python scripts/build_agent_mediated.py --help ;;
+        cosine|--cosine) uv run --frozen python scripts/semantic_optimize.py --help ;;
+        svm|--svm)      uv run --frozen python scripts/svm_generator_experiment.py --help ;;
+      esac
+      exit 0
+    fi
     case "{{mode}}" in
       agent|--agent)
-        uv run python scripts/build_agent_mediated.py {{ARGS}}
-        uv run python scripts/run_curate_agent_sdk.py
-        uv run python scripts/apply_review.py
+        # build_agent_mediated.py: best-effort curation against the
+        # configured Hive data source by default. Pass --xlsx <path> as
+        # progressive enhancement to also include operator-review context.
+        # Persistence happens INSIDE the skill (curate-agent-mediated.md
+        # invokes apply_review.py per table), so no separate apply call.
+        uv run --frozen python scripts/build_agent_mediated.py {{ARGS}}
+        uv run --frozen python scripts/run_curate_agent_sdk.py
         ;;
       cosine|--cosine)
-        uv run python scripts/semantic_optimize.py {{ARGS}}
+        uv run --frozen python scripts/semantic_optimize.py {{ARGS}}
         ;;
       svm|--svm)
-        uv run python scripts/svm_generator_experiment.py {{ARGS}}
+        uv run --frozen python scripts/svm_generator_experiment.py {{ARGS}}
         ;;
       ""|help|--help|-h)
         echo "Usage: just optimize <agent|cosine|svm> [args...]"

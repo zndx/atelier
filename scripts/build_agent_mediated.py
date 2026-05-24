@@ -281,38 +281,55 @@ def _sample_hive_columns(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    # Default to cfg.classify_* where available so the script reflects the
+    # currently-configured data source without operator intervention.  See
+    # feedback_dynamic_annotations.md: the vocabulary + corpus are
+    # runtime-selected; baking values here invites silent drift.
+    _cfg = None
+    try:
+        from atelier.config import load_config
+        _cfg = load_config()
+    except Exception:
+        _cfg = None
+    default_connection = (getattr(_cfg, "classify_connection_name", None) or "hive-poc")
+    # cfg.classify_database is where the vocab annotations table lives
+    # (conventionally "default").  The DATA database (corpus tables) is
+    # a separate concept with no canonical cfg key — keep the hardcoded
+    # default for now; operators override via --data-database.
+    default_database = (getattr(_cfg, "classify_database", None) or "default")
+    default_data_database = "reference_corpus"
+
     parser.add_argument(
         "--xlsx",
         type=Path,
-        default=Path("Atelier-Results-vs-Prompt-solution-522d89ae.xlsx"),
+        default=None,
+        help="OPTIONAL operator-review spreadsheet (progressive enhancement). "
+             "When provided, adds per-column Atelier-vs-llm-solution context to "
+             "the working set (Cat A entries).  When omitted (default), the "
+             "script does best-effort curation against the configured Hive "
+             "data source.",
     )
     parser.add_argument(
         "--run-id",
         default=None,
         help="Run id under build/results/ to pull current Atelier predictions from. "
-             "Defaults to most-recently-modified run dir.",
+             "Defaults to most-recently-modified run dir.  If no runs exist, "
+             "the working set is built without Atelier-current context (Cat C only).",
     )
     parser.add_argument(
         "--connection-name",
-        default="hive-poc",
-        help="CAI connection name for the vocabulary table.",
+        default=default_connection,
+        help=f"CAI connection name for the vocabulary table (default: {default_connection}).",
     )
     parser.add_argument(
         "--database",
-        default="default",
-        help="Hive database holding the 'annotations' vocabulary table.",
+        default=default_database,
+        help=f"Hive database holding the 'annotations' vocabulary table (default: {default_database}).",
     )
     parser.add_argument(
         "--data-database",
-        default="reference_corpus",
-        help="Hive database holding the corpus tables for agent-mediated reference (when "
-             "--include-all-hive is set).",
-    )
-    parser.add_argument(
-        "--include-all-hive",
-        action="store_true",
-        help="Include every table from --data-database, not just the xlsx set. "
-             "Tables not in xlsx are sampled directly from Hive.",
+        default=default_data_database,
+        help=f"Hive database holding the corpus tables for curation (default: {default_data_database}).",
     )
     parser.add_argument(
         "--results-dir",
@@ -326,55 +343,60 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # ── Resolve run id ────────────────────────────────────────────
+    # ── Resolve run id (optional — best-effort if no runs exist) ──
     if args.run_id:
         run_dir = args.results_dir / args.run_id
     else:
         run_dir = _latest_run_dir(args.results_dir)
-        if run_dir is None:
-            print(f"No run dirs under {args.results_dir}", file=sys.stderr)
-            return 2
-    print(f"Using run dir: {run_dir.name}", file=sys.stderr)
+    if run_dir is not None:
+        print(f"Using run dir: {run_dir.name}", file=sys.stderr)
+    else:
+        print("No prior runs under build/results/ — proceeding without Atelier-current context.", file=sys.stderr)
 
     # ── Pull inputs ───────────────────────────────────────────────
     print("Loading vocabulary from Hive...", file=sys.stderr)
     vocab = _load_vocabulary(args.connection_name, args.database)
     print(f"  {len(vocab)} vocabulary entries", file=sys.stderr)
 
-    print(f"Parsing xlsx {args.xlsx.name}...", file=sys.stderr)
-    xlsx_rows = _parse_xlsx(args.xlsx)
-    xlsx_tables = sorted({r["table_name"] for r in xlsx_rows.values()})
-    print(f"  {len(xlsx_rows)} column rows across {len(xlsx_tables)} tables", file=sys.stderr)
-
-    print(f"Loading classifications.json from run {run_dir.name}...", file=sys.stderr)
-    current = _load_classifications(run_dir)
-    print(f"  {len(current)} columns in current run", file=sys.stderr)
-
-    # ── Normalize xlsx sheet names to Hive table names ──────────
-    # Several xlsx sheet names are typos / contain spaces that have
-    # since been corrected; remap so keys match what the live pipeline
-    # produces.
-    xlsx_rows = {
-        f"{XLSX_NAME_FIXES.get(r['table_name'], r['table_name'])}.{r['column_name']}": {
-            **r,
-            "table_name": XLSX_NAME_FIXES.get(r['table_name'], r['table_name']),
+    # xlsx is optional (progressive enhancement) — skip cleanly when absent
+    if args.xlsx is not None:
+        print(f"Parsing xlsx {args.xlsx.name}...", file=sys.stderr)
+        xlsx_rows = _parse_xlsx(args.xlsx)
+        # Normalize xlsx sheet names to Hive table names (some sheets had
+        # typos / spaces since corrected in Hive).
+        xlsx_rows = {
+            f"{XLSX_NAME_FIXES.get(r['table_name'], r['table_name'])}.{r['column_name']}": {
+                **r,
+                "table_name": XLSX_NAME_FIXES.get(r['table_name'], r['table_name']),
+            }
+            for _, r in xlsx_rows.items()
         }
-        for _, r in xlsx_rows.items()
-    }
-    xlsx_tables = sorted({r["table_name"] for r in xlsx_rows.values()})
+        xlsx_tables = sorted({r["table_name"] for r in xlsx_rows.values()})
+        print(f"  {len(xlsx_rows)} column rows across {len(xlsx_tables)} tables", file=sys.stderr)
+    else:
+        xlsx_rows = {}
+        xlsx_tables = []
+        print("No xlsx supplied — best-effort curation against the configured Hive data source.", file=sys.stderr)
+
+    if run_dir is not None:
+        print(f"Loading classifications.json from run {run_dir.name}...", file=sys.stderr)
+        current = _load_classifications(run_dir)
+        print(f"  {len(current)} columns in current run", file=sys.stderr)
+    else:
+        current = {}
 
     # ── Resolve the full table set under review ──────────────────
-    if args.include_all_hive:
-        print(
-            f"Listing tables in Hive {args.data_database}...",
-            file=sys.stderr,
-        )
-        all_hive_tables = set(_list_hive_tables(
-            args.connection_name, args.data_database,
-        ))
-        print(f"  {len(all_hive_tables)} tables in {args.data_database}", file=sys.stderr)
-    else:
-        all_hive_tables = set(xlsx_tables)
+    # Hive discovery is always on now (was opt-in via --include-all-hive).
+    # The configured data_database is the source of truth; xlsx + run_dir
+    # only add per-column context where they overlap.
+    print(
+        f"Listing tables in Hive {args.data_database}...",
+        file=sys.stderr,
+    )
+    all_hive_tables = set(_list_hive_tables(
+        args.connection_name, args.data_database,
+    ))
+    print(f"  {len(all_hive_tables)} tables in {args.data_database}", file=sys.stderr)
 
     run_tables = sorted({r["table_name"] for r in current.values()})
     cat_A = set(xlsx_tables) & all_hive_tables  # xlsx + Hive
@@ -394,7 +416,7 @@ def main() -> int:
         if cur is None:
             return None
         return {
-            "run_id": run_dir.name,
+            "run_id": (run_dir.name if run_dir is not None else None),
             "predicted_annotation": cur.get("predicted_annotation"),
             "predicted_code": str(cur.get("predicted_code") or ""),
             "predicted_label": cur.get("predicted_label"),
@@ -474,8 +496,8 @@ def main() -> int:
     output = {
         "metadata": {
             "built_at": _utc_iso(),
-            "xlsx_path": str(args.xlsx),
-            "run_id": run_dir.name,
+            "xlsx_path": (str(args.xlsx) if args.xlsx is not None else None),
+            "run_id": (run_dir.name if run_dir is not None else None),
             "data_database": args.data_database,
             "vocabulary_size": len(vocab),
             "table_count": len(tables_present),
