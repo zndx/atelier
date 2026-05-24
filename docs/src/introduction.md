@@ -123,7 +123,7 @@ where the **conflict** \\( K = \sum_{A \cap B = \varnothing} m_1(A) \cdot m_2(B)
 measures the degree to which sources contradict each other. High \\( K \\) is
 the diagnostic signal that drives the convergence loop: columns where
 independent evidence sources disagree are escalated for targeted LLM revisit
-with enriched context (ML prediction, belief interval, confusable pair).
+with enriched context (ML prediction, belief interval, source disagreement).
 
 ### Hierarchical Classification
 
@@ -145,7 +145,7 @@ The bootstrap pipeline iterates three phases until the **belief gap**
    per-column belief, plausibility, and gap
 3. **Targeted revisit** — re-classify only **uncertain** columns
    (high gap or low belief) with enriched context (ML prediction +
-   belief interval + detected patterns + confusable pairs)
+   belief interval + detected patterns + disagreement summary)
 
 The primary convergence measure is **mean belief gap** — the average
 width of the \\( [\text{Bel}, \text{Pl}] \\) interval across all

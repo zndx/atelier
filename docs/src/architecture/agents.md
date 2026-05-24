@@ -149,7 +149,8 @@ Claude. Both paths share the same underlying functions (`_llm_sweep`,
 `_run_ml_validation`, etc.) and produce identical DST evidence.
 
 The agent approach is preferred when:
-- The corpus has complex ambiguity patterns (confusable categories)
+- The corpus has wide-belief-gap columns where independent evidence
+  sources disagree in non-obvious ways
 - You want reasoning traces explaining why convergence was declared
 - The LLM backend supports tool_use (Anthropic, Bedrock with Claude)
 
