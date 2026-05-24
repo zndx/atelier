@@ -69,6 +69,49 @@ gateway:
     env -i $(cat build/config/atelier.env 2>/dev/null | xargs) PATH="$$PATH" \
         uv run uvicorn atelier.gateway:app --reload --host 0.0.0.0 --port ${CDSW_APP_PORT:-8090}
 
+# ── Optimize (in-situ domain adaptation) ─────────────────────────
+
+# Unified in-situ domain-adaptation orchestrator.  Initial-steps scaffold;
+# scripts under scripts/ are intended to fold into src/atelier/optimize/
+# in a follow-up.
+#
+#   just optimize agent  [args]   # reference curation (Agent SDK auto-run)
+#   just optimize cosine [args]   # ColBERT/Qdrant enrichment optimization
+#   just optimize svm    [args]   # NHSVM domain adaptation (procedural generators)
+#
+# Both `agent` and `--agent` forms are accepted for ergonomic flexibility.
+optimize mode="help" *ARGS="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{mode}}" in
+      agent|--agent)
+        uv run python scripts/build_agent_mediated.py {{ARGS}}
+        uv run python scripts/run_curate_agent_sdk.py
+        uv run python scripts/apply_review.py
+        ;;
+      cosine|--cosine)
+        uv run python scripts/semantic_optimize.py {{ARGS}}
+        ;;
+      svm|--svm)
+        uv run python scripts/svm_generator_experiment.py {{ARGS}}
+        ;;
+      ""|help|--help|-h)
+        echo "Usage: just optimize <agent|cosine|svm> [args...]"
+        echo ""
+        echo "  agent   reference curation via Agent SDK (build → agent → apply)"
+        echo "  cosine  ColBERT/Qdrant enrichment optimization (semantic_optimize.py)"
+        echo "  svm     NHSVM domain adaptation via procedural generators"
+        echo ""
+        echo "Pass --help after the mode for backing-script help."
+        exit 0
+        ;;
+      *)
+        echo "Unknown mode: {{mode}}" >&2
+        echo "Usage: just optimize <agent|cosine|svm> [args...]" >&2
+        exit 1
+        ;;
+    esac
+
 # ── Database ─────────────────────────────────────────────────────
 
 # Helper: build dbmate-compatible URL (strip +psycopg, add sslmode=disable for local)
