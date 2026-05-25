@@ -275,8 +275,8 @@ def _significant_subtree(
     descendant leaves capture ≥ ``concentration_threshold`` of the
     softmax probability mass.
 
-    Used by ``cosine_to_mass`` to redirect residual evidence mass to a
-    subtree-level internal node when cosine has clear localization to
+    Used by ``late_interaction_to_mass`` to redirect residual evidence
+    mass to a subtree-level internal node when cosine has clear localization to
     a subtree but ambiguity within it.  When the most-specific such
     internal node exists, ``(focal_element, concentration_fraction)``
     is returned; otherwise ``(None, 0.0)``.
@@ -325,113 +325,16 @@ def _significant_subtree(
     return candidates[0][0], candidates[0][1]
 
 
-def cosine_to_mass(
-    similarities: dict[str, float],
-    frame: FrameOfDiscernment,
-    discount: float = 0.3,
-    *,
-    reliability_floor: float = 0.10,
-) -> BeliefAssignment:
-    """Convert cosine similarities to a mass function.
-
-    Applies reliability-shaped allocation per Haenni & Hartmann 2006
-    (see ``_cosine_reliability``): the source-reliability factor α
-    is computed dynamically from top-1 absolute similarity and
-    top-1/top-2 margin, replacing the static ``1 - discount``
-    evidence allocation.  ``discount`` is reinterpreted here as the
-    *complement of the reliability ceiling* — under sharp cosine
-    signal we recover the prior behavior (α ≈ 1 - discount); under
-    diffuse signal we allocate close to ``reliability_floor`` to
-    cosine and the remainder to Θ.
-
-    The α-bounded evidence mass is then split via margin-aware
-    allocation (``_margin_weight``): a sharp top-1 with a clear
-    top-1/top-2 margin concentrates mass on top-1 directly rather
-    than diluting through softmax over hundreds of siblings (the
-    pathology that motivated this change — see
-    ``docs/src/architecture/dst-evidence-independence.md``).
-
-    Args:
-        similarities: ``{code: cosine_similarity}`` over candidate
-            codes.  Values are raw cosines (typically 0-1 range for
-            sentence-transformer embeddings).
-        frame: The frame of discernment.
-        discount: Complement of the reliability ceiling
-            (``ceiling = 1 - discount``).  Default 0.30 preserves
-            the legacy maximum-mass behavior under sharp signal.
-        reliability_floor: Minimum reliability under any conditions.
-            Default 0.10 keeps cosine contributing some signal even
-            when noisy.
-    """
-    if not similarities:
-        return frame.vacuous()
-
-    # Restrict to codes that are real singletons in the frame.
-    in_frame = {code: sim for code, sim in similarities.items()
-                if code in frame.singletons}
-    if not in_frame:
-        return frame.vacuous()
-
-    sorted_sims = sorted(in_frame.values(), reverse=True)
-    top1 = sorted_sims[0]
-    top2 = sorted_sims[1] if len(sorted_sims) > 1 else None
-
-    # α — Haenni-Hartmann reliability bounded by [floor, ceiling].
-    alpha = _cosine_reliability(
-        top1, top2, floor=reliability_floor, ceiling=1.0 - discount,
-    )
-    # Margin weight — fraction of α to concentrate on top-1.
-    margin_w = _margin_weight(top1, top2)
-
-    # Softmax distribution across all in-frame singletons (used for
-    # the residual mass when margin is narrow, and for ranking when
-    # we need the top-1 code identity).
-    max_sim = top1
-    exp_sims = {code: math.exp(sim - max_sim) for code, sim in in_frame.items()}
-    total_exp = sum(exp_sims.values())
-    if total_exp <= 0:
-        return frame.vacuous()
-    softmax_probs = {code: ev / total_exp for code, ev in exp_sims.items()}
-
-    # Identify the top-1 code (deterministic tie-break by code id).
-    top1_code = max(in_frame.items(), key=lambda kv: (kv[1], kv[0]))[0]
-
-    # Margin-aware allocation:
-    #   m(top1) = α * margin_w   (concentrated on the decisive winner)
-    #   m(rest)  = α * (1 - margin_w)  → split between LCA internal
-    #     node (when top-K share an ancestor) and per-leaf softmax.
-    masses: dict[FocalElement, float] = {}
-    top1_share = alpha * margin_w
-    residual = alpha * (1.0 - margin_w)
-
-    # Hierarchical aggregation: walk up from the top-1 leaf, find
-    # the most-specific internal node whose descendants capture a
-    # significant fraction of softmax mass, and redirect that
-    # in-subtree residual to the internal-node focal element.  This
-    # gives Dempster fusion an honest disjunctive signal ("the
-    # answer is somewhere in subtree X") rather than diffuse leaf
-    # mass that gets lost when the LLM votes confidently in a
-    # different subtree.  See _significant_subtree.
-    subtree_fe, lca_concentration = _significant_subtree(
-        top1_code, softmax_probs, frame,
-    )
-
-    lca_share = residual * lca_concentration
-    leaf_residual = residual - lca_share
-
-    for code, prob in softmax_probs.items():
-        m = leaf_residual * prob
-        if code == top1_code:
-            m += top1_share
-        if m > 1e-15:
-            masses[frame.singleton(code)] = m
-
-    if subtree_fe is not None and lca_share > 1e-15:
-        masses[subtree_fe] = masses.get(subtree_fe, 0.0) + lca_share
-
-    masses[frame.theta] = max(0.0, 1.0 - alpha)
-    masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
+# Legacy single-vector ``cosine_to_mass`` removed 2026-05-25.  The
+# late-interaction multi-vector path (`late_interaction_to_mass` below)
+# is the only supported cosine channel mass function.  Per the
+# no-silent-DST-degradation rule, the prior single-vector function was
+# eliminated rather than left as an importable fallback — any future
+# operator who wants single-vector behavior must explicitly reintroduce
+# a function (with the requisite operator-review trail that decision
+# deserves).  See docs/notes/2026-05-25/phase_gate_brief.md and
+# late_interaction_bridge.py's fail-fast contract for the broader
+# discipline this enforces.
 
 
 def late_interaction_to_mass(
@@ -500,8 +403,9 @@ def _late_interaction_positive_mass(
     tags via a ``frame.singletons``-only filter.
 
     The reliability-shaping arithmetic (Haenni-Hartmann α-bounded
-    reliability, margin-aware allocation, softmax-over-residual) is a
-    direct adaptation of :func:`cosine_to_mass`.  The differences:
+    reliability, margin-aware allocation, softmax-over-residual) was
+    originally adapted from a now-removed single-vector
+    ``cosine_to_mass``.  The differences from that legacy form:
 
     1. **Filter accepts both singletons and internal nodes.**  The
        enriched annotation collection in Qdrant may carry first-class

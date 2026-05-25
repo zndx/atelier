@@ -47,7 +47,9 @@ from atelier.classify.mass_functions import (
     DEFAULT_PATTERN_MAP,
     DiscountConfig,
     catboost_to_mass,
-    cosine_to_mass,
+    # cosine_to_mass removed 2026-05-25 — late_interaction_to_mass via
+    # late_interaction_bridge.try_compute_cosine_mass is the only
+    # cosine-channel path (no silent fallback to legacy single-vector)
     llm_to_mass,
     name_match_to_mass,
     nhsvm_to_mass,
