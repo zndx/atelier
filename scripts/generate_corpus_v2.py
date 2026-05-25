@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import collections
 import importlib.util
 import json
 import logging
@@ -39,6 +40,8 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -46,13 +49,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from reflect_nhsvm import build_category_set
 from atelier.classify.synth_registry import GeneratorRegistry
 from atelier.classify.enrichment_loader import load_enrichment_payloads
+from atelier.classify.svm_classifier import build_svm_text
 
 log = logging.getLogger("generate_corpus_v2")
 
-OUTPUT_DIR = Path("build/data/svm_training/corpus_v2")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-SYNTH_ROWS = OUTPUT_DIR / "synth_rows.jsonl"
-MANIFEST = OUTPUT_DIR / "manifest.json"
+# Module-level constants (legacy paths); the active output is parameterized
+# via the --output flag and threaded through `generate_corpus`.
+DEFAULT_OUTPUT_DIR = Path("build/data/svm_training/corpus_v2")
 DEFAULT_PAYLOADS = Path("build/data/svm_training/enrichment_payloads.json")
 GENERATORS_V1 = Path("build/lib/generated/generators_v1.py")
 
@@ -261,16 +264,156 @@ def pick_table_context(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Lean-text helper — matches reflect_nhsvm.build_texts_and_labels output
+# so embeddings produced here are interchangeable with Phase D's.
+# ──────────────────────────────────────────────────────────────────────
+
+def _build_lean_text(row_data: dict) -> str:
+    """Reconstruct the encoder-input lean text from a generated row dict.
+
+    Mirrors ``scripts/reflect_nhsvm.build_texts_and_labels`` so the
+    encoder sees the same string shape at gating time and at training
+    time.
+    """
+    from atelier.classify.features import _closest_siblings
+    col = row_data["column"]
+    siblings_full = row_data.get("siblings_full") or []
+    siblings = _closest_siblings(col, siblings_full, k=4)
+    sibling_part = ", ".join(s.replace("_", " ") for s in siblings)
+    base = build_svm_text(col, row_data.get("column_type", ""),
+                           row_data.get("sample_values", []))
+    return f"{base} | siblings: {sibling_part}" if sibling_part else base
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Diversity gating + marginal-coverage stopping
+# ──────────────────────────────────────────────────────────────────────
+
+class _CodeAcceptor:
+    """Per-code acceptance state for the diversity gate + coverage stop.
+
+    Maintains running statistics over the rows accepted so far for a
+    single code and decides whether each new candidate should be
+    accepted or rejected.  Surfaces a stopping reason when the code's
+    generator has exhausted its useful diversity or saturated the
+    embedding-space neighborhood.
+    """
+
+    DIVERSITY_THRESHOLD = 0.95           # reject if cos sim to nearest > this
+    REJECTION_WINDOW_SIZE = 20
+    REJECTION_WINDOW_RATE = 0.6          # > this rate → diversity_exhausted
+    COVERAGE_EPS = 0.02
+    COVERAGE_WINDOW = 10
+
+    def __init__(self, target_count: int, *, enable_diversity: bool,
+                  enable_coverage: bool):
+        self.target = target_count
+        self.enable_diversity = enable_diversity
+        self.enable_coverage = enable_coverage
+        self.accepted_rows: list[dict] = []
+        self.accepted_emb: list[np.ndarray] = []  # L2-normalized
+        self.rejection_window: collections.deque[bool] = collections.deque(
+            maxlen=self.REJECTION_WINDOW_SIZE)
+        self.radius_history: collections.deque[float] = collections.deque(
+            maxlen=self.COVERAGE_WINDOW)
+        self.centroid: np.ndarray | None = None
+        self.stopping_reason: str | None = None
+
+    def consider(self, row_data: dict, embedding: np.ndarray) -> str:
+        """Returns the outcome of considering this candidate:
+           'accepted' | 'rejected_diversity' |
+           'stopped_diversity_exhausted' | 'stopped_coverage_saturated' |
+           'stopped_target_met'
+
+        The stopped_* outcomes also set self.stopping_reason; further
+        consider() calls should not be made.
+        """
+        if self.stopping_reason is not None:
+            return f"stopped_{self.stopping_reason}"
+
+        emb = (embedding / (np.linalg.norm(embedding) + 1e-12)).astype(np.float32)
+
+        # 1. Diversity gate
+        if self.enable_diversity and self.accepted_emb:
+            sims = np.array([float(np.dot(emb, e)) for e in self.accepted_emb])
+            if float(sims.max()) > self.DIVERSITY_THRESHOLD:
+                self.rejection_window.append(True)
+                # Sliding-window rejection-rate test
+                if (len(self.rejection_window) == self.REJECTION_WINDOW_SIZE
+                        and sum(self.rejection_window) / self.REJECTION_WINDOW_SIZE
+                            > self.REJECTION_WINDOW_RATE):
+                    self.stopping_reason = "diversity_exhausted"
+                    return "stopped_diversity_exhausted"
+                return "rejected_diversity"
+
+        # 2. Accept
+        self.rejection_window.append(False)
+        self.accepted_rows.append(row_data)
+        self.accepted_emb.append(emb)
+
+        # 3. Update centroid + radius
+        if self.centroid is None:
+            self.centroid = emb.copy()
+        else:
+            n = len(self.accepted_emb)
+            self.centroid = ((n - 1) * self.centroid + emb) / n
+            cn = float(np.linalg.norm(self.centroid))
+            self.centroid = self.centroid / (cn + 1e-12)
+        max_radius = max(
+            1.0 - float(np.dot(self.centroid, e)) for e in self.accepted_emb
+        )
+        self.radius_history.append(max_radius)
+
+        # 4. Coverage-saturation check
+        if (self.enable_coverage
+                and len(self.radius_history) == self.COVERAGE_WINDOW
+                and (self.radius_history[-1] - self.radius_history[0])
+                    < self.COVERAGE_EPS):
+            self.stopping_reason = "coverage_saturated"
+            return "stopped_coverage_saturated"
+
+        # 5. Target met?
+        if len(self.accepted_rows) >= self.target:
+            self.stopping_reason = "target_met"
+            return "stopped_target_met"
+
+        return "accepted"
+
+
+def _encode_candidates(texts: list[str], batch_size: int = 64) -> np.ndarray:
+    """Encode candidate lean texts with ModernBERT (mean-pooled).
+
+    Imported lazily — ModernBERT load is slow and only paid when gating
+    is enabled.
+    """
+    from reflect_nhsvm_modernbert import encode_modernbert
+    return encode_modernbert(texts, batch_size=batch_size, pooling="mean")
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Main generation loop
 # ──────────────────────────────────────────────────────────────────────
 
 def generate_corpus(
     *,
-    rows_per_node: int,
+    synth_examples_per_code: int,
     payloads_path: Path,
+    output_dir: Path,
     seed: int = 42,
+    enable_diversity_gate: bool = True,
+    enable_marginal_coverage_stop: bool = True,
+    encoding_batch_size: int = 64,
 ) -> dict:
-    """Generate ~rows_per_node columns per taxonomy node."""
+    """Generate up to synth_examples_per_code columns per taxonomy node.
+
+    With diversity_gate and marginal_coverage_stop both enabled (the
+    default), per-code count may fall below the target — that's by
+    design: an exhausted generator's marginal example adds redundancy
+    to the encoder's view, not new signal.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    synth_rows_path = output_dir / "synth_rows.jsonl"
+    manifest_path = output_dir / "manifest.json"
     log.info("=== Phase C: corpus generation at scale ===")
     log.info("Loading category set...")
     cat_set = build_category_set()
@@ -294,18 +437,93 @@ def generate_corpus(
         v1_gens_by_code[code] = [g for g in gen_list if callable(g)]
     log.info("  v1 generators available for %d codes", len(v1_gens_by_code))
 
+    def _build_candidate(
+        cat, code: str, mnemonic: str, gen_source: str,
+        candidate_gens: list, v1_names: list[str] | None,
+        v1_table_ctx: list[dict] | None, rng: random.Random,
+        variant_idx: int,
+    ) -> dict | None:
+        """Produce one candidate row dict, or None if the generator
+        emits an all-empty sample (shouldn't happen post-validation).
+        Logic mirrors the original inline body but extracted for the
+        gated-vs-ungated dispatcher below.
+        """
+        gen = (rng.choice(candidate_gens) if len(candidate_gens) > 1
+               else candidate_gens[0])
+
+        sample_values: list[str] = []
+        for _ in range(5):
+            try:
+                sample_values.append(str(gen(rng)))
+            except Exception:  # noqa: BLE001
+                sample_values.append("")
+        if not any(s for s in sample_values):
+            return None
+
+        # Column type probe + 20% adjacent-type diversity
+        probe = sample_values + [str(gen(rng)) for _ in range(5)]
+        col_type = infer_column_type(probe)
+        if rng.random() < 0.2:
+            adjacent_map = {
+                "string": ["varchar", "text", "char"],
+                "varchar": ["string", "text"],
+                "text": ["string", "varchar"],
+                "bigint": ["int", "integer", "long"],
+                "double": ["float", "decimal", "numeric"],
+                "boolean": ["bool", "bit"],
+                "timestamp": ["datetime", "date"],
+            }
+            col_type = rng.choice(adjacent_map.get(col_type, [col_type]))
+
+        opaque = rng.random() < 0.25
+        col_name = synth_column_name(
+            cat, rng, v1_names=v1_names,
+            variant_idx=variant_idx, opaque=opaque,
+        )
+        table_name, siblings = pick_table_context(
+            rng, code_templates=v1_table_ctx,
+            fallback_table_names=FALLBACK_TABLE_NAMES,
+            fallback_siblings=FALLBACK_SIBLINGS,
+        )
+        siblings_full = [col_name] + siblings
+
+        return {
+            "table": table_name,
+            "column": col_name,
+            "column_type": col_type,
+            "sample_values": sample_values,
+            "siblings_full": siblings_full,
+            "mnemonic": mnemonic,
+            "code": code,
+            "gen_source": gen_source,
+        }
+
     # Coverage check: per-code, do we have ANY generator available?
     rng = random.Random(seed)
     rows: list[dict] = []
     per_code_counts: dict[str, int] = {}
+    per_code_stopping_reason: dict[str, str] = {}
     skipped_no_gen: list[str] = []
+    gating_enabled = enable_diversity_gate or enable_marginal_coverage_stop
+    CANDIDATE_BATCH = 16
+    CANDIDATE_HARD_CAP_MULTIPLIER = 4
+
+    if gating_enabled:
+        log.info(
+            "Diversity gate: %s; coverage stop: %s (encoding batch size %d)",
+            "ON" if enable_diversity_gate else "OFF",
+            "ON" if enable_marginal_coverage_stop else "OFF",
+            encoding_batch_size,
+        )
+    else:
+        log.info("Gating DISABLED — generating fixed %d examples per code",
+                 synth_examples_per_code)
+
     t0 = time.time()
     for cat_idx, code in enumerate(sorted(cats_by_code.keys())):
         cat = cats_by_code[code]
         mnemonic = getattr(cat, "abbrev", "") or ""
 
-        # Resolve generators: v1 first, then base registry
-        candidate_gens: list = []
         if code in v1_gens_by_code and v1_gens_by_code[code]:
             candidate_gens = v1_gens_by_code[code]
             gen_source = "v1"
@@ -318,72 +536,62 @@ def generate_corpus(
                 skipped_no_gen.append(code)
                 continue
 
-        # Resolve name pool: v1 first, then fall back to style rotation
         v1_names = v1["name_variants_by_code"].get(code)
-
-        # Resolve table-context templates: v1 first, then fallback
         v1_table_ctx = v1["table_context_by_code"].get(code)
 
-        # Generate rows_per_node columns for this code
-        for col_i in range(rows_per_node):
-            gen = rng.choice(candidate_gens) if len(candidate_gens) > 1 else candidate_gens[0]
-
-            # 5 sample values from the generator
-            sample_values: list[str] = []
-            for _ in range(5):
-                try:
-                    v = gen(rng)
-                    sample_values.append(str(v))
-                except Exception:  # noqa: BLE001
-                    sample_values.append("")
-            # Skip if generator produced all-empty (shouldn't happen post-validation)
-            if not any(s for s in sample_values):
-                continue
-
-            # Column type — probe 10 samples + 20% adjacent-type rows for diversity
-            probe_samples = sample_values + [
-                str(gen(rng)) if (s_i := True) else "" for _ in range(5)
-            ]
-            col_type = infer_column_type(probe_samples)
-            if rng.random() < 0.2:
-                # Adjacent type for diversity
-                adjacent_map = {
-                    "string": ["varchar", "text", "char"],
-                    "varchar": ["string", "text"],
-                    "text": ["string", "varchar"],
-                    "bigint": ["int", "integer", "long"],
-                    "double": ["float", "decimal", "numeric"],
-                    "boolean": ["bool", "bit"],
-                    "timestamp": ["datetime", "date"],
-                }
-                col_type = rng.choice(adjacent_map.get(col_type, [col_type]))
-
-            # Column name (75% semantic / 25% opaque)
-            opaque = rng.random() < 0.25
-            col_name = synth_column_name(
-                cat, rng, v1_names=v1_names,
-                variant_idx=col_i, opaque=opaque,
+        if not gating_enabled:
+            # Fast path: no encoding, fixed count per code
+            for col_i in range(synth_examples_per_code):
+                cand = _build_candidate(
+                    cat, code, mnemonic, gen_source, candidate_gens,
+                    v1_names, v1_table_ctx, rng, col_i,
+                )
+                if cand is None:
+                    continue
+                rows.append(cand)
+                per_code_counts[code] = per_code_counts.get(code, 0) + 1
+            per_code_stopping_reason[code] = "target_met"
+        else:
+            # Gated path: batch-encode candidates and accept/reject per code
+            acceptor = _CodeAcceptor(
+                synth_examples_per_code,
+                enable_diversity=enable_diversity_gate,
+                enable_coverage=enable_marginal_coverage_stop,
             )
-
-            # Table + siblings
-            table_name, siblings = pick_table_context(
-                rng, code_templates=v1_table_ctx,
-                fallback_table_names=FALLBACK_TABLE_NAMES,
-                fallback_siblings=FALLBACK_SIBLINGS,
+            variant_idx = 0
+            candidates_seen = 0
+            hard_cap = max(
+                synth_examples_per_code * CANDIDATE_HARD_CAP_MULTIPLIER, 100,
             )
-            siblings_full = [col_name] + siblings  # match Row.siblings_full shape
-
-            rows.append({
-                "table": table_name,
-                "column": col_name,
-                "column_type": col_type,
-                "sample_values": sample_values,
-                "siblings_full": siblings_full,
-                "mnemonic": mnemonic,
-                "code": code,
-                "gen_source": gen_source,
-            })
-            per_code_counts[code] = per_code_counts.get(code, 0) + 1
+            while acceptor.stopping_reason is None and candidates_seen < hard_cap:
+                # Build a batch of candidates
+                batch: list[dict] = []
+                while len(batch) < CANDIDATE_BATCH and candidates_seen < hard_cap:
+                    cand = _build_candidate(
+                        cat, code, mnemonic, gen_source, candidate_gens,
+                        v1_names, v1_table_ctx, rng, variant_idx,
+                    )
+                    candidates_seen += 1
+                    variant_idx += 1
+                    if cand is not None:
+                        batch.append(cand)
+                if not batch:
+                    break
+                # Encode batch
+                texts = [_build_lean_text(c) for c in batch]
+                embs = _encode_candidates(texts, batch_size=encoding_batch_size)
+                # Decide sequentially
+                for cand, emb in zip(batch, embs):
+                    outcome = acceptor.consider(cand, emb)
+                    if outcome.startswith("stopped_"):
+                        break
+            # Record results for this code
+            for r in acceptor.accepted_rows:
+                rows.append(r)
+            per_code_counts[code] = len(acceptor.accepted_rows)
+            per_code_stopping_reason[code] = (
+                acceptor.stopping_reason or "hard_cap_hit"
+            )
 
         if (cat_idx + 1) % 25 == 0:
             elapsed = time.time() - t0
@@ -394,51 +602,93 @@ def generate_corpus(
     log.info("Generated %d total rows across %d nodes in %.1fs (%d skipped for no generator)",
              len(rows), len(per_code_counts), elapsed, len(skipped_no_gen))
 
+    # Stopping-reason summary
+    if gating_enabled:
+        reason_counts: dict[str, int] = {}
+        for r in per_code_stopping_reason.values():
+            reason_counts[r] = reason_counts.get(r, 0) + 1
+        log.info("Stopping reasons: %s", reason_counts)
+
     # Persist
-    with SYNTH_ROWS.open("w") as f:
+    with synth_rows_path.open("w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
     manifest = {
-        "rows_per_node_target": rows_per_node,
+        "synth_examples_per_code_target": synth_examples_per_code,
+        "diversity_gate_enabled": enable_diversity_gate,
+        "marginal_coverage_stop_enabled": enable_marginal_coverage_stop,
         "n_rows_total": len(rows),
         "n_nodes_covered": len(per_code_counts),
         "n_nodes_skipped": len(skipped_no_gen),
         "skipped_codes": sorted(skipped_no_gen),
         "per_code_counts": per_code_counts,
+        "per_code_stopping_reason": per_code_stopping_reason,
         "elapsed_sec": round(elapsed, 1),
         "seed": seed,
     }
-    MANIFEST.write_text(json.dumps(manifest, indent=2))
-    log.info("Wrote %s and %s", SYNTH_ROWS, MANIFEST)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    log.info("Wrote %s and %s", synth_rows_path, manifest_path)
     return manifest
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--rows-per-node", type=int, default=200,
-                    help="Target synthetic columns per taxonomy node (default 200)")
+    ap.add_argument("--synth-examples-per-code", type=int, default=40,
+                    help="Target synthetic columns per taxonomy node "
+                         "(default 40; encoder's lean-text depth is ~5 sample "
+                         "values, so 40 distinct examples already give 8x that)")
+    ap.add_argument("--rows-per-node", type=int, default=None,
+                    help="DEPRECATED alias for --synth-examples-per-code")
+    ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIR,
+                    help="Output directory for synth_rows.jsonl + manifest.json")
     ap.add_argument("--payloads", type=Path, default=DEFAULT_PAYLOADS,
                     help="Enrichment payloads JSON path")
     ap.add_argument("--seed", type=int, default=42,
                     help="RNG seed for reproducibility")
+    ap.add_argument("--diversity-gate", dest="diversity_gate",
+                    action="store_true", default=True,
+                    help="Reject candidates with cos-sim > 0.95 to any "
+                         "accepted-same-code example (default ON)")
+    ap.add_argument("--no-diversity-gate", dest="diversity_gate",
+                    action="store_false",
+                    help="Disable the diversity gate")
+    ap.add_argument("--marginal-coverage-stop", dest="marginal_coverage_stop",
+                    action="store_true", default=True,
+                    help="Stop adding examples per code when the centroid "
+                         "max-radius growth falls below ε (default ON)")
+    ap.add_argument("--no-marginal-coverage-stop", dest="marginal_coverage_stop",
+                    action="store_false",
+                    help="Disable marginal-coverage stopping")
+    ap.add_argument("--encoding-batch-size", type=int, default=64,
+                    help="ModernBERT encoding batch size (only used when "
+                         "gating is enabled)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
 
+    target = args.synth_examples_per_code
+    if args.rows_per_node is not None:
+        log.warning("--rows-per-node is deprecated; use --synth-examples-per-code")
+        target = args.rows_per_node
+
     manifest = generate_corpus(
-        rows_per_node=args.rows_per_node,
+        synth_examples_per_code=target,
         payloads_path=args.payloads,
+        output_dir=args.output,
         seed=args.seed,
+        enable_diversity_gate=args.diversity_gate,
+        enable_marginal_coverage_stop=args.marginal_coverage_stop,
+        encoding_batch_size=args.encoding_batch_size,
     )
     print()
     print("=== Corpus generation complete ===")
     print(f"  total rows: {manifest['n_rows_total']}")
     print(f"  nodes covered: {manifest['n_nodes_covered']}")
     print(f"  nodes skipped (no generator): {manifest['n_nodes_skipped']}")
-    print(f"  output: {SYNTH_ROWS}")
-    print(f"  manifest: {MANIFEST}")
+    print(f"  output: {args.output / 'synth_rows.jsonl'}")
+    print(f"  manifest: {args.output / 'manifest.json'}")
     return 0
 
 
