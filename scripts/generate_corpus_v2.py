@@ -298,10 +298,20 @@ class _CodeAcceptor:
     embedding-space neighborhood.
     """
 
-    DIVERSITY_THRESHOLD = 0.95           # reject if cos sim to nearest > this
+    # ModernBERT's general-purpose encoder embeds same-template lean
+    # text at ~0.97 baseline cosine sim within a code (per
+    # intra_code_mean_sim measurements in corpus_metrology, 0.95-0.99
+    # across codes).  An absolute threshold of 0.95 would reject every
+    # candidate after the first 2-3 (observed empirically on corpus_v3
+    # first attempt: 287/287 codes hit diversity_exhausted at 2-3 rows).
+    # The threshold needs to sit ABOVE the encoder's baseline so only
+    # near-exact duplicates are rejected.
+    DIVERSITY_THRESHOLD = 0.995          # reject if cos sim to nearest > this
     REJECTION_WINDOW_SIZE = 20
     REJECTION_WINDOW_RATE = 0.6          # > this rate → diversity_exhausted
-    COVERAGE_EPS = 0.02
+    # Centroid-radius growth threshold also scaled down to match
+    # ModernBERT's tight intra-code cluster.
+    COVERAGE_EPS = 0.002
     COVERAGE_WINDOW = 10
 
     def __init__(self, target_count: int, *, enable_diversity: bool,
