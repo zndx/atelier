@@ -1,9 +1,76 @@
 # Phase gate brief — DST channel re-architecture (cosine + SVM)
 
-**Date**: 2026-05-25
+**Date**: 2026-05-25 00:25 MDT, amended 2026-05-25 12:09 MDT
 **Audience**: technical engineering review
 **Status**: phase complete pending long-run validation
-**Scope**: cosine channel reorganization + SVM channel ground-up re-architecture
+**Scope**: cosine channel reorganization + SVM channel re-architecture
+
+---
+
+## Amendment — corrected framing
+
+Two architectural corrections surfaced after the original brief was
+written.  Both materially change the success criteria.  Earlier
+sections are preserved as written for record; this addendum is the
+authoritative interpretation.
+
+### 1. Synth-only validate baseline replaces the 0.6125 figure
+
+The original brief cited **0.6125** as the SVM baseline on a 271-row
+held-out test split.  Under the corrected train/validate/test
+framing — where the SVM trains on the synthetic corpus alone (no
+reference data in training) and validates against the full
+agent-mediated reference (1126 entities) — the comparable measurement
+is **0.1856 full-validate top-1** with optional 0.1771 on the
+historical 271-example slice (continuity).
+
+The 0.6125 figure was carried almost entirely by the 855 real
+reference-train rows mixed into training under the prior framing.
+The 0.1856 figure is the direct measurement of synth-only
+generalization to labeled reference, and is the starting point for
+refinement under the metrology + agent-feedback loop.
+
+### 2. DEPLOYMENT_READY redefinition
+
+The original brief discussed a "primary criterion held-out test
+top-1 ≥ 0.80" target.  That framing implicitly required the SVM
+channel to be standalone-deployable at the operator bar.  The
+correct framing for a DST evidence channel is **mutual affirmation
+with the prior stage's output**:
+
+- The SVM channel is DEPLOYMENT_READY when (cosine ⊕ SVM) materially
+  uplifts cosine-alone on the full reference, with bounded per-code
+  regressions and no overturns of confident-and-right cosine calls.
+- A high-accuracy SVM that's redundant with cosine is NOT
+  deployment-ready (adds compute without uplift).
+- A low-accuracy SVM that's complementary to cosine IS
+  deployment-ready (adds independent evidence the fusion can use).
+
+The gate is implemented in `scripts/svm_cosine_uplift_gate.py`.
+Four checks: global uplift ≥ ε, per-code regression band ≤ 5% of
+cosine-correct rows, zero confident-cosine overturns, median
+Dempster K ≤ 0.5 (diagnostic).
+
+TARGET_ACCURACY (0.95) remains relevant — it's the operator's bar
+for synth VALIDATION and the RUNTIME PIPELINE (full DST ensemble:
+cosine + SVM + LLM + CatBoost + name + pattern fused by
+`src/atelier/classify/pipeline.py`). The PIPELINE is a downstream
+measurement made by running the Atelier classification pipeline
+against hive-poc and counting `matches_reference == True` rate in
+`classifications.json`.  It is NOT the same as the SVM-stage gate.
+
+### 3. Cosine channel context
+
+`just optimize cosine` is **enrichment evolution**, not model
+training: a GEPA-shaped APO critic loop (`scripts/semantic_optimize.py`)
+that iteratively edits ColBERT enrichment payloads in Qdrant via
+LLM-mediated rewriting.  The "weights" of the cosine channel are the
+multi-vector ColBERT representations stored in Qdrant; optimization
+is in-place payload editing keyed on per-cluster rescue@1/3/5.  The
+SVM channel must affirm what that stage produced — not replace or
+override it.
+
+---
 
 ---
 
