@@ -27,19 +27,20 @@
 
 set -euo pipefail
 
-# One accuracy bar throughout: the reference is sampled from hive-poc,
-# so validate accuracy is the upper-bound proxy for test-stage
-# reference-overlap accuracy.  Refinement-loop stop target and
-# deployment-readiness gate are the same number (0.95 default).
-# If the loop plateaus below TARGET_ACCURACY, the SVM channel is NOT
-# deployment-ready and the next levers are structural, not more
-# refinement iterations on the same corpus.
+# Two distinct thresholds:
+#  - TARGET_ACCURACY is the refinement-loop's stop signal: when full-
+#    validate top-1 reaches this, the loop stops iterating (still subject
+#    to plateau detection).  It is NOT the deployment gate.
+#  - The deployment gate is the cosine-SVM mutual-affirmation check in
+#    scripts/svm_cosine_uplift_gate.py, evaluating whether (cosine ⊕ SVM)
+#    materially uplifts cosine-alone with bounded per-code regressions and
+#    no overturns of confident-and-right cosine calls.  Gate parameters
+#    live in that script's CLI.
 SYNTH_PER_CODE=40
 SKIP_REFINEMENT=0
 SKIP_TARGET_HEALTH=0
 MAX_REFINEMENT_PASSES=5
 TARGET_ACCURACY=0.95
-DEPLOYMENT_THRESHOLD=0.95
 CORPUS_DIR="build/data/svm_training/corpus_v2"
 
 while [[ $# -gt 0 ]]; do
@@ -50,7 +51,6 @@ while [[ $# -gt 0 ]]; do
     --skip-target-health) SKIP_TARGET_HEALTH=1; shift ;;
     --max-passes) MAX_REFINEMENT_PASSES="$2"; shift 2 ;;
     --target-accuracy) TARGET_ACCURACY="$2"; shift 2 ;;
-    --deployment-threshold) DEPLOYMENT_THRESHOLD="$2"; shift 2 ;;
     --corpus-dir) CORPUS_DIR="$2"; shift 2 ;;
     -h|--help)
       grep "^#" "$0" | head -30
@@ -160,17 +160,37 @@ else
   echo "No best_pass.json present — assuming initial Phase D pass 0 is canonical."
 fi
 
+echo
+echo "=== $(date -u +%FT%TZ) DEPLOYMENT GATE: cosine-SVM mutual affirmation ==="
+# Load-bearing gate.  Tests whether the trained SVM is a verified
+# mutually-affirming addition to the cosine channel that
+# `just optimize cosine` established.  Non-zero exit = NOT deployment-
+# ready; the report at build/svm_uplift_gate/uplift_report.md tells
+# the operator WHICH check failed.
+if ! python scripts/svm_cosine_uplift_gate.py --corpus-dir "$CORPUS_DIR"; then
+  echo
+  echo "✗ SVM channel is NOT deployment-ready (uplift gate failed)."
+  echo "  See build/svm_uplift_gate/uplift_report.md for which check"
+  echo "  failed and which codes regressed.  Run another corpus"
+  echo "  refinement cycle before attempting integration."
+  GATE_RC=1
+else
+  echo "✓ DEPLOYMENT_READY — uplift gate passed."
+  GATE_RC=0
+fi
+
 if [[ "$SKIP_TARGET_HEALTH" -eq 1 ]]; then
-  echo "=== Skipping target-data-source health check (--skip-target-health) ==="
+  echo "=== Skipping post-integration target-data-source diagnostic ==="
 else
   echo
-  echo "=== $(date -u +%FT%TZ) Test stage: target-data-source health on hive-poc ==="
-  echo "    deployment threshold: $DEPLOYMENT_THRESHOLD (full green: 0.95)"
-  python scripts/svm_target_health.py \
-    --corpus-dir "$CORPUS_DIR" \
-    --deployment-threshold "$DEPLOYMENT_THRESHOLD" \
-    || echo "WARNING: svm_target_health exited non-zero — NOT deployment-ready"
+  echo "=== $(date -u +%FT%TZ) Post-integration diagnostic: hive-poc target health ==="
+  # Informational only — does NOT gate.  Surfaces concerns the deployment
+  # gate didn't catch (e.g., catch-all collapse on broader unlabeled data).
+  python scripts/svm_target_health.py --corpus-dir "$CORPUS_DIR" || true
 fi
+
+# Exit with the deployment-gate status, not the diagnostic's status.
+[ "$GATE_RC" -ne 0 ] && exit "$GATE_RC"
 
 echo
 echo "=== $(date -u +%FT%TZ) Pipeline complete ==="
@@ -185,4 +205,5 @@ echo "  per-pass results:     build/reflect_nhsvm_eval_shap_v2/results_pass*.jso
 echo "  refinement history:   build/svm_corpus_v2/refinement_history.json"
 echo "  best-pass record:     build/svm_corpus_v2/best_pass.json"
 echo "  abandoned codes:      build/svm_corpus_v2/abandoned_codes.json"
-echo "  target health:        build/reflect_nhsvm_eval_shap_v2/target_health_report.json"
+echo "  uplift gate report:   build/svm_uplift_gate/uplift_report.md  ← the gate"
+echo "  target health diag:   build/reflect_nhsvm_eval_shap_v2/target_health_report.json"

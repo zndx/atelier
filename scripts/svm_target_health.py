@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
-"""scripts/svm_target_health.py — Test stage on the hive-poc target data source.
+"""scripts/svm_target_health.py — Post-integration diagnostic on hive-poc.
 
-After Phase D + refinement loop produce a best-pass corpus, this script
-trains the factorized NHSVM head on that corpus and runs inference on
-target entities in hive-poc.  Emits a health report measuring deployment-
-readiness, not held-out reference accuracy — the latter is the validate
-signal; this is the test signal.
+**Not the deployment gate.**  The deployment gate is
+``scripts/svm_cosine_uplift_gate.py`` (cosine ⊕ SVM mutual-affirmation
+on the full reference set).  This script runs AFTER the gate passes
+and the SVM channel is wired into the runtime Atelier classification
+pipeline; it surfaces concerns the gate didn't catch by sampling
+broader hive-poc target entities — most of which are NOT in the
+reference set, so accuracy can only be spot-checked via reference-
+overlap rows.
 
-Health metrics:
+What this script measures (all informational, no gating semantics):
 
-  - **Code coverage**: distinct top-1 codes predicted across all target
-    entities; compared against the reference set's expected
-    code-distribution as the baseline (not a hardcoded numeric range).
+  - **Code coverage**: distinct top-1 codes predicted across target
+    entities, compared against the reference set's code distribution.
+    Collapse to a handful or scatter across most of the taxonomy are
+    both concerning.
   - **Confidence distribution**: histogram of (top1_score - top2_score)
-    margin per target entity.  Healthy: bimodal (clearly-confident +
-    clearly-uncertain bins).
+    margin per target entity.  Bimodal (clearly-confident + clearly-
+    uncertain bins) is healthy; uniform low margin is unconfident
+    everywhere.
   - **Per-table consistency**: for each table, fraction of column
-    predictions sharing the same root-level code.  Tables with semantic
-    cohesion should show clustered root distribution.
-  - **Mass concentration**: per target entity, top1_score / sum(top3).
-  - **Reference-overlap sanity**: for target entities that ARE in the
-    reference set, fraction where SVM top-1 matches the reference
-    label.  Should be ≥ the full-validate accuracy.
+    predictions sharing the same root-level code.  Tables with
+    semantic cohesion (an addresses table, a transactions table)
+    should cluster.
+  - **Mass concentration**: top1_score / (top1+top2+top3) per entity.
+    Signal for DST fusion sanity.
+  - **Reference-overlap sanity**: for target entities IN the reference
+    set, fraction where SVM top-1 matches the label.  Should
+    approximately equal the validate accuracy from Phase D.
 
 Usage:
   python scripts/svm_target_health.py
@@ -66,12 +73,12 @@ DEFAULT_CORPUS_DIR = Path("build/data/svm_training/corpus_v2")
 OUTPUT_PATH = REPORT_DIR / "target_health_report.json"
 TARGET_CACHE = Path("build/svm_target_health/target_cache.json")
 
-# Deployment-readiness gate: reference-overlap accuracy must meet this
-# on target hive-poc entities for the SVM channel to go to production.
-# The refinement-loop's --target-accuracy is the SAME number (validate
-# is the upper-bound proxy for test accuracy since the reference is
-# sampled from hive-poc).  Operators tune via --deployment-threshold.
-DEPLOYMENT_READY = 0.95  # the operator's bar for production tagging
+# Reference-overlap watermark: informational expectation for what
+# validate accuracy should look like on the labeled subset of hive-poc.
+# Surfaces a soft "concern" flag when overlap accuracy diverges
+# substantially from the prior Phase D number — it does NOT gate
+# deployment.  The gate is svm_cosine_uplift_gate.py.
+REFERENCE_OVERLAP_WATERMARK = 0.50  # below this, surface as concern
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -313,11 +320,13 @@ def main() -> int:
     ap.add_argument("--refresh-embeddings", action="store_true")
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--output", type=Path, default=OUTPUT_PATH)
-    ap.add_argument("--deployment-threshold", type=float,
-                    default=DEPLOYMENT_READY,
-                    help=f"Reference-overlap accuracy required on target "
-                         f"entities for the SVM channel to be deployment-"
-                         f"ready (default {DEPLOYMENT_READY:.2f})")
+    ap.add_argument("--overlap-watermark", type=float,
+                    default=REFERENCE_OVERLAP_WATERMARK,
+                    help=f"Informational watermark for reference-overlap "
+                         f"accuracy (default {REFERENCE_OVERLAP_WATERMARK:.2f}); "
+                         f"below this, a 'concern' flag surfaces in the "
+                         f"report.  Does NOT gate deployment (the gate is "
+                         f"scripts/svm_cosine_uplift_gate.py).")
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -412,21 +421,24 @@ def main() -> int:
         "p75": round(float(np.percentile(mass_conc, 75)), 4),
     }
 
-    # Deployment-readiness gate (binary: meets or doesn't meet bar).
+    # Informational watermark check — NOT a deployment gate.
     overlap_rate = overlap.get("match_rate")
     if overlap_rate is None:
-        deployment_status = "indeterminate"
-        deployment_reason = ("no overlap between target entities and "
+        watermark_status = "indeterminate"
+        watermark_reason = ("no overlap between target entities and "
                              "reference set; can't measure accuracy")
-    elif overlap_rate >= args.deployment_threshold:
-        deployment_status = "ready"
-        deployment_reason = (f"reference-overlap accuracy {overlap_rate:.4f} "
-                             f"≥ {args.deployment_threshold:.2f}")
+    elif overlap_rate >= args.overlap_watermark:
+        watermark_status = "above_watermark"
+        watermark_reason = (f"reference-overlap accuracy {overlap_rate:.4f} "
+                             f"≥ {args.overlap_watermark:.2f} watermark")
     else:
-        deployment_status = "not_ready"
-        deployment_reason = (f"reference-overlap accuracy {overlap_rate:.4f} "
-                             f"< {args.deployment_threshold:.2f} — DO NOT "
-                             f"proceed to production")
+        watermark_status = "concern_below_watermark"
+        watermark_reason = (f"reference-overlap accuracy {overlap_rate:.4f} "
+                             f"< {args.overlap_watermark:.2f} — concern flag; "
+                             f"deployment gate (cosine-SVM uplift) is the "
+                             f"binding decision, but this divergence from "
+                             f"the expected validate baseline is worth "
+                             f"investigating")
 
     report = {
         "connection": args.connection,
@@ -445,11 +457,14 @@ def main() -> int:
         "per_table_consistency": per_table,
         "mass_concentration": mass_summary,
         "reference_overlap_sanity": overlap,
-        "deployment_gate": {
-            "threshold": args.deployment_threshold,
+        "overlap_watermark_check": {
+            "watermark": args.overlap_watermark,
             "observed_overlap_accuracy": overlap_rate,
-            "status": deployment_status,
-            "reason": deployment_reason,
+            "status": watermark_status,
+            "reason": watermark_reason,
+            "note": ("This is informational only — the deployment gate "
+                      "is scripts/svm_cosine_uplift_gate.py, not this "
+                      "watermark."),
         },
     }
 
@@ -477,13 +492,17 @@ def main() -> int:
         print(f"  reference-overlap sanity: no overlap to check")
     print()
     badge = {
-        "ready":          "✓ DEPLOYMENT READY",
-        "not_ready":      "✗ NOT DEPLOYMENT READY",
-        "indeterminate":  "? DEPLOYMENT STATUS INDETERMINATE",
-    }[deployment_status]
+        "above_watermark":           "  above watermark",
+        "concern_below_watermark":   "⚠  below watermark — concern flag",
+        "indeterminate":             "?  indeterminate (no overlap)",
+    }[watermark_status]
     print(f"  {badge}")
-    print(f"  {deployment_reason}")
-    return 0 if deployment_status == "ready" else 1
+    print(f"  {watermark_reason}")
+    print()
+    print("  Note: this script is a POST-INTEGRATION DIAGNOSTIC.")
+    print("  The deployment gate is scripts/svm_cosine_uplift_gate.py.")
+    # Always return 0 — this script is informational, not gating.
+    return 0
 
 
 if __name__ == "__main__":
