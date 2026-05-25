@@ -91,6 +91,9 @@ COOLDOWN_STATE = SVM_DIR / "cooldown_state.json"
 BEST_PASS = SVM_DIR / "best_pass.json"
 METROLOGY_REPORT = SVM_DIR / "metrology_report.json"
 
+UPLIFT_REPORT = Path("build/svm_uplift_gate/uplift_report.json")
+GENERATORS_V1 = Path("build/lib/generated/generators_v1.py")
+
 PROPOSALS_DIR = SVM_DIR / "proposals"
 SNAPSHOTS_DIR = SVM_DIR / "corpus_snapshots"
 
@@ -138,6 +141,129 @@ def run_command(cmd: list[str]) -> int:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Per-target enrichment for the agent's context — failure rows,
+# trajectory, current inventory.  These three signals are written
+# into refinement_targets.json alongside the metrology block so the
+# agent sees concrete, actionable diagnostic context per code.
+# ──────────────────────────────────────────────────────────────────────
+
+def _failure_rows_by_code(max_per_code: int = 8) -> dict[str, list[dict]]:
+    """For each target code, return up to N rows where the fused SVM
+    prediction was wrong on a row whose true label is that code.
+
+    Source: build/svm_uplift_gate/uplift_report.json's per_row block.
+    Returns {} if the gate has not yet run.
+
+    Each entry is a compact diagnostic dict the agent can read:
+        {"key": "table.column", "true": code, "fused_top1": pred,
+         "svm_top1": pred, "cos_top1": pred,
+         "cos_top1_mass": float,  # cosine's confidence on its top-1
+         "K": float}              # Dempster conflict for this row
+    """
+    if not UPLIFT_REPORT.exists():
+        return {}
+    try:
+        report = json.loads(UPLIFT_REPORT.read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+    per_row = report.get("per_row", [])
+    by_code: dict[str, list[dict]] = defaultdict(list)
+    for r in per_row:
+        true = r.get("true")
+        if not true or r.get("fused_top1") == true:
+            continue
+        if len(by_code[true]) >= max_per_code:
+            continue
+        by_code[true].append({
+            "key": r.get("key"),
+            "true": true,
+            "fused_top1": r.get("fused_top1"),
+            "svm_top1": r.get("svm_top1"),
+            "cos_top1": r.get("cos_top1"),
+            "cos_top1_mass": r.get("cos_top1_mass"),
+            "K": r.get("K"),
+        })
+    return dict(by_code)
+
+
+def _accuracy_trajectory(history_passes: list[dict]) -> dict[str, list[dict]]:
+    """For each code, return its per-pass full-validate accuracy
+    trajectory.  Reads from each pass's per_category_accuracy_passN.json.
+
+    Returns {code: [{"pass_idx": N, "accuracy": A, "n_validate": k}, ...]}.
+    Only includes codes that appear in at least one pass with n_validate>0.
+    """
+    trajectory: dict[str, list[dict]] = defaultdict(list)
+    for p in history_passes:
+        pass_idx = p.get("pass_idx")
+        if pass_idx is None:
+            continue
+        # Try the pass-numbered per_category file first
+        pc_path = REPORT_DIR / f"per_category_accuracy_pass{pass_idx}.json"
+        if not pc_path.exists():
+            continue
+        try:
+            pc_data = json.loads(pc_path.read_text())
+        except Exception:  # noqa: BLE001
+            continue
+        per_cat = pc_data.get("per_category", {})
+        for code, info in per_cat.items():
+            trajectory[code].append({
+                "pass_idx": pass_idx,
+                "accuracy": info.get("accuracy"),
+                "n_validate": info.get("n_test", 0),
+            })
+    return dict(trajectory)
+
+
+def _generator_inventory(target_codes: set[str]) -> dict[str, list[dict]]:
+    """For each target code, return summaries of the currently-authored
+    v1 generators (function name + source code snippet first/last lines).
+
+    Without this, the agent might re-author identical generators each
+    pass.  With it, the agent can vary from what already exists.
+    """
+    if not GENERATORS_V1.exists():
+        return {}
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("generators_v1_inventory",
+                                                      GENERATORS_V1)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # noqa: BLE001
+        return {}
+    by_code = getattr(mod, "GENERATORS_BY_CODE", {})
+    out: dict[str, list[dict]] = {}
+    import inspect
+    for code in target_codes:
+        gens = by_code.get(code)
+        if not gens:
+            continue
+        gens_list = gens if isinstance(gens, list) else [gens]
+        summaries = []
+        for g in gens_list:
+            if not callable(g):
+                continue
+            try:
+                src = inspect.getsource(g)
+                # Keep first 8 lines for context (function body summary)
+                src_lines = src.splitlines()[:8]
+                src_preview = "\n".join(src_lines)
+                if len(src.splitlines()) > 8:
+                    src_preview += "\n    # ... (truncated)"
+            except (OSError, TypeError):
+                src_preview = "<source unavailable>"
+            summaries.append({
+                "function_name": g.__name__,
+                "source_preview": src_preview,
+            })
+        if summaries:
+            out[code] = summaries
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Target identification (metrology-driven)
 # ──────────────────────────────────────────────────────────────────────
 
@@ -148,9 +274,13 @@ def identify_refinement_targets(
     abandoned_codes: set[str],
     cooldown_state: dict[str, int],
     metrology: dict,
+    history_passes: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Pick bottom-N codes from current Phase D results, joined with
-    metrology signals.  Returns (targets_list, diagnostics).
+    metrology signals + per-target failure rows + per-target accuracy
+    trajectory across passes + the current authored-generator inventory.
+
+    Returns (targets_list, diagnostics).
     """
     if not EVAL_RESULTS.exists():
         raise FileNotFoundError(
@@ -215,6 +345,13 @@ def identify_refinement_targets(
             if not rec.get("correct"):
                 neighbors[rec["true"]][rec["pred"]] += 1
 
+    # Enrichment context from past pass outputs — read once outside
+    # the per-target loop for efficiency.
+    failure_rows_by_code = _failure_rows_by_code(max_per_code=8)
+    accuracy_trajectory = _accuracy_trajectory(history_passes or [])
+    target_code_set = {c for c, _ in selected}
+    inventory_by_code = _generator_inventory(target_code_set)
+
     targets: list[dict] = []
     for code, info in selected:
         mt = metrology_per_code.get(code, {})
@@ -247,6 +384,10 @@ def identify_refinement_targets(
             "neighbor_source": mt.get("neighbor_source"),
             "passes_with_problem": mt.get("passes_with_problem", 0),
             "recommended_action": mt.get("recommended_action", "improve_separability"),
+            # Per-target enriched context (new — see refine docstring)
+            "failure_rows_from_last_gate": failure_rows_by_code.get(code, []),
+            "accuracy_trajectory": accuracy_trajectory.get(code, []),
+            "current_generator_inventory": inventory_by_code.get(code, []),
         })
 
     return targets, diagnostics
@@ -433,13 +574,16 @@ def main() -> int:
                         new_abandons, COOLDOWN_PASSES)
             _save_json(ABANDON_SET, sorted(abandoned_codes))
 
-        # Identify targets
+        # Identify targets — pass current history so the per-target
+        # accuracy trajectory + failure rows + generator inventory are
+        # baked into refinement_targets.json
         targets, diagnostics = identify_refinement_targets(
             bottom_n=args.bottom_n,
             n_validate_min=args.n_validate_min,
             abandoned_codes=abandoned_codes,
             cooldown_state=cooldown_state,
             metrology=metrology,
+            history_passes=passes,
         )
         write_refinement_targets(targets, diagnostics)
         log.info("  refinement targets: %d codes (eligible %d, "

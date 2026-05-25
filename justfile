@@ -103,7 +103,7 @@ optimize mode="help" *ARGS="":
       case "{{mode}}" in
         agent|--agent)  python scripts/build_agent_mediated.py --help ;;
         cosine|--cosine) python scripts/semantic_optimize.py --help ;;
-        svm|--svm)      python scripts/svm_generator_experiment.py --help ;;
+        svm|--svm)      bash scripts/run_corpus_expansion_pipeline.sh --help ;;
       esac
       exit 0
     fi
@@ -121,7 +121,12 @@ optimize mode="help" *ARGS="":
         python scripts/semantic_optimize.py {{ARGS}}
         ;;
       svm|--svm)
-        python scripts/svm_generator_experiment.py {{ARGS}}
+        # Dual-gate convergence: coverage audit → agent SDK authorship →
+        # corpus generation → Phase D training/eval → refinement loop
+        # (Gate A: TARGET_ACCURACY) → uplift gate (Gate B: mutual
+        # affirmation with cosine).  See plan and phase gate brief at
+        # docs/notes/2026-05-25/phase_gate_brief.md.
+        bash scripts/run_corpus_expansion_pipeline.sh {{ARGS}}
         ;;
       ""|help|--help|-h)
         echo "Usage: just optimize <agent|cosine|svm> [args...]"

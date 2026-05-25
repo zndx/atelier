@@ -200,9 +200,63 @@ Under the new framing, each target entry carries diagnostic measurements
     "billto_zip | VARCHAR | 90210, 94110, ... | siblings: ..."
   ],
   "passes_with_problem": 1,
-  "recommended_action": "improve_separability"
+  "recommended_action": "improve_separability",
+  "failure_rows_from_last_gate": [
+    {"key": "orders.bill_postal_code", "true": "1.2.3",
+     "fused_top1": "1.2.4", "svm_top1": "1.2.4",
+     "cos_top1": "1.2.3", "cos_top1_mass": 0.45, "K": 0.31}
+  ],
+  "accuracy_trajectory": [
+    {"pass_idx": 1, "accuracy": 0.10, "n_validate": 8},
+    {"pass_idx": 2, "accuracy": 0.30, "n_validate": 8},
+    {"pass_idx": 3, "accuracy": 0.30, "n_validate": 8}
+  ],
+  "current_generator_inventory": [
+    {"function_name": "generate_bill_postal_v1",
+     "source_preview": "def generate_bill_postal_v1(rng):\\n    return f\"{rng.randint(10000,99999)}\"\\n"}
+  ]
 }
 ```
+
+### Reading the per-target diagnostic context
+
+The four new fields (failure_rows_from_last_gate, accuracy_trajectory,
+current_generator_inventory, plus the metrology block) give you
+diagnostic *why*, not just *what*:
+
+- **`failure_rows_from_last_gate`** — up to 8 specific rows where the
+  fused (cosine ⊕ SVM) prediction got it wrong on a row whose TRUE
+  label is this code.  Each row shows the lean-text key
+  (`table.column`), the SVM's top-1 prediction (where it voted), the
+  cosine's top-1 (often the right answer), and the cosine's mass on
+  its top-1 (how confident cosine was when SVM dragged it wrong).
+  When you study these rows, your generator should produce values
+  that look like the `key` columns — that's exactly the shape the
+  encoder is currently misreading.
+
+- **`accuracy_trajectory`** — your code's per-pass validate accuracy
+  across the refinement history.  Three patterns matter:
+  - **Stagnation** (accuracy flat across passes): your prior
+    re-authoring isn't working; try a fundamentally different
+    format-family rather than tweaking the existing pattern
+  - **Improvement then plateau**: you found a partial fix; identify
+    which subset of failure_rows your prior generators DON'T cover
+    and author specifically for those
+  - **Regression** (accuracy went DOWN): your last authoring made
+    things worse — revert toward the prior pattern, or look at the
+    current_generator_inventory to see what shouldn't have changed
+
+- **`current_generator_inventory`** — the function names and source
+  previews of generators already in `generators_v1.py` for this
+  code.  Use this to:
+  - Avoid re-authoring identical or near-identical generators
+  - Identify the format family already covered and pick a different
+    one to author (e.g., if `_v1` produces 5-digit postal codes,
+    your new variant should cover 9-digit ZIP+4, alphanumeric
+    Canadian postal codes, foreign formats)
+  - Recognize when a code already has rich coverage and the issue
+    is elsewhere (the failure_rows suggest a different problem
+    like calibration rather than coverage)
 
 ### Shape anchoring — the load-bearing instruction
 

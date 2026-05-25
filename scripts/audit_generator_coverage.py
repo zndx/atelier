@@ -84,7 +84,39 @@ def probe_generator(gen, n: int = DIVERSITY_PROBE_N, seed: int = DIVERSITY_SEED)
     }
 
 
-def classify_gap(source: str | None, diversity_ratio: float, threshold: float) -> str:
+def classify_gap(
+    source: str | None,
+    diversity_ratio: float,
+    threshold: float,
+    *,
+    has_v1: bool = False,
+    require_v1_coverage: bool = False,
+) -> str:
+    """Classify per-code coverage status.
+
+    With ``require_v1_coverage=True`` (the SVM stage's default), any code
+    NOT covered by a v1 (agent-authored) generator is a gap the agent
+    must fill — even if ICE / template / inferred coverage exists in the
+    upstream Aegir registry.  The hand-coded ICE generators remain a
+    first-class upstream surface but no longer satisfy SVM-stage
+    coverage.
+    """
+    if require_v1_coverage and not has_v1:
+        # Any ICE/template/inferred coverage is a gap-to-fill for the
+        # SVM stage; only v1 coverage counts.  Surface the underlying
+        # situation in the gap_class so the agent's prioritization can
+        # still distinguish missing vs ice-only.
+        if source is None:
+            return "missing"
+        if source == "hand-coded":
+            return "ice_only_to_retire"
+        if source == "template":
+            return "template_only_to_retire"
+        if source == "inferred":
+            return "inferred_only_to_retire"
+        return "unknown_to_retire"
+
+    # Legacy (non-v1-requiring) classification: ICE counts as ok.
     if source is None:
         return "missing"
     if source == "inferred":
@@ -98,6 +130,23 @@ def classify_gap(source: str | None, diversity_ratio: float, threshold: float) -
     return "unknown"
 
 
+def _load_v1_codes() -> set[str]:
+    """Return the set of taxonomy codes with v1 (agent-authored) generators."""
+    v1_path = Path("build/lib/generated/generators_v1.py")
+    if not v1_path.exists():
+        return set()
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("generators_v1", v1_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out = set()
+    for code, gens in getattr(mod, "GENERATORS_BY_CODE", {}).items():
+        gens_list = gens if isinstance(gens, list) else [gens]
+        if any(callable(g) for g in gens_list):
+            out.add(code)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -105,6 +154,15 @@ def main() -> int:
                     help=f"Enrichment payloads JSON (default: {DEFAULT_PAYLOADS})")
     ap.add_argument("--diversity-threshold", type=float, default=0.5,
                     help="distinct_ratio below this on hand-coded → low_diversity gap")
+    ap.add_argument("--require-v1-coverage", action="store_true", default=True,
+                    help="SVM-stage default ON: codes with only ICE/template/"
+                         "inferred coverage are reclassified as gaps the "
+                         "agent must fill (the SVM channel does not train "
+                         "on hand-coded ICE; that surface stays upstream "
+                         "in Aegir)")
+    ap.add_argument("--no-require-v1-coverage", dest="require_v1_coverage",
+                    action="store_false",
+                    help="Disable v1-coverage requirement (legacy audit mode)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -126,6 +184,12 @@ def main() -> int:
     coverage_summary = registry.coverage_summary(cat_set)
     log.info("  coverage by source: %s", coverage_summary)
 
+    if args.require_v1_coverage:
+        v1_codes = _load_v1_codes()
+        log.info("  v1 (agent-authored) coverage: %d codes", len(v1_codes))
+    else:
+        v1_codes = set()
+
     log.info("Probing generators for diversity (n=%d, seed=%d)...",
              DIVERSITY_PROBE_N, DIVERSITY_SEED)
 
@@ -141,26 +205,38 @@ def main() -> int:
         if spec is not None:
             probe = probe_generator(spec.generator)
             diversity_ratio = probe["distinct_ratio"]
-        gap_class = classify_gap(source, diversity_ratio, args.diversity_threshold)
+        gap_class = classify_gap(
+            source, diversity_ratio, args.diversity_threshold,
+            has_v1=(code in v1_codes),
+            require_v1_coverage=args.require_v1_coverage,
+        )
         gap_class_counts[gap_class] += 1
         per_node.append({
             "code": code,
             "mnemonic": mnemonic,
             "label": getattr(cat, "label", "") or "",
             "source": source,
+            "has_v1": (code in v1_codes),
             "gap_class": gap_class,
             "probe": probe,
             "payload_present": mnemonic in payloads,
         })
 
-    # Priority-sorted gap list: missing > inferred_only > template_only >
-    # low_diversity_handcoded.  Within each tier, sort by mnemonic for
-    # determinism.
+    # Priority-sorted gap list.  Under require_v1_coverage=True the gap
+    # classes are *_to_retire variants; legacy classes also handled for
+    # backward compat when the flag is disabled.
     PRIORITY = {
+        # v1-required mode: every retirement gap is high priority for
+        # the agent
         "missing": 0,
-        "inferred_only": 1,
-        "template_only": 2,
-        "low_diversity_handcoded": 3,
+        "ice_only_to_retire": 1,
+        "template_only_to_retire": 2,
+        "inferred_only_to_retire": 3,
+        "unknown_to_retire": 4,
+        # legacy mode
+        "inferred_only": 5,
+        "template_only": 6,
+        "low_diversity_handcoded": 7,
         "ok": 99,
     }
     gap_nodes = [n for n in per_node if n["gap_class"] != "ok"]

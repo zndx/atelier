@@ -193,16 +193,21 @@ def _column_features_for_row(row: Row):
     )
 
 
-def _svm_proba_dict(head, X_row: np.ndarray) -> dict[str, float]:
+def _svm_proba_dict(
+    head, X_row: np.ndarray, temperature: float = 1.0,
+) -> dict[str, float]:
     """Run the factorized head on a single row, return {code: prob}.
 
-    `head.predict_proba` returns (1, n_nodes) softmax probabilities;
-    we dict-ify against the head's code ordering.
+    `head.predict_proba(temperature=T)` returns (1, n_nodes) softmax
+    probabilities at the chosen temperature; we dict-ify against the
+    head's code ordering.  Higher T → diffuser proba → more Θ-mass
+    when nhsvm_to_mass projects to focal elements.  The default T=1.0
+    matches the head's standard predict_proba behavior.
     """
     X_norm = sk_normalize(X_row.reshape(1, -1), norm="l2", axis=1).astype(np.float32)
     device = next(head.parameters()).device
     X_t = torch.tensor(X_norm, device=device)
-    proba = head.predict_proba(X_t)[0]  # (n_nodes,)
+    proba = head.predict_proba(X_t, temperature=temperature)[0]  # (n_nodes,)
     return {head.codes[i]: float(proba[i]) for i in range(len(head.codes))}
 
 
@@ -502,6 +507,14 @@ def main() -> int:
                     help=f"Check 4: median K bound, diagnostic only (default {DEFAULT_K_MEDIAN_BOUND})")
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--refresh-embeddings", action="store_true")
+    ap.add_argument("--temperature", type=float, default=1.0,
+                    help="SVM softmax temperature passed to "
+                         "head.predict_proba(temperature=T).  Higher T "
+                         "diffuses proba and raises Θ-mass in the SVM "
+                         "BeliefAssignment after nhsvm_to_mass projection. "
+                         "Useful for sweeping when check 2 (regression "
+                         "band) keeps failing — try T ∈ {1.0, 1.5, 2.0, "
+                         "3.0}.  Default 1.0.")
     ap.add_argument("--qdrant-url", default=None,
                     help="Override Qdrant URL (bypasses taxonomy_registry DAO lookup)")
     ap.add_argument("--qdrant-collection", default=None,
@@ -594,7 +607,7 @@ def main() -> int:
             continue
 
         # SVM mass via factorized head proba → nhsvm_to_mass
-        svm_proba = _svm_proba_dict(head, X_row)
+        svm_proba = _svm_proba_dict(head, X_row, temperature=args.temperature)
         m_svm = nhsvm_to_mass(
             svm_proba, frame, cat_set, alphas, discount=0.20,
         )
@@ -659,6 +672,9 @@ def main() -> int:
             "regression_band": args.regression_band,
             "confident_cos_mass": args.confident_cos_mass,
             "k_median_bound": args.k_median_bound,
+        },
+        "calibration": {
+            "svm_softmax_temperature": args.temperature,
         },
         **gate,
         "per_code": per_code,

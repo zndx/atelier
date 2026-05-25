@@ -47,7 +47,6 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from reflect_nhsvm import build_category_set
-from atelier.classify.synth_registry import GeneratorRegistry
 from atelier.classify.enrichment_loader import load_enrichment_payloads
 from atelier.classify.svm_classifier import build_svm_text
 
@@ -423,9 +422,14 @@ def generate_corpus(
     log.info("Loading enrichment payloads from %s...", payloads_path)
     payloads = load_enrichment_payloads(json_path=payloads_path)
 
-    log.info("Building registry (hand-coded ICE + template + inferred)...")
-    base_registry = GeneratorRegistry.from_enrichment_payloads(payloads, cat_set)
-
+    # NOTE: ICE/template/inferred fallback is DELIBERATELY NOT loaded
+    # here.  The SVM stage must train exclusively on v1 agent-authored
+    # generators (refined under the metrology loop).  ICE generators
+    # remain a first-class upstream Aegir surface — they are used in
+    # other contexts — but they have no place in this channel's training
+    # corpus.  Codes without v1 coverage are skipped and surfaced in
+    # the manifest's `n_nodes_skipped` so the next coverage audit picks
+    # them up as gaps for the agent to fill.
     log.info("Loading generators_v1 (Phase B output)...")
     v1 = load_generators_v1()
     # Build a v1 callable lookup: code → list[callable]
@@ -528,13 +532,11 @@ def generate_corpus(
             candidate_gens = v1_gens_by_code[code]
             gen_source = "v1"
         else:
-            spec = base_registry.get(code)
-            if spec is not None:
-                candidate_gens = [spec.generator]
-                gen_source = spec.source
-            else:
-                skipped_no_gen.append(code)
-                continue
+            # No ICE/template/inferred fallback — see note above.  The
+            # coverage audit must catch this code and route it to the
+            # agent for authoring before the next corpus generation.
+            skipped_no_gen.append(code)
+            continue
 
         v1_names = v1["name_variants_by_code"].get(code)
         v1_table_ctx = v1["table_context_by_code"].get(code)
