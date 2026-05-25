@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
-"""scripts/svm_cosine_uplift_gate.py — DEPLOYMENT_READY gate for `just optimize svm`.
+"""scripts/svm_cosine_uplift_gate.py — Gate B of the SVM stage's dual-gate exit.
 
-Tests whether the freshly-trained factorized NHSVM channel is a verified
-mutually-affirming addition to the cosine channel that `just optimize
-cosine` previously established.  This is the *architectural correctness*
-check that gates handoff to the Atelier classification pipeline — NOT
-a standalone-accuracy check.
+`just optimize svm` exits when BOTH gates pass:
+  Gate A (quantitative steering): refinement loop's full-validate top-1
+         reaches TARGET_ACCURACY (default 0.95) OR honest plateau.
+         Enforced in scripts/refine_generators_from_failures.py.
+  Gate B (architectural correctness): this script.  Tests whether
+         the trained factorized NHSVM channel is a verified mutually-
+         affirming addition to the cosine channel that `just optimize
+         cosine` previously established.
 
-The gate is the pairwise Dempster fusion of (cosine ⊕ SVM) compared
+Gate B is NOT a substitute for Gate A.  A high-accuracy SVM that fails
+this gate is redundant or correlated with cosine and shouldn't ship;
+a Gate-B-passing SVM that hasn't reached Gate A is correct-but-weak
+and shouldn't ship either.  Both required.  See
+.claude/projects/-home-cdsw/memory/feedback_deployment_ready_is_mutually_affirming.md
+for the dual-gate rationale.
+
+This gate is the pairwise Dempster fusion of (cosine ⊕ SVM) compared
 against cosine alone on the full agent-mediated reference set
 (1126 rows after singleton-class filter).  Four checks:
 
-  1. **Global uplift**:  A_fused − A_cos ≥ ε (default 0.01).
+  1. **Global uplift**:  A_fused − A_cos ≥ ε (default 0.01).  Mandatory.
   2. **Per-code regression band**: of rows where cos_top1 == true,
-     fraction where fused_top1 != true must stay ≤ 0.05.
+     fraction where fused_top1 != true must stay ≤ 0.05.  Mandatory.
   3. **Confidence-conditional do-no-harm**: among rows where cosine
      emits ≥ 0.7 mass on its top-1 singleton AND cos_top1 == true,
      100% must still have fused_top1 == true.  No overturns of
-     confident-and-right cosine calls.
+     confident-and-right cosine calls.  Mandatory.
   4. **Conflict K bound** (diagnostic): median K across rows ≤ 0.5.
      Logged but not fail-default.
 

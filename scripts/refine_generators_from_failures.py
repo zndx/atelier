@@ -26,11 +26,30 @@ Per pass:
   8. Compare post vs prior on full_validate top-1; update cooldown for
      non-improvers; track best pass.
 
+``--target-accuracy`` (default 0.95) is the **load-bearing quality
+bar** for the SVM stage — the quantitative steering signal that
+drives this refinement loop and the agent's per-pass generator
+authorship.  It is the same operator bar as the runtime ensemble's
+production gate (matches_reference ≥ 0.95 against hive-poc); validate
+accuracy is the upper-bound proxy for test accuracy since the
+reference is sampled from hive-poc, so anything less than 0.95 here
+cannot be made up downstream.
+
 Loop stops on:
-  - full-validate top-1 ≥ ``--target-accuracy`` (default 0.95, the
-    SAME number as the test-stage deployment threshold), OR
-  - Two consecutive passes with lift < 1pp, OR
+  - full-validate top-1 ≥ ``--target-accuracy`` (default 0.95) — the
+    quantitative target met, OR
+  - Two consecutive passes with lift < 1pp — honest plateau, OR
   - ``--max-passes`` reached (default 5).
+
+A SEPARATE check, run AFTER this loop exits, is the
+architectural-correctness gate at ``scripts/svm_cosine_uplift_gate.py``
+— pairwise cosine⊕SVM mutual affirmation on the full reference.
+That gate is NOT a substitute for ``--target-accuracy``; both must
+pass for the SVM channel to be shippable into the runtime ensemble.
+A high-accuracy SVM that fails the uplift gate is redundant or
+correlated with cosine; a uplift-passing SVM that plateaued below
+``--target-accuracy`` is correct-but-weak.  Both require the next
+refinement cycle (or structural code-set decisions).
 
 Outputs:
   build/svm_corpus_v2/refinement_history.json — per-pass deltas
@@ -321,12 +340,16 @@ def main() -> int:
     )
     ap.add_argument("--max-passes", type=int, default=5)
     ap.add_argument("--target-accuracy", type=float, default=0.95,
-                    help="Stop when full-validate top-1 reaches this "
-                         "(SAME as the test-stage deployment threshold — "
-                         "validate is the upper-bound proxy for test "
-                         "accuracy since the reference is sampled from "
-                         "hive-poc; plateauing below this means the SVM "
-                         "channel is NOT deployment-ready)")
+                    help="The load-bearing quality bar for the SVM stage "
+                         "(default 0.95).  Quantitative steering signal "
+                         "for this refinement loop; the metrology + agent "
+                         "feedback machinery exists to drive validate "
+                         "accuracy toward this target.  Plateauing below "
+                         "0.95 means the SVM channel is NOT shippable "
+                         "even if the separate uplift gate passes — both "
+                         "are required.  Operator may lower for "
+                         "diagnostic runs; production refinement should "
+                         "target 0.95.")
     ap.add_argument("--bottom-n", type=int, default=20,
                     help="Per-pass: refine bottom-N worst-accuracy codes")
     ap.add_argument("--n-validate-min", type=int, default=3,

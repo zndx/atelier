@@ -27,6 +27,24 @@ to `just optimize agent` — so the SVM has to generalize from synth to
 real target entities, and the agent-mediated reference is our best
 validate-stage signal.
 
+**Your primary objective is full-validate top-1 accuracy ≥ 0.95**
+(`TARGET_ACCURACY`).  This is the same operator bar as the runtime
+ensemble's production gate — the reference is sampled from hive-poc,
+so validate accuracy is the upper-bound proxy for what the full DST
+pipeline can reach against hive-poc target entities.  Anything less
+than 0.95 here cannot be made up downstream by other channels for the
+codes you cover.  The refinement loop will not stop iterating until
+this target is met OR an honest plateau is reached (2 consecutive
+passes < 1pp lift) OR max-passes is exhausted.
+
+A SEPARATE check runs after refinement completes — the cosine-SVM
+mutual-affirmation gate (`scripts/svm_cosine_uplift_gate.py`) — to
+verify your channel architecturally affirms the cosine channel
+instead of fighting it.  That gate is necessary but not sufficient;
+it does NOT replace the TARGET_ACCURACY objective.  Authoring
+generators that barely scrape past mutual affirmation at low
+standalone accuracy is the wrong target — keep pushing accuracy up.
+
 Per-slice SHAP attribution says `sample_values` dominates at 4× the
 next slice, so value-distribution realism is the highest-leverage axis;
 secondary axes are `column_name`, `column_type`, and contextual signals
