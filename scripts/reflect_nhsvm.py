@@ -202,7 +202,7 @@ def build_category_set():
     conn = cmldata.get_connection("hive-poc")
     vdf = conn.get_pandas_dataframe(
         "select id, annotation, definition from default.annotations "
-        "where deprecated is null or deprecated = false"
+        "where deprecated != 'yes'"
     )
     records = []
     for _, v in vdf.iterrows():

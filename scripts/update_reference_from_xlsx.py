@@ -218,7 +218,11 @@ def refresh_taxonomy_cache() -> None:
             "annotation": r["annotation"],
             "definition": r["definition"],
             "common_names": r.get("common_names") or "",
-            "deprecated": str(r.get("deprecated") or "").lower() == "true",
+            # Hive's `default.annotations.deprecated` is a string "yes"/"no",
+            # not a boolean.  Comparing to "true" here always returned False,
+            # silently leaking deprecated codes into the reviewer candidate
+            # set at line ~492.  Found via reflect_nhsvm.py 2026-05-25.
+            "deprecated": str(r.get("deprecated") or "").strip().lower() == "yes",
         }
         for _, r in df.iterrows()
     ]
@@ -488,10 +492,14 @@ def build_user_prompt(
         lines.append(f"- code: `{cur_code or '<unset>'}` (not in taxonomy)")
 
     lines.append(f"\n# Taxonomy ({len(taxonomy_subset)} entries)")
+    # Deprecated codes remain in the list — deprecation is a curation
+    # signal (prefer non-deprecated alternatives), NOT a hide.  Columns
+    # already tagged with a deprecated code may legitimately keep that
+    # assignment; hiding the code from the reviewer would force a
+    # spurious re-routing.
     for t in taxonomy_subset:
-        if t["deprecated"]:
-            continue
-        line = f"- `{t['code']}` `{t['annotation']}` — {t['definition'][:160]}"
+        suffix = "  [DEPRECATED]" if t["deprecated"] else ""
+        line = f"- `{t['code']}` `{t['annotation']}`{suffix} — {t['definition'][:160]}"
         if t.get("common_names"):
             line += f"  (aliases: {t['common_names'][:100]})"
         lines.append(line)
