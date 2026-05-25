@@ -70,6 +70,64 @@ is in-place payload editing keyed on per-cluster rescue@1/3/5.  The
 SVM channel must affirm what that stage produced — not replace or
 override it.
 
+### 4. Why standalone accuracy is the wrong gate
+
+DST evidence fusion's load-bearing property is complementary independence
+between channels, not individual channel strength. Two cases prove this
+cuts both ways:
+
+Case A — low-accuracy complementary channel is DEPLOYMENT_READY:
+    - A_cos = 0.78, A_svm = 0.65, A_cos⊕svm = 0.86
+    - The SVM is only 65% standalone but its errors are uncorrelated with cosine's errors
+    - Fusion realizes +8pp uplift over cosine alone
+    - Architecturally correct addition → ship it
+
+Case B — high-accuracy redundant channel is NOT DEPLOYMENT_READY:
+    - A_cos = 0.93, A_svm = 0.95, A_cos⊕svm = 0.93
+    - The SVM is 95% standalone but its mass distribution mirrors cosine's
+    - Adding it to the ensemble costs compute without uplift
+    - Violates the source-independence assumption that makes Dempster's rule valid
+    - Reject — even though it "passes" any standalone-accuracy bar
+
+Case C — high SVM that regresses cosine's wins:
+    - A_cos = 0.78, A_svm = 0.92, A_cos⊕svm = 0.81
+    - Globally positive uplift, but SVM is fighting cosine where cosine was right
+    - Silent failure mode hidden by aggregate accuracy
+    - The per-code regression band is what catches this
+
+#### The formalization
+      
+SVM is DEPLOYMENT_READY iff:
+    (1) A_cos⊕svm − A_cos ≥ ε                    [global uplift, mandatory]
+    (2) regression_rate ≤ δ                      [per-code regression band, mandatory]
+    where regression_rate = |{rows : cos_top1=true AND fused_top1≠true}| / |{cos_top1=true}|
+    (3) ∀ rows with m_cos({top1}) ≥ τ AND cos_top1=true: fused_top1 = true
+                                                   [confidence-conditional do-no-harm, mandatory]
+    (4) median(K) ≤ κ                            [conflict bound, diagnostic only]
+
+Defaults: ε=0.01, δ=0.05, τ=0.7, κ=0.5
+
+TARGET_ACCURACY is two separate concepts, found in multiple operational modalities.
+      
+The 0.95 operator bar lives at _both the runtime ensemble, _and_ the synthetic NHSVM channel:
+    - Validate accuracy is the upper-bound proxy for test accuracy (reference is sampled from hive-poc;
+    same distribution)
+    - The full DST ensemble's matches_reference == True rate in classifications.json is the production
+    gate
+    - Each channel's pairwise-uplift gate is necessary; the full-ensemble gate is the ultimate decision
+
+These are different decisions: an architecturally-correct ensemble can still fall short of 0.95 (keep iterating);
+a 0.95-achieving ensemble can still contain a redundant channel that should be removed (audit independence).
+     
+The bidirectional NHSVM / Cosine channel logic in one sentence:
+    ▎ A channel passes its deployment gate by demonstrating uplift over the prior stage's fusion, 
+    ▎ regardless of its absolute accuracy; conversely, no level of standalone accuracy passes the gate if
+    ▎ uplift is absent.
+
+This is what scripts/svm_cosine_uplift_gate.py encodes — pure pairwise Dempster fusion of cosine ⊕
+SVM mass on the full agent-mediated reference (1126 rows), compared against cosine-alone on the same
+rows.
+
 ---
 
 ---
@@ -244,27 +302,18 @@ context.
 ## Open questions for phase gate
 
 1. **Generalization confirmation.**  Held-out 61.25% is real but
-   below the 80% target.  Corpus expansion to ~57k training rows is
-   currently running on the App pod (Agent SDK + Bedrock Opus 4.6
-   authoring per-node generators per a SHAP-priority spec).  Result
-   expected in 6-12 hours.  Gate question: do we hold the phase open
-   pending this result, or close on the architectural validation
-   alone with corpus expansion as a continuation?
+   below the true 95% target.  Corpus expansion to ~57k training
+   rows is currently running with Agent SDK + Bedrock Opus 4.6
+   authoring per-node generators per a SHAP-priority spec.  Result
+   expected in 6-12 hours.  We will hold the phase open pending this
+   result, and any remediation indicated by the result.
 
-2. **TF-IDF generalization unknown.**  The 98.93% TF-IDF figure is
-   fit-on-train; held-out generalization has not been measured.  Until
-   it is, we cannot assert that ModernBERT-Factorized is *better* than
-   TF-IDF-Kronecker on the metric that matters — only that it works
-   correctly with dense encoders.  Recommended: run TF-IDF through the
-   same held-out harness as a parity check before the standalone NHSVM
-   write-up commits to comparative claims.
-
-3. **DST discount recalibration.**  The factorized head is structurally
+2. **DST discount recalibration.**  The factorized head is structurally
    different enough from the prior implementation that the previous
    discount calibration (0.22) should be re-derived.  Pending corpus
    expansion result.
 
-4. **Standalone publication scope.**  Recommend separate technical
+3. **Standalone publication scope.**  Recommend separate technical
    note covering only the factorized NHSVM head + non-leaf extension +
    tree-distance Δ derivation + benchmark protocol, decoupled from
    Atelier-specific deployment context.  Audience: hierarchical-
@@ -275,13 +324,13 @@ context.
 ## Recommendation
 
 **Conditional gate pass** pending the in-flight corpus expansion
-result (D-day decision: held-out top-1 ≥ 0.70 keeps the architecture
-on its current trajectory; <0.70 triggers structural simplification
+result (D-day decision: held-out top-1 ≥ 0.90 keeps the architecture
+on its current trajectory; <0.90 triggers structural simplification
 work as parallel investigation — low-rank `W_n`, sibling weight
 sharing).
 
 Next phase scope:
 - Corpus expansion convergence + held-out result interpretation
-- TF-IDF parity baseline through the same harness
 - DST discount recalibration against the new channel
 - Standalone technical write-up draft for external publication
+
