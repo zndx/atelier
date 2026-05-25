@@ -2,19 +2,38 @@
 """scripts/audit_generator_coverage.py — Phase A of the corpus expansion plan.
 
 Deterministic, no-LLM audit of synth generator coverage across the full
-287-node taxonomy.  For every node:
+taxonomy.  For every node:
 
   1. Resolve a generator via ``GeneratorRegistry.from_enrichment_payloads``
-     (the same registry the production pipeline uses).
-  2. If covered, run a 50-trial diversity probe with a fixed-seed RNG
-     and record: distinct-output ratio, mean output length, top-1 share,
-     sample outputs.
-  3. Classify each node into one of:
-       - ``missing``               — no generator at any layer
-       - ``inferred_only``         — only regex-keyword-matched fallback
-       - ``template_only``         — only sample-perturbation generator
-       - ``low_diversity_handcoded`` — hand-coded but distinct_ratio < 0.5
-       - ``ok``                    — hand-coded with adequate diversity
+     (the upstream Aegir registry; includes BFO/CCO ICE generators,
+     template-based generators, and inferred fallbacks).
+  2. Check whether a v1 (agent-authored, SVM-channel-scoped) generator
+     exists at ``build/lib/generated/generators_v1.py``.
+  3. Classify each node.  Under ``--require-v1-coverage`` (default ON
+     for SVM-stage usage):
+
+       - ``ok``                          — v1 generator exists
+       - ``missing``                     — no coverage anywhere
+       - ``ice_upstream_needs_v1``       — upstream ICE coverage but
+                                           no v1; agent must author
+       - ``template_upstream_needs_v1``  — upstream template coverage
+                                           but no v1; agent must author
+       - ``inferred_upstream_needs_v1``  — upstream inferred coverage
+                                           but no v1; agent must author
+
+     Under ``--no-require-v1-coverage`` (legacy diagnostic mode), the
+     classification uses upstream-registry coverage only (ICE counts
+     as ok), without the v1 requirement.
+
+About ICE: ICE = Information Content Entity, a BFO/CCO ontology class
+(see CommonCoreOntology/CommonCoreOntologies/.../InformationEntityOntology.ttl).
+ICE generators are NOT legacy — they are a first-class upstream
+Aegir-managed surface, used in other contexts.  The SVM stage requires
+its own v1 generators (refined under the metrology loop) because the
+SVM channel must train on agent-authored generators that the metrology
++ refinement machinery can steer.  ICE generators continue to exist
+upstream; this audit just enforces that they don't satisfy SVM-stage
+coverage on their own.
 
 Outputs:
   build/svm_corpus_v2/coverage_audit.json  — full per-code metadata
@@ -26,6 +45,7 @@ Usage:
   python scripts/audit_generator_coverage.py
   python scripts/audit_generator_coverage.py --payloads <path>
   python scripts/audit_generator_coverage.py --diversity-threshold 0.6
+  python scripts/audit_generator_coverage.py --no-require-v1-coverage
 """
 from __future__ import annotations
 
@@ -103,21 +123,25 @@ def classify_gap(
     """
     if require_v1_coverage:
         if has_v1:
-            # v1 covers this code; it's done regardless of any legacy
-            # ICE/template/inferred coverage that may also exist.
+            # v1 covers this code; it's done regardless of any
+            # upstream ICE / template / inferred coverage that may
+            # also exist via the Aegir-managed registry.
             return "ok"
-        # No v1 coverage — surface the underlying ICE/template/inferred
+        # No v1 coverage — surface the underlying upstream-registry
         # situation in the gap_class so the agent's prioritization can
-        # still distinguish missing vs ice-only.
+        # distinguish missing-everywhere vs has-upstream-ICE-but-needs-v1.
+        # ICE = Information Content Entity (BFO/CCO ontology surface
+        # managed upstream in Aegir) — NOT legacy; co-exists with the
+        # SVM stage's v1 channel, just outside its scope.
         if source is None:
             return "missing"
         if source == "hand-coded":
-            return "ice_only_to_retire"
+            return "ice_upstream_needs_v1"
         if source == "template":
-            return "template_only_to_retire"
+            return "template_upstream_needs_v1"
         if source == "inferred":
-            return "inferred_only_to_retire"
-        return "unknown_to_retire"
+            return "inferred_upstream_needs_v1"
+        return "unknown_upstream_needs_v1"
 
     # Legacy (non-v1-requiring) classification: ICE counts as ok.
     if source is None:
@@ -226,16 +250,17 @@ def main() -> int:
         })
 
     # Priority-sorted gap list.  Under require_v1_coverage=True the gap
-    # classes are *_to_retire variants; legacy classes also handled for
-    # backward compat when the flag is disabled.
+    # classes are *_upstream_needs_v1 variants (codes with upstream
+    # Aegir-managed coverage but no v1 SVM-channel generator); legacy
+    # classes also handled for backward compat when the flag is
+    # disabled.
     PRIORITY = {
-        # v1-required mode: every retirement gap is high priority for
-        # the agent
+        # v1-required mode: every gap is high priority for the agent
         "missing": 0,
-        "ice_only_to_retire": 1,
-        "template_only_to_retire": 2,
-        "inferred_only_to_retire": 3,
-        "unknown_to_retire": 4,
+        "ice_upstream_needs_v1": 1,
+        "template_upstream_needs_v1": 2,
+        "inferred_upstream_needs_v1": 3,
+        "unknown_upstream_needs_v1": 4,
         # legacy mode
         "inferred_only": 5,
         "template_only": 6,

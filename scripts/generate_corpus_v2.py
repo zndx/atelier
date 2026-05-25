@@ -422,14 +422,16 @@ def generate_corpus(
     log.info("Loading enrichment payloads from %s...", payloads_path)
     payloads = load_enrichment_payloads(json_path=payloads_path)
 
-    # NOTE: ICE/template/inferred fallback is DELIBERATELY NOT loaded
-    # here.  The SVM stage must train exclusively on v1 agent-authored
-    # generators (refined under the metrology loop).  ICE generators
-    # remain a first-class upstream Aegir surface — they are used in
-    # other contexts — but they have no place in this channel's training
-    # corpus.  Codes without v1 coverage are skipped and surfaced in
-    # the manifest's `n_nodes_skipped` so the next coverage audit picks
-    # them up as gaps for the agent to fill.
+    # NOTE: upstream ICE / template / inferred fallback is DELIBERATELY
+    # NOT loaded here.  ICE = Information Content Entity (BFO/CCO
+    # ontology surface managed upstream in the Aegir project — NOT
+    # legacy).  The SVM stage requires its own v1 (agent-authored)
+    # generators because the metrology + refinement machinery can only
+    # steer generators that the agent owns end-to-end.  ICE continues
+    # to exist as a first-class upstream surface, just outside this
+    # channel's training corpus.  Codes without v1 coverage are
+    # skipped and surfaced in the manifest's `n_nodes_skipped` so the
+    # next coverage audit picks them up as gaps for the agent to fill.
     log.info("Loading generators_v1 (Phase B output)...")
     v1 = load_generators_v1()
     # Build a v1 callable lookup: code → list[callable]
@@ -532,9 +534,11 @@ def generate_corpus(
             candidate_gens = v1_gens_by_code[code]
             gen_source = "v1"
         else:
-            # No ICE/template/inferred fallback — see note above.  The
-            # coverage audit must catch this code and route it to the
-            # agent for authoring before the next corpus generation.
+            # No upstream-ICE fallback — see note above (upstream ICE
+            # is BFO/CCO ontology surface managed in Aegir, outside
+            # this channel's scope).  The coverage audit must catch
+            # this code and route it to the agent for authoring before
+            # the next corpus generation.
             skipped_no_gen.append(code)
             continue
 

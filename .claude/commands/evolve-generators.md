@@ -3,8 +3,10 @@
 ## Purpose
 
 Phase B of the SHAP-priority-guided synthetic corpus expansion plan.
-For every gap node in the taxonomy (codes without a hand-coded generator
-or with low-diversity coverage), produce:
+For every gap node in the taxonomy (codes without a v1
+agent-authored generator in `build/lib/generated/generators_v1.py`,
+regardless of whether upstream ICE / template / inferred coverage
+exists in Aegir's `GeneratorRegistry`), produce:
 
 1. **A generator function** `Callable[[random.Random], str]` returning
    distributionally-realistic synthetic values for that category.
@@ -62,9 +64,15 @@ shapes) over quantity.
 - `build/data/svm_training/enrichment_payloads.json` — per-mnemonic
   enrichment metadata: `label`, `description`, `name_hints`,
   `prototype_values`, `value_patterns`, `anti_examples`.
-- `src/atelier/classify/synth_generators.py` — ~70 hand-coded ICE.*
-  reference generators to imitate the style of (single-family
-  diversified strings via `rng.choice` / `rng.randint` / format mixing).
+- `src/atelier/classify/synth_generators.py` — ~70 upstream
+  ICE (Information Content Entity, BFO/CCO ontology surface managed
+  in Aegir) reference generators.  Read these for STYLE reference
+  (single-family diversified strings via `rng.choice` /
+  `rng.randint` / format mixing) — do NOT import or extend them
+  directly; v1 generators must be authored exclusively for the SVM
+  channel so the metrology + refinement loop can steer them.  ICE
+  continues to exist as a first-class upstream surface, parallel to
+  the SVM channel.
 - `build/lib/generated/generators_v0.py` — 4 prior Opus-emitted
   generators for stylistic reference.
 
