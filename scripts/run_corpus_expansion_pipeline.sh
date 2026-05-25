@@ -2,41 +2,67 @@
 # scripts/run_corpus_expansion_pipeline.sh — long-run orchestrator.
 #
 # Runs the full SHAP-priority-guided synthetic corpus expansion plan
-# (Phases A-E) end-to-end.  Designed for unattended execution on the
-# CAI App pod where the Bedrock-routed Agent SDK runs.
+# (Phases A-E) end-to-end + the target-data-source health check (test
+# stage).  Designed for unattended execution on the CAI App pod where
+# the Bedrock-routed Agent SDK runs.
 #
 # Each phase logs to its own report dir under build/.  Re-running this
 # script after a partial completion resumes from where it stopped (each
 # phase is independently resume-safe).
 #
+# Best-pass tracking: refinement loop writes build/svm_corpus_v2/best_pass.json
+# with the best validate-accuracy pass's idx + corpus hash.  Before the
+# final test stage, this orchestrator restores the best-pass corpus
+# snapshot if it differs from the current pass's corpus (so test runs
+# against the BEST model the loop produced, not the LAST).
+#
 # Usage:
 #   bash scripts/run_corpus_expansion_pipeline.sh
-#   bash scripts/run_corpus_expansion_pipeline.sh --rows-per-node 100  # smaller smoke run
-#   bash scripts/run_corpus_expansion_pipeline.sh --skip-refinement     # initial pass only
+#   bash scripts/run_corpus_expansion_pipeline.sh --synth-examples-per-code 60
+#   bash scripts/run_corpus_expansion_pipeline.sh --skip-refinement
+#   bash scripts/run_corpus_expansion_pipeline.sh --skip-target-health
+#   bash scripts/run_corpus_expansion_pipeline.sh --corpus-dir build/data/svm_training/corpus_v3
 #
 # Logs to /tmp/corpus_expansion.log when invoked under nohup.
 
 set -euo pipefail
 
-ROWS_PER_NODE=200
+# One accuracy bar throughout: the reference is sampled from hive-poc,
+# so validate accuracy is the upper-bound proxy for test-stage
+# reference-overlap accuracy.  Refinement-loop stop target and
+# deployment-readiness gate are the same number (0.95 default).
+# If the loop plateaus below TARGET_ACCURACY, the SVM channel is NOT
+# deployment-ready and the next levers are structural, not more
+# refinement iterations on the same corpus.
+SYNTH_PER_CODE=40
 SKIP_REFINEMENT=0
+SKIP_TARGET_HEALTH=0
 MAX_REFINEMENT_PASSES=5
-TARGET_ACCURACY=0.80
+TARGET_ACCURACY=0.95
+DEPLOYMENT_THRESHOLD=0.95
+CORPUS_DIR="build/data/svm_training/corpus_v2"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --rows-per-node) ROWS_PER_NODE="$2"; shift 2 ;;
+    --synth-examples-per-code) SYNTH_PER_CODE="$2"; shift 2 ;;
+    --rows-per-node) SYNTH_PER_CODE="$2"; shift 2 ;;  # deprecated alias
     --skip-refinement) SKIP_REFINEMENT=1; shift ;;
+    --skip-target-health) SKIP_TARGET_HEALTH=1; shift ;;
     --max-passes) MAX_REFINEMENT_PASSES="$2"; shift 2 ;;
     --target-accuracy) TARGET_ACCURACY="$2"; shift 2 ;;
+    --deployment-threshold) DEPLOYMENT_THRESHOLD="$2"; shift 2 ;;
+    --corpus-dir) CORPUS_DIR="$2"; shift 2 ;;
     -h|--help)
-      grep "^#" "$0" | head -25
+      grep "^#" "$0" | head -30
       exit 0 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
 
 cd /home/cdsw
+
+SNAPSHOTS_DIR="build/svm_corpus_v2/corpus_snapshots"
+mkdir -p "$SNAPSHOTS_DIR"
 
 echo "=== $(date -u +%FT%TZ) Phase A: generator coverage audit ==="
 python scripts/audit_generator_coverage.py
@@ -48,11 +74,9 @@ echo "=== $(date -u +%FT%TZ) Phase B: Agent SDK generator authorship ==="
 for i in $(seq 1 10); do
   echo "--- Phase B agent session $i ---"
   python scripts/run_evolve_generators_sdk.py
-  # Check if there are still untreated gap codes
   remaining=$(python -c "
-import json
+import json, os
 audit = json.load(open('build/svm_corpus_v2/coverage_audit.json'))
-import os
 proposals_dir = 'build/svm_corpus_v2/proposals'
 treated = {f.removesuffix('.json').replace('_', '.') for f in os.listdir(proposals_dir)} if os.path.isdir(proposals_dir) else set()
 remaining = [g['code'] for g in audit['gap_list'] if g['code'] not in treated]
@@ -67,21 +91,85 @@ done
 
 echo
 echo "=== $(date -u +%FT%TZ) Phase C: corpus generation at scale ==="
-python scripts/generate_corpus_v2.py --rows-per-node "$ROWS_PER_NODE"
+python scripts/generate_corpus_v2.py \
+  --synth-examples-per-code "$SYNTH_PER_CODE" \
+  --output "$CORPUS_DIR"
+
+# Snapshot pass-0 corpus (initial pre-refinement state)
+PASS0_SNAP="$SNAPSHOTS_DIR/pass_0"
+mkdir -p "$PASS0_SNAP"
+cp "$CORPUS_DIR/synth_rows.jsonl" "$PASS0_SNAP/"
+cp "$CORPUS_DIR/manifest.json" "$PASS0_SNAP/"
+echo "Snapshot taken: $PASS0_SNAP"
 
 echo
-echo "=== $(date -u +%FT%TZ) Phase D: long-run eval (synth+real → real held-out) ==="
-python scripts/reflect_nhsvm_eval_shap_v2.py
+echo "=== $(date -u +%FT%TZ) Phase D: initial eval (pass 0) ==="
+python scripts/reflect_nhsvm_eval_shap_v2.py \
+  --pass-idx 0 \
+  --corpus-dir "$CORPUS_DIR"
 
 if [[ "$SKIP_REFINEMENT" -eq 1 ]]; then
   echo "=== Skipping Phase E (--skip-refinement) ==="
 else
   echo
   echo "=== $(date -u +%FT%TZ) Phase E: iterative refinement loop ==="
+  # The refinement loop runs Phase D internally with --pass-idx for each
+  # refinement pass and tracks best_pass.json + corpus snapshots.
   python scripts/refine_generators_from_failures.py \
     --max-passes "$MAX_REFINEMENT_PASSES" \
     --target-accuracy "$TARGET_ACCURACY" \
-    --rows-per-node "$ROWS_PER_NODE"
+    --synth-examples-per-code "$SYNTH_PER_CODE" \
+    --corpus-dir "$CORPUS_DIR"
+fi
+
+# Best-pass restoration before the test stage
+BEST_PASS_JSON="build/svm_corpus_v2/best_pass.json"
+if [[ -f "$BEST_PASS_JSON" ]]; then
+  BEST_IDX=$(python -c "import json; print(json.load(open('$BEST_PASS_JSON'))['best_pass_idx'])")
+  BEST_TOP1=$(python -c "import json; print(json.load(open('$BEST_PASS_JSON'))['best_top1'])")
+  BEST_SNAP="$SNAPSHOTS_DIR/pass_${BEST_IDX}"
+  if [[ -d "$BEST_SNAP" && -f "$BEST_SNAP/synth_rows.jsonl" ]]; then
+    CURRENT_HASH=$(python -c "
+import hashlib
+print(hashlib.sha1(open('$CORPUS_DIR/synth_rows.jsonl','rb').read()).hexdigest()[:12])
+")
+    BEST_HASH=$(python -c "
+import hashlib
+print(hashlib.sha1(open('$BEST_SNAP/synth_rows.jsonl','rb').read()).hexdigest()[:12])
+")
+    if [[ "$CURRENT_HASH" != "$BEST_HASH" ]]; then
+      echo
+      echo "=== Restoring best-pass corpus (pass $BEST_IDX, top-1=$BEST_TOP1) ==="
+      echo "    current corpus hash:  $CURRENT_HASH"
+      echo "    best-pass corpus hash: $BEST_HASH"
+      cp "$BEST_SNAP/synth_rows.jsonl" "$CORPUS_DIR/"
+      cp "$BEST_SNAP/manifest.json" "$CORPUS_DIR/"
+      # Re-run Phase D against restored corpus for the canonical final number
+      echo
+      echo "=== $(date -u +%FT%TZ) Phase D: final eval on restored best-pass corpus ==="
+      python scripts/reflect_nhsvm_eval_shap_v2.py \
+        --pass-idx "$BEST_IDX" \
+        --corpus-dir "$CORPUS_DIR"
+    else
+      echo "Best-pass corpus already current ($CURRENT_HASH); no restore needed."
+    fi
+  else
+    echo "WARN: best_pass.json points to pass $BEST_IDX but snapshot $BEST_SNAP missing"
+  fi
+else
+  echo "No best_pass.json present — assuming initial Phase D pass 0 is canonical."
+fi
+
+if [[ "$SKIP_TARGET_HEALTH" -eq 1 ]]; then
+  echo "=== Skipping target-data-source health check (--skip-target-health) ==="
+else
+  echo
+  echo "=== $(date -u +%FT%TZ) Test stage: target-data-source health on hive-poc ==="
+  echo "    deployment threshold: $DEPLOYMENT_THRESHOLD (full green: 0.95)"
+  python scripts/svm_target_health.py \
+    --corpus-dir "$CORPUS_DIR" \
+    --deployment-threshold "$DEPLOYMENT_THRESHOLD" \
+    || echo "WARNING: svm_target_health exited non-zero — NOT deployment-ready"
 fi
 
 echo
@@ -90,7 +178,11 @@ echo
 echo "Reports:"
 echo "  coverage audit:       build/svm_corpus_v2/coverage_audit.json"
 echo "  acceptance log:       build/svm_corpus_v2/acceptance_log.json"
-echo "  corpus manifest:      build/data/svm_training/corpus_v2/manifest.json"
+echo "  metrology report:     build/svm_corpus_v2/metrology_report.json"
+echo "  corpus manifest:      $CORPUS_DIR/manifest.json"
 echo "  eval report:          build/reflect_nhsvm_eval_shap_v2/report.md"
-echo "  per-category JSON:    build/reflect_nhsvm_eval_shap_v2/per_category_accuracy.json"
+echo "  per-pass results:     build/reflect_nhsvm_eval_shap_v2/results_pass*.json"
 echo "  refinement history:   build/svm_corpus_v2/refinement_history.json"
+echo "  best-pass record:     build/svm_corpus_v2/best_pass.json"
+echo "  abandoned codes:      build/svm_corpus_v2/abandoned_codes.json"
+echo "  target health:        build/reflect_nhsvm_eval_shap_v2/target_health_report.json"
