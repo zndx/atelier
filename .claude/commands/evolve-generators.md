@@ -19,13 +19,22 @@ contexts.
 
 ## Why this matters
 
-The factorized NHSVM head currently generalizes to 61.25% on the
-held-out test (vs ~80% target).  The gap is data scarcity — only ~5
-training examples per class.  Per-slice SHAP attribution says
-`sample_values` dominates at 4× the next slice, so value-distribution
-realism is the highest-leverage axis; secondary axes are
-`column_name`, `column_type`, and contextual signals (`sibling_context`,
-`source_table`).
+The factorized NHSVM head is trained on the synthetic corpus alone and
+validated against the full agent-mediated reference set (~1126 labeled
+hive-poc columns).  The deployment job is tagging hive-poc at large
+(10M+ tables, 100M+ entities) where most columns will never be sent
+to `just optimize agent` — so the SVM has to generalize from synth to
+real target entities, and the agent-mediated reference is our best
+validate-stage signal.
+
+Per-slice SHAP attribution says `sample_values` dominates at 4× the
+next slice, so value-distribution realism is the highest-leverage axis;
+secondary axes are `column_name`, `column_type`, and contextual signals
+(`sibling_context`, `source_table`).  But **the encoder only sees
+~5 sample values per row via lean text** — volume of generator output
+past the diversity gate produces clustered redundant embeddings, not
+new signal.  Focus on quality (breadth + depth of distinct realistic
+shapes) over quantity.
 
 ## Inputs you have
 
@@ -150,29 +159,89 @@ If `build/svm_corpus_v2/proposals/<sanitized_code>.json` already
 exists for a gap code, **skip it** — assume a prior agent run already
 authored it.  Process only codes without an existing proposal file.
 
-## Domain-adaptation mode (when refinement_targets.json is present)
+## Domain-adaptation mode — metrology-driven feedback
 
-If `build/svm_corpus_v2/refinement_targets.json` exists, read it.  Each
-target entry has `{code, accuracy, neighbors: [{pred_code, count}]}` —
-the `neighbors` are categories the prior generator's output was
-indistinguishable from at the held-out test boundary.
+If `build/svm_corpus_v2/refinement_targets.json` exists, read it.
+Under the new framing, each target entry carries diagnostic measurements
+(NOT just "you got this wrong"):
 
-For each refinement target whose proposal file has been cleared by the
-refinement orchestrator:
+```json
+{
+  "code": "1.2.3",
+  "validate_accuracy": 0.52,
+  "n_validate": 8,
+  "neighbors": [{"pred_code": "1.2.4", "count": 5, "separability": 0.18}],
+  "fidelity_vs_reference": 0.31,
+  "fidelity_pct": 87,
+  "separability_min": 0.05,
+  "separability_pct": 12,
+  "intra_code_mean_sim": 0.97,
+  "spread_pct": 91,
+  "shape_exemplars_from_reference": [
+    "bill_postal | INT | 90210, 90212, 94110, 02134, 60601 | siblings: bill_city, bill_state, ...",
+    "billto_zip | VARCHAR | 90210, 94110, ... | siblings: ..."
+  ],
+  "passes_with_problem": 1,
+  "recommended_action": "improve_separability"
+}
+```
 
-- This is a **domain adaptation** task: re-author the generator so its
-  output occupies a value-shape region clearly separable from the
-  listed `neighbors`.  Focus on the SOLUTION (what distinguishes this
-  category's true values) rather than the PROBLEM (what got confused).
-- Read the existing entries for each neighbor code in
-  `build/lib/generated/generators_v1.py` (or `synth_generators.py` if
-  hand-coded ICE) to understand the adjacent value-shape regions.
-- Choose a format family, prefix vocabulary, delimiter pattern, or
-  length distribution that occupies a different region of value-shape
-  space than the neighbors.
-- Lead the proposal's `rationale` with: "DOMAIN-ADAPTED against
-  neighbors <neighbor_codes>: <which value-shape region this
-  category occupies that the neighbors do not>".
+### Shape anchoring — the load-bearing instruction
+
+Before authoring, **inspect `shape_exemplars_from_reference`** — these
+are real labeled hive-poc columns rendered as lean text (the exact
+string the ModernBERT encoder sees).  Your generator's outputs,
+rendered as lean text, should be:
+
+- **(a) indistinguishable from the exemplars** in surface form
+  (format, character class, length distribution, value vocabulary)
+- **(b) clearly distinguishable from the lean text of each `neighbor`**
+
+The encoder sees ONLY what fits in lean text — column_name,
+column_type, ~5 sample values, sibling names.  Optimize for that small
+window; volume of generator output does not help past the diversity
+gate.
+
+### Per-action interpretation
+
+Use `recommended_action` to decide what to optimize:
+
+- **`improve_fidelity`** — `fidelity_pct` in the top decile (synth
+  shape diverges from the reference).  Study `shape_exemplars` and
+  re-author your generator's values to match their surface form:
+  wrong format → fix format; wrong character class → fix character
+  class; wrong length distribution → fix length distribution.
+- **`improve_separability`** — `separability_pct` in the bottom decile
+  (synth on-shape but indistinguishable from neighbors).  Look up the
+  listed `neighbors`' exemplars (or their entries in
+  `build/lib/generated/generators_v1.py`); identify what
+  discriminative dimension distinguishes this code's true values from
+  neighbors' true values; amplify that dimension in your output.
+- **`reduce_redundancy`** — `spread_pct` very high (intra-code synth
+  is over-clustered).  Generator is producing repetitive outputs.
+  Add format-family variety (multiple `rng.choice` branches with
+  different surface forms); the corpus generator's diversity gate is
+  rejecting most of your output as duplicates.
+- **`abandon_structural`** — metrology has flagged this code as
+  unresolvable from value-shape alone over 2+ passes.  **Do not
+  author** another generator for this code.  Write a rationale-only
+  proposal explaining what makes this code structurally non-
+  separable (e.g., "BILLPOSTAL value distribution is identical to
+  SHIPPOSTAL; disambiguation requires column-name + table-context
+  channels in the DST fusion, not the SVM channel").  The orchestrator
+  will exclude this code from future refinement.
+
+### Rationale lead
+
+Lead the proposal's `rationale` with the recommended_action and the
+specific evidence:
+
+```
+"recommended_action=improve_separability vs neighbors [1.1.1.4.2.3.2,
+1.1.1.4.2.2.1] — original synth had sep_min=0.05 (p12).  Re-authored
+to <specific discriminative dimension>: <how the new output occupies
+a separable region>."
+```
 
 Refinement targets take priority over fresh gap codes.  Process them
 first, then move to remaining gaps if budget allows.
