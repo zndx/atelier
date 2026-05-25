@@ -174,6 +174,58 @@ def _load_v1_codes() -> set[str]:
     return out
 
 
+def _load_reference_value_samples(
+    max_per_column: int = 8,
+    max_columns_per_code: int = 4,
+) -> dict[str, list[dict]]:
+    """For each code present in the agent-mediated reference, pull
+    actual hive-poc sample values from the reference columns tagged
+    with that code.  Returns {code: [{table, column, values}, ...]}.
+
+    These samples ground the agent's authorship in the actual hive-poc
+    value distribution rather than (only) the taxonomy definition's
+    semantic.  Without them the agent can interpret a definition
+    correctly-in-the-abstract but produce values that don't match
+    what's actually in hive-poc — e.g., generating international
+    postal codes when hive-poc has only US 5-digit ZIPs.
+    """
+    am_path = Path("build/data/agent_mediated/agent_mediated.json")
+    hive_cache_path = Path("build/reflect_nhsvm/hive_cache.json")
+    if not am_path.exists() or not hive_cache_path.exists():
+        return {}
+    try:
+        am = json.loads(am_path.read_text())
+        hive_cache = json.loads(hive_cache_path.read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+
+    by_code: dict[str, list[dict]] = {}
+    for key, entry in am.items():
+        if not isinstance(entry, dict):
+            continue
+        code = entry.get("code")
+        if not code:
+            continue
+        table, _, column = key.partition(".")
+        if not table or not column:
+            continue
+        tdata = hive_cache.get(table) or {}
+        samples = (tdata.get("samples") or {}).get(column) or []
+        if not samples:
+            continue
+        # Truncate per-column samples; cap columns per code so the
+        # JSON doesn't bloat for codes with many reference rows
+        bucket = by_code.setdefault(code, [])
+        if len(bucket) >= max_columns_per_code:
+            continue
+        bucket.append({
+            "table": table,
+            "column": column,
+            "values": [str(v)[:200] for v in samples[:max_per_column]],
+        })
+    return by_code
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -217,6 +269,10 @@ def main() -> int:
     else:
         v1_codes = set()
 
+    log.info("Loading actual hive-poc sample values from agent-mediated reference...")
+    ref_value_samples = _load_reference_value_samples()
+    log.info("  loaded reference values for %d codes", len(ref_value_samples))
+
     log.info("Probing generators for diversity (n=%d, seed=%d)...",
              DIVERSITY_PROBE_N, DIVERSITY_SEED)
 
@@ -247,6 +303,14 @@ def main() -> int:
             "gap_class": gap_class,
             "probe": probe,
             "payload_present": mnemonic in payloads,
+            # Actual hive-poc value samples from the agent-mediated
+            # reference rows tagged with this code.  Ground truth the
+            # agent must match when authoring generators — without this,
+            # the agent can interpret a definition correctly-in-the-
+            # abstract but produce values that don't match what's
+            # actually in hive-poc (e.g., international postal codes
+            # for a US-only BILLPOSTAL column).
+            "reference_value_samples": ref_value_samples.get(code, []),
         })
 
     # Priority-sorted gap list.  Under require_v1_coverage=True the gap

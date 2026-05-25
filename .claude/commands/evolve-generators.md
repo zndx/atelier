@@ -59,11 +59,32 @@ shapes) over quantity.
 ## Inputs you have
 
 - `build/svm_corpus_v2/coverage_audit.json` — the gap list with
-  priority ordering: missing → inferred_only → template_only →
-  low_diversity_handcoded.
+  priority ordering.  Each gap entry includes a critical field:
+  **`reference_value_samples`** — actual hive-poc values from the
+  columns currently tagged with this code in the agent-mediated
+  reference.  These are the GROUND TRUTH your generator's output
+  must match in distribution.  Example for code `1.1.1.4.2.3.1`
+  (BILLPOSTAL):
+  ```json
+  "reference_value_samples": [
+    {"table": "address_book", "column": "billing_zip",
+     "values": ["95014", "10001", "90001", "60601", "77001"]},
+    {"table": "telecom_subscribers", "column": "billing_zip",
+     "values": ["10001", "90210", "60614", "85001", "30301"]}
+  ]
+  ```
+  These tell you: hive-poc has US 5-digit ZIPs ONLY for BILLPOSTAL,
+  even though the taxonomy definition would permit international
+  formats.  Your generator must produce values that look like the
+  reference samples; if you produce UK or Canadian postal codes,
+  the SVM will learn a distribution that diverges from what hive-poc
+  actually contains, and the deployment gate will fail.
 - `build/data/svm_training/enrichment_payloads.json` — per-mnemonic
   enrichment metadata: `label`, `description`, `name_hints`,
-  `prototype_values`, `value_patterns`, `anti_examples`.
+  `prototype_values`, `value_patterns`, `anti_examples`.  These tell
+  you the taxonomy curator's INTENT; the `reference_value_samples`
+  above tell you what's ACTUALLY in hive-poc.  When the two diverge,
+  trust the actual values.
 - `src/atelier/classify/synth_generators.py` — ~70 upstream
   ICE (Information Content Entity, BFO/CCO ontology surface managed
   in Aegir) reference generators.  Read these for STYLE reference
@@ -132,13 +153,35 @@ JSON schema (strict):
 - **Use the `rng` parameter for all randomness**; no globals, no
   module-level state.
 - **5-25 line body** per function.
+- **MUST match the reference-value distribution.**  Read
+  `reference_value_samples` for the target code in
+  `coverage_audit.json` BEFORE authoring.  Your generator outputs
+  must look like the actual values in those reference columns — not
+  what the taxonomy definition says they "should" be.  Examples:
+  - If reference samples are all US 5-digit ZIPs, do NOT generate
+    UK/Canadian postal codes (even if the definition says
+    "postal code")
+  - If reference samples include domain-specific identifiers with
+    specific prefixes (`REDACTED-…`, 16-digit `REDACTED…`), match
+    those prefixes — don't generate `ID12345` or `asset_67890`
+    just because the definition says "asset ID"
+  - If reference samples contain corporate addresses + URLs +
+    IETF references (ENOS code), generate that breadth, not
+    country/currency codes
+  Treat the reference samples as the load-bearing ground truth;
+  treat the taxonomy definition as a STARTING context, NOT the
+  final word.
 - **Variety in output**: 50 successive calls must produce ≥30 distinct
   strings (≥0.6 distinct ratio).  Different lengths, prefixes,
-  formats — not 100 near-identical strings.
+  formats — not 100 near-identical strings.  But the variety must
+  stay within the reference distribution; if the reference shows
+  ONLY US ZIPs, your 50 calls should produce diverse US ZIPs (5-digit
+  + ZIP+4) — not international expansion outside reference scope.
 - **Per code, 2-4 generator variants** with `variant_label`s like
   `human`, `terse`, `opaque`, `hash`, `formal`, `abbreviated`,
   `prefixed`, `suffixed`.  Each variant covers a different
-  sub-distribution of how that category appears in the wild.
+  sub-distribution **observed in the reference samples**, not a
+  hypothetical sub-distribution from the definition.
 
 ### Name variants constraints
 
