@@ -101,9 +101,12 @@ def classify_gap(
     first-class upstream surface but no longer satisfy SVM-stage
     coverage.
     """
-    if require_v1_coverage and not has_v1:
-        # Any ICE/template/inferred coverage is a gap-to-fill for the
-        # SVM stage; only v1 coverage counts.  Surface the underlying
+    if require_v1_coverage:
+        if has_v1:
+            # v1 covers this code; it's done regardless of any legacy
+            # ICE/template/inferred coverage that may also exist.
+            return "ok"
+        # No v1 coverage — surface the underlying ICE/template/inferred
         # situation in the gap_class so the agent's prioritization can
         # still distinguish missing vs ice-only.
         if source is None:
