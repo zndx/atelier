@@ -139,12 +139,99 @@ async def _run_agent() -> int:
 # Proposal validation (reuses svm_generator_experiment helpers)
 # ──────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────
+# Reference-shape divergence — catches categorical-prior override
+# ──────────────────────────────────────────────────────────────────────
+
+# Empirically calibrated 2026-05-25 from the 94-code survey of the first
+# convergence cycle's authored proposals (15 severe + 23 concerning out
+# of 94 with reference data).  Severity bands:
+#   ≤ 0.2  good distribution match
+#   0.2-0.5  minor variation
+#   0.5-1.0  concerning shape mismatch (often character-class wrong)
+#   > 1.0   severe override (agent invented its own interpretation)
+DIVERGENCE_REJECT_THRESHOLD = 1.0   # severe overrides rejected outright
+DIVERGENCE_WARN_THRESHOLD = 0.5     # concerning shape mismatches logged
+
+
+def _shape_signature(values: list[str]) -> dict | None:
+    """Compact character-class + length signature for a value set."""
+    if not values:
+        return None
+    total = 0
+    digit = upper = lower = symbol = space = 0
+    lengths = []
+    for v in values:
+        s = str(v)
+        lengths.append(len(s))
+        for c in s:
+            total += 1
+            if c.isdigit(): digit += 1
+            elif c.isupper(): upper += 1
+            elif c.islower(): lower += 1
+            elif c.isspace(): space += 1
+            else: symbol += 1
+    total = max(total, 1)
+    return {
+        "digit_frac": digit / total,
+        "upper_frac": upper / total,
+        "lower_frac": lower / total,
+        "symbol_frac": symbol / total,
+        "space_frac": space / total,
+        "len_mean": sum(lengths) / max(len(lengths), 1),
+    }
+
+
+def _shape_divergence(sig_a: dict, sig_b: dict) -> float | None:
+    """L1 over character-class fractions + relative length-mean delta.
+
+    Symmetric, in [0, ~3].  0 = identical distributions.
+    """
+    if not sig_a or not sig_b:
+        return None
+    char_keys = ["digit_frac", "upper_frac", "lower_frac", "symbol_frac", "space_frac"]
+    char_dist = sum(abs(sig_a[k] - sig_b[k]) for k in char_keys)
+    len_a = sig_a["len_mean"]
+    len_b = sig_b["len_mean"]
+    len_dist = abs(len_a - len_b) / max(max(len_a, len_b), 1)
+    return char_dist + len_dist
+
+
+def _reference_values_for_code(code: str) -> list[str]:
+    """Pull actual hive-poc reference values for the code, from the
+    coverage audit's `reference_value_samples` field.  Returns flat
+    list across reference columns, or empty list if no reference data.
+    """
+    if not AUDIT_JSON.exists():
+        return []
+    try:
+        audit = json.loads(AUDIT_JSON.read_text())
+    except Exception:
+        return []
+    for node in audit.get("per_node", []):
+        if node.get("code") == code:
+            vals = []
+            for col in node.get("reference_value_samples", []):
+                vals.extend(col.get("values", []))
+            return vals
+    return []
+
+
 def validate_proposal(proposal: dict) -> tuple[bool, str, list[dict]]:
-    """Validate a per-code proposal through AST + sandbox + output-shape.
+    """Validate a per-code proposal through AST + sandbox + output-shape
+    + reference-shape-divergence.
 
     Returns (ok, reason_if_fail, accepted_generators).  A proposal is
     accepted if at least one of its generator variants passes all gates;
     failed variants are dropped from the accepted list.
+
+    The reference-shape-divergence gate catches the categorical-prior-
+    override pattern: when the agent invents its own interpretation of
+    a code's semantics rather than matching the reference value
+    distribution.  Generators with divergence > 1.0 from reference are
+    rejected; 0.5-1.0 are logged as concerning but accepted (the
+    metrology + refinement loop will catch them via accuracy regression
+    if they're truly wrong).
     """
     from svm_generator_experiment import (
         validate_ast, sandbox_exec, validate_output_shape,
@@ -157,6 +244,12 @@ def validate_proposal(proposal: dict) -> tuple[bool, str, list[dict]]:
     generators = proposal.get("generators", [])
     if not generators or not isinstance(generators, list):
         return False, "missing/empty 'generators' list", []
+
+    # Reference values for divergence check (empty list if no reference
+    # data — the gate is then skipped and the agent's authorship is
+    # accepted on AST + sandbox alone).
+    ref_values = _reference_values_for_code(code)
+    ref_sig = _shape_signature(ref_values) if ref_values else None
 
     accepted: list[dict] = []
     rejection_reasons: list[str] = []
@@ -185,11 +278,42 @@ def validate_proposal(proposal: dict) -> tuple[bool, str, list[dict]]:
             rejection_reasons.append(f"{fn_name}: shape rejected — {reason_shape}")
             continue
 
+        # Reference-shape-divergence gate (only when reference values exist)
+        divergence: float | None = None
+        if ref_sig is not None:
+            gen_sig = _shape_signature(outputs)
+            divergence = _shape_divergence(ref_sig, gen_sig)
+            if divergence is not None and divergence > DIVERGENCE_REJECT_THRESHOLD:
+                rejection_reasons.append(
+                    f"{fn_name}: shape-divergence {divergence:.2f} > "
+                    f"{DIVERGENCE_REJECT_THRESHOLD} — outputs don't match "
+                    f"reference distribution.  Reference shape "
+                    f"(char-class fractions): "
+                    f"d={ref_sig['digit_frac']:.2f} u={ref_sig['upper_frac']:.2f} "
+                    f"l={ref_sig['lower_frac']:.2f} s={ref_sig['symbol_frac']:.2f}, "
+                    f"len_mean={ref_sig['len_mean']:.1f}; generator: "
+                    f"d={gen_sig['digit_frac']:.2f} u={gen_sig['upper_frac']:.2f} "
+                    f"l={gen_sig['lower_frac']:.2f} s={gen_sig['symbol_frac']:.2f}, "
+                    f"len_mean={gen_sig['len_mean']:.1f}.  Categorical-prior "
+                    f"override suspected — re-author with explicit attention "
+                    f"to the reference_value_samples distribution."
+                )
+                continue
+            if divergence is not None and divergence > DIVERGENCE_WARN_THRESHOLD:
+                log.warning(
+                    "  %s: shape-divergence %.2f in warn band (%.1f-%.1f) — "
+                    "accepted but flagged for refinement-loop attention",
+                    fn_name, divergence,
+                    DIVERGENCE_WARN_THRESHOLD, DIVERGENCE_REJECT_THRESHOLD,
+                )
+
         accepted.append({
             "code": code,
             "function_name": fn_name,
             "variant_label": gen_spec.get("variant_label", ""),
             "code_body": gen_code,
+            "reference_shape_divergence": (round(divergence, 4)
+                                            if divergence is not None else None),
         })
 
     if not accepted:

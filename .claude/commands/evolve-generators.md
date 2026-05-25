@@ -157,7 +157,21 @@ JSON schema (strict):
   `reference_value_samples` for the target code in
   `coverage_audit.json` BEFORE authoring.  Your generator outputs
   must look like the actual values in those reference columns — not
-  what the taxonomy definition says they "should" be.  Examples:
+  what the taxonomy definition says they "should" be.  A programmatic
+  **shape-divergence gate** in `run_evolve_generators_sdk.py`
+  computes the character-class + length-distribution divergence
+  between your 50 sandbox outputs and the reference values; if
+  divergence > 1.0 your proposal is REJECTED with a specific
+  shape-mismatch reason and you must re-author.  This catches the
+  "categorical-prior override" pattern where the agent reads the
+  reference, asserts "this code REPRESENTS X" based on prior
+  knowledge, and then generates X-shaped values instead of
+  matching what the reference actually contains.  **For codes with
+  vague or aggregator mnemonics (A_*, C_*, ENOS-style "publicly
+  available" definitions), the override risk is highest** — the
+  reference values are *especially* load-bearing for those codes;
+  treat your prior categorical assumption as a starting hypothesis
+  to be DISCONFIRMED by the reference, not confirmed.  Examples:
   - If reference samples are all US 5-digit ZIPs, do NOT generate
     UK/Canadian postal codes (even if the definition says
     "postal code")
