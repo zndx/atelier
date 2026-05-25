@@ -55,7 +55,6 @@ from sklearn.preprocessing import normalize as sk_normalize
 
 from reflect_nhsvm import Row, load_rows, build_texts_and_labels
 from reflect_nhsvm_eval_shap_v2 import encode_with_cache, corpus_hash
-from reflect_nhsvm_eval_shap import stratified_split
 
 log = logging.getLogger("corpus_metrology")
 
@@ -261,34 +260,6 @@ def _shape_exemplars_by_code(
 # Top-level
 # ──────────────────────────────────────────────────────────────────────
 
-def _phase_d_reference_split(real_rows: list[Row]) -> tuple[
-    list[Row], list[str], list[Row], list[str]
-]:
-    """Reproduce Phase D's reference split (seed=42, 80/20 stratified)
-    so we can reuse the existing aug-train cache entries that encoded
-    rows in this order.  Returns (real_train_rows, real_train_labels,
-    real_test_rows, real_test_labels).
-
-    The split is used purely for cache-key alignment.  For metrology,
-    we then re-concatenate train+test as the full reference set.
-    """
-    from collections import Counter as _Counter
-    _, real_labels = build_texts_and_labels(real_rows)
-    code_counts = _Counter(real_labels)
-    singletons = {c for c, n in code_counts.items() if n < 2}
-    trainable_mask = [l not in singletons for l in real_labels]
-    trainable_rows = [r for r, m in zip(real_rows, trainable_mask) if m]
-    trainable_labels = [l for l, m in zip(real_labels, trainable_mask) if m]
-    train_idx, test_idx = stratified_split(
-        trainable_labels, test_size=0.2, seed=42,
-    )
-    rt_rows = [trainable_rows[i] for i in train_idx]
-    rt_labels = [trainable_labels[i] for i in train_idx]
-    re_rows = [trainable_rows[i] for i in test_idx]
-    re_labels = [trainable_labels[i] for i in test_idx]
-    return rt_rows, rt_labels, re_rows, re_labels
-
-
 def compute_metrology(
     *,
     corpus_dir: Path,
@@ -301,11 +272,10 @@ def compute_metrology(
 ) -> dict:
     """Compute per-code metrology against the full reference set.
 
-    Strategy: reuse Phase D's cache keys so dry-runs against existing
-    corpus_v2 hit cache cleanly (the aug-train cache contains synth +
-    real_train concatenated in known order; the real-test cache holds
-    the held-out 271).  Slicing reconstructs the full reference set
-    (real_train ∪ real_test) without re-encoding.
+    Cache keys match Phase D's new naming (`synth-only-{corpus_hash}`
+    for the synth corpus, `full-reference` for the full reference
+    validate set).  When Phase D has been run on this corpus,
+    metrology hits cache cleanly with no re-encoding.
 
     Returns the report dict.  Writes to output_path unless dry_run.
     """
@@ -327,52 +297,38 @@ def compute_metrology(
             ))
     log.info("  %d synth rows loaded", len(synth_rows))
 
-    log.info("Loading reference set (full, used as validate)...")
+    log.info("Loading reference set (full, validate dataset)...")
     real_rows = load_rows(refresh_cache=False, database="reference_corpus")
-    log.info("  %d reference rows loaded", len(real_rows))
+    # Drop singleton-class rows to align with Phase D's validate set
+    from collections import Counter as _Counter
+    _, _raw_labels = build_texts_and_labels(real_rows)
+    code_counts = _Counter(_raw_labels)
+    singletons = {c for c, n in code_counts.items() if n < 2}
+    validate_rows = [
+        r for r, l in zip(real_rows, _raw_labels) if l not in singletons
+    ]
+    log.info("  %d reference rows loaded; %d after singleton filter",
+             len(real_rows), len(validate_rows))
 
-    # Reproduce Phase D's split so cache keys align
-    real_train_rows, real_train_labels, real_test_rows, real_test_labels = \
-        _phase_d_reference_split(real_rows)
-    log.info("  reference split (Phase-D-aligned): train=%d  test=%d",
-             len(real_train_rows), len(real_test_rows))
-
-    # 2. Build lean_text for aug-train (synth + real_train) and test
+    # 2. Build lean_text — same shape Phase D uses
     log.info("Building lean texts...")
     synth_texts, synth_labels = build_texts_and_labels(synth_rows)
-    aug_rows = synth_rows + real_train_rows
-    aug_texts, aug_labels = build_texts_and_labels(aug_rows)
-    test_texts, _ = build_texts_and_labels(real_test_rows)
+    real_texts, real_labels = build_texts_and_labels(validate_rows)
 
-    # 3. Encode using Phase D's cache keys — this reuses existing cache
-    #    cleanly when corpus_v2 hasn't changed since the last Phase D run.
-    log.info("Encoding aug-train via Phase D cache key...")
-    aug_emb = encode_with_cache(
-        aug_texts, cache_key=f"aug-train-{corpus_hash()}",
+    # 3. Encode using Phase D's cache keys (new framing)
+    log.info("Encoding synth-only via Phase D cache key...")
+    synth_emb = encode_with_cache(
+        synth_texts, cache_key=f"synth-only-{corpus_hash(corpus_dir)}",
         refresh=refresh_embeddings, batch_size=batch_size,
     )
-    log.info("  aug-train embeddings: %s", aug_emb.shape)
+    log.info("  synth embeddings: %s", synth_emb.shape)
 
-    log.info("Encoding real-test via Phase D cache key...")
-    test_emb = encode_with_cache(
-        test_texts, cache_key="real-test",
+    log.info("Encoding full-reference via Phase D cache key...")
+    ref_emb = encode_with_cache(
+        real_texts, cache_key="full-reference",
         refresh=refresh_embeddings, batch_size=batch_size,
     )
-    log.info("  real-test embeddings: %s", test_emb.shape)
-
-    # 4. Slice aug-train into synth + real_train; concat with real-test
-    #    to form the FULL reference embedding (per the validate framing).
-    n_synth = len(synth_rows)
-    synth_emb = aug_emb[:n_synth]
-    real_train_emb = aug_emb[n_synth:]
-    log.info("  sliced: synth=%s  real_train=%s",
-             synth_emb.shape, real_train_emb.shape)
-
-    # Full reference = real_train + real_test (validate dataset)
-    ref_emb = np.concatenate([real_train_emb, test_emb], axis=0)
-    real_labels = list(real_train_labels) + list(real_test_labels)
-    log.info("  full reference embeddings: %s (train %d + test %d)",
-             ref_emb.shape, len(real_train_labels), len(real_test_labels))
+    log.info("  full reference embeddings: %s", ref_emb.shape)
 
     # 4. Centroids per code
     log.info("Computing per-code centroids...")
@@ -394,11 +350,9 @@ def compute_metrology(
     else:
         log.info("  neighbors sourced from top-K nearest reference centroids")
 
-    # 7. Shape exemplars — built from the full reference (train ∪ test)
-    full_ref_rows = list(real_train_rows) + list(real_test_rows)
-    full_ref_texts = list(build_texts_and_labels(full_ref_rows)[0])
+    # 7. Shape exemplars — built from the full reference (validate set)
     exemplars = _shape_exemplars_by_code(
-        full_ref_rows, full_ref_texts, max_per_code=5,
+        validate_rows, real_texts, max_per_code=5,
     )
 
     # 8. Abandon-history (from prior passes) — informs passes_with_problem
