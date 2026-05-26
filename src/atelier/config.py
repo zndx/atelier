@@ -152,6 +152,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.exclude_temp_tables": ("classify_exclude_temp_tables", bool),
     "classify.table_exclude_patterns": ("classify_table_exclude_patterns", str),
     "classify.svm.enabled": ("classify_svm_enabled", bool),
+    "classify.svm.source": ("classify_svm_source", str),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -450,6 +451,7 @@ class AtelierConfig:
     # c0ceaf5c regression).  Set true to re-enable the alignment-based
     # SVM after the new training data is in place.
     classify_svm_enabled: bool = False
+    classify_svm_source: str = "registered"
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
