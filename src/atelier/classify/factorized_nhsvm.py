@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
 
-"""Factorized NHSVM head for dense pretrained embeddings.
+"""Factorized NHSVM head for dense pretrained embeddings + runtime adapter.
 
 The original ``HierarchicalFeatureExpander`` materializes the Kronecker
 product ``phi(x, y) = sqrt(alpha_y) * (x ⊗ e_y)`` as an explicit
@@ -46,9 +46,12 @@ LinearExplainer is therefore exact in milliseconds per row.
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -203,6 +206,262 @@ class FactorizedNHSVMHead(nn.Module):
 
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Persistence: save/load for runtime promotion via the registry
+    # ──────────────────────────────────────────────────────────────────
+
+    def save(self, directory: str | Path) -> None:
+        """Serialize the head to ``directory``.
+
+        Writes:
+          - ``state_dict.pt``  — torch state_dict (W parameter + alpha,
+            M_alpha, delta buffers)
+          - ``head_manifest.json`` — codes (in node order), embed_dim,
+            n_nodes — enough to reconstruct an instance without a
+            category_set at load time.
+
+        The category_set is NOT required at load time because the head's
+        operational state is fully captured by W + the derived buffers.
+        """
+        d = Path(directory)
+        d.mkdir(parents=True, exist_ok=True)
+        torch.save(self.state_dict(), d / "state_dict.pt")
+        manifest = {
+            "codes": list(self.codes),
+            "embed_dim": int(self.embed_dim),
+            "n_nodes": int(self.n_nodes),
+            "_schema_version": 1,
+        }
+        (d / "head_manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    @classmethod
+    def load(
+        cls,
+        directory: str | Path,
+        device: str = "cpu",
+    ) -> "FactorizedNHSVMHead":
+        """Reconstruct a head from artifacts written by ``save()``.
+
+        Does NOT call ``__init__`` (which would require a category_set).
+        Instead reconstructs the module skeleton and loads state_dict
+        directly.  The buffers M_alpha, delta, alpha that were derived
+        from the category_set at training time are restored verbatim
+        from disk.
+        """
+        d = Path(directory)
+        manifest = json.loads((d / "head_manifest.json").read_text())
+        if manifest.get("_schema_version") not in (None, 1):
+            raise ValueError(
+                f"unsupported FactorizedNHSVMHead manifest schema "
+                f"{manifest.get('_schema_version')}"
+            )
+
+        # Instantiate without going through __init__ to avoid the
+        # category_set dependency.  Set up the structural attributes
+        # __init__ would normally set, then register the buffers as
+        # placeholders that load_state_dict will populate.
+        inst = cls.__new__(cls)
+        nn.Module.__init__(inst)
+        inst.embed_dim = manifest["embed_dim"]
+        inst.codes = manifest["codes"]
+        inst.code_to_idx = {c: i for i, c in enumerate(inst.codes)}
+        inst.n_nodes = manifest["n_nodes"]
+        # categories: not reconstructable without the original CategorySet;
+        # callers that need category objects should load the category_set
+        # separately.  None is the explicit signal.
+        inst.categories = None
+
+        inst.register_buffer(
+            "alpha", torch.zeros(inst.n_nodes, dtype=torch.float32),
+        )
+        inst.register_buffer(
+            "M_alpha",
+            torch.zeros(inst.n_nodes, inst.n_nodes, dtype=torch.float32),
+        )
+        inst.register_buffer(
+            "delta",
+            torch.zeros(inst.n_nodes, inst.n_nodes, dtype=torch.float32),
+        )
+        inst.W = nn.Parameter(
+            torch.zeros(inst.n_nodes, inst.embed_dim, dtype=torch.float32),
+        )
+
+        state = torch.load(
+            d / "state_dict.pt", map_location=device, weights_only=True,
+        )
+        inst.load_state_dict(state)
+        inst = inst.to(device)
+        inst.eval()
+        return inst
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Runtime adapter — bridges ColumnFeatures input to {code: prob} output
+# ──────────────────────────────────────────────────────────────────────
+
+
+class NHSVMHeadAdapter:
+    """Runtime wrapper around a trained ``FactorizedNHSVMHead``.
+
+    Provides the ``predict_proba(features) -> dict[str, float]`` contract
+    that ``ml_inference.predict_svm()`` consumers expect at pipeline
+    runtime, polymorphic with the legacy ``SVMClassifier``:
+
+      - ``adapter.classes_``     — list of code strings (sklearn-style)
+      - ``adapter.predict_proba(features)``  — dict[code, prob] for one row
+
+    Wraps the trained head + encoder identity + training metadata so the
+    runtime can pick the right encoder + apply the same input pipeline
+    the head was trained against (build_svm_text + sibling enrichment +
+    L2-normalize).
+
+    Save layout (under ``directory``):
+      - ``state_dict.pt``        — head weights + buffers (via head.save)
+      - ``head_manifest.json``   — head structural metadata
+      - ``adapter_manifest.json``— encoder_id, training_metadata, etc.
+    """
+
+    def __init__(
+        self,
+        head: FactorizedNHSVMHead,
+        encoder_id: str,
+        embed_dim: int,
+        training_metadata: dict[str, Any] | None = None,
+    ):
+        self.head = head
+        self.encoder_id = encoder_id
+        self.embed_dim = embed_dim
+        self.training_metadata = training_metadata or {}
+        # sklearn-style classes_ for install_svm() polymorphism
+        self.classes_ = list(head.codes)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Inference: ColumnFeatures → {code: prob}
+    # ──────────────────────────────────────────────────────────────────
+
+    def _build_text(self, features: Any) -> str:
+        """Recreate the same text shape the head was trained against.
+
+        Mirrors ``atelier.optimize.svm.reflect.build_texts_and_labels``:
+        build_svm_text base + " | siblings: a, b, c" enrichment over
+        the centered-window k=4 closest siblings.
+        """
+        from atelier.classify.svm_classifier import build_svm_text
+        from atelier.classify.features import _closest_siblings
+
+        column_name = getattr(features, "column_name_humanized", None)
+        if column_name is None:
+            # Fallback for unusual feature shapes (training side uses
+            # Row.column, which is raw_name; here we accept either).
+            column_name = getattr(features, "column_name", "")
+        column_type = getattr(features, "column_type", None)
+
+        # Sample values: training uses list[str]; ColumnFeatures stores
+        # an already-joined string.  Convert back to a list for build_svm_text.
+        sample_values_text = getattr(features, "sample_values_text", None)
+        if sample_values_text:
+            sample_values = [
+                v.strip() for v in str(sample_values_text).split(",") if v.strip()
+            ]
+        else:
+            sample_values = []
+
+        base = build_svm_text(column_name, column_type, sample_values)
+
+        # Centered-window siblings (k=4) — same as training-side
+        # build_texts_and_labels
+        siblings = getattr(features, "sibling_names", []) or []
+        top_siblings = _closest_siblings(column_name, siblings, k=4)
+        sibling_part = ", ".join(s.replace("_", " ") for s in top_siblings)
+        if sibling_part:
+            return f"{base} | siblings: {sibling_part}"
+        return base
+
+    def _encode(self, text: str) -> np.ndarray:
+        """Encode a single text via the adapter's encoder_id.
+
+        Currently dispatches to ``encode_modernbert`` for the only
+        supported encoder.  Future encoder IDs can be dispatched here.
+        Returns a (1, embed_dim) float32 array.
+        """
+        if self.encoder_id == "answerdotai/ModernBERT-base":
+            # Local import — encoder module currently lives in scripts/;
+            # will migrate to atelier.optimize.svm.encoder in a follow-up.
+            import sys
+            root = Path(__file__).resolve().parent.parent.parent.parent
+            scripts_dir = root / "scripts"
+            if str(scripts_dir) not in sys.path:
+                sys.path.insert(0, str(scripts_dir))
+            from reflect_nhsvm_modernbert import encode_modernbert  # type: ignore
+
+            emb = encode_modernbert([text], batch_size=1, pooling="mean")
+            return np.asarray(emb, dtype=np.float32)
+        raise ValueError(
+            f"unsupported encoder_id={self.encoder_id!r}; the adapter "
+            f"currently dispatches only 'answerdotai/ModernBERT-base'"
+        )
+
+    def predict_proba(self, features: Any) -> dict[str, float]:
+        """Single-row inference.
+
+        Returns ``{code: probability}`` for every node in the taxonomy
+        the head was trained on.  Pipeline.py's per-column SVM path
+        (``_classify_column`` → ``nhsvm_to_mass``) consumes this dict.
+        """
+        text = self._build_text(features)
+        emb = self._encode(text)  # (1, embed_dim)
+
+        # L2-normalize input — same as training-time normalization in
+        # fit_factorized_nhsvm.  Without this, the head's path scores
+        # are mis-scaled.
+        from sklearn.preprocessing import normalize as sk_normalize
+        emb_norm = sk_normalize(emb, norm="l2", axis=1).astype(np.float32)
+
+        device = next(self.head.parameters()).device
+        X = torch.as_tensor(emb_norm, device=device)
+        with torch.no_grad():
+            proba = self.head.predict_proba(X)  # (1, n_nodes)
+        return {code: float(proba[0, i]) for i, code in enumerate(self.head.codes)}
+
+    # ──────────────────────────────────────────────────────────────────
+    # Persistence
+    # ──────────────────────────────────────────────────────────────────
+
+    def save(self, directory: str | Path) -> None:
+        """Persist the adapter (head + encoder identity + metadata)."""
+        d = Path(directory)
+        d.mkdir(parents=True, exist_ok=True)
+        self.head.save(d)
+        manifest = {
+            "encoder_id": self.encoder_id,
+            "embed_dim": int(self.embed_dim),
+            "training_metadata": self.training_metadata,
+            "_schema_version": 1,
+        }
+        (d / "adapter_manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    @classmethod
+    def load(
+        cls,
+        directory: str | Path,
+        device: str = "cpu",
+    ) -> "NHSVMHeadAdapter":
+        """Reconstruct an adapter from artifacts written by ``save()``."""
+        d = Path(directory)
+        head = FactorizedNHSVMHead.load(d, device=device)
+        manifest = json.loads((d / "adapter_manifest.json").read_text())
+        if manifest.get("_schema_version") not in (None, 1):
+            raise ValueError(
+                f"unsupported NHSVMHeadAdapter manifest schema "
+                f"{manifest.get('_schema_version')}"
+            )
+        return cls(
+            head=head,
+            encoder_id=manifest["encoder_id"],
+            embed_dim=manifest["embed_dim"],
+            training_metadata=manifest.get("training_metadata", {}),
+        )
 
 
 def fit_factorized_nhsvm(
