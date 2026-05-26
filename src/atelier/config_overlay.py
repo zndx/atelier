@@ -342,6 +342,16 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 0.30,
         "caption_template": "Reserve {value_pct}% of SVM mass as ignorance — the synth-trained SVM uses TF-IDF features and ICE-keyed labels translated into the user taxonomy via the LLM-mediated alignment, making it weakly non-distinct evidence at the vocabulary level (Denoeux 2008). The 0.30 default reflects this regime; raise toward 0.55 if reverting to per-column LLM-derivative training.",
     },
+    "classify_svm_source": {
+        "hocon_path": "classify.svm.source",
+        "label": "SVM channel source",
+        "description": "Which SVM head the pipeline loads for the SVM evidence channel",
+        "group": "evidence",
+        "type": "choice",
+        "choices": ["registered", "per_vocab_legacy", "auto"],
+        "default": "registered",
+        "caption_template": "registered (strict) requires a current factorized NHSVM head in nhsvm_head_registry; per_vocab_legacy forces the legacy on-the-fly TF-IDF LinearSVC path; auto tries registered then falls back to legacy with a degradation tag.",
+    },
     "classify_discount_pattern_theta": {
         "hocon_path": "classify.discounts.pattern_theta",
         "label": "Pattern Discount",
