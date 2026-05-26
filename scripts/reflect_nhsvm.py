@@ -60,6 +60,7 @@ from atelier.optimize.svm.reflect import (  # noqa: E402
     AGENT_MEDIATED,
     HIVE_CACHE,
     Row,
+    _pull_hive_table,  # used by svm_target_health.py; re-export until that script migrates too
     build_category_set,
     build_texts_and_labels,
     characterize_failures,
