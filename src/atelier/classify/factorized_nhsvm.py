@@ -156,6 +156,7 @@ class FactorizedNHSVMHead(nn.Module):
         self,
         X: torch.Tensor,
         y_idx: torch.Tensor,
+        sample_weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Structured-SVM hinge loss with tree-distance margin.
 
@@ -166,13 +167,25 @@ class FactorizedNHSVMHead(nn.Module):
         clamped at 0 (the augmented max always includes y' = y_i with
         delta = 0, so the difference is non-negative iff some wrong
         node violates the tree-distance margin).
+
+        If ``sample_weight`` is provided (shape ``(batch,)``), per-row
+        hinge values are multiplied by the weights before averaging.
+        The result is a weighted mean: ``sum(w_i * m_i) / sum(w_i)``,
+        so a uniform weight vector reproduces the unweighted mean.
+        Default ``None`` preserves identical behavior to the unweighted
+        form.
         """
         scores = self(X)                                       # (batch, n_nodes)
         true_scores = scores.gather(1, y_idx.unsqueeze(1)).squeeze(1)
         augmented = scores + self.delta[y_idx]                 # (batch, n_nodes)
         max_violators, _ = augmented.max(dim=1)
         margins = (max_violators - true_scores).clamp(min=0)
-        return margins.mean()
+        if sample_weight is None:
+            return margins.mean()
+        # Weighted mean — guard against all-zero-weight batch (shouldn't
+        # happen if caller filters weight==0 rows upstream, but be safe).
+        w_sum = sample_weight.sum().clamp(min=1e-8)
+        return (margins * sample_weight).sum() / w_sum
 
     def predict_codes(self, X: torch.Tensor) -> list[str]:
         """Argmax over nodes, return list of code strings."""
@@ -206,6 +219,7 @@ def fit_factorized_nhsvm(
     l2_normalize_input: bool = True,
     eval_every: int = 20,
     verbose: bool = True,
+    sample_weights: np.ndarray | None = None,
 ) -> tuple[FactorizedNHSVMHead, TrainResult]:
     """Train a FactorizedNHSVMHead on precomputed embeddings.
 
@@ -213,6 +227,12 @@ def fit_factorized_nhsvm(
         X        : (N, d) numpy array of dense embeddings (cached encoder output)
         labels   : list of N node-code strings
         category_set : provides nodes, paths, alphas
+        sample_weights : optional (N,) numpy array of per-row weights for the
+            structured-SVM hinge.  Weight semantics: w==1.0 means full hinge
+            contribution; w==0.5 means half-contribution to the weighted mean;
+            w==0.0 rows should be filtered out by the caller (zero weight
+            still consumes batch slots without contributing).  ``None``
+            (default) preserves identical behavior to the unweighted form.
 
     Returns the trained head + training metadata.
     """
@@ -252,6 +272,15 @@ def fit_factorized_nhsvm(
         [head.code_to_idx[l] for l in labels],
         dtype=torch.long, device=device,
     )
+    w_t: torch.Tensor | None = None
+    if sample_weights is not None:
+        if len(sample_weights) != len(labels):
+            raise ValueError(
+                f"sample_weights length {len(sample_weights)} != labels {len(labels)}"
+            )
+        w_t = torch.tensor(
+            np.asarray(sample_weights, dtype=np.float32), device=device,
+        )
 
     optimizer = torch.optim.AdamW(
         head.parameters(), lr=lr, weight_decay=weight_decay,
@@ -267,7 +296,8 @@ def fit_factorized_nhsvm(
         total = 0.0
         for start in range(0, n, batch_size):
             idx = perm[start:start + batch_size]
-            loss = head.structured_hinge_loss(X_t[idx], y_t[idx])
+            w_batch = w_t[idx] if w_t is not None else None
+            loss = head.structured_hinge_loss(X_t[idx], y_t[idx], sample_weight=w_batch)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

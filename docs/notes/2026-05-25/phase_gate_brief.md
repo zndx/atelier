@@ -363,7 +363,11 @@ fusion calibration in production.
 SVM channel is shippable iff BOTH:
 
   Gate A (TARGET_ACCURACY, quantitative steering):
-    full_validate_top1 ≥ τ_acc                              [default τ_acc = 0.95]
+    Under synth-only training:
+      full_validate_top1 ≥ τ_acc                            [default τ_acc = 0.95]
+    Under reference-primary k-fold training (default since 2026-05-26):
+      mean(fold-val_top1) ≥ τ_acc  AND  std(fold-val_top1) ≤ τ_std
+                                                            [default τ_acc = 0.95, τ_std = 0.03]
 
   Gate B (DEPLOYMENT_READY, architectural correctness):
     (1) A_cos⊕svm − A_cos ≥ ε                               [global uplift]
@@ -376,6 +380,60 @@ SVM channel is shippable iff BOTH:
 
   Defaults: ε = 0.01, δ = 0.05, τ_conf = 0.7, κ = 0.5
 ```
+
+### Training protocol (Gate A measurement surface)
+
+Two training protocols measure Gate A.  They are CALIBRATIONS of the
+same gate, not separate gates:
+
+**Synth-only training (historical default until 2026-05-26)**.
+Train on the synthetic corpus alone; validate on the full reference.
+`full_validate_top1` is the headline number.  Generalization to
+hive-poc-at-large is upper-bounded by validate-on-reference because
+reference is sampled from hive-poc.  Pre-switch best: 0.55 on a 287-
+node tree.
+
+**Reference-primary k-fold training (default since 2026-05-26)**.
+The agent-mediated reference is itself the training data; each fold
+trains on 80% of the reference (audit-policy-weighted) augmented with
+synth rows for under-represented codes, then predicts the held-out
+20%.  The union of fold-vals is the full reference, so the headline
+`validate.full_top1` is a true held-out number computed across the
+entire reference.  Per-fold mean ± std quantifies the variance of
+that number; both `mean ≥ τ_acc` and `std ≤ τ_std` must hold.
+
+The synth-only diagnostic is preserved as a parallel signal
+(`--also-report-synth-only`) so the operator continues to see how the
+synth corpus alone would score — useful for spotting when the held-
+out lift is coming from reference-data exposure (fold augmentation
+working) versus structural synth improvement (the corpus genuinely
+learning the deployment scope).
+
+**Rationale for the switch**: the factorized NHSVM head has ~98%
+proven fit capacity at the reference's scale; synth-only-train denied
+the head access to the labels we already had.  Validation IS the
+deployment target (the reference is a sample of the deployment
+scope), so reference-primary aligns training with what the channel
+must predict.  Per [`feedback_validation_target_over_generalization`](
+../../../.claude/projects/-home-cdsw/memory/feedback_validation_target_over_generalization.md):
+generalizability is secondary to validation-target accuracy when
+validation IS the deployment target.
+
+### Re-baseline 2026-05-26 (post-protocol-switch)
+
+| metric | synth-only (corpus_v3) | reference-primary k=2 smoke | reference-primary k=5 (run-pending) |
+|---|---:|---:|---:|
+| held-out full-ref top-1 | 0.5488 | 0.7397 | TBD |
+| per-fold mean ± std | n/a (single split) | 0.7403 ± 0.0092 | TBD |
+| synth-only diagnostic | 0.5488 | 0.5519 | TBD |
+| protocol-switch lift   | — | +0.1878 | TBD |
+| Gate A pass            | ✗ | ✗ (need τ_acc=0.95) | TBD |
+
+Smoke test was k=2 (a 50/50 train/val partition, the LEAST favorable
+k-fold setting); k=5 (80/20 per fold) is expected to score
+substantially higher and is what the AMP-pod convergence cycle will
+measure.  Numbers above set the baseline; subsequent refinement
+passes will populate the k=5 column.
 
 The asymmetry that matters:
 

@@ -92,7 +92,10 @@ from reflect_nhsvm import (
 from reflect_nhsvm_eval_shap import BEST_KNOB
 from reflect_nhsvm_eval_shap_v2 import (
     REPORT_DIR as PHASE_D_REPORT_DIR,
+    VALID_TRAINING_MODES,
+    _select_synth_augmentation,
     corpus_hash, encode_with_cache, load_synth_rows,
+    load_reference_rows_with_weights, reference_hash,
 )
 
 log = logging.getLogger("svm_cosine_uplift_gate")
@@ -151,6 +154,140 @@ def _train_factorized_head_on_synth(
     log.info("  trained: fit-acc=%.4f  elapsed=%.1fs",
              train_result.final_train_acc, time.time() - t0)
     return head, cat_set
+
+
+def _train_factorized_head_on_reference(
+    *,
+    corpus_dir: Path,
+    batch_size: int,
+    refresh_embeddings: bool,
+    weights_path: Path,
+    augment_floor: int,
+    training_mode: str,
+):
+    """Train the factorized NHSVM head on the full agent-mediated reference
+    (no fold held out) with synth augmentation policy determined by mode.
+
+    This is the deployment-ready head for Gate B under reference-primary or
+    reference+synth modes.  Out-of-sample generalization is Gate A's k-fold
+    job; Gate B measures whether THIS head — the one that ships — preserves
+    cosine's confident calls and produces mutual-affirmation uplift.
+
+    Note: under reference-primary, the head's fit on the reference will be
+    near-perfect (it trained on every row).  Gate B's checks (do-no-harm,
+    regression band, uplift) remain meaningful — they ask "does the
+    deployment head respect cosine's confidence?", not "does the SVM
+    generalize?"  The k-fold path is where generalization is tested.
+    """
+    log.info("Loading reference rows + per-row weights (training_weights.json)...")
+    ref_rows, ref_labels, ref_weights, _coverage, _audit_summary = (
+        load_reference_rows_with_weights(weights_path=weights_path)
+    )
+    log.info("  reference: %d rows  %d codes",
+             len(ref_rows), len(set(ref_labels)))
+
+    ref_texts, _ = build_texts_and_labels(ref_rows)
+    log.info("Encoding (or loading cached) reference embeddings...")
+    X_ref = encode_with_cache(
+        ref_texts, cache_key="full-reference",
+        refresh=refresh_embeddings, batch_size=batch_size,
+    )
+
+    # Load + encode the synth corpus (used for augmentation in both modes).
+    log.info("Loading synth corpus from %s (for augmentation)...", corpus_dir)
+    synth_rows = load_synth_rows(corpus_dir)
+    synth_labels_all = [r.code for r in synth_rows]
+    synth_counts = Counter(synth_labels_all)
+    keep = [i for i, l in enumerate(synth_labels_all) if synth_counts[l] >= 2]
+    synth_rows = [synth_rows[i] for i in keep]
+    synth_labels = [synth_labels_all[i] for i in keep]
+    synth_texts, _ = build_texts_and_labels(synth_rows)
+    ch = corpus_hash(corpus_dir)
+    log.info("Encoding (or loading cached) synth embeddings...")
+    X_synth = encode_with_cache(
+        synth_texts, cache_key=f"synth-only-{ch}",
+        refresh=refresh_embeddings, batch_size=batch_size,
+    )
+
+    # Per-mode augmentation: reference-primary tops up under-represented
+    # codes; reference+synth appends the full corpus.
+    if training_mode == "reference-primary":
+        synth_by_code: dict[str, list[int]] = defaultdict(list)
+        for i, l in enumerate(synth_labels):
+            synth_by_code[l].append(i)
+        ref_counts = Counter(ref_labels)
+        rng = np.random.RandomState(42)
+        aug_idx, aug_labels = _select_synth_augmentation(
+            train_counts=ref_counts,
+            synth_by_code=synth_by_code,
+            augment_floor=augment_floor,
+            rng=rng,
+        )
+        log.info("  augmentation: %d synth rows across %d codes",
+                 len(aug_idx), len({c for c in aug_labels}))
+        if aug_idx:
+            X_train = np.concatenate([X_ref, X_synth[aug_idx]], axis=0)
+            y_train = list(ref_labels) + list(aug_labels)
+            w_train = np.concatenate(
+                [ref_weights, np.ones(len(aug_idx), dtype=np.float32)]
+            )
+        else:
+            X_train, y_train, w_train = X_ref, list(ref_labels), ref_weights
+    elif training_mode == "reference+synth":
+        log.info("  augmentation: appending full synth corpus (%d rows)",
+                 len(synth_labels))
+        X_train = np.concatenate([X_ref, X_synth], axis=0)
+        y_train = list(ref_labels) + list(synth_labels)
+        w_train = np.concatenate(
+            [ref_weights, np.ones(len(synth_labels), dtype=np.float32)]
+        )
+    else:
+        raise ValueError(f"unexpected training_mode in reference path: {training_mode!r}")
+
+    log.info("  train (reference-primary deployment head): %d rows  %d codes",
+             len(y_train), len(set(y_train)))
+
+    cat_set = build_category_set()
+    t0 = time.time()
+    head, train_result = fit_factorized_nhsvm(
+        X_train, y_train, cat_set,
+        sample_weights=w_train,
+        **BEST_KNOB, verbose=True, eval_every=50,
+    )
+    log.info("  trained: fit-acc=%.4f  elapsed=%.1fs  ref_hash=%s",
+             train_result.final_train_acc, time.time() - t0,
+             reference_hash(weights_path))
+    return head, cat_set
+
+
+def _train_head_for_gate(
+    *,
+    corpus_dir: Path,
+    batch_size: int,
+    refresh_embeddings: bool,
+    training_mode: str,
+    weights_path: Path,
+    augment_floor: int,
+):
+    """Dispatcher: route to synth-only or reference-primary training.
+
+    Gate B uses the deployment-ready head under whatever training protocol
+    the operator chose for Phase D.  Mismatched training-mode between Gate
+    B and Phase D would mean Gate B tests a head that wouldn't actually
+    deploy — keep them in sync via the orchestrator.
+    """
+    if training_mode == "synth-only":
+        return _train_factorized_head_on_synth(
+            corpus_dir, batch_size, refresh_embeddings,
+        )
+    return _train_factorized_head_on_reference(
+        corpus_dir=corpus_dir,
+        batch_size=batch_size,
+        refresh_embeddings=refresh_embeddings,
+        weights_path=weights_path,
+        augment_floor=augment_floor,
+        training_mode=training_mode,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -378,6 +515,21 @@ def _render_report_md(report: dict) -> str:
     lines.append(f"- qdrant_collection: `{report['qdrant_collection']}`")
     lines.append(f"- n_validate: {report['n_validate']} "
                  f"(rows with cosine mass: {report['n_validate_with_cosine_mass']})")
+    lines.append(f"- training_mode: `{report.get('training_mode', 'synth-only')}`")
+    if report.get("training_mode", "synth-only") != "synth-only":
+        lines.append(f"- weights_path: `{report.get('weights_path')}`")
+        lines.append(f"- augment_floor: {report.get('augment_floor')}")
+        lines.append(f"- reference_hash: `{report.get('reference_hash')}`")
+        lines.append("")
+        lines.append(
+            "**Note on gate semantics under non-synth-only training**: this "
+            "head was trained on the full reference (no fold held out), so "
+            "A_svm here is an *in-sample* number — out-of-sample "
+            "generalization is reported by Gate A's k-fold result, not this "
+            "gate.  Gate B's checks (do-no-harm, regression band, uplift) "
+            "still measure whether the deployment-ready head respects "
+            "cosine's confident calls."
+        )
     lines.append("")
     lines.append("## Global accuracies")
     lines.append("")
@@ -519,6 +671,21 @@ def main() -> int:
                     help="Override Qdrant URL (bypasses taxonomy_registry DAO lookup)")
     ap.add_argument("--qdrant-collection", default=None,
                     help="Override Qdrant collection name (bypasses taxonomy_registry DAO lookup)")
+    ap.add_argument("--training-mode", choices=VALID_TRAINING_MODES,
+                    default="synth-only",
+                    help="Training protocol for the deployment head used "
+                         "by this gate.  Should match Phase D's mode.  "
+                         "Under reference-primary/reference+synth the head "
+                         "trains on the full reference + audit-weighted "
+                         "rows; Gate B then tests its mutual affirmation "
+                         "with cosine.")
+    ap.add_argument("--weights-path", type=Path,
+                    default=Path("build/data/agent_mediated/training_weights.json"),
+                    help="Audit-derived per-row training weights (used "
+                         "under non-synth-only modes)")
+    ap.add_argument("--augment-floor", type=int, default=5,
+                    help="Per-code coverage floor for synth augmentation "
+                         "under reference-primary (default 5)")
     args = ap.parse_args()
 
     # Optional override of taxonomy-registry-based collection resolution.
@@ -551,9 +718,13 @@ def main() -> int:
     log.info("Loaded config; ColBERT model: %s",
              getattr(cfg, "classify_colbert_model", "<default>"))
 
-    head, cat_set = _train_factorized_head_on_synth(
-        args.corpus_dir, batch_size=args.batch_size,
+    head, cat_set = _train_head_for_gate(
+        corpus_dir=args.corpus_dir,
+        batch_size=args.batch_size,
         refresh_embeddings=args.refresh_embeddings,
+        training_mode=args.training_mode,
+        weights_path=args.weights_path,
+        augment_floor=args.augment_floor,
     )
     frame = FrameOfDiscernment(cat_set, confusable_pairs=[])
     alphas = cat_set.compute_nhsvm_alphas()
@@ -667,6 +838,13 @@ def main() -> int:
         "qdrant_url": qdrant_url,
         "n_validate": len(validate_rows),
         "n_validate_with_cosine_mass": len(records),
+        "training_mode": args.training_mode,
+        "weights_path": str(args.weights_path) if args.training_mode != "synth-only" else None,
+        "augment_floor": args.augment_floor if args.training_mode != "synth-only" else None,
+        "reference_hash": (
+            reference_hash(args.weights_path)
+            if args.training_mode != "synth-only" else None
+        ),
         "thresholds": {
             "uplift_threshold": args.uplift_threshold,
             "regression_band": args.regression_band,

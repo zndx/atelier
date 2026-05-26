@@ -58,6 +58,7 @@ from reflect_nhsvm_modernbert import (
 )
 from reflect_nhsvm_eval_shap import (
     stratified_split,
+    stratified_k_fold,
     BEST_KNOB,
 )
 from atelier.classify.factorized_nhsvm import fit_factorized_nhsvm
@@ -114,6 +115,140 @@ def corpus_hash(corpus_dir: Path = DEFAULT_CORPUS_DIR) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()[:12]
+
+
+def reference_hash(weights_path: Path) -> str:
+    """Hash tied to the audit-derived weights file for cache invalidation
+    of reference-primary embeddings.  Uses (mtime, size, summary block) so
+    the key changes if the audit re-runs even if weights values land
+    identically."""
+    if not weights_path.exists():
+        return "noaudit"
+    st = weights_path.stat()
+    h = hashlib.sha1()
+    h.update(f"{st.st_mtime_ns}:{st.st_size}".encode())
+    try:
+        blob = json.loads(weights_path.read_text())
+        summary = json.dumps(blob.get("summary", {}), sort_keys=True)
+        h.update(summary.encode())
+    except Exception:
+        pass
+    return h.hexdigest()[:12]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Load reference rows + join with audit-derived training weights
+# ──────────────────────────────────────────────────────────────────────
+
+def load_reference_rows_with_weights(
+    *,
+    weights_path: Path = Path("build/data/agent_mediated/training_weights.json"),
+    database: str = "reference_corpus",
+    refresh_cache: bool = False,
+) -> tuple[list[Row], list[str], np.ndarray, dict, dict]:
+    """Load the agent-mediated reference and join it with per-row training
+    weights from the audit policy file.
+
+    Rows excluded from training (confidence=low/unsure → weight 0) are
+    dropped here so the caller never has to worry about them.  Singleton
+    classes are also dropped (NHSVM constraint).  Rows present in the
+    reference but absent from the audit default to weight=1.0 — keeps the
+    function safe to call when audit.json hasn't been re-run after the
+    reference grew.
+
+    If ``weights_path`` is absent entirely, falls back to weight=1.0
+    everywhere with no exclusions (other than singletons).  Same default
+    as if you ran ``scripts/audit_reference_quality.py`` with all weights
+    set to 1.0.
+
+    Returns
+    -------
+    kept_rows : list[Row]
+        Rows after exclusions, parallel to kept_labels and kept_weights.
+    kept_labels : list[str]
+        Code labels per kept row.
+    kept_weights : np.ndarray  (float32, shape (N,))
+        Per-row training weight, parallel to kept_rows.
+    coverage_table : dict[str, dict]
+        Per-code coverage stats from the audit (n_total, n_kept,
+        effective_weight_sum, needs_synth_augmentation).  Empty if no
+        audit file.
+    audit_summary : dict
+        Policy + summary + audit_source + timestamp metadata block,
+        for surfacing in the results JSON.  Empty if no audit file.
+    """
+    if weights_path.exists():
+        weights_blob = json.loads(weights_path.read_text())
+        per_row_weights = weights_blob.get("per_row", {})
+        coverage_table = weights_blob.get("per_code_coverage", {})
+        audit_summary = {
+            "policy": weights_blob.get("policy", {}),
+            "summary": weights_blob.get("summary", {}),
+            "audit_source": weights_blob.get("audit_source"),
+            "timestamp": weights_blob.get("timestamp"),
+        }
+        log.info(
+            "  loaded training weights from %s (%s rows, %s codes in audit)",
+            weights_path,
+            audit_summary["summary"].get("n_rows_total", "?"),
+            audit_summary["summary"].get("n_codes", "?"),
+        )
+    else:
+        per_row_weights = {}
+        coverage_table = {}
+        audit_summary = {}
+        log.info(
+            "  training_weights.json not found at %s; defaulting weight=1.0 everywhere",
+            weights_path,
+        )
+
+    log.info("Loading reference rows from %s...", database)
+    real_rows = load_rows(refresh_cache=refresh_cache, database=database)
+    _, real_labels = build_texts_and_labels(real_rows)
+
+    # First pass: apply audit-derived exclusions + collect per-row weights.
+    indexed: list[tuple[Row, str, float]] = []
+    n_excluded_weight = 0
+    n_missing_audit = 0
+    for r, lbl in zip(real_rows, real_labels):
+        key = f"{r.table}.{r.column}"
+        entry = per_row_weights.get(key)
+        if entry is None:
+            n_missing_audit += 1
+            weight = 1.0  # default for rows not in audit
+        else:
+            if entry.get("exclude", False) or float(entry.get("weight", 1.0)) <= 0.0:
+                n_excluded_weight += 1
+                continue
+            weight = float(entry["weight"])
+        indexed.append((r, lbl, weight))
+
+    # Second pass: drop singleton classes (NHSVM constraint).
+    code_counts = Counter(lbl for _, lbl, _ in indexed)
+    singletons = {c for c, n in code_counts.items() if n < 2}
+    kept_rows: list[Row] = []
+    kept_labels: list[str] = []
+    kept_weights: list[float] = []
+    n_singletons_dropped = 0
+    for r, lbl, w in indexed:
+        if lbl in singletons:
+            n_singletons_dropped += 1
+            continue
+        kept_rows.append(r)
+        kept_labels.append(lbl)
+        kept_weights.append(w)
+
+    log.info(
+        "  reference: %d rows kept  (%d excluded by audit policy, %d singleton-class rows dropped, %d not in audit→default weight 1.0)",
+        len(kept_rows), n_excluded_weight, n_singletons_dropped, n_missing_audit,
+    )
+    return (
+        kept_rows,
+        kept_labels,
+        np.asarray(kept_weights, dtype=np.float32),
+        coverage_table,
+        audit_summary,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -175,7 +310,7 @@ def per_category_accuracy(
 # Phase D core
 # ──────────────────────────────────────────────────────────────────────
 
-def run_eval(
+def _run_eval_synth_only(
     *,
     corpus_dir: Path = DEFAULT_CORPUS_DIR,
     refresh_embeddings: bool = False,
@@ -183,12 +318,17 @@ def run_eval(
     knob: dict | None = None,
     pass_idx: int | None = None,
 ) -> dict:
-    """Phase D under the train/validate/test framing.
+    """Phase D under the train/validate/test framing — synth-only branch.
 
     Trains on synth-only; evaluates on the full agent-mediated reference
     set (validate).  Reports two top-1 numbers: full-validate (primary
     refinement signal) and the 271-example seed=42 stratified slice
     (continuity with the historical 0.6125 baseline).
+
+    Backwards-compatibility: this is the verbatim original body of
+    ``run_eval``.  Its result schema (no ``training_mode`` key) is the
+    back-compat marker — downstream render/print code treats missing
+    ``training_mode`` as synth-only.
     """
     knob = knob or BEST_KNOB
     pass_label = f"pass {pass_idx}" if pass_idx is not None else "single run"
@@ -347,6 +487,545 @@ def run_eval(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Reference-primary k-fold training (Phase D protocol switch)
+# ──────────────────────────────────────────────────────────────────────
+
+def _train_synth_only_diagnostic(
+    X_synth: np.ndarray,
+    synth_labels: list[str],
+    X_ref: np.ndarray,
+    ref_labels: list[str],
+    *,
+    cat_set,
+    knob: dict,
+) -> dict:
+    """Train a head on synth-only, predict on full reference.
+
+    Returns a diagnostic block usable as ``validate.synth_only_diagnostic``.
+    The diagnostic answers: 'how would synth-only training have scored
+    today on this same reference?' — generalization signal that runs in
+    parallel to k-fold so we never lose sight of the synth-only baseline
+    while training reference-primary.
+    """
+    from sklearn.preprocessing import normalize as sk_normalize
+    t0 = time.time()
+    head_diag, result_diag = fit_factorized_nhsvm(
+        X_synth, synth_labels, cat_set,
+        **knob, verbose=False, eval_every=50,
+    )
+    X_ref_norm = sk_normalize(X_ref, norm="l2", axis=1).astype(np.float32)
+    device = next(head_diag.parameters()).device
+    pred = head_diag.predict_codes(torch.tensor(X_ref_norm, device=device))
+    correct = sum(1 for p, t in zip(pred, ref_labels) if p == t)
+    elapsed = time.time() - t0
+    n = len(ref_labels)
+    top1 = correct / n if n else 0.0
+    log.info("  synth-only diagnostic: top-1=%.4f (%d/%d) fit=%.4f elapsed=%.1fs",
+             top1, correct, n, result_diag.final_train_acc, elapsed)
+    return {
+        "full_top1": round(top1, 4),
+        "n_correct": correct,
+        "n": n,
+        "fit_acc": round(result_diag.final_train_acc, 4),
+        "elapsed_sec": round(elapsed, 1),
+    }
+
+
+def _select_synth_augmentation(
+    *,
+    train_counts: Counter,
+    synth_by_code: dict[str, list[int]],
+    augment_floor: int,
+    rng: np.random.RandomState,
+) -> tuple[list[int], list[str]]:
+    """Pick synth row indices to top up under-represented codes in fold-train.
+
+    For each code whose fold-train count is below ``augment_floor``, draws
+    ``floor - count`` synth rows from that code's synth pool (without
+    replacement if enough are available, otherwise uses all).  Codes with
+    no synth coverage are silently skipped — no fix available at this
+    layer; surface them in the generator-coverage audit instead.
+    """
+    aug_idx: list[int] = []
+    aug_labels: list[str] = []
+    for code in sorted(train_counts):
+        if train_counts[code] >= augment_floor:
+            continue
+        need = augment_floor - train_counts[code]
+        pool = synth_by_code.get(code, [])
+        if not pool:
+            continue
+        if len(pool) >= need:
+            chosen = list(rng.choice(pool, size=need, replace=False))
+        else:
+            chosen = list(pool)
+        aug_idx.extend(chosen)
+        aug_labels.extend(code for _ in chosen)
+    return aug_idx, aug_labels
+
+
+def _run_eval_reference_primary(
+    *,
+    corpus_dir: Path,
+    refresh_embeddings: bool,
+    batch_size: int,
+    knob: dict,
+    pass_idx: int | None,
+    n_folds: int,
+    fold_seed: int,
+    weights_path: Path,
+    augment_floor: int,
+    also_report_synth_only: bool,
+) -> dict:
+    """K-fold reference-primary training: each fold trains on 80% of the
+    reference (+ synth-augmentation for under-represented codes) and
+    predicts the held-out 20%.
+
+    The union of fold-vals is the full reference (every non-singleton row
+    appears in exactly one fold's val partition), so ``validate.full_top1``
+    is a true held-out number computed across the entire reference.
+    Per-fold mean ± std quantifies the variance of that number.
+    """
+    pass_label = f"pass {pass_idx}" if pass_idx is not None else "single run"
+    log.info("=== Phase D (%s, mode=reference-primary): %d-fold "
+             "ref-primary train → held-out ref validate ===",
+             pass_label, n_folds)
+
+    ref_rows, ref_labels, ref_weights, coverage_table, audit_summary = (
+        load_reference_rows_with_weights(weights_path=weights_path)
+    )
+    ref_texts, _ = build_texts_and_labels(ref_rows)
+    log.info("Encoding full reference texts with ModernBERT...")
+    X_ref = encode_with_cache(
+        ref_texts, cache_key="full-reference",
+        refresh=refresh_embeddings, batch_size=batch_size,
+    )
+
+    log.info("Loading synth corpus from %s (for fold augmentation)...", corpus_dir)
+    synth_rows = load_synth_rows(corpus_dir)
+    synth_labels_all = [r.code for r in synth_rows]
+    synth_counts = Counter(synth_labels_all)
+    synth_keep = [i for i, l in enumerate(synth_labels_all) if synth_counts[l] >= 2]
+    synth_rows = [synth_rows[i] for i in synth_keep]
+    synth_labels = [synth_labels_all[i] for i in synth_keep]
+    if len(synth_keep) < len(synth_labels_all):
+        log.info("  dropped %d singleton-class synth rows",
+                 len(synth_labels_all) - len(synth_keep))
+    synth_texts, _ = build_texts_and_labels(synth_rows)
+    log.info("Encoding synth corpus with ModernBERT...")
+    ch = corpus_hash(corpus_dir)
+    X_synth = encode_with_cache(
+        synth_texts, cache_key=f"synth-only-{ch}",
+        refresh=refresh_embeddings, batch_size=batch_size,
+    )
+    synth_by_code: dict[str, list[int]] = defaultdict(list)
+    for i, l in enumerate(synth_labels):
+        synth_by_code[l].append(i)
+
+    log.info("Building %d-fold stratified split (seed=%d)...", n_folds, fold_seed)
+    folds = stratified_k_fold(ref_labels, n_folds=n_folds, seed=fold_seed)
+
+    cat_set = build_category_set()
+    rng = np.random.RandomState(fold_seed)
+    from sklearn.preprocessing import normalize as sk_normalize
+
+    per_fold_results: list[dict] = []
+    union_predictions: dict[int, tuple[str, str, int]] = {}
+    n_train_real_per_fold: list[int] = []
+    n_train_synth_aug_per_fold: list[int] = []
+    n_codes_aug_per_fold: list[int] = []
+    fit_acc_per_fold: list[float] = []
+    fold_train_elapsed_total = 0.0
+
+    for fold_idx, (fold_train_idx, fold_val_idx) in enumerate(folds):
+        log.info("--- Fold %d/%d: %d train, %d val ---",
+                 fold_idx + 1, n_folds, len(fold_train_idx), len(fold_val_idx))
+
+        X_fold_real = X_ref[fold_train_idx]
+        y_fold_real = [ref_labels[i] for i in fold_train_idx]
+        w_fold_real = ref_weights[fold_train_idx]
+
+        train_counts = Counter(y_fold_real)
+        aug_idx, aug_labels = _select_synth_augmentation(
+            train_counts=train_counts,
+            synth_by_code=synth_by_code,
+            augment_floor=augment_floor,
+            rng=rng,
+        )
+        n_codes_aug = len({c for c in aug_labels})
+
+        if aug_idx:
+            X_aug = X_synth[aug_idx]
+            X_fold = np.concatenate([X_fold_real, X_aug], axis=0)
+            y_fold = list(y_fold_real) + aug_labels
+            w_fold = np.concatenate(
+                [w_fold_real, np.ones(len(aug_idx), dtype=np.float32)]
+            )
+        else:
+            X_fold = X_fold_real
+            y_fold = list(y_fold_real)
+            w_fold = w_fold_real
+
+        n_train_real_per_fold.append(len(fold_train_idx))
+        n_train_synth_aug_per_fold.append(len(aug_idx))
+        n_codes_aug_per_fold.append(n_codes_aug)
+
+        train_t0 = time.time()
+        head_k, train_result_k = fit_factorized_nhsvm(
+            X_fold, y_fold, cat_set,
+            sample_weights=w_fold,
+            **knob, verbose=False, eval_every=50,
+        )
+        fold_elapsed = time.time() - train_t0
+        fold_train_elapsed_total += fold_elapsed
+        fit_acc_per_fold.append(train_result_k.final_train_acc)
+
+        X_val_norm = sk_normalize(
+            X_ref[fold_val_idx], norm="l2", axis=1
+        ).astype(np.float32)
+        device = next(head_k.parameters()).device
+        pred_codes_k = head_k.predict_codes(torch.tensor(X_val_norm, device=device))
+        fold_true = [ref_labels[i] for i in fold_val_idx]
+        fold_correct = sum(1 for p, t in zip(pred_codes_k, fold_true) if p == t)
+        fold_top1 = fold_correct / len(fold_val_idx) if fold_val_idx else 0.0
+
+        per_fold_results.append({
+            "fold": fold_idx + 1,
+            "n_train": len(y_fold),
+            "n_train_real": len(fold_train_idx),
+            "n_train_synth_aug": len(aug_idx),
+            "n_codes_aug": n_codes_aug,
+            "n_val": len(fold_val_idx),
+            "fit_acc": round(train_result_k.final_train_acc, 4),
+            "val_top1": round(fold_top1, 4),
+            "val_correct": fold_correct,
+            "elapsed_sec": round(fold_elapsed, 1),
+        })
+        log.info(
+            "  fold %d: train n=%d (real=%d, synth_aug=%d over %d codes)  "
+            "fit=%.4f  val_top1=%.4f (%d/%d)  elapsed=%.1fs",
+            fold_idx + 1, len(y_fold), len(fold_train_idx), len(aug_idx),
+            n_codes_aug, train_result_k.final_train_acc,
+            fold_top1, fold_correct, len(fold_val_idx), fold_elapsed,
+        )
+
+        for ref_i, pred_code in zip(fold_val_idx, pred_codes_k):
+            union_predictions[ref_i] = (ref_labels[ref_i], pred_code, fold_idx + 1)
+
+    fit_acc_arr = np.asarray(fit_acc_per_fold)
+    val_top1_arr = np.asarray([r["val_top1"] for r in per_fold_results])
+    union_correct = sum(1 for true, pred, _ in union_predictions.values() if true == pred)
+    union_n = len(union_predictions)
+    full_top1 = union_correct / union_n if union_n else 0.0
+
+    log.info("=== K-fold aggregate ===")
+    log.info("  union top-1 (held-out, full reference): %.4f (%d/%d)",
+             full_top1, union_correct, union_n)
+    log.info("  per-fold val_top1: mean=%.4f std=%.4f  fit=%.4f±%.4f",
+             val_top1_arr.mean(), val_top1_arr.std(),
+             fit_acc_arr.mean(), fit_acc_arr.std())
+
+    sorted_ref_idx = sorted(union_predictions)
+    union_true = [union_predictions[i][0] for i in sorted_ref_idx]
+    union_pred = [union_predictions[i][1] for i in sorted_ref_idx]
+    union_rows = [ref_rows[i] for i in sorted_ref_idx]
+    union_folds = [union_predictions[i][2] for i in sorted_ref_idx]
+    per_cat = per_category_accuracy(union_pred, union_true)
+
+    diagnostic_block = None
+    if also_report_synth_only:
+        log.info("Running synth-only diagnostic alongside reference-primary...")
+        diagnostic_block = _train_synth_only_diagnostic(
+            X_synth, synth_labels, X_ref, ref_labels,
+            cat_set=cat_set, knob=knob,
+        )
+
+    failures = characterize_failures(union_rows, union_pred, union_true, cat_set)
+
+    return {
+        "pass_idx": pass_idx,
+        "training_mode": "reference-primary",
+        "n_folds": n_folds,
+        "fold_seed": fold_seed,
+        "augment_floor": augment_floor,
+        "weights_path": str(weights_path),
+        "audit_summary": audit_summary,
+        "config": dict(knob),
+        "encoder": MODEL_ID,
+        "encoder_dim": int(X_ref.shape[1]),
+        "corpus_hash": ch,
+        "corpus_dir": str(corpus_dir),
+        "reference_hash": reference_hash(weights_path),
+        "split": {
+            "n_reference_total": len(ref_rows),
+            "n_reference_classes": len(set(ref_labels)),
+            "n_synth_pool": len(synth_rows),
+            "n_synth_pool_classes": len(set(synth_labels)),
+            "n_folds": n_folds,
+            "n_train_real_per_fold": n_train_real_per_fold,
+            "n_train_synth_aug_per_fold": n_train_synth_aug_per_fold,
+            "n_codes_aug_per_fold": n_codes_aug_per_fold,
+        },
+        "train": {
+            "fit_acc_mean": round(float(fit_acc_arr.mean()), 4),
+            "fit_acc_std": round(float(fit_acc_arr.std()), 4),
+            "fit_acc_per_fold": [round(x, 4) for x in fit_acc_per_fold],
+            "elapsed_sec_total": round(fold_train_elapsed_total, 1),
+        },
+        "validate": {
+            "full_top1": round(full_top1, 4),
+            "full_n_correct": union_correct,
+            "full_n": union_n,
+            "full_top1_mean": round(float(val_top1_arr.mean()), 4),
+            "full_top1_std": round(float(val_top1_arr.std()), 4),
+            "full_top1_per_fold": [round(x, 4) for x in val_top1_arr.tolist()],
+            "synth_only_diagnostic": diagnostic_block,
+        },
+        "per_fold": per_fold_results,
+        "per_category_accuracy": per_cat,
+        "failures": {
+            "kinds": failures["failure_kinds"],
+            "examples_top": failures["examples_top"][:30],
+        },
+        "predictions": [
+            {
+                "key": f"{r.table}.{r.column}",
+                "true": t,
+                "pred": p,
+                "correct": p == t,
+                "fold": f,
+            }
+            for r, t, p, f in zip(union_rows, union_true, union_pred, union_folds)
+        ],
+    }
+
+
+def _run_eval_reference_plus_synth(
+    *,
+    corpus_dir: Path,
+    refresh_embeddings: bool,
+    batch_size: int,
+    knob: dict,
+    pass_idx: int | None,
+    fold_seed: int,
+    weights_path: Path,
+    augment_floor: int,
+    also_report_synth_only: bool,
+) -> dict:
+    """Single 80/20 stratified split of the reference + full synth corpus
+    appended to train.  Faster than k-fold (one head trained), no variance
+    estimate.  Useful for quick experimentation between full k-fold runs.
+
+    ``augment_floor`` is accepted but unused under this mode — full synth
+    is unconditionally appended; per-code top-up is meaningful only in the
+    k-fold path where train counts vary across folds.
+    """
+    del augment_floor  # explicitly unused in this mode
+    pass_label = f"pass {pass_idx}" if pass_idx is not None else "single run"
+    log.info("=== Phase D (%s, mode=reference+synth): single 80/20 split + full synth ===",
+             pass_label)
+
+    ref_rows, ref_labels, ref_weights, coverage_table, audit_summary = (
+        load_reference_rows_with_weights(weights_path=weights_path)
+    )
+    ref_texts, _ = build_texts_and_labels(ref_rows)
+    log.info("Encoding full reference texts with ModernBERT...")
+    X_ref = encode_with_cache(
+        ref_texts, cache_key="full-reference",
+        refresh=refresh_embeddings, batch_size=batch_size,
+    )
+
+    log.info("Loading synth corpus from %s...", corpus_dir)
+    synth_rows = load_synth_rows(corpus_dir)
+    synth_labels_all = [r.code for r in synth_rows]
+    synth_counts = Counter(synth_labels_all)
+    synth_keep = [i for i, l in enumerate(synth_labels_all) if synth_counts[l] >= 2]
+    synth_rows = [synth_rows[i] for i in synth_keep]
+    synth_labels = [synth_labels_all[i] for i in synth_keep]
+    synth_texts, _ = build_texts_and_labels(synth_rows)
+    log.info("Encoding synth corpus with ModernBERT...")
+    ch = corpus_hash(corpus_dir)
+    X_synth = encode_with_cache(
+        synth_texts, cache_key=f"synth-only-{ch}",
+        refresh=refresh_embeddings, batch_size=batch_size,
+    )
+
+    train_idx, val_idx = stratified_split(ref_labels, test_size=0.2, seed=fold_seed)
+    log.info("  split: %d train + %d synth = %d, %d val",
+             len(train_idx), len(synth_rows), len(train_idx) + len(synth_rows),
+             len(val_idx))
+
+    X_train = np.concatenate([X_ref[train_idx], X_synth], axis=0)
+    y_train = [ref_labels[i] for i in train_idx] + synth_labels
+    w_train = np.concatenate([
+        ref_weights[train_idx],
+        np.ones(len(synth_labels), dtype=np.float32),
+    ])
+
+    cat_set = build_category_set()
+    train_t0 = time.time()
+    head, train_result = fit_factorized_nhsvm(
+        X_train, y_train, cat_set,
+        sample_weights=w_train,
+        **knob, verbose=True, eval_every=50,
+    )
+    train_elapsed = time.time() - train_t0
+    log.info("  train fit-acc=%.4f  elapsed=%.1fs",
+             train_result.final_train_acc, train_elapsed)
+
+    from sklearn.preprocessing import normalize as sk_normalize
+    X_val_norm = sk_normalize(
+        X_ref[val_idx], norm="l2", axis=1
+    ).astype(np.float32)
+    device = next(head.parameters()).device
+    pred = head.predict_codes(torch.tensor(X_val_norm, device=device))
+    true = [ref_labels[i] for i in val_idx]
+    val_rows = [ref_rows[i] for i in val_idx]
+    correct = sum(1 for p, t in zip(pred, true) if p == t)
+    top1 = correct / len(true) if true else 0.0
+    log.info("  validate held-out 20%%: top-1=%.4f (%d/%d)",
+             top1, correct, len(true))
+
+    per_cat = per_category_accuracy(pred, true)
+
+    diagnostic_block = None
+    if also_report_synth_only:
+        log.info("Running synth-only diagnostic alongside reference+synth...")
+        diagnostic_block = _train_synth_only_diagnostic(
+            X_synth, synth_labels, X_ref, ref_labels,
+            cat_set=cat_set, knob=knob,
+        )
+
+    failures = characterize_failures(val_rows, pred, true, cat_set)
+
+    return {
+        "pass_idx": pass_idx,
+        "training_mode": "reference+synth",
+        "fold_seed": fold_seed,
+        "weights_path": str(weights_path),
+        "audit_summary": audit_summary,
+        "config": dict(knob),
+        "encoder": MODEL_ID,
+        "encoder_dim": int(X_ref.shape[1]),
+        "corpus_hash": ch,
+        "corpus_dir": str(corpus_dir),
+        "reference_hash": reference_hash(weights_path),
+        "split": {
+            "n_reference_total": len(ref_rows),
+            "n_reference_classes": len(set(ref_labels)),
+            "n_synth_pool": len(synth_rows),
+            "n_train_real": len(train_idx),
+            "n_train_synth": len(synth_labels),
+            "n_train_total": len(y_train),
+            "n_val": len(val_idx),
+            "split_seed": fold_seed,
+        },
+        "train": {
+            "fit_acc": round(train_result.final_train_acc, 4),
+            "final_loss": round(train_result.final_train_loss, 4),
+            "elapsed_sec": round(train_elapsed, 1),
+            "epochs": train_result.epochs_run,
+        },
+        "validate": {
+            "full_top1": round(top1, 4),
+            "full_n_correct": correct,
+            "full_n": len(true),
+            "synth_only_diagnostic": diagnostic_block,
+        },
+        "per_category_accuracy": per_cat,
+        "failures": {
+            "kinds": failures["failure_kinds"],
+            "examples_top": failures["examples_top"][:30],
+        },
+        "predictions": [
+            {"key": f"{r.table}.{r.column}", "true": t, "pred": p,
+             "correct": p == t}
+            for r, t, p in zip(val_rows, true, pred)
+        ],
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase D dispatcher
+# ──────────────────────────────────────────────────────────────────────
+
+VALID_TRAINING_MODES = ("synth-only", "reference-primary", "reference+synth")
+
+
+def run_eval(
+    *,
+    training_mode: str = "synth-only",
+    corpus_dir: Path = DEFAULT_CORPUS_DIR,
+    refresh_embeddings: bool = False,
+    batch_size: int = 64,
+    knob: dict | None = None,
+    pass_idx: int | None = None,
+    n_folds: int = 5,
+    fold_seed: int = 42,
+    weights_path: Path = Path("build/data/agent_mediated/training_weights.json"),
+    augment_floor: int = 5,
+    also_report_synth_only: bool = False,
+) -> dict:
+    """Phase D dispatcher — routes to the per-training-mode evaluator.
+
+    Modes:
+      ``synth-only``       — historical default; train on synth corpus,
+                             validate on full reference.  Back-compat:
+                             result schema has no ``training_mode`` key.
+      ``reference-primary`` — k-fold over reference; each fold trains 80%
+                             of reference + synth-augmentation, validates
+                             the held-out 20%.  Union of fold-vals = full
+                             reference, headline ``validate.full_top1`` is
+                             true held-out.
+      ``reference+synth``   — single 80/20 split of reference + full synth
+                             corpus appended to train.  Faster, no fold
+                             variance.
+
+    ``weights_path``, ``augment_floor``, ``n_folds``, ``fold_seed``,
+    ``also_report_synth_only`` are only consulted by the non-synth-only
+    modes.  Keeping them as defaultable kwargs preserves the existing
+    synth-only call site signature.
+    """
+    knob = knob or BEST_KNOB
+    if training_mode == "synth-only":
+        return _run_eval_synth_only(
+            corpus_dir=corpus_dir,
+            refresh_embeddings=refresh_embeddings,
+            batch_size=batch_size,
+            knob=knob,
+            pass_idx=pass_idx,
+        )
+    if training_mode == "reference-primary":
+        return _run_eval_reference_primary(
+            corpus_dir=corpus_dir,
+            refresh_embeddings=refresh_embeddings,
+            batch_size=batch_size,
+            knob=knob,
+            pass_idx=pass_idx,
+            n_folds=n_folds,
+            fold_seed=fold_seed,
+            weights_path=weights_path,
+            augment_floor=augment_floor,
+            also_report_synth_only=also_report_synth_only,
+        )
+    if training_mode == "reference+synth":
+        return _run_eval_reference_plus_synth(
+            corpus_dir=corpus_dir,
+            refresh_embeddings=refresh_embeddings,
+            batch_size=batch_size,
+            knob=knob,
+            pass_idx=pass_idx,
+            fold_seed=fold_seed,
+            weights_path=weights_path,
+            augment_floor=augment_floor,
+            also_report_synth_only=also_report_synth_only,
+        )
+    raise ValueError(
+        f"unknown training_mode={training_mode!r}; valid: {VALID_TRAINING_MODES}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Report rendering
 # ──────────────────────────────────────────────────────────────────────
 
@@ -378,6 +1057,20 @@ def _baseline_per_category() -> dict[str, float]:
 
 
 def render_report(result: dict) -> str:
+    """Dispatch report rendering by training_mode.
+
+    Back-compat: a result without ``training_mode`` is treated as
+    synth-only (since the old run_eval body never set that key).
+    """
+    mode = result.get("training_mode", "synth-only")
+    if mode == "reference-primary":
+        return _render_report_reference_primary(result)
+    if mode == "reference+synth":
+        return _render_report_reference_plus_synth(result)
+    return _render_report_synth_only(result)
+
+
+def _render_report_synth_only(result: dict) -> str:
     lines: list[str] = []
     pass_label = (f" — pass {result['pass_idx']}"
                   if result.get("pass_idx") is not None else "")
@@ -506,6 +1199,209 @@ def render_report(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_report_reference_primary(result: dict) -> str:
+    lines: list[str] = []
+    pass_label = (f" — pass {result['pass_idx']}"
+                  if result.get("pass_idx") is not None else "")
+    lines.append(
+        f"# Factorized NHSVM eval{pass_label} — reference-primary "
+        f"({result['n_folds']}-fold), synth-augmented"
+    )
+    lines.append("")
+    s = result["split"]
+    t = result["train"]
+    v = result["validate"]
+    lines.append(
+        f"Reference: **{s['n_reference_total']} rows** across "
+        f"{s['n_reference_classes']} codes (full agent-mediated reference, "
+        f"weights from `{result['weights_path']}`).  Synth pool: "
+        f"**{s['n_synth_pool']} rows** across {s['n_synth_pool_classes']} "
+        f"codes from {result['corpus_dir']}.  K-fold: {result['n_folds']} "
+        f"(seed={result['fold_seed']}).  Encoder: {result['encoder']}."
+    )
+    lines.append("")
+
+    lines.append("## Headline (held-out across all folds)")
+    lines.append("")
+    lines.append(
+        f"- **Full-reference held-out top-1: {v['full_top1']:.4f} "
+        f"({v['full_n_correct']}/{v['full_n']})** — union of all fold-vals "
+        f"(every row predicted by a model that did not see it during training)"
+    )
+    lines.append(
+        f"- Per-fold val_top1: mean={v['full_top1_mean']:.4f}  "
+        f"std={v['full_top1_std']:.4f}  "
+        f"folds={v['full_top1_per_fold']}"
+    )
+    lines.append(
+        f"- Train fit-acc: mean={t['fit_acc_mean']:.4f}  "
+        f"std={t['fit_acc_std']:.4f}  folds={t['fit_acc_per_fold']}"
+    )
+    lines.append(f"- Total train time: {t['elapsed_sec_total']:.1f}s "
+                 f"across {result['n_folds']} folds")
+    diag = v.get("synth_only_diagnostic")
+    if diag is not None:
+        lines.append(
+            f"- Synth-only diagnostic (parallel): {diag['full_top1']:.4f} "
+            f"({diag['n_correct']}/{diag['n']}) — "
+            f"generalization signal under the prior synth-only protocol; "
+            f"large gap to held-out top-1 confirms the protocol switch "
+            f"was load-bearing"
+        )
+    lines.append("")
+
+    lines.append("## Per-fold detail")
+    lines.append("")
+    lines.append("| fold | train (real+aug) | aug codes | val | fit-acc | val top-1 | elapsed |")
+    lines.append("|---:|---:|---:|---:|---:|---:|---:|")
+    for r in result["per_fold"]:
+        lines.append(
+            f"| {r['fold']} | {r['n_train']} ({r['n_train_real']}+"
+            f"{r['n_train_synth_aug']}) | {r['n_codes_aug']} | "
+            f"{r['n_val']} | {r['fit_acc']:.4f} | {r['val_top1']:.4f} "
+            f"({r['val_correct']}/{r['n_val']}) | {r['elapsed_sec']:.1f}s |"
+        )
+    lines.append("")
+
+    # Per-category lift vs Phase A baseline (if available)
+    baseline_per_cat = _baseline_per_category()
+    if baseline_per_cat:
+        lines.append("## Per-category lift vs Phase A baseline (top 20 / top 10)")
+        lines.append("")
+        deltas = []
+        for cls, info in result["per_category_accuracy"].items():
+            base_acc = baseline_per_cat.get(cls, 0.0)
+            new_acc = info["accuracy"]
+            deltas.append((cls, base_acc, new_acc, new_acc - base_acc, info["n_test"]))
+        deltas_imp = sorted([d for d in deltas if d[3] > 0],
+                            key=lambda x: -x[3])[:20]
+        deltas_reg = sorted([d for d in deltas if d[3] < 0],
+                            key=lambda x: x[3])[:10]
+        lines.append("### Improvements")
+        lines.append("")
+        lines.append("| code | baseline | this pass | Δ | n_validate |")
+        lines.append("|---|---:|---:|---:|---:|")
+        for cls, b, n, d, nt in deltas_imp:
+            lines.append(f"| `{cls}` | {b:.3f} | {n:.3f} | +{d:.3f} | {nt} |")
+        lines.append("")
+        if deltas_reg:
+            lines.append("### Regressions")
+            lines.append("")
+            lines.append("| code | baseline | this pass | Δ | n_validate |")
+            lines.append("|---|---:|---:|---:|---:|")
+            for cls, b, n, d, nt in deltas_reg:
+                lines.append(f"| `{cls}` | {b:.3f} | {n:.3f} | {d:.3f} | {nt} |")
+            lines.append("")
+
+    lines.append("## Failure-mode breakdown (held-out union)")
+    lines.append("")
+    lines.append("| Failure kind | Count |")
+    lines.append("|---|---:|")
+    for k, val in sorted(result["failures"]["kinds"].items(),
+                         key=lambda kv: -kv[1]):
+        lines.append(f"| {k} | {val} |")
+    lines.append("")
+
+    lines.append("## Gate A interpretation")
+    lines.append("")
+    full_top1 = v["full_top1"]
+    std = v["full_top1_std"]
+    if full_top1 >= 0.95 and std <= 0.03:
+        lines.append(
+            f"✓ **Gate A MET (k-fold)**: held-out top-1={full_top1:.4f} ≥ 0.95 "
+            f"AND std={std:.4f} ≤ 0.03.  Channel deployment-ready on accuracy; "
+            f"check Gate B (mutual affirmation with cosine) next."
+        )
+    elif full_top1 >= 0.85:
+        lines.append(
+            f"~ **Approaching Gate A**: held-out top-1={full_top1:.4f} "
+            f"in [0.85, 0.95).  Std={std:.4f}.  Refinement loop should "
+            f"push toward 0.95 by targeting per-code gaps (per-category "
+            f"table above)."
+        )
+    elif full_top1 >= 0.65:
+        lines.append(
+            f"~ **Mid-band**: held-out top-1={full_top1:.4f} in [0.65, 0.85).  "
+            f"Std={std:.4f}.  Likely indicates corpus-induced ceiling or "
+            f"structural failures (heterogeneous codes like 0.1 INOS).  "
+            f"Consider CCO subtype work + targeted refinement."
+        )
+    else:
+        lines.append(
+            f"✗ **Below 0.65**: held-out top-1={full_top1:.4f}.  Reference-"
+            f"primary protocol should have lifted substantially from synth-"
+            f"only baseline; if not, inspect per-fold variance and audit "
+            f"weight distribution before refining."
+        )
+    if diag is not None:
+        gap = full_top1 - diag["full_top1"]
+        lines.append("")
+        lines.append(
+            f"**Protocol-switch lift**: reference-primary {full_top1:.4f} "
+            f"− synth-only diagnostic {diag['full_top1']:.4f} = "
+            f"**+{gap:.4f}**.  This is the headline 'switching to reference-"
+            f"primary was worth doing' number; refinement loop continues to "
+            f"steer the synth corpus, which retains direct value via fold "
+            f"augmentation."
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_report_reference_plus_synth(result: dict) -> str:
+    lines: list[str] = []
+    pass_label = (f" — pass {result['pass_idx']}"
+                  if result.get("pass_idx") is not None else "")
+    lines.append(
+        f"# Factorized NHSVM eval{pass_label} — reference+synth (single 80/20)"
+    )
+    lines.append("")
+    s = result["split"]
+    t = result["train"]
+    v = result["validate"]
+    lines.append(
+        f"Train: **{s['n_train_total']} examples** "
+        f"({s['n_train_real']} real + {s['n_train_synth']} synth, "
+        f"weights from `{result['weights_path']}`).  "
+        f"Validate: **{s['n_val']} reference examples** (held-out 20% "
+        f"single split, seed={s['split_seed']}).  Encoder: {result['encoder']}."
+    )
+    lines.append("")
+
+    lines.append("## Headline")
+    lines.append("")
+    lines.append(
+        f"- **Held-out 20% top-1: {v['full_top1']:.4f} "
+        f"({v['full_n_correct']}/{v['full_n']})**"
+    )
+    lines.append(f"- Train fit-acc: {t['fit_acc']:.4f}")
+    lines.append(f"- Train time: {t['elapsed_sec']:.1f}s "
+                 f"({t['epochs']} epochs, loss={t['final_loss']:.4f})")
+    diag = v.get("synth_only_diagnostic")
+    if diag is not None:
+        lines.append(
+            f"- Synth-only diagnostic (parallel): {diag['full_top1']:.4f} "
+            f"({diag['n_correct']}/{diag['n']})"
+        )
+    lines.append("")
+    lines.append(
+        "**Caveat**: single split — no fold variance.  Use "
+        "`--training-mode reference-primary --n-folds 5` for a deployment-"
+        "grade number with std."
+    )
+    lines.append("")
+
+    lines.append("## Failure-mode breakdown (held-out 20%)")
+    lines.append("")
+    lines.append("| Failure kind | Count |")
+    lines.append("|---|---:|")
+    for k, val in sorted(result["failures"]["kinds"].items(),
+                         key=lambda kv: -kv[1]):
+        lines.append(f"| {k} | {val} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────
@@ -520,6 +1416,30 @@ def main() -> int:
                          "written when set.  Without, single-run outputs.")
     ap.add_argument("--corpus-dir", type=Path, default=DEFAULT_CORPUS_DIR,
                     help="Corpus directory containing synth_rows.jsonl")
+    ap.add_argument("--training-mode",
+                    choices=VALID_TRAINING_MODES,
+                    default="synth-only",
+                    help="Training protocol.  synth-only (default, "
+                         "back-compat) trains on synth corpus and "
+                         "validates on full reference.  reference-primary "
+                         "runs k-fold on the reference with synth "
+                         "augmentation.  reference+synth uses a single "
+                         "80/20 split + full synth.")
+    ap.add_argument("--n-folds", type=int, default=5,
+                    help="Number of folds for reference-primary mode")
+    ap.add_argument("--fold-seed", type=int, default=42,
+                    help="Seed for stratified-k-fold / stratified-split")
+    ap.add_argument("--weights-path", type=Path,
+                    default=Path("build/data/agent_mediated/training_weights.json"),
+                    help="Path to audit-derived training weights")
+    ap.add_argument("--augment-floor", type=int, default=5,
+                    help="In reference-primary, top up codes whose fold-"
+                         "train count falls below this floor by drawing "
+                         "from synth corpus")
+    ap.add_argument("--also-report-synth-only", action="store_true",
+                    help="In non-synth-only modes, additionally train a "
+                         "synth-only head and report its full-reference "
+                         "top-1 as a parallel diagnostic")
     args = ap.parse_args()
 
     # Logging both to console and to RUN_LOG (append mode so pass-by-pass
@@ -534,10 +1454,16 @@ def main() -> int:
     )
 
     result = run_eval(
+        training_mode=args.training_mode,
         corpus_dir=args.corpus_dir,
         refresh_embeddings=args.refresh_embeddings,
         batch_size=args.batch_size,
         pass_idx=args.pass_idx,
+        n_folds=args.n_folds,
+        fold_seed=args.fold_seed,
+        weights_path=args.weights_path,
+        augment_floor=args.augment_floor,
+        also_report_synth_only=args.also_report_synth_only,
     )
 
     # Pass-numbered output paths
@@ -578,15 +1504,39 @@ def main() -> int:
     print()
     pass_label = (f"pass {args.pass_idx}" if args.pass_idx is not None
                   else "single run")
-    print(f"=== Phase D headline ({pass_label}) ===")
+    mode = result.get("training_mode", "synth-only")
+    print(f"=== Phase D headline ({pass_label}, mode={mode}) ===")
     v = result["validate"]
-    print(f"  full-validate top-1:     {v['full_top1']:.4f} "
-          f"({v['full_n_correct']}/{v['full_n']})")
-    print(f"  continuity-271 top-1:    {v['continuity_top1']:.4f} "
-          f"({v['continuity_n_correct']}/{v['continuity_n']})")
-    print(f"  train fit-acc:           {result['train']['fit_acc']:.4f}")
-    print(f"  historical 0.6125 anchor (different regime): "
-          f"reference-only train + 271-test")
+    if mode == "synth-only":
+        print(f"  full-validate top-1:     {v['full_top1']:.4f} "
+              f"({v['full_n_correct']}/{v['full_n']})")
+        print(f"  continuity-271 top-1:    {v['continuity_top1']:.4f} "
+              f"({v['continuity_n_correct']}/{v['continuity_n']})")
+        print(f"  train fit-acc:           {result['train']['fit_acc']:.4f}")
+        print(f"  historical 0.6125 anchor (different regime): "
+              f"reference-only train + 271-test")
+    elif mode == "reference-primary":
+        print(f"  held-out full-ref top-1: {v['full_top1']:.4f} "
+              f"({v['full_n_correct']}/{v['full_n']})")
+        print(f"  per-fold val mean±std:   {v['full_top1_mean']:.4f} "
+              f"± {v['full_top1_std']:.4f}")
+        print(f"  per-fold val_top1:       {v['full_top1_per_fold']}")
+        print(f"  train fit-acc mean±std:  {result['train']['fit_acc_mean']:.4f} "
+              f"± {result['train']['fit_acc_std']:.4f}")
+        diag = v.get("synth_only_diagnostic")
+        if diag is not None:
+            print(f"  synth-only diagnostic:   {diag['full_top1']:.4f} "
+                  f"({diag['n_correct']}/{diag['n']}) — parallel baseline")
+            print(f"  protocol-switch lift:    "
+                  f"+{v['full_top1'] - diag['full_top1']:.4f}")
+    elif mode == "reference+synth":
+        print(f"  held-out 20% top-1:      {v['full_top1']:.4f} "
+              f"({v['full_n_correct']}/{v['full_n']})")
+        print(f"  train fit-acc:           {result['train']['fit_acc']:.4f}")
+        diag = v.get("synth_only_diagnostic")
+        if diag is not None:
+            print(f"  synth-only diagnostic:   {diag['full_top1']:.4f} "
+                  f"({diag['n_correct']}/{diag['n']})")
     return 0
 
 

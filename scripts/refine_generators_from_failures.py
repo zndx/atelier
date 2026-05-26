@@ -501,7 +501,36 @@ def main() -> int:
     ap.add_argument("--corpus-dir", type=Path,
                     default=Path("build/data/svm_training/corpus_v2"),
                     help="Target corpus directory")
+    # Training-protocol pass-through (mirrors Phase D).  Defaults preserve
+    # historical synth-only behavior; downstream Phase D invocation gets
+    # the new flags only under non-synth-only modes.
+    ap.add_argument("--training-mode",
+                    choices=("synth-only", "reference-primary", "reference+synth"),
+                    default="synth-only",
+                    help="Training protocol for Phase D under refinement")
+    ap.add_argument("--n-folds", type=int, default=5)
+    ap.add_argument("--fold-seed", type=int, default=42)
+    ap.add_argument("--weights-path", type=Path,
+                    default=Path("build/data/agent_mediated/training_weights.json"))
+    ap.add_argument("--augment-floor", type=int, default=5)
+    ap.add_argument("--also-report-synth-only", action="store_true")
     args = ap.parse_args()
+
+    # Build Phase D arg list once.  Empty under synth-only (default flags
+    # match historical behavior); non-synth-only inserts the protocol-
+    # switch CLI surface so the reflect script's dispatcher routes
+    # correctly on every refinement-loop invocation.
+    phase_d_extra_args: list[str] = []
+    if args.training_mode != "synth-only":
+        phase_d_extra_args += [
+            "--training-mode", args.training_mode,
+            "--n-folds", str(args.n_folds),
+            "--fold-seed", str(args.fold_seed),
+            "--weights-path", str(args.weights_path),
+            "--augment-floor", str(args.augment_floor),
+        ]
+        if args.also_report_synth_only:
+            phase_d_extra_args.append("--also-report-synth-only")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -633,6 +662,7 @@ def main() -> int:
             sys.executable, "scripts/reflect_nhsvm_eval_shap_v2.py",
             "--pass-idx", str(new_pass_idx),
             "--corpus-dir", str(args.corpus_dir),
+            *phase_d_extra_args,
         ])
         if rc != 0:
             log.error("reflect_nhsvm_eval_shap_v2 failed (rc=%d); aborting", rc)
@@ -692,12 +722,25 @@ def main() -> int:
             log.info("  ★ new best pass: %d  top-1=%.4f",
                      new_pass_idx, post_top1)
 
-        # Record this pass
-        passes.append({
+        # Surface reference-primary variance fields when present.  Refinement
+        # decisions still steer on the mean (`post_full_top1`), but the
+        # operator sees the spread so they can spot when one fold is
+        # collapsing.  When training_mode=synth-only these fields are
+        # absent and we record None.
+        post_v = post.get("validate", {})
+        diag = post_v.get("synth_only_diagnostic")
+        pass_record = {
             "pass_idx": new_pass_idx,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "training_mode": post.get("training_mode", "synth-only"),
             "prior_full_top1": round(prior_top1, 4),
             "post_full_top1": round(post_top1, 4),
+            "post_full_top1_mean": post_v.get("full_top1_mean"),
+            "post_full_top1_std": post_v.get("full_top1_std"),
+            "post_full_top1_per_fold": post_v.get("full_top1_per_fold"),
+            "post_synth_only_diagnostic": (
+                diag.get("full_top1") if isinstance(diag, dict) else None
+            ),
             "post_continuity_top1": (round(post_cont, 4)
                                       if post_cont is not None else None),
             "lift": round(lift, 4),
@@ -708,7 +751,8 @@ def main() -> int:
             "n_abandoned_total": len(abandoned_codes),
             "n_new_abandoned_this_pass": new_abandons,
             "n_cooldown_active": len(cooldown_state),
-        })
+        }
+        passes.append(pass_record)
         _save_json(HISTORY_JSON, {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "passes": passes,

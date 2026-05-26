@@ -22,6 +22,18 @@
 #   bash scripts/run_corpus_expansion_pipeline.sh --skip-refinement
 #   bash scripts/run_corpus_expansion_pipeline.sh --skip-target-health
 #   bash scripts/run_corpus_expansion_pipeline.sh --corpus-dir build/data/svm_training/corpus_v3
+#   bash scripts/run_corpus_expansion_pipeline.sh \
+#       --training-mode reference-primary --n-folds 5 --also-report-synth-only
+#
+# Training-mode flags (default: synth-only, fully back-compatible):
+#   --training-mode {synth-only,reference-primary,reference+synth}
+#   --n-folds N           folds for reference-primary (default 5)
+#   --fold-seed N         (default 42)
+#   --weights-path PATH   audit-derived weights (default
+#                         build/data/agent_mediated/training_weights.json)
+#   --augment-floor N     fold-train code coverage floor (default 5)
+#   --also-report-synth-only  parallel synth-only diagnostic per pass
+#   --skip-reference-audit    suppress Phase 0.5
 #
 # Logs to /tmp/corpus_expansion.log when invoked under nohup.
 
@@ -56,6 +68,19 @@ MAX_REFINEMENT_PASSES=5
 TARGET_ACCURACY=0.95
 CORPUS_DIR="build/data/svm_training/corpus_v2"
 
+# Training-protocol args (default synth-only preserves back-compat).
+# Under reference-primary, Phase 0.5 runs the reference-quality audit
+# and Phase D + refinement loop train against the reference k-fold with
+# synth augmentation.  See docs/notes/2026-05-25/phase_gate_brief.md
+# (Training protocol section) for the protocol rationale.
+TRAINING_MODE="synth-only"
+N_FOLDS=5
+FOLD_SEED=42
+WEIGHTS_PATH="build/data/agent_mediated/training_weights.json"
+AUGMENT_FLOOR=5
+ALSO_REPORT_SYNTH_ONLY=0
+SKIP_REFERENCE_AUDIT=0
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --synth-examples-per-code) SYNTH_PER_CODE="$2"; shift 2 ;;
@@ -65,41 +90,103 @@ while [[ $# -gt 0 ]]; do
     --max-passes) MAX_REFINEMENT_PASSES="$2"; shift 2 ;;
     --target-accuracy) TARGET_ACCURACY="$2"; shift 2 ;;
     --corpus-dir) CORPUS_DIR="$2"; shift 2 ;;
+    --training-mode) TRAINING_MODE="$2"; shift 2 ;;
+    --n-folds) N_FOLDS="$2"; shift 2 ;;
+    --fold-seed) FOLD_SEED="$2"; shift 2 ;;
+    --weights-path) WEIGHTS_PATH="$2"; shift 2 ;;
+    --augment-floor) AUGMENT_FLOOR="$2"; shift 2 ;;
+    --also-report-synth-only) ALSO_REPORT_SYNTH_ONLY=1; shift ;;
+    --skip-reference-audit) SKIP_REFERENCE_AUDIT=1; shift ;;
     -h|--help)
-      grep "^#" "$0" | head -30
+      grep "^#" "$0" | head -45
       exit 0 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
+
+# Validate training-mode early.
+case "$TRAINING_MODE" in
+  synth-only|reference-primary|reference+synth) ;;
+  *)
+    echo "ERROR: unknown --training-mode: $TRAINING_MODE"
+    echo "Valid: synth-only, reference-primary, reference+synth"
+    exit 1 ;;
+esac
+
+# Build the Phase D arg array once so every Phase D invocation is identical.
+# Empty under synth-only (no flags → Phase D defaults match historical behavior).
+PHASE_D_ARGS=()
+if [[ "$TRAINING_MODE" != "synth-only" ]]; then
+  PHASE_D_ARGS+=("--training-mode" "$TRAINING_MODE")
+  PHASE_D_ARGS+=("--n-folds" "$N_FOLDS")
+  PHASE_D_ARGS+=("--fold-seed" "$FOLD_SEED")
+  PHASE_D_ARGS+=("--weights-path" "$WEIGHTS_PATH")
+  PHASE_D_ARGS+=("--augment-floor" "$AUGMENT_FLOOR")
+  [[ "$ALSO_REPORT_SYNTH_ONLY" -eq 1 ]] && PHASE_D_ARGS+=("--also-report-synth-only")
+fi
 
 cd /home/cdsw
 
 SNAPSHOTS_DIR="build/svm_corpus_v2/corpus_snapshots"
 mkdir -p "$SNAPSHOTS_DIR"
 
+echo "=== run_corpus_expansion_pipeline configuration ==="
+echo "  training_mode:        $TRAINING_MODE"
+if [[ "$TRAINING_MODE" != "synth-only" ]]; then
+  echo "  n_folds:              $N_FOLDS"
+  echo "  fold_seed:            $FOLD_SEED"
+  echo "  weights_path:         $WEIGHTS_PATH"
+  echo "  augment_floor:        $AUGMENT_FLOOR"
+  echo "  also_report_synth:    $ALSO_REPORT_SYNTH_ONLY"
+fi
+echo "  corpus_dir:           $CORPUS_DIR"
+echo "  target_accuracy:      $TARGET_ACCURACY"
+echo "  max_refinement_passes: $MAX_REFINEMENT_PASSES"
+echo "  skip_refinement:      $SKIP_REFINEMENT"
+echo "  skip_target_health:   $SKIP_TARGET_HEALTH"
+echo
+
 echo "=== $(date -u +%FT%TZ) Phase A: generator coverage audit ==="
 python scripts/audit_generator_coverage.py
+
+if [[ "$TRAINING_MODE" != "synth-only" && "$SKIP_REFERENCE_AUDIT" -ne 1 ]]; then
+  echo
+  echo "=== $(date -u +%FT%TZ) Phase 0.5: reference-quality audit ==="
+  # Produces $WEIGHTS_PATH (per-row weights + per-code coverage flags)
+  # consumed by Phase D under reference-primary and reference+synth.
+  python scripts/audit_reference_quality.py \
+    --output "$WEIGHTS_PATH"
+fi
 
 echo
 echo "=== $(date -u +%FT%TZ) Phase B: Agent SDK generator authorship ==="
 # Loop the agent until no more gaps remain (each session targets ~30 codes).
 # Cap at 10 invocations to bound runaway.
 for i in $(seq 1 10); do
-  echo "--- Phase B agent session $i ---"
-  python scripts/run_evolve_generators_sdk.py
+  # Check remaining gaps BEFORE invoking the agent.  Treats a code as
+  # treated only if it appears in generators_v1.py's GENERATORS_BY_CODE
+  # (acceptance-aware; not just proposal-file-presence-aware).  Skips
+  # the agent invocation entirely when nothing is gap — saves 15-20 min
+  # of wall-clock per spurious session that would otherwise be spent
+  # in inspect-and-skip.
   remaining=$(python -c "
-import json, os
+import json, sys
 audit = json.load(open('build/svm_corpus_v2/coverage_audit.json'))
-proposals_dir = 'build/svm_corpus_v2/proposals'
-treated = {f.removesuffix('.json').replace('_', '.') for f in os.listdir(proposals_dir)} if os.path.isdir(proposals_dir) else set()
-remaining = [g['code'] for g in audit['gap_list'] if g['code'] not in treated]
+sys.path.insert(0, 'build/lib/generated')
+try:
+    import generators_v1
+    accepted = set(generators_v1.GENERATORS_BY_CODE.keys())
+except Exception:
+    accepted = set()
+remaining = [g['code'] for g in audit['gap_list'] if g['code'] not in accepted]
 print(len(remaining))
 ")
-  echo "Remaining gap codes: $remaining"
   if [[ "$remaining" -eq 0 ]]; then
-    echo "All gaps treated; exiting Phase B loop."
+    echo "All gaps already treated; skipping Phase B loop."
     break
   fi
+  echo "--- Phase B agent session $i (remaining=$remaining) ---"
+  python scripts/run_evolve_generators_sdk.py
 done
 
 echo
@@ -116,10 +203,11 @@ cp "$CORPUS_DIR/manifest.json" "$PASS0_SNAP/"
 echo "Snapshot taken: $PASS0_SNAP"
 
 echo
-echo "=== $(date -u +%FT%TZ) Phase D: initial eval (pass 0) ==="
+echo "=== $(date -u +%FT%TZ) Phase D: initial eval (pass 0, mode=$TRAINING_MODE) ==="
 python scripts/reflect_nhsvm_eval_shap_v2.py \
   --pass-idx 0 \
-  --corpus-dir "$CORPUS_DIR"
+  --corpus-dir "$CORPUS_DIR" \
+  "${PHASE_D_ARGS[@]}"
 
 if [[ "$SKIP_REFINEMENT" -eq 1 ]]; then
   echo "=== Skipping Phase E (--skip-refinement) ==="
@@ -127,12 +215,24 @@ else
   echo
   echo "=== $(date -u +%FT%TZ) Phase E: iterative refinement loop ==="
   # The refinement loop runs Phase D internally with --pass-idx for each
-  # refinement pass and tracks best_pass.json + corpus snapshots.
+  # refinement pass and tracks best_pass.json + corpus snapshots.  Under
+  # non-synth-only modes we forward the training-protocol args so every
+  # nested Phase D invocation gets routed to the same dispatcher branch.
+  REFINE_EXTRA_ARGS=()
+  if [[ "$TRAINING_MODE" != "synth-only" ]]; then
+    REFINE_EXTRA_ARGS+=("--training-mode" "$TRAINING_MODE")
+    REFINE_EXTRA_ARGS+=("--n-folds" "$N_FOLDS")
+    REFINE_EXTRA_ARGS+=("--fold-seed" "$FOLD_SEED")
+    REFINE_EXTRA_ARGS+=("--weights-path" "$WEIGHTS_PATH")
+    REFINE_EXTRA_ARGS+=("--augment-floor" "$AUGMENT_FLOOR")
+    [[ "$ALSO_REPORT_SYNTH_ONLY" -eq 1 ]] && REFINE_EXTRA_ARGS+=("--also-report-synth-only")
+  fi
   python scripts/refine_generators_from_failures.py \
     --max-passes "$MAX_REFINEMENT_PASSES" \
     --target-accuracy "$TARGET_ACCURACY" \
     --synth-examples-per-code "$SYNTH_PER_CODE" \
-    --corpus-dir "$CORPUS_DIR"
+    --corpus-dir "$CORPUS_DIR" \
+    "${REFINE_EXTRA_ARGS[@]}"
 fi
 
 # Best-pass restoration before the test stage
@@ -159,10 +259,11 @@ print(hashlib.sha1(open('$BEST_SNAP/synth_rows.jsonl','rb').read()).hexdigest()[
       cp "$BEST_SNAP/manifest.json" "$CORPUS_DIR/"
       # Re-run Phase D against restored corpus for the canonical final number
       echo
-      echo "=== $(date -u +%FT%TZ) Phase D: final eval on restored best-pass corpus ==="
+      echo "=== $(date -u +%FT%TZ) Phase D: final eval on restored best-pass corpus (mode=$TRAINING_MODE) ==="
       python scripts/reflect_nhsvm_eval_shap_v2.py \
         --pass-idx "$BEST_IDX" \
-        --corpus-dir "$CORPUS_DIR"
+        --corpus-dir "$CORPUS_DIR" \
+        "${PHASE_D_ARGS[@]}"
     else
       echo "Best-pass corpus already current ($CURRENT_HASH); no restore needed."
     fi
@@ -182,7 +283,16 @@ echo "=== $(date -u +%FT%TZ) Gate B: cosine-SVM mutual affirmation ==="
 # separate quality bar.  Non-zero exit = Gate B failed; the report at
 # build/svm_uplift_gate/uplift_report.md tells the operator WHICH check
 # failed and WHICH codes regressed.
-if ! python scripts/svm_cosine_uplift_gate.py --corpus-dir "$CORPUS_DIR"; then
+# Build Gate B args to mirror Phase D's training-mode (Gate B's head must
+# match the deployment head Phase D measures, otherwise the gate tests a
+# model that wouldn't ship).
+GATE_B_ARGS=("--corpus-dir" "$CORPUS_DIR")
+if [[ "$TRAINING_MODE" != "synth-only" ]]; then
+  GATE_B_ARGS+=("--training-mode" "$TRAINING_MODE")
+  GATE_B_ARGS+=("--weights-path" "$WEIGHTS_PATH")
+  GATE_B_ARGS+=("--augment-floor" "$AUGMENT_FLOOR")
+fi
+if ! python scripts/svm_cosine_uplift_gate.py "${GATE_B_ARGS[@]}"; then
   echo
   echo "✗ SVM channel did NOT pass Gate B (architectural correctness)."
   echo "  See build/svm_uplift_gate/uplift_report.md for which check"
