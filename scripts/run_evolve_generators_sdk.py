@@ -353,8 +353,14 @@ def load_existing_v1() -> dict:
     # Extract all `def generate_*(rng):` blocks.  Simple but works for
     # the format this script writes.
     import re as _re
+    # Match any def whose first parameter is `rng` — covers both the
+    # original `def generate_*` and agent-authored `def gen_*` naming
+    # conventions.  An earlier `def generate_\w+`-only regex silently
+    # dropped `gen_*` blocks across persist cycles, leaving
+    # GENERATORS_BY_CODE referencing functions whose defs no longer
+    # appeared in the file.
     blocks = _re.findall(
-        r"(def generate_\w+\(rng[^)]*\)[^\n]*:\n(?:    .*\n|\n)+?)(?=\ndef |\n\w|\Z)",
+        r"(def [a-zA-Z_]\w*\(rng[^)]*\)[^\n]*:\n(?:    .*\n|\n)+?)(?=\ndef |\n\w|\Z)",
         src,
     )
     for blk in blocks:
@@ -406,7 +412,11 @@ import re
     generators_by_code: dict[str, list[str]] = {}
     for code, fns in existing["generators_by_code"].items():
         if isinstance(fns, list):
-            generators_by_code[code] = list(fns)
+            generators_by_code[code] = [
+                fn.__name__ if callable(fn) else str(fn) for fn in fns
+            ]
+        elif callable(fns):
+            generators_by_code[code] = [fns.__name__]
         else:
             generators_by_code[code] = [str(fns)]  # backward-compat single-fn
     name_variants_by_code = dict(existing["name_variants_by_code"])

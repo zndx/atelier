@@ -24,9 +24,9 @@ the runtime Atelier classification pipeline.
   `hive-poc_hive-poc-default-annotations_019e5636-...`.
 
 - **SVM channel** (`just optimize svm`): rebuilt from first principles.
-  The legacy Kronecker-expanded NHSVM head collapses catastrophically
-  on dense pretrained encoders (4.26% fit-on-train with ModernBERT
-  vs 98.93% with TF-IDF).  The factorized form per Choi et al. 2015
+  The initial Kronecker-expanded NHSVM head collapses catastrophically
+  on dense pretrained encoders (4.26% fit-on-train with ModernBERT).
+  The factorized form per Choi et al. 2015
   Section 5.1 — per-node weight vectors `W_n ∈ R^d` + frozen
   path-normalization scalars `α_n` — recovers full architectural
   capacity (99.38% fit-on-train) and admits exact Shapley attribution
@@ -304,6 +304,52 @@ already-accepted same-code example; marginal-coverage stop halts
 generation when convex-hull-radius growth falls below ε = 0.02 over
 10 consecutive added examples.
 
+### Categorical-prior-override gate (shape divergence, `scripts/run_evolve_generators_sdk.py`)
+
+A failure mode observed during early Phase B runs against
+Bedrock Opus 4.6: when authoring generators for a code whose
+mnemonic carries strong semantic priors, the agent occasionally
+reads the `reference_value_samples` block but then asserts its own
+interpretation of what the code *should* contain instead of matching
+what the reference shows it *does* contain.  Short-mnemonic
+catch-all and aggregator codes are most susceptible — the mnemonic
+is a stronger context signal than 5-10 sample values when the agent
+is composing under cost pressure.
+
+The shape-divergence gate computes per-generator output character-class
+fractions (digits / uppercase / lowercase / specials) and length-mean,
+forms an L1 divergence against the same signature taken over
+`reference_value_samples`, and applies a two-tier policy:
+
+| Band | Threshold | Action |
+|---|---|---|
+| Reject | divergence > 1.0 | proposal dropped; rejection reason names the reference vs generator shape numbers so the agent can re-author with explicit attention to the distribution |
+| Warn | 0.5 < divergence ≤ 1.0 | accepted but flagged in the acceptance log with the divergence value; the refinement loop inherits this as a per-code priority hint |
+| Pass | divergence ≤ 0.5 | accepted silently |
+
+**First-run validation** (2026-05-25 Phase B against the 87-code
+gap list): 246 proposals processed → 243 accepted, 3 rejected.  The
+three rejections were mnemonic codes for A) catch-all, reference shape 
+which is a short alphanumeric ~3.8 chars; agent invented booleans/status
+enums ~6 chars mostly lowercase, divergence 1.38-1.91 across 4 variants,
+B) reference len 63 with 30% special chars; agent wrote short package 
+names without specials, divergence 1.04-1.62), and C) reference 47% digits,
+len 185; agent produced short bytestrings ~26-91 chars missing the 
+special-char band, divergence 1.01-1.47). All three are short-mnemonic codes
+where the mnemonic-prior dominates the value-sample evidence under a 
+one-shot authoring prompt.
+
+The gate is doing exactly what it is designed for.  Notable: the agent
+in that session **explicitly claimed reference-first authoring** in
+its summary while still producing the three failures; the skill
+instruction nudges the agent toward the reference distribution but a
+programmatic check is what catches the slips that survive the nudge.
+Hard rejections re-enter the next Phase B pass as gap codes with the
+divergence diagnostic attached to their context; warn-band acceptances
+flow forward to the refinement loop with a quantitative signal of
+which generators to prioritize improving rather than retraining
+identical patterns.
+
 ---
 
 ## The dual-gate exit contract
@@ -542,6 +588,158 @@ re-authoring is the lever.
 
 ---
 
+## Enabling accommodation: training tree decoupled from output vocabulary
+
+The gate's per-code regression table surfaces a structural finding
+the SVM channel needs to accommodate before further refinement
+cycles will move the needle on its largest single drag.
+
+### What the data shows
+
+Mining the agent-mediated reference's `reasoning` fields reveals
+that the 247 validate rows under code `0.1` are not one class.
+The agent itself attests to four distinct concepts squeezed into
+a single governance code because the taxonomy lacked finer-grained
+homes:
+
+| Concept | n | Agent's own reasoning marker |
+|---|---:|---|
+| Surrogate / sequential int | 74 | `"Surrogate."` / `"Sequential int surrogate key."` |
+| Boolean flag | 63 | `"Boolean."` / `"Boolean (True/False)..."` |
+| Anonymized enum | 33 | `"Anonymized enum."` / `"Anonymized enum (type_a..type_e)."` |
+| True `0.1` (residual after subtype split) | ~77 | varied short alphanumeric tokens per the enrichment payload's shape description |
+
+170 of 247 rows under `0.1` (69%) are agent-flagged-homeless
+concepts.  True `0.1` (the residual after the three structural
+subtypes are split off) is only ~31% of what's currently
+labeled `0.1`.  Inventory at
+`build/data/cco_ice_candidates/2026-05-26_cco_ice_inventory.json`.
+
+### Why this matters for the gate
+
+The per-code regression table from the first gate run shows the
+50 cells lost to SVM-confidently-wrong on heterogeneous codes
+(`1.2.2` and `0.1` are the largest two drags, −27.9pp and
+−20.8pp respectively).  Cosine handles `0.1` at 60.4% via
+late-interaction semantic match against the enriched payload's
+catch-all description.  SVM gets 0% because it has no abstain
+mechanism — trained only on positive-shape leaves, it confidently
+picks a wrong leaf on every `0.1`-shape input.
+
+The naive fix — adding three new top-level codes for the
+structural concepts (sequential-int surrogate, boolean,
+anonymized enum) to default.annotations — was considered and
+reversed same-day.  Applying the governance test (does the code
+drive a different masking / retention / access decision?) honestly:
+none of these structural concepts drives different governance
+treatment than `0.1`.  They earn no default.annotations seat.
+
+### The accommodation
+
+The SVM head's *training tree* is a learning representation; the
+governance vocabulary is an *output contract* with downstream
+consumers.  These are different concerns and can be kept decoupled.
+The factorized NHSVM head's `category_set` is extended with
+internal subtypes that aggregate to governance codes at the output
+layer:
+
+```
+Internal SVM tree (290 nodes):     Governance output (287 codes):
+
+  0.1                               0.1
+  ├── 0.1.s  (Surrogate)     ─┐
+  ├── 0.1.b  (Boolean)        │── collapse ──→  0.1
+  ├── 0.1.e  (Anonymized Enum)─┘
+  └── (root masses for true `0.1` shapes)
+
+  1.1.x.x.x... (governance)         1.1.x.x.x... (governance)
+  ...                                ...
+```
+
+- SVM trains per-subtype generators against shape-coherent classes
+  (`0.1.s` against synthetic surrogate-key sequences, `0.1.b`
+  against boolean variants, `0.1.e` against generic enum patterns)
+- The head's path-sum scoring naturally aggregates subtype masses
+  to parent at the output layer; the `predict_proba` API gains a
+  `collapse_to=governance_vocab` parameter that performs the
+  aggregation deterministically
+- DST fusion operates on the collapsed 287-code governance
+  vocabulary; subtypes never appear in the fusion or output layers
+- Gate B's mutual-affirmation check operates on the collapsed
+  vocabulary, so subtype-overfitting cannot game the gate
+
+### Why this preserves architectural correctness
+
+- **Default.annotations stays pure**: still 287 governance-relevant
+  codes; no taxonomy bloat for concepts that don't drive policy
+- **CCO/ICE concepts stay upstream**: the structural type taxonomy
+  lives in Aegir as the upstream owner; Atelier consumes the type
+  signals locally as SVM target nodes without claiming taxonomy
+  ownership
+- **DST mutual affirmation strengthens**: previously the SVM
+  abstained (Θ-mass) on cosine-stronghold rows, forfeiting
+  reinforcement; with subtypes, SVM produces confident predictions
+  that agree with cosine, and DST fusion reinforces rather than
+  diffuses
+- **Output collapse is deterministic and lossless**: subtype
+  labels always recover their governance parent unambiguously;
+  evaluation is governance-level, so subtypes can only earn their
+  existence by improving collapsed-governance accuracy
+
+### Discipline against runaway subtype proliferation
+
+The pattern is powerful and could be over-applied.  The discipline
+that bounds it: subtypes earn their existence by evidence in the
+agent-mediated reference, not by engineering speculation.  The
+three-part test for a new subtype:
+
+1. Measurable failure mode in the current cycle's per-code
+   accuracy (real signal, not hypothesis)
+2. Agent-attested or curator-attested distinction (a label exists
+   somewhere — `cco_type` field on agent_mediated decisions
+   formalizes this; reasoning-field mining is the bootstrap)
+3. Candidate count sufficient to learn and verify the split
+   (≥ ~30 candidates for the validate-set comparison to have power)
+
+The current proposal — Surrogate (n=74), Boolean (n=63), Enum
+(n=33) — meets all three.  Future subtype proposals follow the
+same gate.
+
+### Where the pattern generalizes (available but not yet built)
+
+- **Sibling-pair conditioning**: addresses the 139 sibling-subtree
+  failures in pass-4 results (sibling-pair confusables class).
+  Internal subtypes like `code.alone` vs
+  `code.partnered_with_<sibling>` capture co-occurrence as a
+  discriminator.  Collapses to parent at output.
+- **Value-shape variants**: addresses the `1.2.2` JSON-blob
+  disparity (real values for one variant of this code are 700+
+  char nested JSON; synth was 60-char minimal).  Subtypes per
+  real-data heterogeneity (`code.simple` / `code.rich`).
+  Collapses to parent.
+- **Domain-dialect adaptation**: per-customer training subtypes
+  (`code.dialect_X`) that stay in untracked artifacts; governance
+  output never carries dialect.  Resolves the leak-risk tradeoff
+  identified during the value-distribution-richness analysis.
+- **Cross-channel self-distillation**: cosine's high-confidence
+  predictions on validate columns become SVM subtype labels in a
+  self-supervised loop.  Formalizes the DST mutual-affirmation
+  pattern as training-time signal flow.
+
+### Implementation surface
+
+| File | Change |
+|---|---|
+| `src/atelier/classify/factorized_nhsvm.py` | `predict_proba(X, temperature, collapse_to=None)` — when `collapse_to` is provided, sum subtype probabilities into governance parents via the precomputed `_subtype_to_parent` map |
+| `src/atelier/classify/pipeline.py` | invoke `predict_proba` with `collapse_to=governance_vocab` at the SVM-mass-emission boundary; DST fusion sees governance-only beliefs |
+| `build/data/agent_mediated/decisions/*.json` schema | new `cco_type` field alongside `tag` — `"DesignativeIdentifier:Surrogate" | "Boolean" | "Enum" | null` — promoted from the implicit reasoning-field signal |
+| `scripts/generate_corpus_v2.py` | per-subtype synth corpus generation; subtype-tagged rows for training |
+| `scripts/svm_cosine_uplift_gate.py` | Gate B operates on collapsed governance vocabulary (already correct under this design — no change needed) |
+
+Tracked in tasks #257-262.
+
+---
+
 ## What the next refinement cycle does with this
 
 The gate's per-code regression table is **the agent's diagnostic
@@ -631,6 +829,14 @@ Atelier-specific deployment context.
      + name-match handle them)
    - Collapse BILL/SHIP at the parent for SVM training (let the
      name and table-context channels disambiguate leaves)
+   - Apply the **training-tree-decoupled-from-output-vocabulary**
+     accommodation (see section above) — split the code into
+     shape-coherent internal subtypes that collapse to the
+     governance parent at output.  The metrology's
+     `abandon_structural` flag is the right signal for "no
+     shape-coherent split is available"; the subtype accommodation
+     is the right move when shape heterogeneity is the failure
+     mode.
    The metrology produces `abandon_structural` flags as the data
    point for that conversation.
 
