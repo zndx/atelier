@@ -8,7 +8,7 @@
 
 """SQLAlchemy ORM models for Atelier state."""
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -147,6 +147,52 @@ class TaxonomyRegistry(Base):
 
     # 'building' | 'current' | 'stale' | 'archived'
     status = Column(String, nullable=False, default="building")
+
+    summary = Column(Text, nullable=True)
+
+    built_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now())
+
+
+class NhsvmHeadRegistry(Base):
+    """Administrative pointer to a trained factorized NHSVM head artifact.
+
+    PGlite holds the pointer; serialized head + manifests live on disk at
+    ``build/cache/nhsvm/{head_sig}/``.  Multiple versions of a single
+    (taxonomy_id, encoder) may coexist; the partial unique index
+    ``idx_nhsvm_head_registry_one_current`` enforces at most one
+    ``status='current'`` row per (taxonomy_id, encoder) tuple.
+
+    See ``.claude/plans/lovely-doodling-badger.md`` Step 4 for the
+    design this schema is derived from.
+    """
+
+    __tablename__ = "nhsvm_head_registry"
+
+    id = Column(String, primary_key=True, nullable=False)
+
+    taxonomy_id = Column(String, nullable=False)
+    head_sig = Column(String, nullable=False, unique=True)
+    vocab_sig = Column(String, nullable=False)
+
+    reference_hash = Column(String, nullable=True)
+    corpus_hash = Column(String, nullable=True)
+    training_mode = Column(String, nullable=False)
+    fold_seed = Column(Integer, nullable=True)
+
+    encoder = Column(String, nullable=False)
+    embedding_dim = Column(Integer, nullable=False)
+    augment_floor = Column(Integer, nullable=True)
+
+    artifact_path = Column(String, nullable=False)
+
+    # 'building' | 'current' | 'stale' | 'archived'
+    status = Column(String, nullable=False, default="building")
+
+    # Per-fold variance + Gate A/B headline numbers.  SQLAlchemy JSON
+    # maps to JSONB on Postgres/PGlite (where queryability is useful)
+    # and to plain TEXT on SQLite; consumers pass + receive dicts.
+    metrics = Column(JSON, nullable=True)
 
     summary = Column(Text, nullable=True)
 
