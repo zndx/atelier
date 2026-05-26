@@ -402,27 +402,52 @@ class NHSVMHeadAdapter:
             f"currently dispatches only 'answerdotai/ModernBERT-base'"
         )
 
-    def predict_proba(self, features: Any) -> dict[str, float]:
-        """Single-row inference.
+    def _encode_and_predict(self, text: str) -> dict[str, float]:
+        """Encode ``text``, L2-normalize, run head, return {code: prob}.
 
-        Returns ``{code: probability}`` for every node in the taxonomy
-        the head was trained on.  Pipeline.py's per-column SVM path
-        (``_classify_column`` → ``nhsvm_to_mass``) consumes this dict.
+        Shared by both ``predict_proba_features`` and
+        ``predict_proba_single`` — the only difference between them is
+        whether siblings are folded into the text.
         """
-        text = self._build_text(features)
         emb = self._encode(text)  # (1, embed_dim)
-
         # L2-normalize input — same as training-time normalization in
         # fit_factorized_nhsvm.  Without this, the head's path scores
         # are mis-scaled.
         from sklearn.preprocessing import normalize as sk_normalize
         emb_norm = sk_normalize(emb, norm="l2", axis=1).astype(np.float32)
-
         device = next(self.head.parameters()).device
         X = torch.as_tensor(emb_norm, device=device)
         with torch.no_grad():
             proba = self.head.predict_proba(X)  # (1, n_nodes)
         return {code: float(proba[0, i]) for i, code in enumerate(self.head.codes)}
+
+    def predict_proba_features(self, features: Any) -> dict[str, float]:
+        """Rich-input inference path.
+
+        Builds the SAME text the head was trained against — including
+        centered-window sibling enrichment — then encodes + predicts.
+        Used by ``ml_inference.predict_svm`` when the installed model
+        exposes this method.
+
+        Returns ``{code: probability}`` for every node in the taxonomy.
+        """
+        text = self._build_text(features)
+        return self._encode_and_predict(text)
+
+    def predict_proba_single(self, text: str) -> dict[str, float]:
+        """Back-compat shape: takes a raw text string (no sibling
+        enrichment) and returns ``{code: prob}``.
+
+        Mirrors the legacy ``SVMClassifier.predict_proba_single``
+        signature so a polymorphic ``install_svm()`` consumer that
+        only knows the legacy contract still works against this
+        adapter.  Note that this path's text shape will differ from
+        the training-time shape (no siblings); accuracy will be
+        slightly lower than the features-aware path.  Prefer
+        ``predict_proba_features`` when the caller has a
+        ``ColumnFeatures`` object.
+        """
+        return self._encode_and_predict(text)
 
     # ──────────────────────────────────────────────────────────────────
     # Persistence

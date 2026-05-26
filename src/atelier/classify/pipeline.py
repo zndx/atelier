@@ -402,6 +402,78 @@ def _ensure_per_vocab_svm(
     return bundle_path
 
 
+def _ensure_registered_svm_head(
+    cfg, category_set,
+    *,
+    taxonomy_id: str = "default",
+    encoder: str = "answerdotai/ModernBERT-base",
+) -> bool:
+    """Load + install the currently-registered NHSVM head, if any.
+
+    Returns True when a head was loaded and installed; False when no
+    ``status='current'`` row exists for (taxonomy_id, encoder).
+
+    Compared to ``_ensure_per_vocab_svm`` (which trains a fresh
+    TF-IDF LinearSVC per run from enrichment payloads), this path
+    consumes a PERSISTENT head trained via ``just optimize svm`` and
+    promoted via ``atelier.registry.nhsvm_head.promote_to_current``.
+
+    Selector logic lives in ``run_classification_pipeline`` via
+    ``cfg.classify_svm_source`` — this function is the runtime
+    consumer of the registry.
+    """
+    from atelier.classify import ml_inference
+    from atelier.classify.factorized_nhsvm import NHSVMHeadAdapter
+    from atelier.registry.nhsvm_head import get_current
+
+    current = get_current(taxonomy_id, encoder)
+    if current is None:
+        logger.info(
+            "_ensure_registered_svm_head: no current head for "
+            "(taxonomy_id=%s, encoder=%s)",
+            taxonomy_id, encoder,
+        )
+        return False
+
+    artifact_path = Path(current["artifact_path"])
+    if not artifact_path.exists():
+        logger.warning(
+            "_ensure_registered_svm_head: registered head id=%s claims "
+            "artifact_path=%s but path missing — falling back",
+            current["id"], artifact_path,
+        )
+        return False
+
+    try:
+        device = "cuda" if _torch_cuda_available() else "cpu"
+        adapter = NHSVMHeadAdapter.load(artifact_path, device=device)
+    except Exception as exc:
+        logger.warning(
+            "_ensure_registered_svm_head: failed to load adapter from %s: "
+            "%s — falling back",
+            artifact_path, exc,
+        )
+        return False
+
+    ml_inference.install_svm(adapter)
+    logger.info(
+        "_ensure_registered_svm_head: installed NHSVM head id=%s "
+        "head_sig=%s training_mode=%s (n_classes=%d)",
+        current["id"], current["head_sig"], current["training_mode"],
+        len(adapter.classes_),
+    )
+    return True
+
+
+def _torch_cuda_available() -> bool:
+    """Best-effort CUDA detection without forcing torch import at module load."""
+    try:
+        import torch  # type: ignore
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 def run_classification_pipeline(
     cfg,
     fsm: AgentFSM,
@@ -1078,23 +1150,77 @@ def run_classification_pipeline(
         # SVM/CatBoost pair without retraining.
 
         # Multi-run safety: clear any SVM that a prior pipeline run on
-        # this same process installed.  ``_ensure_per_vocab_svm``
-        # re-installs on success.  If it fails, the SVM source stays
-        # absent rather than carrying a stale prior-vocabulary model
-        # into the new frame.
+        # this same process installed.  The selector below
+        # re-installs on success.  If both paths fail, the SVM source
+        # stays absent rather than carrying a stale prior-vocabulary
+        # model into the new frame.
         ml_inference.reset_svm()
 
-        try:
-            _ensure_per_vocab_svm(
-                cfg, category_set,
-                cache_dir=build_dir / "cache" / "svm",
-                run_dir=results_dir,
-            )
-        except Exception as exc:
+        # SVM channel source selector.  See
+        # .claude/plans/lovely-doodling-badger.md Step 6 + the
+        # feedback_no_silent_dst_degradation memory rule.
+        svm_source = getattr(cfg, "classify_svm_source", "auto")
+        if svm_source not in ("registered", "per_vocab_legacy", "auto"):
             logger.warning(
-                "per-vocab SVM build failed — SVM evidence will be "
-                "absent for this run: %s", exc,
+                "classify.svm.source=%r is not a valid value; "
+                "falling back to 'auto'", svm_source,
             )
+            svm_source = "auto"
+
+        if svm_source == "registered":
+            # Strict path: a current registered head MUST exist.
+            if not _ensure_registered_svm_head(cfg, category_set):
+                raise RuntimeError(
+                    "classify.svm.source='registered' but no current head "
+                    "found in nhsvm_head_registry.  Promote a head via "
+                    "atelier.optimize.svm.promote.promote_head() + "
+                    "atelier.registry.nhsvm_head.promote_to_current() "
+                    "before running with this mode."
+                )
+            logger.info("SVM channel: registered NHSVM head path")
+        elif svm_source == "per_vocab_legacy":
+            # Strict legacy path — emergency rollback knob.
+            try:
+                _ensure_per_vocab_svm(
+                    cfg, category_set,
+                    cache_dir=build_dir / "cache" / "svm",
+                    run_dir=results_dir,
+                )
+                logger.info("SVM channel: per-vocab legacy LinearSVC path (forced)")
+            except Exception as exc:
+                logger.warning(
+                    "per-vocab SVM build failed — SVM evidence absent: %s",
+                    exc,
+                )
+        else:  # 'auto' (transitional default)
+            # Try registered; fall back loud-and-tagged to legacy.
+            # Per feedback_no_silent_dst_degradation: fallback to
+            # pre-enhancement state is *deployment-degraded*, logged
+            # loudly + tagged in operator artifacts.
+            if _ensure_registered_svm_head(cfg, category_set):
+                logger.info("SVM channel: registered NHSVM head path (auto-selected)")
+            else:
+                logger.warning(
+                    "degraded_no_head_registered: no current NHSVM head "
+                    "found in registry; SVM channel falls back to "
+                    "per-vocab TF-IDF LinearSVC.  Per "
+                    "feedback_hierarchical_svm_only memory rule, the "
+                    "fallback violates hierarchical=True; promote a "
+                    "reference-primary head via "
+                    "atelier.optimize.svm.promote.promote_head() to "
+                    "restore the architecturally-correct channel."
+                )
+                try:
+                    _ensure_per_vocab_svm(
+                        cfg, category_set,
+                        cache_dir=build_dir / "cache" / "svm",
+                        run_dir=results_dir,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "per-vocab legacy fallback ALSO failed — SVM evidence "
+                        "absent for this run: %s", exc,
+                    )
 
         # Try sentence-transformers for cosine
         has_embeddings = False
