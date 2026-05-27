@@ -86,6 +86,45 @@ _FATAL_MSG_SUBSTRINGS: tuple[str, ...] = (
 )
 
 
+def _canonical_code(emitted: str, category_set) -> str:
+    """Translate an LLM-emitted classification to a canonical hierarchical id.
+
+    The LLM contract surface uses dot-separated mnemonic paths (e.g.
+    ``C_PID.C_FD.A_TXNAMT.TRANSDATE``) as of task #289; internal code
+    (state.labels, classifications.json, registry, mass functions)
+    uses hierarchical ids (e.g. ``1.2.2``).  This helper does the
+    boundary translation.
+
+    Accepts four shapes (in priority order):
+      1. Full mnemonic path → translate via category_set.path_to_id
+      2. Bare hierarchical id (legacy form) → pass through if in vocab
+      3. Bare mnemonic (transitional) → look up via by_abbrev
+      4. Unresolvable → return original (callers can detect by checking
+         membership in by_code or all_by_code)
+
+    Path translation lands here rather than in mass_functions because
+    state.labels (and downstream CatBoost training labels,
+    classifications.json) all need canonical ids; the mass function
+    boundary already handles both forms via _resolve_to_focal_element.
+    """
+    if not emitted or category_set is None:
+        return emitted
+    path_to_id = getattr(category_set, "path_to_id", None) or {}
+    if emitted in path_to_id:
+        return path_to_id[emitted]
+    by_code = getattr(category_set, "by_code", {}) or {}
+    if emitted in by_code:
+        return emitted
+    by_abbrev = getattr(category_set, "by_abbrev", {}) or {}
+    if emitted in by_abbrev:
+        return by_abbrev[emitted].code
+    # Case-insensitive transitional fallback
+    for ab, cat in by_abbrev.items():
+        if ab and ab.upper() == emitted.upper():
+            return cat.code
+    return emitted
+
+
 def _classify_error(exc: Exception) -> str:
     """Return ``"fatal"`` or ``"recoverable"`` for an LLM call exception.
 
@@ -878,7 +917,7 @@ def _llm_sweep(
                         f"{tname}.{c.column_name}"
                         if tname else c.column_name
                     )
-                    state.labels[key] = c.category_code
+                    state.labels[key] = _canonical_code(c.category_code, category_set)
                     state.confidence[key] = c.confidence
                     state.label_source[key] = "llm"
 
@@ -977,7 +1016,7 @@ def _llm_sweep(
                             f"{tname}.{c.column_name}"
                             if tname else c.column_name
                         )
-                        state.labels[key] = c.category_code
+                        state.labels[key] = _canonical_code(c.category_code, category_set)
                         state.confidence[key] = c.confidence
                         state.label_source[key] = "llm"
 
@@ -1255,7 +1294,7 @@ def _llm_revisit(
                         f"{tname}.{c.column_name}"
                         if tname else c.column_name
                     )
-                    state.labels[key] = c.category_code
+                    state.labels[key] = _canonical_code(c.category_code, category_set)
                     state.confidence[key] = c.confidence
                     state.label_source[key] = "llm_revisit"
 

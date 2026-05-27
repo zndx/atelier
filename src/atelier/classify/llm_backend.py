@@ -881,24 +881,26 @@ def validate_emissions(
     response: "LLMResponse",
     category_set,
 ) -> list[tuple[str, str]]:
-    """Return (column_name, invalid_code) for out-of-vocabulary emissions.
+    """Return (column_name, invalid_code) for unresolvable emissions.
 
-    A ``category_code`` is "valid" if it appears in the deployed
-    taxonomy — i.e. it matches a ``code`` entry (dot-notation) or an
-    ``abbrev`` entry (annotation mnemonic, case-insensitive) on the
-    given category set.  ``None`` / empty codes are passed through
-    (the LLM saying "no category fits" is a valid response).
+    An emitted ``category_code`` is "valid" if it resolves to a node
+    in the deployed taxonomy via any of: full dot-separated mnemonic
+    path (preferred form as of 2026-05-27), bare hierarchical
+    dot-code (legacy form), or bare annotation mnemonic
+    (case-insensitive transitional fallback).  ``None`` / empty
+    codes pass through (the LLM saying "no category fits" is a
+    valid response).
 
-    Used by ``classify_batch_with_validation`` to detect hallucinated
-    codes that pattern-match the taxonomy's conventions but don't
-    actually exist (e.g. the LLM producing ``A_FD`` because it sees
-    siblings using the ``A_*`` prefix family, even though the real
-    annotation is ``C_FD``).
+    Used by ``classify_batch_with_validation`` to detect emissions
+    that don't resolve to any in-frame node and feed
+    ``_build_validation_callout`` for targeted aberrant-callout
+    feedback per task #289.
     """
     if category_set is None:
         return []
     by_code = getattr(category_set, "by_code", {}) or {}
     by_abbrev = getattr(category_set, "by_abbrev", {}) or {}
+    path_to_id = getattr(category_set, "path_to_id", {}) or {}
     # Case-insensitive abbrev index — the LLM occasionally emits
     # lowercased variants and they should still be valid.
     abbrev_upper = {k.upper() for k in by_abbrev if k}
@@ -907,6 +909,9 @@ def validate_emissions(
     for cls in response.classifications:
         code = cls.category_code
         if not code:
+            continue
+        # Path form is the preferred contract; check first.
+        if code in path_to_id:
             continue
         if code in by_code:
             continue
@@ -918,29 +923,64 @@ def validate_emissions(
     return invalid
 
 
-def _build_validation_callout(invalid: list[tuple[str, str]]) -> str:
+def _build_validation_callout(
+    invalid: list[tuple[str, str]],
+    category_set=None,
+) -> str:
     """Construct the augmentation appended to system_prompt on retry.
 
-    Names each invalid emission specifically.  Does NOT include "did
-    you mean" lexical suggestions because the system prompt already
-    carries the full taxonomy — pointing at the offender is the
-    entire signal the LLM needs.
+    For each invalid emission, runs the path-aware aberrant walker to
+    produce TARGETED feedback that names the specific aberrant
+    segment + lists valid children at that parent position — per
+    task #289 and the no-silent-DST-degradation principle.  Falls
+    back to a generic "not found in taxonomy" message when
+    ``category_set`` is None or the walker can't produce useful
+    feedback (e.g. emitted code has no dot-segments).
     """
     lines = [
         "",
         "## Re-classification needed",
         "",
-        "Your previous response included codes that are not in the taxonomy:",
+        "Your previous response included paths that don't match the taxonomy:",
         "",
     ]
+
+    walker = None
+    feedback_fmt = None
+    if category_set is not None:
+        try:
+            from atelier.classify.mass_functions import (
+                walk_path_for_aberrant, aberrant_feedback_message,
+            )
+            from atelier.classify.belief import FrameOfDiscernment
+            frame = FrameOfDiscernment(category_set)
+            walker = lambda p: walk_path_for_aberrant(p, frame)
+            feedback_fmt = aberrant_feedback_message
+        except Exception:
+            walker = None
+
     for col, bad in invalid:
-        lines.append(f"  - {col}: {bad!r} not found")
+        targeted = ""
+        if walker is not None and feedback_fmt is not None and "." in bad:
+            try:
+                r = walker(bad)
+                if not r.get("ok"):
+                    targeted = feedback_fmt(r)
+            except Exception:
+                pass
+        if targeted:
+            lines.append(f"  - **{col}**: emitted `{bad}`. {targeted}")
+        else:
+            lines.append(
+                f"  - **{col}**: emitted {bad!r} which is not in the taxonomy."
+            )
+
     lines.extend([
         "",
-        "Re-classify these columns. Use only the dot-notation Code "
-        "values or the bracketed annotation mnemonics from the "
-        "taxonomy above. Do not invent codes that look like the "
-        "conventions.",
+        "Re-classify these columns. Emit the **full dot-separated path** "
+        "from a forest root to the chosen node, exactly as it appears in "
+        "the taxonomy tree above. Do not emit bare mnemonics, hierarchical "
+        "codes, or paths whose segments don't match the tree.",
     ])
     return "\n".join(lines)
 
@@ -1030,7 +1070,9 @@ def classify_batch_with_validation(
             retry_idx + 1, max_validation_retries, len(invalid), bad_preview,
         )
 
-        augmented_system = system_prompt + _build_validation_callout(invalid)
+        augmented_system = system_prompt + _build_validation_callout(
+            invalid, category_set,
+        )
         retry_response = backend.classify_batch(
             samples=retry_samples, system_prompt=augmented_system,
             revisit_context=revisit_context, table_name=table_name,
