@@ -181,6 +181,17 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.discounts.catboost_max": ("classify_discount_catboost_max", float),
     "classify.discounts.catboost_fallback": ("classify_discount_catboost_fallback", float),
     "classify.discounts.confusable_ratio_threshold": ("classify_discount_confusable_ratio_threshold", float),
+    # Mass-magnitude calibration (post-discount α scaling per channel).
+    # Defaults α=1.0 preserve historical behavior; tuning operating
+    # point identified in build/runs/calibration/findings_5ef4868c.md.
+    "classify.mass_calibration.cosine_alpha": ("classify_mass_calibration_cosine_alpha", float),
+    "classify.mass_calibration.svm_alpha": ("classify_mass_calibration_svm_alpha", float),
+    "classify.mass_calibration.catboost_alpha": ("classify_mass_calibration_catboost_alpha", float),
+    "classify.mass_calibration.llm_alpha": ("classify_mass_calibration_llm_alpha", float),
+    # Cosine top-K union focal element ("the answer is in this candidate set").
+    # K=0 disables (default, per-tag singletons preserve historical behavior).
+    "classify.cosine.union_focal_k": ("classify_cosine_union_focal_k", int),
+    "classify.cosine.union_focal_alpha": ("classify_cosine_union_focal_alpha", float),
     # CatBoost training hyperparameters
     "classify.catboost.iterations": ("classify_catboost_iterations", int),
     "classify.catboost.depth": ("classify_catboost_depth", int),
@@ -507,10 +518,25 @@ class AtelierConfig:
     classify_discount_catboost_max: float = 0.75
     classify_discount_catboost_fallback: float = 0.55
     classify_discount_confusable_ratio_threshold: float = 3.0
+    # Mass-magnitude calibration (post-discount α multipliers).
+    # Defaults are no-op; Phase 1 calibration sweep on 5ef4868c
+    # identified the operating point α_cosine=0.5, α_svm=15,
+    # α_catboost=0.7, α_llm=0.1 as offline-optimal (no-LLM equivalent).
+    classify_mass_calibration_cosine_alpha: float = 1.0
+    classify_mass_calibration_svm_alpha: float = 1.0
+    classify_mass_calibration_catboost_alpha: float = 1.0
+    classify_mass_calibration_llm_alpha: float = 1.0
+    # Cosine top-K union focal — "answer is in this candidate set"
+    # focal-element shape that matches cosine's actual signal (top-1
+    # 60.75%, top-3 76.33%).  K=0 (default) preserves the existing
+    # per-tag mass path.  K=3 is structurally optimal per Phase 1
+    # findings; K>3 dilutes the focal and underperforms.
+    classify_cosine_union_focal_k: int = 0
+    classify_cosine_union_focal_alpha: float = 0.45
 
     # CatBoost training hyperparameters
     classify_catboost_iterations: int = 1000
-    classify_catboost_depth: int = 6
+    classify_catboost_depth: int = 8
     classify_catboost_learning_rate: float = 0.10
     classify_catboost_fit_to_llm: bool = False
     classify_catboost_fit_to_llm_min_labels: int = 30

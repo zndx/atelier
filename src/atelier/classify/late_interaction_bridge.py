@@ -320,7 +320,14 @@ def try_compute_cosine_mass(
                 f"Re-enrich against the current taxonomy.",
             )
 
-        mass = late_interaction_to_mass(scored_tags, frame)
+        mass = late_interaction_to_mass(
+            scored_tags, frame,
+            alpha=getattr(cfg, "classify_mass_calibration_cosine_alpha", 1.0),
+            union_focal_k=int(getattr(cfg, "classify_cosine_union_focal_k", 0)),
+            union_focal_alpha=float(
+                getattr(cfg, "classify_cosine_union_focal_alpha", 0.45)
+            ),
+        )
 
         attribution = _build_attribution(
             scored_tags=scored_tags,

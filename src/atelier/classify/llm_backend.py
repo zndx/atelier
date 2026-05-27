@@ -357,16 +357,22 @@ def _depth_for(cat) -> int:
 
 
 def build_category_tree(category_set) -> str:
-    """Render the full taxonomy tree (leaves + parents) for the system prompt.
+    """Render the taxonomy as a single annotated tree using path-form mnemonics.
 
-    Every node — leaf or internal — is a first-class tagging target
-    in Atlas-style governance, and the customer's curators tag every
-    level (``Financial Data`` parent, ``Salary`` leaf) with their own
-    short codes, sensitivity ratings, and aliases.  Rendering only
-    leaves discards the parent-level information *and* implicitly
-    forbids the LLM from voting at the level its evidence actually
-    supports.  This tree-form rendering shows parents alongside
-    leaves so the LLM can pick the most-specific defensible level.
+    The LLM contract surface uses dot-separated mnemonic paths
+    (e.g. ``C_PID.C_FD.A_TXNAMT.TRANSDATE``) — not numeric dot-codes.
+    Rationale (2026-05-27): a single rendered identifier per node
+    eliminates the LLM emitting two forms (numeric vs mnemonic) and
+    gives the LLM a semantically meaningful path that aligns with
+    its training distribution (Java packages, Atlas types, ICE.*
+    ontologies).  Path-uniqueness is verified at category-set build
+    time via ``id_to_path``.
+
+    Structural-only nodes (no annotation row, ``classifiable=False``,
+    or ghost positions absorbed by the sanitization step) are marked
+    ``[INVALID TERM — classify into a child]`` so the LLM doesn't
+    emit them as answers.  The aberrant-callout revisit loop catches
+    anything that still slips through.
 
     Falls back to ``build_category_table`` when the category_set is
     not hierarchical.
@@ -375,54 +381,71 @@ def build_category_tree(category_set) -> str:
     if not cats:
         return build_category_table(category_set)
 
+    id_to_path = getattr(category_set, "id_to_path", None)
+    if not id_to_path:
+        return build_category_table(category_set)
+
+    # Build parent → children map from the sanitized parent chain.
+    by_code = {c.code: c for c in cats}
+    children: dict[str | None, list[str]] = {}
+    for cat in cats:
+        children.setdefault(cat.parent_code, []).append(cat.code)
+    # Sort children for stable output (path-alphabetical reads more naturally).
+    for parent in children:
+        children[parent].sort(key=lambda c: id_to_path.get(c, c))
+
     leaf_codes = getattr(category_set, "leaf_codes", None)
     if leaf_codes is None:
         leaf_codes = frozenset(c.code for c in category_set.categories)
 
-    sorted_cats = sorted(cats, key=lambda c: c.code or "")
+    lines: list[str] = ["```"]
 
-    lines: list[str] = []
-    for cat in sorted_cats:
-        depth = _depth_for(cat)
-        indent = "  " * depth
-        is_leaf = cat.code in leaf_codes
+    def _render_node(code: str, prefix: str, is_last: bool) -> None:
+        cat = by_code[code]
+        connector = "└── " if is_last else "├── "
+        is_leaf = code in leaf_codes
+        mnemonic = (cat.abbrev or "").strip() or code
+        label = (cat.label or "").strip()
 
-        parts: list[str] = [f"`{cat.code}` **{cat.label}**"]
+        # Classifiability marker — currently only ghost-derived
+        # forest roots can be structural-only; future curator flag
+        # (see task #293) extends this naturally.
+        classifiable = bool(getattr(cat, "classifiable", True))
+        invalid_marker = (
+            "  [INVALID TERM — classify into a child]"
+            if not classifiable else ""
+        )
 
-        abbrev = (getattr(cat, "abbrev", "") or "").strip()
-        if abbrev:
-            parts.append(f"[{abbrev}]")
-
-        sens_str = _format_sensitivity_dict(getattr(cat, "sensitivity", None))
-        if sens_str:
-            parts.append(f"sens: {sens_str}")
-
-        aliases = (getattr(cat, "common_names", "") or "").strip()
-        if aliases:
-            parts.append(f"aliases: {aliases[:60]}")
-
+        # Inline definition tail (short).
         desc = (cat.description or "").strip()
-        if desc:
-            parts.append(desc[:80])
+        if desc and desc.lower() != label.lower():
+            tail = f" — {label}: {desc[:80]}" if label else f" — {desc[:80]}"
+        elif label:
+            tail = f" — {label}"
+        else:
+            tail = ""
 
-        marker = "-" if is_leaf else "▸"
-        lines.append(f"{indent}{marker} " + " · ".join(parts))
+        # Sensitivity hint for sensitive-subtree leaves (compact).
+        sens_str = _format_sensitivity_dict(getattr(cat, "sensitivity", None))
+        sens_hint = f" · sens: {sens_str}" if sens_str else ""
 
-        # Specifics live in embedding_text for cosine; surface a short
-        # tail to the LLM only when it's clearly an example payload
-        # rather than a verbatim duplicate of label/description.
-        embedding_text = (getattr(cat, "embedding_text", "") or "").strip()
-        if is_leaf and embedding_text:
-            tail = embedding_text.split(" | ")[-1].strip()
-            if (
-                tail
-                and tail.lower() != cat.label.lower()
-                and tail.lower() != desc.lower()
-                and tail.lower() != aliases.lower()
-                and len(tail) >= 16
-            ):
-                lines.append(f"{indent}    e.g., {tail[:120]}")
+        lines.append(
+            f"{prefix}{connector}{mnemonic}{invalid_marker}{tail}{sens_hint}"
+        )
 
+        # Recurse.
+        kids = children.get(code, [])
+        if kids:
+            extension = "    " if is_last else "│   "
+            for i, kid in enumerate(kids):
+                _render_node(kid, prefix + extension, i == len(kids) - 1)
+
+    # Forest roots: parent_code is None.  Render in path-alphabetical order.
+    roots = children.get(None, [])
+    lines.append(".")
+    for i, root in enumerate(roots):
+        _render_node(root, "", i == len(roots) - 1)
+    lines.append("```")
     return "\n".join(lines)
 
 
@@ -552,25 +575,39 @@ def build_system_prompt(category_table: str, category_set=None) -> str:
     block names the high-sensitivity subtree and catch-all so the LLM
     can locate the right sensitive parent under uncertainty.
     """
-    # Pick a leaf and a parent for the response-format examples so the
-    # contract demonstrates that both levels of specificity are valid
-    # answers — Atlas-style governance treats every node as a
-    # first-class tagging target.
+    # Pick a leaf and a parent (in path-form) for the response-format
+    # examples.  Atlas-style governance treats every node as a
+    # first-class tagging target — the contract demonstrates that
+    # parent-level answers are valid when leaf-level evidence is
+    # insufficient.  Path-form (e.g. ``C_PID.A_GD.A_BIO.SSN``) is
+    # required as of 2026-05-27 to eliminate the two-form
+    # mnemonic-vs-id ambiguity.
     example_leaf = "ICE.SENSITIVE.PID.IDENTITY.GOVID.SSN"
     example_parent = "ICE.SENSITIVE.PID.IDENTITY.GOVID"
     if category_set is not None:
+        id_to_path = getattr(category_set, "id_to_path", None) or {}
         leaves = list(getattr(category_set, "categories", []) or [])
-        if leaves:
+        if leaves and id_to_path:
+            # Pick a leaf with at least 2 path segments for a richer example
+            multi_seg_leaves = [c for c in leaves
+                                if id_to_path.get(c.code, "").count(".") >= 1]
+            chosen_leaf = (multi_seg_leaves or leaves)[0]
+            example_leaf = id_to_path.get(chosen_leaf.code, chosen_leaf.code)
+        elif leaves:
             example_leaf = leaves[0].code
-        parents: list = []
+
         leaf_codes = getattr(category_set, "leaf_codes", None)
         all_cats = getattr(category_set, "all_categories", None)
         if all_cats and leaf_codes is not None:
             parents = [c for c in all_cats if c.code not in leaf_codes]
-        if parents:
-            example_parent = parents[0].code
-        elif len(leaves) >= 2:
-            example_parent = leaves[1].code
+            if parents and id_to_path:
+                example_parent = id_to_path.get(parents[0].code, parents[0].code)
+            elif parents:
+                example_parent = parents[0].code
+            elif len(leaves) >= 2:
+                example_parent = id_to_path.get(
+                    leaves[1].code, leaves[1].code
+                ) if id_to_path else leaves[1].code
 
     sensitivity_summary = _sensitive_subtree_summary(category_set)
     governance_block = _governance_cost_model_block(sensitivity_summary)
@@ -583,30 +620,35 @@ def build_system_prompt(category_table: str, category_set=None) -> str:
         "## Taxonomy\n"
         "\n"
         "Every node — parent or leaf — is a valid classification target. "
-        "Indentation shows hierarchy; ``▸`` marks a parent (internal node), "
-        "``-`` marks a leaf. Each row may carry the customer's own short "
-        "code in brackets, sensitivity-by-role ratings (``sens:``), aliases, "
-        "and a definition. Treat the metadata as the customer's stated "
-        "intent — usually reliable, but cross-check against the column "
-        "you're classifying.\n"
+        "The tree below uses Unix-style box-drawing characters to show "
+        "hierarchy; each line is a node identified by its **mnemonic** "
+        "(e.g. ``INOS``, ``SSN``), followed by ``— <label>: <definition>``. "
+        "Nodes marked ``[INVALID TERM — classify into a child]`` are "
+        "structural-only umbrella positions; do NOT classify into them — "
+        "pick one of their children instead.\n"
         "\n"
         f"{category_table}\n"
         "\n"
         "## Instructions\n"
         "\n"
-        "- Classify each column into exactly ONE category from the taxonomy "
+        "- Classify each column into exactly ONE node from the taxonomy "
         "above — pick the most specific level you can defend. If the "
         "evidence supports a leaf, name the leaf. If the evidence only "
         "supports a parent (e.g. 'this is financial something' but you "
         "can't tell which financial leaf), name the parent. Lower "
         "confidence should track decreasing specificity, not climb to "
         "compensate for it.\n"
-        "- Use the exact Code value as it appears in the taxonomy.\n"
+        "- Emit the **full dot-separated path** from a root to the chosen "
+        f"node (e.g. ``{example_leaf}``).  The path must match the tree "
+        "exactly — every segment is the mnemonic of the corresponding "
+        "node along the chain.  Do NOT emit a bare mnemonic, a numeric "
+        "code, or any segment marked ``[INVALID TERM]``.\n"
         "- Consider column name, data type, sample values, and sibling columns.\n"
         "- If no category fits, set category_code to null.\n"
         "- Provide confidence 0.0–1.0 and brief evidence.\n"
-        "- For each column, list up to 3 alternative categories with confidence. "
-        "Alternatives may be at any level — leaves, parents, or a mix.\n"
+        "- For each column, list up to 3 alternative categories (also as "
+        "full dot-separated paths) with confidence. Alternatives may be "
+        "at any level — leaves, parents, or a mix.\n"
         "- Respond with ONLY a JSON array, no markdown fencing.\n"
         "\n"
         f"{governance_block}\n"

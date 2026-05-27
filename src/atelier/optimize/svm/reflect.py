@@ -185,16 +185,19 @@ def build_category_set():
     from atelier.classify.taxonomy import _build_category_set_from_records
     conn = cmldata.get_connection("hive-poc")
     vdf = conn.get_pandas_dataframe(
-        "select id, annotation, definition from default.annotations "
-        "where deprecated != 'yes'"
+        "select id, annotation, definition, common_names, ontology "
+        "from default.annotations where deprecated != 'yes'"
     )
     records = []
     for _, v in vdf.iterrows():
+        ontology_val = v.get("ontology") or v.get("annotation") or ""
         records.append({
             "id": str(v["id"]),
-            "ontology": str(v["id"]),
+            "ontology": str(ontology_val),
             "annotation": str(v["annotation"]),
-            "label": str(v.get("annotation", "")),
+            "label": str(ontology_val),
+            "definition": str(v.get("definition") or ""),
+            "common_names": str(v.get("common_names") or ""),
         })
     cs = _build_category_set_from_records(records, hierarchical=True)
     log.info("Built category_set: %d codes (%d categories)",

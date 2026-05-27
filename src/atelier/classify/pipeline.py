@@ -2796,6 +2796,7 @@ def _classify_column(
             llm_alternatives or [],
             frame, discount=llm_discount,
             allow_annotation_fallback=resolve_llm_annotation_mnemonic,
+            alpha=getattr(cfg, "classify_mass_calibration_llm_alpha", 1.0),
         )
         if not _is_vacuous(llm_mass_val):
             source_masses["llm"] = llm_mass_val
@@ -2812,6 +2813,7 @@ def _classify_column(
                 variance_scale=discounts.catboost_variance_scale,
                 max_discount=discounts.catboost_max,
                 fallback_discount=discounts.catboost_fallback,
+                alpha=getattr(cfg, "classify_mass_calibration_catboost_alpha", 1.0),
             )
             if not _is_vacuous(cb_mass):
                 source_masses["catboost"] = cb_mass
@@ -2830,14 +2832,19 @@ def _classify_column(
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
         if svm_proba:
+            svm_mass_alpha = getattr(cfg, "classify_mass_calibration_svm_alpha", 1.0)
             if svm_hierarchical and nhsvm_alphas:
                 svm_mass = nhsvm_to_mass(
                     svm_proba, frame, category_set, nhsvm_alphas,
                     discount=discounts.svm, temperature=nhsvm_temperature,
                     distance_matrix=nhsvm_distance_matrix,
+                    mass_alpha=svm_mass_alpha,
                 )
             else:
-                svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
+                svm_mass = svm_to_mass(
+                    svm_proba, frame,
+                    discount=discounts.svm, alpha=svm_mass_alpha,
+                )
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
     except Exception as exc:

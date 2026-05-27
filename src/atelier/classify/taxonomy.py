@@ -201,6 +201,67 @@ class HierarchicalCategorySet(CategorySet):
         """Path from root to *code* inclusive (``[root, ..., parent, code]``)."""
         return list(reversed(self.ancestors(code))) + [code]
 
+    @cached_property
+    def ghost_codes(self) -> frozenset[str]:
+        """Dot-code positions that appear as parent prefixes but have no
+        annotation row.  Currently `1` (the implicit sensitive umbrella)
+        is the only ghost in the production vocab.  These positions are
+        structurally visible in the hierarchy but not classifiable.
+        """
+        all_codes = frozenset(c.code for c in self.all_categories)
+        ghosts: set[str] = set()
+        for code in all_codes:
+            for i in range(1, code.count(".") + 1):
+                ancestor = code.rsplit(".", i)[0]
+                if ancestor and ancestor not in all_codes:
+                    ghosts.add(ancestor)
+        return frozenset(ghosts)
+
+    @cached_property
+    def id_to_path(self) -> dict[str, str]:
+        """Map hierarchical id → dot-separated mnemonic path.
+
+        Walks the parent chain via ``ancestors`` and joins mnemonics
+        with ``.``.  Whitespace in mnemonics is stripped at this
+        boundary so paths are always token-clean.  Ghost positions
+        (no annotation row) appear with their raw hierarchical-id
+        segment in parentheses, e.g. ``(1).PII.IDENTITY.GOVID.SSN``.
+
+        Used by the LLM contract surface to render the tree and parse
+        emitted paths back to internal ids.  All downstream code keeps
+        using ``id``; the path form is only the LLM I/O boundary.
+        """
+        id_to_ann = self.all_by_code
+        ghost = self.ghost_codes
+        out: dict[str, str] = {}
+        for cat in self.all_categories:
+            parts: list[str] = []
+            for ancestor_code in reversed(self.ancestors(cat.code)):
+                if ancestor_code in ghost:
+                    parts.append(f"({ancestor_code})")
+                else:
+                    anc = id_to_ann.get(ancestor_code)
+                    seg = (anc.abbrev or ancestor_code).strip() if anc else ancestor_code
+                    parts.append(seg)
+            self_seg = (cat.abbrev or cat.code).strip()
+            parts.append(self_seg)
+            out[cat.code] = ".".join(parts)
+        return out
+
+    @cached_property
+    def path_to_id(self) -> dict[str, str]:
+        """Reverse of :attr:`id_to_path` — paths emitted by the LLM
+        translate back to hierarchical ids for downstream code.
+        """
+        return {path: code for code, path in self.id_to_path.items()}
+
+    def ghost_path_segment(self, ghost_code: str) -> str:
+        """Render a ghost position's path segment.  Currently
+        ``(<hierarchical_id>)`` — keeps the LLM-visible tree
+        structurally consistent without inventing mnemonics.
+        """
+        return f"({ghost_code})"
+
     def compute_nhsvm_alphas(self) -> dict[str, float]:
         """NHSVM normalization weights with directional constraint (Choi et al. 2015, Eq. 7).
 
