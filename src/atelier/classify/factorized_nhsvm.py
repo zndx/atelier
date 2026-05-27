@@ -417,8 +417,15 @@ class NHSVMHeadAdapter:
         emb_norm = sk_normalize(emb, norm="l2", axis=1).astype(np.float32)
         device = next(self.head.parameters()).device
         X = torch.as_tensor(emb_norm, device=device)
+        # Fitted softmax temperature: a head trained with the (uncalibrated)
+        # structured-SVM hinge loss produces cold logits that flatten under
+        # the 287-way softmax.  PASS 2 of the synth-primary retrain fits T
+        # against a held-out reference slice and writes it here; default
+        # 1.0 preserves byte-identical behavior for adapters trained
+        # before this calibration step existed (c3cf4fce).
+        T = float(self.training_metadata.get("softmax_temperature", 1.0))
         with torch.no_grad():
-            proba = self.head.predict_proba(X)  # (1, n_nodes)
+            proba = self.head.predict_proba(X, temperature=T)  # (1, n_nodes)
         return {code: float(proba[0, i]) for i, code in enumerate(self.head.codes)}
 
     def predict_proba_features(self, features: Any) -> dict[str, float]:
