@@ -86,11 +86,11 @@ def fmt_elapsed(start: float) -> str:
 def find_current_run() -> str | None:
     """Return run_id if an FSM run is in progress, else None."""
     try:
-        state = http("GET", "/api/fsm/state", timeout=5)
+        state = http("GET", "/api/fsm/status", timeout=5)
     except Exception:
         return None
     cur_state = (state.get("state") or "").upper()
-    run_id = state.get("run_id")
+    run_id = state.get("id") or state.get("run_id")
     if cur_state and cur_state not in ("IDLE", "CONVERGED", "ERROR") and run_id:
         return run_id
     return None
@@ -115,14 +115,14 @@ def apply_overlay(overlay: dict) -> dict:
 
 def start_pipeline(source_id: str) -> str:
     """Trigger fsm_start; return the new run_id (poll briefly to discover it)."""
-    result = http("POST", "/api/fsm/start", data={"source_id": source_id}, timeout=30)
+    result = http("POST", f"/api/fsm/start?source_id={source_id}", timeout=30)
     if not result.get("started"):
         raise RuntimeError(f"fsm_start failed: {result}")
     # run_id is created inside the daemon thread; poll for it
     for _ in range(30):
         time.sleep(2)
-        state = http("GET", "/api/fsm/state", timeout=5)
-        run_id = state.get("run_id")
+        state = http("GET", "/api/fsm/status", timeout=5)
+        run_id = state.get("id") or state.get("run_id")
         cur_state = (state.get("state") or "").upper()
         if run_id and cur_state not in ("IDLE", "CONVERGED", "ERROR"):
             return run_id
@@ -140,7 +140,7 @@ def monitor(run_id: str, poll_interval: int = 30) -> str:
     consecutive_poll_errors = 0
     while True:
         try:
-            state = http("GET", "/api/fsm/state", timeout=10)
+            state = http("GET", "/api/fsm/status", timeout=10)
             cur = (state.get("state") or "?").upper()
             prog = json.dumps(state.get("progress") or {}, sort_keys=True)[:140]
             if cur != last_state or prog != last_progress:

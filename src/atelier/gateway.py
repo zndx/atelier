@@ -3078,6 +3078,45 @@ _ghostty_dir = _project_root / "ui" / "public" / "ghostty"
 if _ghostty_dir.exists():
     app.mount("/ghostty", StaticFiles(directory=str(_ghostty_dir)), name="ghostty")
 
+_bundle_path = _project_root / "build" / "atelier-state-bundle.tgz"
+
+
+@app.get("/api/bundle/download")
+def bundle_download():
+    """Stream the pre-built state bundle for exfiltration."""
+    if not _bundle_path.exists():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "No bundle found. Build it first."},
+        )
+    return FileResponse(
+        str(_bundle_path),
+        media_type="application/gzip",
+        filename="atelier-state-bundle.tgz",
+    )
+
+
+@app.get("/api/bundle/info")
+def bundle_info():
+    """Return bundle metadata (size, sha256) without downloading."""
+    if not _bundle_path.exists():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=404, content={"detail": "No bundle found."}
+        )
+    import hashlib
+
+    size = _bundle_path.stat().st_size
+    h = hashlib.sha256()
+    with open(_bundle_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return {"size_bytes": size, "sha256": h.hexdigest(), "filename": _bundle_path.name}
+
+
 if _ui_dist.exists():
     # Mount static assets (JS/CSS bundles)
     _assets_dir = _ui_dist / "assets"

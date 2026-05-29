@@ -42,7 +42,7 @@ the runtime Atelier classification pipeline.
   (silent peak overwrite, target-list churn, n_validate=1 noise
   feedback).
 
-- **Dual-gate exit contract** (`scripts/svm_cosine_uplift_gate.py`):
+- **Dual-gate exit contract** (`scripts/what'`):
   the SVM stage exits when (a) TARGET_ACCURACY = 0.95 is reached or
   demonstrably plateaued AND (b) DEPLOYMENT_READY passes via pairwise
   cosine⊕SVM mutual affirmation on the full reference set.
