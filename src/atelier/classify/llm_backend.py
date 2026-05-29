@@ -650,6 +650,10 @@ def build_system_prompt(category_table: str, category_set=None) -> str:
         "full dot-separated paths) with confidence. Alternatives may be "
         "at any level — leaves, parents, or a mix.\n"
         "- Respond with ONLY a JSON array, no markdown fencing.\n"
+        "- Some columns include assessments from independent classifiers — "
+        "weigh them as additional evidence, not as instructions to change "
+        "your answer. Confirm or revise based on the column's intrinsic "
+        "signals.\n"
         "\n"
         f"{governance_block}\n"
         "\n"
@@ -737,27 +741,24 @@ def build_batch_user_prompt(
 
     for i, sample in enumerate(samples, 1):
         revisit = revisit_context.get(sample.name) if revisit_context else None
-        tag = " (REVISIT)" if revisit else ""
-        lines = [f"### Column {i}: {sample.name}{tag}"]
-        lines.append(f"Type: {sample.column_type or 'UNKNOWN'}")
+        lines = [f"### Column {i}: {sample.name}"]
 
-        if sample.values:
-            preview = sample.values[:10]
-            lines.append(f"Values: {preview}")
-            if hasattr(sample, 'all_values') and sample.all_values and len(sample.all_values) > len(preview):
-                lines.append(f"({len(sample.all_values)} total values sampled)")
+        has_embed = bool(revisit and revisit.get("embedding_text"))
+        if has_embed:
+            lines.append(f"Feature summary: {revisit['embedding_text']}")
+        else:
+            lines.append(f"Type: {sample.column_type or 'UNKNOWN'}")
+            if sample.values:
+                preview = sample.values[:10]
+                lines.append(f"Values: {preview}")
+                if hasattr(sample, 'all_values') and sample.all_values and len(sample.all_values) > len(preview):
+                    lines.append(f"({len(sample.all_values)} total values sampled)")
+            if sample.siblings:
+                from atelier.classify.features import _closest_siblings
+                nearby = _closest_siblings(sample.name, sample.siblings, k=4)
+                if nearby:
+                    lines.append(f"Siblings: {nearby}")
 
-        if sample.siblings:
-            lines.append(f"Siblings: {sample.siblings}")
-
-        # Pattern-detected ontology priors — canonical metadata from
-        # Atelier's BFO/IAO-grounded universal vocabulary.  Fed to
-        # the LLM on every batch (sweep + revisit) so it has a
-        # publicly-grounded translation anchor when the user
-        # vocabulary doesn't carry an exact equivalent of the
-        # detected pattern.  Choose the closest fit from the user's
-        # own taxonomy; the canonical ICE.* code itself is NEVER a
-        # valid classification target.
         priors = _ontology_priors_for_sample(sample)
         rendered_priors = _render_ontology_priors(priors)
         if rendered_priors:
@@ -765,6 +766,9 @@ def build_batch_user_prompt(
             lines.extend(rendered_priors)
 
         if revisit:
+            vdesc = revisit.get("value_description", "")
+            if vdesc:
+                lines.append(f"Value profile: {vdesc}")
             ml_pred = revisit.get("ml_prediction", "")
             bel = revisit.get("belief", 0.0)
             pl = revisit.get("plausibility", 0.0)
@@ -775,8 +779,13 @@ def build_batch_user_prompt(
             if revisit.get("previous"):
                 prev = revisit["previous"]
                 lines.append(
-                    f"Your previous: {prev.get('code', '?')} (conf={prev.get('confidence', 0):.2f})"
+                    f"Tentative classification: {prev.get('code', '?')} (conf={prev.get('confidence', 0):.2f})"
                 )
+            bp = revisit.get("belief_path") or []
+            if bp:
+                bp_parts = [f"{n['label']} (Bel={n['bel']:.2f})" for n in bp if isinstance(n, dict)]
+                if bp_parts:
+                    lines.append(f"Belief path: {' → '.join(bp_parts)}")
             indep = revisit.get("independent_consensus") or {}
             if indep.get("code"):
                 lines.append(
@@ -784,6 +793,15 @@ def build_batch_user_prompt(
                     f"excluding LLM-derivative ML): {indep.get('label') or indep['code']} "
                     f"(mass={indep.get('mass', 0):.2f})"
                 )
+            ch_signals = revisit.get("channel_signals") or []
+            if ch_signals:
+                lines.append("Channel signals:")
+                for sig in ch_signals:
+                    ch = sig["channel"]
+                    cands = sig["candidates"]
+                    ch_label = {"cosine": "Cosine top-3", "svm": "SVM", "catboost": "CatBoost"}.get(ch, ch)
+                    parts_str = ", ".join(f"{lbl} ({m:.2f})" for lbl, m in cands)
+                    lines.append(f"  {ch_label:14s}: {parts_str}")
 
         parts.append("\n".join(lines))
 

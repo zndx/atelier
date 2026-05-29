@@ -1110,6 +1110,7 @@ def run_classification_pipeline(
             BootstrapState,
             FatalLLMError,
             bootstrap_config_from_cfg,
+            _channel_agreement_locked,
             _coverage,
             _identify_disagreements,
             _identify_uncertain_columns,
@@ -1333,6 +1334,7 @@ def run_classification_pipeline(
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
             progress_callback=_sweep_progress,
+            category_set=category_set,
         )
 
         # ── Label Propagation ──────────────────────────────────────
@@ -1433,13 +1435,14 @@ def run_classification_pipeline(
                 progress_callback=_ml_validate_progress,
             )
 
-        disagreements = _identify_disagreements(state, column_names, boot_cfg)
+        locked = _channel_agreement_locked(state, column_names, boot_cfg)
+        disagreements = _identify_disagreements(state, column_names, boot_cfg, locked=locked)
         mean_k = _mean_k(state, column_names)
         mean_gap = _mean_gap(state, column_names)
 
         logger.info(
-            "ML validation: mean_gap=%.3f, mean_K=%.3f, disagreements=%d",
-            mean_gap, mean_k, len(disagreements),
+            "ML validation: mean_gap=%.3f, mean_K=%.3f, disagreements=%d, locked=%d",
+            mean_gap, mean_k, len(disagreements), len(locked),
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
@@ -1493,7 +1496,7 @@ def run_classification_pipeline(
                 )
                 fallback_candidates: list[str] = list(disagreements)
                 fb_uncertain = _identify_uncertain_columns(
-                    state, column_names, boot_cfg,
+                    state, column_names, boot_cfg, locked=locked,
                 )
                 seen = set(fallback_candidates)
                 for n in fb_uncertain:
@@ -1519,8 +1522,9 @@ def run_classification_pipeline(
                         discounts=discounts,
                         atelier_cfg=cfg,
                     )
+                    locked = _channel_agreement_locked(state, column_names, boot_cfg)
                     fallback_candidates = list(_identify_uncertain_columns(
-                        state, column_names, boot_cfg,
+                        state, column_names, boot_cfg, locked=locked,
                     ))
             # Carry the agent's structured tag (if it picked one) and
             # its prose reason as a separate detail field.  Tag drives
@@ -1547,7 +1551,7 @@ def run_classification_pipeline(
             # Mirrors the ``max_iterations >= 2`` directive in 0c0170f.
             for iteration in range(1, boot_cfg.max_iterations + 1):
                 revisit_candidates = list(disagreements)
-                uncertain = _identify_uncertain_columns(state, column_names, boot_cfg)
+                uncertain = _identify_uncertain_columns(state, column_names, boot_cfg, locked=locked)
                 # Dedupe while preserving disagreement ordering (highest K first).
                 seen = set(revisit_candidates)
                 for name in uncertain:
@@ -1662,7 +1666,8 @@ def run_classification_pipeline(
                                 state.labels[name]
                             )
 
-                disagreements = _identify_disagreements(state, column_names, boot_cfg)
+                locked = _channel_agreement_locked(state, column_names, boot_cfg)
+                disagreements = _identify_disagreements(state, column_names, boot_cfg, locked=locked)
                 mean_k = _mean_k(state, column_names)
                 mean_gap = _mean_gap(state, column_names)
                 coverage = _coverage(state, column_names)

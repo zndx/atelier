@@ -116,6 +116,14 @@ def _resolve_code_to_fe(
     Returns None when the code is unresolvable — caller should skip it
     (mass falls through to Theta).
     """
+    # Path-form lookup — translate mnemonic paths to hierarchical ids.
+    # Same pattern as _resolve_to_focal_element (line ~1318).
+    _cs = getattr(frame, "_category_set", None)
+    if _cs is not None and "." in code:
+        _p2i = getattr(_cs, "path_to_id", None)
+        if _p2i and code in _p2i:
+            code = _p2i[code]
+
     if code in frame.internal_nodes:
         return frame.internal_nodes[code]
     if code in frame.singletons:

@@ -127,7 +127,16 @@ class CatBoostColumnClassifier:
         use_gpu = False
         try:
             from atelier.classify.gpu import preflight_gpu
-            use_gpu = preflight_gpu().available
+            probe = preflight_gpu()
+            import os
+            gpu_setting = os.environ.get(
+                "ATELIER_CATBOOST_GPU", "auto"
+            ).lower().strip()
+            if gpu_setting in ("1", "true", "yes"):
+                use_gpu = probe.available
+            elif gpu_setting == "auto":
+                use_gpu = probe.available and depth <= 6
+            # "false" / "0" / anything else → CPU
         except Exception:
             pass
 

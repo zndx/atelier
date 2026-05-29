@@ -107,6 +107,104 @@ def _stratified_split_by_code(
     return train_idx, holdout_idx
 
 
+def _load_synth_primary(args, targeted_codes, log, load_ref, load_synth,
+                        build_tl, enc_cache, c_hash):
+    """Synth-primary: all synth rows + targeted reference."""
+    synth_rows = load_synth(args.corpus_dir)
+    synth_labels_all = [r.code for r in synth_rows]
+    synth_counts = Counter(synth_labels_all)
+    keep = [i for i, l in enumerate(synth_labels_all) if synth_counts[l] >= 2]
+    synth_rows = [synth_rows[i] for i in keep]
+    synth_labels = [synth_labels_all[i] for i in keep]
+    synth_texts, _ = build_tl(synth_rows)
+    ch = c_hash(args.corpus_dir)
+    X_synth = enc_cache(synth_texts, cache_key=f"synth-only-{ch}",
+                        refresh=False, batch_size=64)
+    log.info("synth corpus: %d rows, %d distinct codes", len(synth_rows), len(set(synth_labels)))
+
+    if args.mix_policy == "synth-only" or not targeted_codes:
+        X_ref = np.zeros((0, X_synth.shape[1]), dtype=X_synth.dtype)
+        ref_labels: list[str] = []
+        ref_weights = np.zeros(0, dtype=np.float32)
+        log.info("reference: SKIPPED (mix-policy=%s)", args.mix_policy)
+    else:
+        all_ref_rows, all_ref_labels, all_ref_weights, _, _ = (
+            load_ref(weights_path=args.weights_path))
+        mask = [i for i, l in enumerate(all_ref_labels) if l in targeted_codes]
+        if not mask:
+            log.warning("no reference rows for targeted codes %s", sorted(targeted_codes))
+            X_ref = np.zeros((0, X_synth.shape[1]), dtype=X_synth.dtype)
+            ref_labels = []
+            ref_weights = np.zeros(0, dtype=np.float32)
+        else:
+            ref_rows_t = [all_ref_rows[i] for i in mask]
+            ref_labels = [all_ref_labels[i] for i in mask]
+            ref_weights = all_ref_weights[mask]
+            ref_texts_t, _ = build_tl(ref_rows_t)
+            key = hashlib.sha1(",".join(sorted(targeted_codes)).encode()).hexdigest()[:8]
+            X_ref = enc_cache(ref_texts_t, cache_key=f"ref-targeted-{key}",
+                              refresh=False, batch_size=64)
+            log.info("reference (targeted): %d rows across %d codes",
+                     len(ref_labels), len(set(ref_labels)))
+
+    X_full = np.concatenate([X_synth, X_ref], axis=0) if len(X_ref) else X_synth
+    y_full = list(synth_labels) + list(ref_labels)
+    w_full = np.ones(len(y_full), dtype=np.float32)
+    if len(ref_weights):
+        w_full[len(synth_labels):] = ref_weights.astype(np.float32)
+    log.info("training corpus: %d rows total (%d synth + %d reference)",
+             len(y_full), len(synth_labels), len(ref_labels))
+    return X_full, y_full, w_full, len(ref_labels), len(synth_labels), ch
+
+
+def _load_reference_primary(args, targeted_codes, log, load_ref, load_synth,
+                            build_tl, enc_cache, c_hash, r_hash):
+    """Reference-primary: all reference rows + synth augmentation for sparse codes."""
+    all_ref_rows, all_ref_labels, all_ref_weights, _, _ = (
+        load_ref(weights_path=args.weights_path))
+    ref_texts, _ = build_tl(all_ref_rows)
+    rh = r_hash(args.weights_path)
+    X_ref = enc_cache(ref_texts, cache_key=f"full-reference-{rh}",
+                      refresh=False, batch_size=64)
+    ref_counts = Counter(all_ref_labels)
+    log.info("reference base: %d rows, %d distinct codes",
+             len(all_ref_labels), len(set(all_ref_labels)))
+
+    synth_rows = load_synth(args.corpus_dir)
+    ch = c_hash(args.corpus_dir)
+    floor = args.augment_floor
+    sparse_codes = {c for c in set(r.code for r in synth_rows) if ref_counts.get(c, 0) < floor}
+    log.info("codes below augment_floor=%d: %d (will augment from synth)", floor, len(sparse_codes))
+
+    aug_rows, aug_labels = [], []
+    if sparse_codes:
+        for r in synth_rows:
+            if r.code in sparse_codes:
+                need = floor - ref_counts.get(r.code, 0)
+                aug_per = Counter(aug_labels)
+                if aug_per.get(r.code, 0) < need:
+                    aug_rows.append(r)
+                    aug_labels.append(r.code)
+        if aug_rows:
+            aug_texts, _ = build_tl(aug_rows)
+            X_aug = enc_cache(aug_texts, cache_key=f"ref-aug-{ch[:8]}-f{floor}",
+                              refresh=False, batch_size=64)
+            log.info("synth augmentation: %d rows across %d codes",
+                     len(aug_labels), len(set(aug_labels)))
+        else:
+            X_aug = np.zeros((0, X_ref.shape[1]), dtype=X_ref.dtype)
+    else:
+        X_aug = np.zeros((0, X_ref.shape[1]), dtype=X_ref.dtype)
+
+    X_full = np.concatenate([X_ref, X_aug], axis=0) if len(X_aug) else X_ref
+    y_full = list(all_ref_labels) + list(aug_labels)
+    w_full = np.ones(len(y_full), dtype=np.float32)
+    w_full[:len(all_ref_labels)] = all_ref_weights.astype(np.float32)
+    log.info("training corpus: %d rows total (%d reference + %d synth aug)",
+             len(y_full), len(all_ref_labels), len(aug_labels))
+    return X_full, y_full, w_full, len(all_ref_labels), len(aug_labels), ch
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -119,19 +217,32 @@ def main() -> int:
                     default=Path("build/data/agent_mediated/training_weights.json"),
                     help="Audit-derived per-row reference weights")
     ap.add_argument("--mix-policy", default="synth-primary",
-                    choices=("synth-primary", "synth-only"),
+                    choices=("synth-primary", "synth-only", "reference-primary"),
                     help="Training data mix. synth-primary: all synth + reference "
                          "for --targeted-reference-codes only. synth-only: "
-                         "synth corpus exclusively (no reference at all).")
+                         "synth corpus exclusively (no reference at all). "
+                         "reference-primary: all reference + synth augmentation "
+                         "for codes with fewer than --augment-floor reference rows.")
     ap.add_argument("--targeted-reference-codes", default="0.1",
                     help="Comma-separated codes whose reference rows are "
                          "included alongside the full synth corpus. INOS=0.1 "
                          "is the canonical default. Pass a PASS 1 weak-codes "
                          "list joined with commas (e.g. '0.1,1.2.6,1.3.2.1.3').")
+    ap.add_argument("--augment-floor", type=int, default=5,
+                    help="(reference-primary) Min reference rows per code. "
+                         "Codes below this threshold are augmented with synth "
+                         "rows up to this count.")
     ap.add_argument("--calibration-holdout", type=float, default=0.15,
                     help="Fraction of training data to hold out (stratified "
                          "by code) for softmax temperature fitting. 0 disables "
                          "calibration entirely.")
+    ap.add_argument("--calibration-mode", default="reference-accuracy",
+                    choices=("holdout-nll", "reference-accuracy"),
+                    help="Temperature calibration strategy. "
+                         "reference-accuracy (default): maximize top-1 "
+                         "accuracy against agent-mediated reference. "
+                         "holdout-nll: minimize NLL on stratified holdout "
+                         "(original behavior).")
     ap.add_argument("--taxonomy-id", default="default")
     ap.add_argument("--encoder", default="answerdotai/ModernBERT-base")
     ap.add_argument("--fold-seed", type=int, default=42)
@@ -170,81 +281,33 @@ def main() -> int:
     )
     from atelier.optimize.svm.promote import promote_head
     from atelier.optimize.svm.calibrate import (
-        fit_softmax_temperature, head_logits_batched,
-        mass_metrics_at_T, expected_calibration_error,
+        fit_softmax_temperature, fit_temperature_for_reference,
+        head_logits_batched, mass_metrics_at_T, expected_calibration_error,
     )
 
     targeted_codes = set(_parse_codes_list(args.targeted_reference_codes))
     log.info("mix-policy: %s", args.mix_policy)
     log.info("targeted reference codes: %s", sorted(targeted_codes) or "(none — pure synth)")
+    log.info("calibration mode: %s", args.calibration_mode)
     log.info("calibration holdout: %.0f%% stratified by code",
              100 * args.calibration_holdout)
 
     t_start = time.time()
 
-    # ── 1. Load + encode synth corpus (the training base) ──────────────
-    synth_rows = load_synth_rows(args.corpus_dir)
-    synth_labels_all = [r.code for r in synth_rows]
-    synth_counts = Counter(synth_labels_all)
-    # Drop singletons (codes with only 1 row — can't stratify)
-    keep = [i for i, l in enumerate(synth_labels_all) if synth_counts[l] >= 2]
-    synth_rows = [synth_rows[i] for i in keep]
-    synth_labels = [synth_labels_all[i] for i in keep]
-    synth_texts, _ = build_texts_and_labels(synth_rows)
-    ch = corpus_hash(args.corpus_dir)
-    X_synth = encode_with_cache(
-        synth_texts, cache_key=f"synth-only-{ch}",
-        refresh=False, batch_size=64,
-    )
-    log.info("synth corpus: %d rows, %d distinct codes (after singleton filter)",
-             len(synth_rows), len(set(synth_labels)))
-
-    # ── 2. Load + encode targeted reference rows ─────────────────────
-    if args.mix_policy == "synth-only" or not targeted_codes:
-        # No reference at all
-        X_ref = np.zeros((0, X_synth.shape[1]), dtype=X_synth.dtype)
-        ref_labels: list[str] = []
-        ref_weights: np.ndarray = np.zeros(0, dtype=np.float32)
-        log.info("reference: SKIPPED (mix-policy=%s, %d targeted codes)",
-                 args.mix_policy, len(targeted_codes))
-    else:
-        all_ref_rows, all_ref_labels, all_ref_weights, _, _ = (
-            load_reference_rows_with_weights(weights_path=args.weights_path)
+    if args.mix_policy == "reference-primary":
+        X_full, y_full, w_full, n_ref, n_synth_aug, ch = _load_reference_primary(
+            args, targeted_codes, log,
+            load_reference_rows_with_weights, load_synth_rows,
+            build_texts_and_labels, encode_with_cache,
+            corpus_hash, reference_hash,
         )
-        # Filter to targeted codes only
-        mask = [i for i, l in enumerate(all_ref_labels) if l in targeted_codes]
-        if not mask:
-            log.warning("no reference rows for targeted codes %s — "
-                        "training will be synth-only", sorted(targeted_codes))
-            X_ref = np.zeros((0, X_synth.shape[1]), dtype=X_synth.dtype)
-            ref_labels = []
-            ref_weights = np.zeros(0, dtype=np.float32)
-        else:
-            ref_rows_targeted = [all_ref_rows[i] for i in mask]
-            ref_labels = [all_ref_labels[i] for i in mask]
-            ref_weights = all_ref_weights[mask]
-            ref_texts_targeted, _ = build_texts_and_labels(ref_rows_targeted)
-            X_ref = encode_with_cache(
-                ref_texts_targeted,
-                cache_key=f"ref-targeted-{hashlib.sha1(','.join(sorted(targeted_codes)).encode()).hexdigest()[:8]}",
-                refresh=False, batch_size=64,
-            )
-            log.info("reference (targeted): %d rows across %d codes",
-                     len(ref_labels), len(set(ref_labels)))
-
-    # ── 3. Combine + stratified split for calibration ─────────────────
-    X_full = np.concatenate([X_synth, X_ref], axis=0) if len(X_ref) else X_synth
-    y_full = list(synth_labels) + list(ref_labels)
-    # Sample weights: all 1.0 in synth-primary (NOT down-weight synth as
-    # the legacy reference-primary path did via training_weights.json)
-    w_full = np.ones(len(y_full), dtype=np.float32)
-    if len(ref_weights):
-        # Optional: respect per-row audit weight on the reference rows
-        # (don't penalize low-quality reference rows we explicitly kept)
-        w_full[len(synth_labels):] = ref_weights.astype(np.float32)
-
-    log.info("training corpus: %d rows total (%d synth + %d reference)",
-             len(y_full), len(synth_labels), len(ref_labels))
+    else:
+        X_full, y_full, w_full, n_ref, n_synth_aug, ch = _load_synth_primary(
+            args, targeted_codes, log,
+            load_reference_rows_with_weights, load_synth_rows,
+            build_texts_and_labels, encode_with_cache,
+            corpus_hash,
+        )
 
     if args.calibration_holdout > 0:
         train_idx, holdout_idx = _stratified_split_by_code(
@@ -276,15 +339,48 @@ def main() -> int:
     log.info("trained: fit_acc=%.4f  elapsed=%.1fs",
              train_result.final_train_acc, time.time() - t_fit)
 
-    # ── 5. Calibration: fit T on stratified holdout ──────────────────
+    # ── 5. Calibration ────────────────────────────────────────────────
     cal_meta: dict = {}
     fitted_T = 1.0
-    if holdout_idx and len(holdout_idx) >= 20:
-        log.info("fitting softmax_temperature on %d-row holdout", len(holdout_idx))
-        # Compute raw logits
+    code_to_idx = {c: i for i, c in enumerate(head.codes)}
+
+    if args.calibration_mode == "reference-accuracy":
+        log.info("calibration mode: reference-accuracy — loading full reference")
+        cal_ref_rows, cal_ref_labels, _, _, _ = (
+            load_reference_rows_with_weights(weights_path=args.weights_path))
+        cal_ref_texts, _ = build_texts_and_labels(cal_ref_rows)
+        rh = reference_hash(args.weights_path)
+        X_ref_cal = encode_with_cache(
+            cal_ref_texts, cache_key=f"ref-cal-{rh}",
+            refresh=False, batch_size=64,
+        )
+        cal_result = fit_temperature_for_reference(
+            head, X_ref_cal, cal_ref_labels, code_to_idx,
+        )
+        fitted_T = cal_result["best_T"]
+        log.info("reference calibration: T=%.4f  brier=%.4f  acc=%.4f  "
+                 "(T=1.0 acc=%.4f)  n_valid=%d/%d",
+                 fitted_T, cal_result.get("best_brier", -1),
+                 cal_result["best_accuracy"],
+                 cal_result["accuracy_at_T1"],
+                 cal_result["n_valid"], cal_result["n_reference"])
+        # Mass diagnostics at fitted T vs T=1.0
+        cal_logits = head_logits_batched(head, X_ref_cal, batch_size=512)
+        y_cal_idx = np.array([code_to_idx.get(l, -1) for l in cal_ref_labels])
+        cal_valid = y_cal_idx >= 0
+        mass_T1 = mass_metrics_at_T(cal_logits[cal_valid], y_cal_idx[cal_valid], 1.0)
+        mass_best = mass_metrics_at_T(cal_logits[cal_valid], y_cal_idx[cal_valid], fitted_T)
+        log.info("top1 mass at T=1.0:    mean=%.4f max=%.4f acc=%.4f",
+                 mass_T1["mean"], mass_T1["max"], mass_T1["accuracy"])
+        log.info("top1 mass at T=%.4f:  mean=%.4f max=%.4f acc=%.4f  ← calibrated",
+                 fitted_T, mass_best["mean"], mass_best["max"], mass_best["accuracy"])
+        cal_meta = cal_result
+        cal_meta["mass_at_T1"] = mass_T1
+        cal_meta["mass_at_best_T"] = mass_best
+
+    elif holdout_idx and len(holdout_idx) >= 20:
+        log.info("calibration mode: holdout-nll on %d-row holdout", len(holdout_idx))
         head_logits = head_logits_batched(head, X_holdout, batch_size=512)
-        # Label index in head.codes order
-        code_to_idx = {c: i for i, c in enumerate(head.codes)}
         y_holdout_idx = np.array([code_to_idx.get(l, -1) for l in y_holdout])
         valid = y_holdout_idx >= 0
         if valid.sum() < len(y_holdout):
@@ -300,7 +396,6 @@ def main() -> int:
                  cal_result["improvement"],
                  cal_result["ece_at_T1"], cal_result["ece_at_best"])
         cal_meta = cal_result
-        # Mass diagnostics at fitted T
         mass_T1 = mass_metrics_at_T(head_logits[valid], y_holdout_idx[valid], 1.0)
         mass_best = mass_metrics_at_T(head_logits[valid], y_holdout_idx[valid], fitted_T)
         log.info("top1 mass at T=1.0:    mean=%.4f max=%.4f acc=%.4f",
@@ -310,49 +405,50 @@ def main() -> int:
         cal_meta["mass_at_T1"] = mass_T1
         cal_meta["mass_at_best_T"] = mass_best
     else:
-        log.warning("holdout too small (%d) for stable calibration — "
-                    "leaving softmax_temperature=1.0", len(holdout_idx))
+        log.warning("no calibration data available (holdout=%d, mode=%s) — "
+                    "leaving softmax_temperature=1.0",
+                    len(holdout_idx), args.calibration_mode)
 
     # ── 6. Wrap in NHSVMHeadAdapter ──────────────────────────────────
+    training_mode = args.mix_policy
     adapter = NHSVMHeadAdapter(
         head, encoder_id=args.encoder, embed_dim=int(X_train.shape[1]),
         training_metadata={
-            "training_mode": "synth-primary",
+            "training_mode": training_mode,
             "mix_policy": args.mix_policy,
+            "calibration_mode": args.calibration_mode,
             "targeted_reference_codes": sorted(targeted_codes),
             "fit_acc": float(train_result.final_train_acc),
             "n_train": len(y_train),
-            "n_synth": len(synth_labels),
-            "n_reference": len(ref_labels),
+            "n_reference": n_ref,
+            "n_synth": n_synth_aug,
             "n_calibration_holdout": len(holdout_idx),
             "softmax_temperature": float(fitted_T),
             "calibration": cal_meta,
             "fold_seed": args.fold_seed,
             "best_knob": BEST_KNOB,
+            "augment_floor": getattr(args, "augment_floor", 5),
             "description": (
-                f"Synth-primary head with calibrated softmax_temperature={fitted_T:.4f}. "
-                f"Trained on {len(y_train)} rows ({len(synth_labels)} synth + "
-                f"{len(ref_labels)} targeted reference for codes "
-                f"{sorted(targeted_codes)}). Calibrated against "
-                f"{len(holdout_idx)}-row stratified holdout via NLL minimization. "
-                f"Compatible with mass_calibration.svm_alpha=1.0 (the Phase 1 "
-                f"post-hoc α=15 multiplier is NO LONGER NEEDED with this head)."
+                f"{training_mode} head with softmax_temperature={fitted_T:.4f} "
+                f"(calibrated via {args.calibration_mode}). "
+                f"Trained on {len(y_train)} rows ({n_ref} reference + "
+                f"{n_synth_aug} synth)."
             ),
         },
     )
 
     vocab_sig = hashlib.sha1(
-        ",".join(sorted(set(synth_labels) | set(ref_labels))).encode()
+        ",".join(sorted(set(y_full))).encode()
     ).hexdigest()[:16]
-    ref_hash = reference_hash(args.weights_path) if len(ref_labels) else "synth-only"
+    ref_hash = reference_hash(args.weights_path) if n_ref else "synth-only"
 
     # ── 7. Persist + register (registry write deferred if no DB) ──────
     metrics = {
         "fit_acc": float(train_result.final_train_acc),
-        "training_phase": "T1_synth_primary",
+        "training_phase": f"T1_{training_mode.replace('-', '_')}",
         "n_train_total": len(y_train),
-        "n_synth": len(synth_labels),
-        "n_reference": len(ref_labels),
+        "n_reference": n_ref,
+        "n_synth": n_synth_aug,
         "n_calibration_holdout": len(holdout_idx),
         "softmax_temperature_fitted": float(fitted_T),
     }
@@ -363,8 +459,8 @@ def main() -> int:
         metrics["holdout_top1_mass_max"] = cal_meta.get("mass_at_best_T", {}).get("max")
 
     summary = (
-        f"synth-primary head: {len(y_train)} train rows "
-        f"({len(synth_labels)} synth + {len(ref_labels)} ref), "
+        f"{training_mode} head: {len(y_train)} train rows "
+        f"({n_ref} ref + {n_synth_aug} synth), "
         f"fit_acc={train_result.final_train_acc:.4f}, "
         f"softmax_T={fitted_T:.4f}"
     )
@@ -377,7 +473,7 @@ def main() -> int:
         #   register_building(...)
         head_sig_seed = (
             f"{vocab_sig}|{ref_hash}|{ch}|{args.encoder}|{X_train.shape[1]}|"
-            f"synth-primary|{args.fold_seed}|T={fitted_T:.6f}|"
+            f"{training_mode}|{args.fold_seed}|T={fitted_T:.6f}|"
             f"|target={','.join(sorted(targeted_codes))}"
         )
         head_sig = hashlib.sha1(head_sig_seed.encode()).hexdigest()[:16]
@@ -393,7 +489,7 @@ def main() -> int:
             "corpus_hash": ch,
             "encoder": args.encoder,
             "embedding_dim": int(X_train.shape[1]),
-            "training_mode": "synth-primary",
+            "training_mode": training_mode,
             "fold_seed": args.fold_seed,
             "metrics": metrics,
             "summary": summary,
@@ -418,7 +514,7 @@ def main() -> int:
         adapter,
         taxonomy_id=args.taxonomy_id,
         vocab_sig=vocab_sig,
-        training_mode="synth-primary",
+        training_mode=training_mode,
         reference_hash=ref_hash,
         corpus_hash=ch,
         fold_seed=args.fold_seed,

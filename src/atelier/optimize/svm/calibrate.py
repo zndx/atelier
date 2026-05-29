@@ -178,6 +178,122 @@ def fit_softmax_temperature(
     }
 
 
+def fit_temperature_for_reference(
+    head: "Any",
+    X_ref: np.ndarray,
+    y_ref_labels: list[str],
+    code_to_idx: dict[str, int],
+    *,
+    T_grid: tuple[float, ...] = DEFAULT_T_GRID,
+) -> dict[str, Any]:
+    """Fit softmax temperature to maximize top-1 accuracy against reference.
+
+    Unlike :func:`fit_softmax_temperature` (NLL on holdout), this
+    function optimizes for the metric that matters at fusion time: does
+    the SVM's top-1 prediction match the agent-mediated reference?
+
+    NLL calibration optimizes probabilistic calibration on in-
+    distribution holdout data.  On out-of-distribution runtime data
+    the NLL-optimal T (typically >1, softening) can collapse mass
+    below the noise floor.  Reference-accuracy calibration selects
+    the T that makes the SVM predict the right answer on the actual
+    deployment target.
+
+    Args:
+        head: ``FactorizedNHSVMHead`` (must expose ``forward(X)``).
+        X_ref: ``(N, embed_dim)`` L2-normalized reference embeddings.
+        y_ref_labels: ``(N,)`` reference code labels (hierarchical ids).
+        code_to_idx: ``{code: column_index}`` into ``head.codes`` order.
+        T_grid: candidate temperatures.
+
+    Returns:
+        Dict with ``best_T``, ``best_accuracy``, ``accuracy_at_T1``,
+        ``grid_results``, ``n_reference``, ``n_valid``,
+        ``method = "reference-accuracy"``.
+    """
+    if X_ref.ndim != 2:
+        raise ValueError(f"X_ref must be 2D; got {X_ref.shape}")
+    if len(y_ref_labels) != X_ref.shape[0]:
+        raise ValueError(
+            f"y_ref_labels length {len(y_ref_labels)} != "
+            f"X_ref rows {X_ref.shape[0]}"
+        )
+
+    logits = head_logits_batched(head, X_ref)
+
+    y_ref_idx = np.array(
+        [code_to_idx.get(label, -1) for label in y_ref_labels]
+    )
+    valid = y_ref_idx >= 0
+    n_valid = int(valid.sum())
+    if n_valid == 0:
+        logger.warning("fit_temperature_for_reference: no valid labels overlap head vocab")
+        return {
+            "best_T": 1.0,
+            "best_accuracy": 0.0,
+            "accuracy_at_T1": 0.0,
+            "grid_results": [],
+            "n_reference": len(y_ref_labels),
+            "n_valid": 0,
+            "method": "reference-accuracy",
+        }
+
+    logits_v = logits[valid]
+    y_v = y_ref_idx[valid]
+
+    grid_results: list[dict] = []
+    best_T = 1.0
+    best_brier = float("inf")
+
+    for T in T_grid:
+        proba = _softmax_at_T(logits_v, T)
+        top1_preds = proba.argmax(axis=1)
+        top1_probs = proba.max(axis=1)
+        correct = (top1_preds == y_v).astype(np.float64)
+        acc = float(correct.mean())
+        mass_mean = float(top1_probs.mean())
+        # Brier score: penalizes confident-wrong, rewards confident-correct.
+        # argmax accuracy is T-invariant; Brier is the discriminating metric.
+        brier = float(((top1_probs - correct) ** 2).mean())
+        ece = expected_calibration_error(proba, y_v)
+        entry = {
+            "T": float(T),
+            "accuracy": acc,
+            "top1_mass_mean": mass_mean,
+            "brier": brier,
+            "ece": float(ece),
+        }
+        grid_results.append(entry)
+        if brier < best_brier:
+            best_T = float(T)
+            best_brier = brier
+
+    acc_at_T1 = next(
+        (r["accuracy"] for r in grid_results if r["T"] == 1.0),
+        grid_results[0]["accuracy"],
+    )
+    best_entry = next(r for r in grid_results if r["T"] == best_T)
+
+    logger.info(
+        "reference calibration: best_T=%.4f  brier=%.4f  acc=%.4f  "
+        "mass_mean=%.4f  (T=1.0 acc=%.4f)  n_valid=%d/%d",
+        best_T, best_brier, best_entry["accuracy"],
+        best_entry["top1_mass_mean"], acc_at_T1,
+        n_valid, len(y_ref_labels),
+    )
+
+    return {
+        "best_T": best_T,
+        "best_brier": best_brier,
+        "best_accuracy": best_entry["accuracy"],
+        "accuracy_at_T1": acc_at_T1,
+        "grid_results": grid_results,
+        "n_reference": len(y_ref_labels),
+        "n_valid": n_valid,
+        "method": "reference-brier",
+    }
+
+
 def expected_calibration_error(
     proba: np.ndarray,
     y_true_idx: np.ndarray,

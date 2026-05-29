@@ -131,6 +131,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.llm.temperature": ("classify_llm_temperature", float),
     "classify.llm.columns_per_call": ("classify_llm_columns_per_call", int),
     "classify.llm.min_columns_per_call": ("classify_llm_min_columns_per_call", int),
+    "classify.llm.revisit_columns_per_call": ("classify_llm_revisit_columns_per_call", int),
     "classify.llm.max_retries": ("classify_llm_max_retries", int),
     "classify.llm.disable_reasoning": ("classify_llm_disable_reasoning", bool),
     "classify.llm.reasoning_budget": ("classify_llm_reasoning_budget", int),
@@ -164,6 +165,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
     "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
     "classify.bootstrap.top1_margin_threshold": ("classify_bootstrap_top1_margin_threshold", float),
+    "classify.bootstrap.channel_agreement_min": ("classify_bootstrap_channel_agreement_min", int),
+    "classify.bootstrap.channel_agreement_cosine_k": ("classify_bootstrap_channel_agreement_cosine_k", int),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
     # Late-interaction ColBERT cosine via Qdrant — feature-flag gated
@@ -413,6 +416,7 @@ class AtelierConfig:
     # this size, at which point a per-batch failure is recorded rather
     # than the columns being silently dropped.  1 = per-column fallback.
     classify_llm_min_columns_per_call: int = 1
+    classify_llm_revisit_columns_per_call: int = 20
     classify_llm_max_retries: int = 3
     classify_llm_disable_reasoning: bool = False
     classify_llm_reasoning_budget: int = 8192
@@ -478,6 +482,8 @@ class AtelierConfig:
     classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
     # DST sensitivity Rec 3 — rank-instability revisit gate.
     classify_bootstrap_top1_margin_threshold: float = 0.05
+    classify_bootstrap_channel_agreement_min: int = 3
+    classify_bootstrap_channel_agreement_cosine_k: int = 3
 
     # DST discount factors.  ``catboost_*`` defaults are calibrated
     # well above the cosine discount because that source is LLM-

@@ -304,6 +304,18 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 0.45,
         "caption_template": "Trigger an LLM revisit when {{cosine, pattern, name_match}} agree on a code at ≥ {value} mass that disagrees with the LLM — lower = more revisits, higher = more conservative.",
     },
+    "classify_bootstrap_channel_agreement_min": {
+        "hocon_path": "classify.bootstrap.channel_agreement_min",
+        "label": "Channel Agreement Min",
+        "description": "Auto-accept when ≥N ML channels agree with LLM (0 disables)",
+        "group": "convergence",
+        "type": "int",
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "default": 3,
+        "caption_template": "Lock columns where ≥ {value} of {{SVM, cosine-top-K, CatBoost}} agree with LLM — those skip revisit entirely. 0 = disabled (all columns eligible).",
+    },
     # ── Evidence & Fusion ─────────────────────────────────────────
     "classify_fusion_strategy": {
         "hocon_path": "classify.fusion_strategy",
