@@ -107,7 +107,7 @@ def reference_hash(weights_path: Path) -> str:
 def load_reference_rows_with_weights(
     *,
     weights_path: Path = Path("build/data/agent_mediated/training_weights.json"),
-    database: str = "reference_corpus",
+    database: str | None = None,
     refresh_cache: bool = False,
 ) -> tuple[list[Row], list[str], np.ndarray, dict, dict]:
     """Load the agent-mediated reference and join it with per-row training
@@ -164,6 +164,23 @@ def load_reference_rows_with_weights(
         log.info(
             "  training_weights.json not found at %s; defaulting weight=1.0 everywhere",
             weights_path,
+        )
+
+    # Resolve the reference database from config (fail-closed). No customer
+    # database is baked in: callers either pass database= explicitly or set
+    # ATELIER_REFERENCE_DATABASE (classify.reference_database). The legacy
+    # Hive reference path is deprecated in favor of the public
+    # GitTables/SOTAB fixture path, which needs no Hive database at all.
+    if database is None:
+        from atelier.config import load_config
+        database = (load_config().classify_reference_database or "").strip()
+    if not database:
+        raise ValueError(
+            "load_reference_rows_with_weights: no reference database "
+            "configured. This legacy Hive reference path is deprecated — "
+            "prefer the public GitTables/SOTAB fixture path. To use the Hive "
+            "path anyway, set ATELIER_REFERENCE_DATABASE (or pass database=). "
+            "No customer database is defaulted."
         )
 
     log.info("Loading reference rows from %s...", database)
@@ -224,14 +241,7 @@ def encode_with_cache(
     *, refresh: bool = False, batch_size: int = 64,
 ) -> np.ndarray:
     """Encode texts with ModernBERT, cache by (text_hash, key)."""
-    # Local import: encode_modernbert lives in scripts/reflect_nhsvm_modernbert.py
-    # for now; will migrate in a follow-up commit.  Until then keep the
-    # script on sys.path.
-    import sys as _sys
-    _root = Path(__file__).resolve().parent.parent.parent.parent.parent
-    if str(_root / "scripts") not in _sys.path:
-        _sys.path.insert(0, str(_root / "scripts"))
-    from reflect_nhsvm_modernbert import encode_modernbert  # type: ignore
+    from atelier.optimize.svm.encoder import encode_modernbert
 
     text_hash = hashlib.sha1("\n".join(texts).encode("utf-8")).hexdigest()[:12]
     full_key = f"{cache_key}_{text_hash}"

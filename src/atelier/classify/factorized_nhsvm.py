@@ -386,14 +386,9 @@ class NHSVMHeadAdapter:
         Returns a (1, embed_dim) float32 array.
         """
         if self.encoder_id == "answerdotai/ModernBERT-base":
-            # Local import — encoder module currently lives in scripts/;
-            # will migrate to atelier.optimize.svm.encoder in a follow-up.
-            import sys
-            root = Path(__file__).resolve().parent.parent.parent.parent
-            scripts_dir = root / "scripts"
-            if str(scripts_dir) not in sys.path:
-                sys.path.insert(0, str(scripts_dir))
-            from reflect_nhsvm_modernbert import encode_modernbert  # type: ignore
+            # Canonical encoder; loaded-once + cached process-wide, so
+            # per-column encoding doesn't reload the model each call.
+            from atelier.optimize.svm.encoder import encode_modernbert
 
             emb = encode_modernbert([text], batch_size=1, pooling="mean")
             return np.asarray(emb, dtype=np.float32)

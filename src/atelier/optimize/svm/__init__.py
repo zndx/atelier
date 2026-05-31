@@ -1,6 +1,8 @@
 """atelier.optimize.svm — factorized NHSVM training + refinement + gate.
 
 Modules:
+    encoder          — canonical ModernBERT encoder (encode_modernbert),
+                       shared by runtime inference + offline training
     audit_reference  — confidence-tier weights from agent_mediated/audit.json
     reference        — load reference rows + join with per-row weights
     kfold            — stratified k-fold partitioning over reference labels

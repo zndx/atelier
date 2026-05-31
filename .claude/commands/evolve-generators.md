@@ -176,9 +176,9 @@ JSON schema (strict):
     UK/Canadian postal codes (even if the definition says
     "postal code")
   - If reference samples include domain-specific identifiers with
-    specific prefixes (`REDACTED-…`, 16-digit `REDACTED…`), match
-    those prefixes — don't generate `ID12345` or `asset_67890`
-    just because the definition says "asset ID"
+    characteristic prefixes or fixed-width numeric formats, match
+    those observed prefixes/widths — don't generate `ID12345` or
+    `asset_67890` just because the definition says "asset ID"
   - If reference samples contain corporate addresses + URLs +
     IETF references (ENOS code), generate that breadth, not
     country/currency codes

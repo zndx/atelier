@@ -259,7 +259,18 @@ class HierarchicalFeatureExpander:
 
 
 class SVMClassifier:
-    """TF-IDF + LinearSVC classifier with calibrated probabilities.
+    """TF-IDF + LinearSVC classifier with calibrated probabilities. **LEGACY.**
+
+    .. deprecated::
+        This TF-IDF-bound classifier is the legacy SVM evidence source,
+        slated for removal.  The intended DST source is the dense
+        factorized modernBERT+NHSVM head
+        (``atelier.classify.factorized_nhsvm.NHSVMHeadAdapter``),
+        trained + promoted via ``just optimize`` and loaded through the
+        ``nhsvm_head_registry`` (``classify.svm.source='registered'``).
+        This class is reached only via the deprecated
+        ``per_vocab_legacy`` / ``auto`` runtime source modes.  Do not
+        build new functionality on it.
 
     Combines character n-gram and word n-gram TF-IDF features into a
     single sparse feature matrix, then trains a LinearSVC with Platt

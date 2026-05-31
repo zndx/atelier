@@ -314,7 +314,17 @@ def _ensure_per_vocab_svm(
     cache_dir: Path,
     run_dir: Path,
 ) -> Path:
-    """Cache-then-bundle the per-vocabulary SVM.
+    """Cache-then-bundle the per-vocabulary SVM. **DEPRECATED.**
+
+    .. deprecated::
+        This is the legacy TF-IDF + LinearSVC SVM path.  It is slated
+        for removal in favor of the registered dense modernBERT+NHSVM
+        head (``_ensure_registered_svm_head``), which is the intended
+        DST evidence source.  This function is reached only via the
+        ``per_vocab_legacy`` / ``auto`` source modes — both deprecated.
+        Do not build new workflows on it.  Once a promoted head is
+        guaranteed in every environment, this function and the
+        TF-IDF-bound paths in ``svm_classifier.py`` will be deleted.
 
     Generates a user-code-labeled synthetic corpus from enrichment
     payloads and trains the SVM directly — no alignment step needed.
@@ -344,6 +354,13 @@ def _ensure_per_vocab_svm(
     from atelier.classify.ml_train import train_svm
     from atelier.classify.svm_classifier import SVMClassifier
     from atelier.classify.synth import generate_user_taxonomy_corpus
+
+    logger.warning(
+        "DEPRECATED legacy TF-IDF SVM path (_ensure_per_vocab_svm): this "
+        "path is slated for removal. The intended DST source is the "
+        "registered modernBERT+NHSVM head — run `just optimize` to train "
+        "and promote one, then use classify.svm.source='registered'."
+    )
 
     svm_hierarchical = getattr(cfg, "classify_svm_hierarchical", True)
 

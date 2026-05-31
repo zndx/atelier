@@ -86,65 +86,15 @@ EMBED_CACHE = REPORT_DIR / "embeddings.npz"
 RESULTS_JSON = REPORT_DIR / "results.json"
 REPORT_MD = REPORT_DIR / "report.md"
 
-MODEL_ID = "answerdotai/ModernBERT-base"
-EMB_DIM = 768  # ModernBERT-base hidden size
-
-
-# ──────────────────────────────────────────────────────────────────────
-# ModernBERT encoding
-# ──────────────────────────────────────────────────────────────────────
-
-def encode_modernbert(
-    texts: list[str],
-    *,
-    batch_size: int = 64,
-    max_length: int = 256,
-    pooling: str = "mean",
-    device: str | None = None,
-):
-    """Encode texts with ModernBERT-base; return (N, 768) float32 ndarray.
-
-    ``pooling=mean`` uses attention-mask-weighted mean over token states
-    (standard retrieval pooling).  ``pooling=cls`` uses the [CLS] token
-    state directly.
-    """
-    import numpy as np
-    import torch
-    from transformers import AutoTokenizer, AutoModel
-
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    log.info("  encoder=%s  pooling=%s  device=%s  batch=%d  max_len=%d",
-             MODEL_ID, pooling, device, batch_size, max_length)
-
-    tok = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = AutoModel.from_pretrained(MODEL_ID, torch_dtype=torch.float32)
-    model.eval().to(device)
-
-    out = np.empty((len(texts), EMB_DIM), dtype=np.float32)
-    t0 = time.time()
-    with torch.inference_mode():
-        for start in range(0, len(texts), batch_size):
-            chunk = texts[start:start + batch_size]
-            enc = tok(chunk, padding=True, truncation=True,
-                      max_length=max_length, return_tensors="pt").to(device)
-            hidden = model(**enc).last_hidden_state  # (B, T, H)
-            if pooling == "cls":
-                vec = hidden[:, 0, :]
-            elif pooling == "mean":
-                mask = enc["attention_mask"].unsqueeze(-1).float()
-                summed = (hidden * mask).sum(dim=1)
-                counts = mask.sum(dim=1).clamp(min=1.0)
-                vec = summed / counts
-            else:
-                raise ValueError(f"unknown pooling: {pooling}")
-            out[start:start + len(chunk)] = vec.cpu().numpy()
-            if (start // batch_size) % 10 == 0:
-                done = start + len(chunk)
-                rate = done / max(time.time() - t0, 1e-6)
-                log.info("    %d/%d (%.0f rows/s)", done, len(texts), rate)
-    log.info("  encoded %d texts in %.1fs", len(texts), time.time() - t0)
-    return out
+# The encoder is now canonical in the package.  Re-exported here so the
+# research scripts that ``from reflect_nhsvm_modernbert import encode_modernbert``
+# keep working unchanged.  (Previously this script DEFINED the encoder and
+# production code reached it via a sys.path-into-scripts hack — removed.)
+from atelier.optimize.svm.encoder import (  # noqa: E402
+    MODEL_ID,
+    EMB_DIM,
+    encode_modernbert,
+)
 
 
 def load_or_encode_embeddings(

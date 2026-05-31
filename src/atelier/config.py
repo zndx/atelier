@@ -118,6 +118,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.subagent_model": ("classify_subagent_model", str),
     "classify.meta_tagging_dir": ("classify_meta_tagging_dir", str),
     "classify.reference_uri": ("classify_reference_uri", str),
+    "classify.reference_database": ("classify_reference_database", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm.hierarchical": ("classify_svm_hierarchical", bool),
@@ -401,6 +402,12 @@ class AtelierConfig:
     # by evaluation_report + overwatch.  Set to a path or file:// URI.
     # Contents never checked in; deployments point at their own CSV.
     classify_reference_uri: str = ""
+    # Hive database holding the agent-mediated reference corpus consumed by
+    # the legacy SVM training path (atelier.optimize.svm.reference). Empty by
+    # default and fail-closed — no customer database is baked in. Set via
+    # ATELIER_REFERENCE_DATABASE only when using the deprecated Hive
+    # reference path; the public GitTables/SOTAB fixture path needs none.
+    classify_reference_database: str = ""
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"
