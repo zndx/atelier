@@ -239,7 +239,9 @@ def test_generator_provides_verifier_feedback_on_retry():
             taxonomy_context=_sample_taxonomy_context(is_leaf=True),
             prior_attempt=prior,
             verifier_feedback={
-                "failed_checks": [
+                # Matches ReportResult.to_dict(): failed checks live under
+                # "details", each as {name, detail, ...} (verifiers.py).
+                "details": [
                     {"name": "parent_path_consistent",
                      "detail": "parent_path does not match taxonomy hierarchy"}
                 ]

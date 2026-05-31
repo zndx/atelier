@@ -342,8 +342,10 @@ class TestAlignmentCache:
             "ICE.A": lambda rng: "test@example.com",
             "ICE.B": lambda rng: "555-0123",
         }
+        # GENERATORS is imported function-locally from synth_generators
+        # inside _build_ice_signatures, so patch it at the source module.
         with patch(
-            "atelier.classify.subsumption_alignment.GENERATORS",
+            "atelier.classify.synth_generators.GENERATORS",
             mock_generators,
         ):
             # Patch to avoid Qdrant lookup
