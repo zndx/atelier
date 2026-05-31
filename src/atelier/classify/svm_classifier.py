@@ -607,7 +607,11 @@ class SVMClassifier:
 
         loaded = joblib.load(str(path))
 
-        obj = cls(config=config)
+        # Construct flat to bypass the hierarchical-requires-category_set
+        # guard: load() restores the true hierarchical state and all
+        # fitted artifacts from the bundle below, so the constructor's
+        # category_set is never consulted on this path.
+        obj = cls(config=config, hierarchical=False)
         if isinstance(loaded, dict) and loaded.get("hierarchical"):
             # Roll-forward: bundle must declare the current variant tag.
             # Pre-Crammer-Singer bundles (no ``nhsvm_variant`` key) are
