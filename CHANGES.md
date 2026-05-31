@@ -17,7 +17,99 @@ changes; the upgrade notes call them out).
 
 ---
 
-## Unreleased
+## v0.5.1 — 2026-05-31
+
+Consolidation release.  Brings the deployment/UAT line
+(`feat/dst-late-interaction-cosine`, ~75 commits through the 93.1%
+milestone) together with the true-NHSVM roll-forward
+(`feat/true-nhsvm`) onto trunk.  The two lines are complementary: the
+UAT line builds the infrastructure *around* the hierarchical SVM head
+(registry, calibration, promotion, channel revival, corpus
+expansion), while the roll-forward replaces the head's *training
+algorithm* with Crammer-Singer joint multi-class.
+
+This supersedes the staged-but-never-consolidated `v0.5.0`
+release-branch (which contained neither the UAT line nor the
+Crammer-Singer work).
+
+### True NHSVM via Crammer-Singer (roll-forward)
+
+- Hierarchical NHSVM now trains via sklearn's
+  `multi_class="crammer_singer"` LinearSVC (joint multi-class, Choi
+  et al. 2015 Eq. 5) with per-class expansion at inference, replacing
+  the OvR-hierarchical path entirely.  **Roll-forward posture, no
+  fallback**: the OvR path is removed, not flagged off.
+- Bundle cache namespaced under `_nhsvm_cs`; `SVMClassifier.load`
+  fails loudly on bundles missing or carrying a stale `nhsvm_variant`
+  tag, so pre-roll-forward `_nhsvm.pkl` files cannot silently drive
+  the per-class inference geometry.
+- Adversarial audit + LLM-only ablation harness
+  (`scripts/audit_nhsvm_adversarial.py`) and the UAT
+  empirical-validation protocol
+  (`docs/notes/2026-05-21/…_nhsvm_rework_uat_protocol.md`).
+
+### Late-interaction (ColBERT) cosine
+
+- ColBERT-style late-interaction retrieval as the cosine evidence
+  source, fail-fast on bridge errors, with config threaded through the
+  revisit + ML-validation loops.  Taxonomy collection promoted to
+  `current` with bridge error diagnostics.
+
+### NHSVM head: factorization, registry, promotion
+
+- Factorized NHSVM head for dense pretrained encoders, synth-primary
+  training with calibrated softmax temperature, and an
+  `NHSVMHeadAdapter` runtime wrapper with save/load persistence.
+- `nhsvm_head_registry` table + DAO with content-addressable
+  `head_sig`, transactional current-promotion, and pipeline
+  integration (`registry/`, `optimize/svm/promote.py`,
+  `scripts/promote_t1_head.py`).
+
+### SVM calibration + optimization subsystem (`optimize/`)
+
+- Unified `just optimize agent|cosine|svm` orchestrator.
+- Reference-primary k-fold training protocol, calibration sweeps,
+  programmatic shape-divergence gate (catches categorical-prior
+  overrides), cosine-SVM mutual-affirmation uplift gate, temperature
+  gate, and `reflect_nhsvm.py` capacity diagnostics.
+- Centered 4-column sibling feature window with margin-flexible
+  selection.
+
+### T1′ channel revival
+
+- Revived CatBoost + SVM evidence channels with a channel-agreement
+  lock and enriched LLM revisit context; hierarchical NHSVM is now the
+  default (silent leaf-only training paths flipped, guarded by a
+  required `category_set`).
+
+### Synthetic corpus + GEPA evolve loop
+
+- SHAP-priority-guided synthetic corpus expansion with a volume cap,
+  diversity gate, and marginal-coverage stop; per-code metrology
+  diagnostic signals feeding refinement.
+- `/evolve-classification` skill — end-to-end GEPA loop orchestrator
+  with roll-forward transform apply and a change-management guide;
+  `evolve` short command in the terminal.
+- Reference handling: color-aware xlsx routing, dual-format storage,
+  correction-type classification, xlsx-driven LLM correction loop.
+
+### Task queue, forensics, UI progress
+
+- Restart-ready idempotent task queue; `fsm_start` serializes on it
+  and the gateway lifespan drains synchronously.  Gateway-lifespan
+  forensics sampler for memory / FSM / queue telemetry.
+- Nested `PhaseProgress` tree replacing the single LLM_SWEEP bar,
+  focus-mode (active phase only), iteration banner, and per-column
+  counters across SAMPLING / VALIDATING / CLASSIFYING / EVALUATING.
+- Bundle download route; post-sweep phase heartbeats.
+
+### Deps
+
+- `cuml-cu12` + `cupy-cuda12x` removed from the `[gpu]` extra and
+  installed by `scripts/install_deps.py` via direct pip when
+  `nvidia-smi` is present — uv's resolver cannot model cuml's
+  nvidia.com wheel-stub install (CAI-WORKAROUND, documented in
+  `pyproject.toml`).
 
 ### Terminology cleanup — "frontier" no longer overloaded
 

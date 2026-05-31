@@ -115,7 +115,7 @@ function Layout({ children, fullHeight }: LayoutProps) {
       {!fullHeight && (
         <Footer style={{ textAlign: "center" }}>
           <Text type="secondary">
-            Atelier v0.4.0-rc2 &mdash; Agentic Classification Workbench
+            Atelier v0.5.1 &mdash; Agentic Classification Workbench
           </Text>
         </Footer>
       )}
