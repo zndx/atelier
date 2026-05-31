@@ -1,5 +1,5 @@
-"""atelier.optimize.cosine — GEPA-shaped semantic optimization of the
-ColBERT/Qdrant cosine channel.
+"""atelier.optimize.maxsim — GEPA-shaped semantic optimization of the
+ColBERT/Qdrant maxsim channel (ColBERT late-interaction scored via Qdrant MaxSim).
 
 Modules:
     semantic  — LLM critic loop that proposes enrichment-payload edits

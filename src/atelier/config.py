@@ -37,6 +37,7 @@ Preflight:
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -166,12 +167,15 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
     "classify.bootstrap.top1_margin_threshold": ("classify_bootstrap_top1_margin_threshold", float),
     "classify.bootstrap.channel_agreement_min": ("classify_bootstrap_channel_agreement_min", int),
-    "classify.bootstrap.channel_agreement_cosine_k": ("classify_bootstrap_channel_agreement_cosine_k", int),
+    "classify.bootstrap.channel_agreement_maxsim_k": ("classify_bootstrap_channel_agreement_maxsim_k", int),
     # DST discount factors
-    "classify.discounts.cosine": ("classify_discount_cosine", float),
-    # Late-interaction ColBERT cosine via Qdrant — feature-flag gated
-    "classify.cosine.late_interaction.enabled": ("classify_cosine_late_interaction_enabled", bool),
-    "classify.cosine.late_interaction.model": ("classify_colbert_model", str),
+    "classify.discounts.maxsim": ("classify_discount_maxsim", float),
+    # MaxSim channel — ColBERT late-interaction via Qdrant, feature-flag
+    # gated.  "maxsim" names the scoring operation (sum of per-query-token
+    # max cosines); the legacy single-vector "cosine" channel it replaced
+    # is retired.  The encoder stays ColBERT (classify.maxsim.model).
+    "classify.maxsim.enabled": ("classify_maxsim_enabled", bool),
+    "classify.maxsim.model": ("classify_colbert_model", str),
     "classify.discounts.svm": ("classify_discount_svm", float),
     "classify.subsumption_alignment.score_threshold": ("classify_subsumption_score_threshold", float),
     "classify.discounts.pattern_theta": ("classify_discount_pattern_theta", float),
@@ -187,14 +191,14 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # Mass-magnitude calibration (post-discount α scaling per channel).
     # Defaults α=1.0 preserve historical behavior; tuning operating
     # point identified in build/runs/calibration/findings_5ef4868c.md.
-    "classify.mass_calibration.cosine_alpha": ("classify_mass_calibration_cosine_alpha", float),
+    "classify.mass_calibration.maxsim_alpha": ("classify_mass_calibration_maxsim_alpha", float),
     "classify.mass_calibration.svm_alpha": ("classify_mass_calibration_svm_alpha", float),
     "classify.mass_calibration.catboost_alpha": ("classify_mass_calibration_catboost_alpha", float),
     "classify.mass_calibration.llm_alpha": ("classify_mass_calibration_llm_alpha", float),
-    # Cosine top-K union focal element ("the answer is in this candidate set").
+    # MaxSim top-K union focal element ("the answer is in this candidate set").
     # K=0 disables (default, per-tag singletons preserve historical behavior).
-    "classify.cosine.union_focal_k": ("classify_cosine_union_focal_k", int),
-    "classify.cosine.union_focal_alpha": ("classify_cosine_union_focal_alpha", float),
+    "classify.maxsim.union_focal_k": ("classify_maxsim_union_focal_k", int),
+    "classify.maxsim.union_focal_alpha": ("classify_maxsim_union_focal_alpha", float),
     # CatBoost training hyperparameters
     "classify.catboost.iterations": ("classify_catboost_iterations", int),
     "classify.catboost.depth": ("classify_catboost_depth", int),
@@ -483,7 +487,7 @@ class AtelierConfig:
     # DST sensitivity Rec 3 — rank-instability revisit gate.
     classify_bootstrap_top1_margin_threshold: float = 0.05
     classify_bootstrap_channel_agreement_min: int = 3
-    classify_bootstrap_channel_agreement_cosine_k: int = 3
+    classify_bootstrap_channel_agreement_maxsim_k: int = 3
 
     # DST discount factors.  ``catboost_*`` defaults are calibrated
     # well above the cosine discount because that source is LLM-
@@ -497,20 +501,18 @@ class AtelierConfig:
     # §11.3 + Denoeux 2008, non-distinct evidence requires a
     # discount to avoid double-counting under Dempster's rule; the
     # current SVM default reflects the weakly-non-distinct regime.
-    classify_discount_cosine: float = 0.20
-    # Late-interaction multi-vector cosine via Qdrant is the production
-    # cosine evidence source under the DST-independence architecture.
-    # Default ON: this is the path that restores independence among
-    # evidence sources.  Disabling it routes the pipeline back through
-    # the single-vector cosine path which is known to under-discriminate
-    # on adversarial corpora and is retained only as a transitional
-    # emergency fallback during deployment rollout.  When this flag is
-    # True and the late-interaction path cannot run (no enriched
+    classify_discount_maxsim: float = 0.20
+    # MaxSim channel — ColBERT late-interaction multi-vector scoring via
+    # Qdrant — is the production retrieval evidence source under the
+    # DST-independence architecture.  Default ON: this is the path that
+    # restores independence among evidence sources.  The legacy
+    # single-vector cosine path it replaced is retired (no fallback).
+    # When this flag is True and the MaxSim path cannot run (no enriched
     # collection registered, Qdrant unreachable, qdrant-client missing),
-    # the pipeline logs a WARNING and marks the run as degraded — that
-    # condition is a deployment issue, not a normal operating mode.
-    # See docs/src/architecture/late-interaction-cosine.md.
-    classify_cosine_late_interaction_enabled: bool = True
+    # the bridge raises MaxSimUnavailable and the run fails fast in the
+    # FSM — no silent degradation.  See
+    # docs/src/architecture/maxsim-channel.md.
+    classify_maxsim_enabled: bool = True
     classify_colbert_model: str = "colbert-ir/colbertv2.0"
     classify_discount_svm: float = 0.22
     classify_subsumption_score_threshold: float = 0.35
@@ -526,19 +528,19 @@ class AtelierConfig:
     classify_discount_confusable_ratio_threshold: float = 3.0
     # Mass-magnitude calibration (post-discount α multipliers).
     # Defaults are no-op; Phase 1 calibration sweep on 5ef4868c
-    # identified the operating point α_cosine=0.5, α_svm=15,
+    # identified the operating point α_maxsim=0.5, α_svm=15,
     # α_catboost=0.7, α_llm=0.1 as offline-optimal (no-LLM equivalent).
-    classify_mass_calibration_cosine_alpha: float = 1.0
+    classify_mass_calibration_maxsim_alpha: float = 1.0
     classify_mass_calibration_svm_alpha: float = 1.0
     classify_mass_calibration_catboost_alpha: float = 1.0
     classify_mass_calibration_llm_alpha: float = 1.0
-    # Cosine top-K union focal — "answer is in this candidate set"
-    # focal-element shape that matches cosine's actual signal (top-1
+    # MaxSim top-K union focal — "answer is in this candidate set"
+    # focal-element shape that matches the channel's actual signal (top-1
     # 60.75%, top-3 76.33%).  K=0 (default) preserves the existing
     # per-tag mass path.  K=3 is structurally optimal per Phase 1
     # findings; K>3 dilutes the focal and underperforms.
-    classify_cosine_union_focal_k: int = 0
-    classify_cosine_union_focal_alpha: float = 0.45
+    classify_maxsim_union_focal_k: int = 0
+    classify_maxsim_union_focal_alpha: float = 0.45
 
     # CatBoost training hyperparameters
     classify_catboost_iterations: int = 1000
@@ -824,6 +826,52 @@ def _coerce(val: Any, target_type: type) -> Any:
     return str(val).strip()
 
 
+# Legacy "cosine"-channel keys retired in the maxsim rename (v0.5.x).
+# Roll-forward posture: we do NOT alias them — a config still carrying
+# these keys is stale and would silently no-op (the value would be
+# ignored, not applied), so we fail loudly and point at the new key.
+_LEGACY_MAXSIM_KEYS: dict[str, str] = {
+    "classify.cosine.late_interaction.enabled": "classify.maxsim.enabled",
+    "classify.cosine.late_interaction.model": "classify.maxsim.model",
+    "classify.cosine.union_focal_k": "classify.maxsim.union_focal_k",
+    "classify.cosine.union_focal_alpha": "classify.maxsim.union_focal_alpha",
+    "classify.discounts.cosine": "classify.discounts.maxsim",
+    "classify.mass_calibration.cosine_alpha": "classify.mass_calibration.maxsim_alpha",
+    "classify.bootstrap.channel_agreement_cosine_k": "classify.bootstrap.channel_agreement_maxsim_k",
+}
+_LEGACY_MAXSIM_ENV: dict[str, str] = {
+    "ATELIER_MASS_CALIBRATION_COSINE_ALPHA": "ATELIER_MASS_CALIBRATION_MAXSIM_ALPHA",
+}
+
+
+def _reject_legacy_maxsim_keys(conf) -> None:
+    """Fail loudly on retired cosine-channel HOCON keys / env vars.
+
+    The DST cosine channel was renamed to ``maxsim`` (the operation
+    ColBERT actually performs is MaxSim, not single-vector cosine).
+    Under the project's roll-forward posture there is no back-compat
+    alias: a stale key would be silently dropped by ``_hocon_to_dict``
+    and the operator's intended value never reach the pipeline.  Catch
+    it here instead.
+    """
+    found: list[str] = []
+    for old, new in _LEGACY_MAXSIM_KEYS.items():
+        try:
+            if conf.get(old) is not None:
+                found.append(f"  HOCON  {old}  →  {new}")
+        except Exception:
+            continue
+    for old, new in _LEGACY_MAXSIM_ENV.items():
+        if os.environ.get(old) is not None:
+            found.append(f"  env    {old}  →  {new}")
+    if found:
+        raise ValueError(
+            "Retired cosine-channel config detected (renamed to 'maxsim' "
+            "in the v0.5.x roll-forward — no alias).  Update these and "
+            "retry:\n" + "\n".join(found)
+        )
+
+
 def _hocon_to_dict(conf) -> dict[str, Any]:
     """Extract values from a pyhocon ConfigTree using the mapping table."""
     result: dict[str, Any] = {}
@@ -861,6 +909,7 @@ def load_config(
     else:
         conf = ConfigFactory.parse_string("")
 
+    _reject_legacy_maxsim_keys(conf)
     values = _hocon_to_dict(conf)
 
     # Apply CLI overrides (highest precedence)

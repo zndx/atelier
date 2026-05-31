@@ -17,6 +17,49 @@ changes; the upgrade notes call them out).
 
 ---
 
+## Unreleased
+
+### BREAKING: DST cosine channel renamed to `maxsim`
+
+The retrieval evidence channel — ColBERT late-interaction scored via
+Qdrant's native MaxSim — was historically named `cosine`, inherited from
+the retired single-vector cosine source it replaced.  MaxSim is a sum of
+per-query-token max cosines, not a single cosine similarity; the stale name
+had leaked cosine-scale assumptions into the reliability calibration.  The
+channel is now named `maxsim` end-to-end (the per-token metric is still
+cosine and the encoder is still ColBERT — only the channel identity changed).
+
+**Roll-forward posture — no alias.**  `load_config()` fails loudly on any
+retired key, pointing at its replacement.  Operators must update config:
+
+| Retired | Replacement |
+|---|---|
+| HOCON `classify.cosine.late_interaction.enabled` | `classify.maxsim.enabled` |
+| HOCON `classify.cosine.late_interaction.model` | `classify.maxsim.model` |
+| HOCON `classify.cosine.union_focal_k` | `classify.maxsim.union_focal_k` |
+| HOCON `classify.cosine.union_focal_alpha` | `classify.maxsim.union_focal_alpha` |
+| HOCON `classify.discounts.cosine` | `classify.discounts.maxsim` |
+| HOCON `classify.mass_calibration.cosine_alpha` | `classify.mass_calibration.maxsim_alpha` |
+| HOCON `classify.bootstrap.channel_agreement_cosine_k` | `classify.bootstrap.channel_agreement_maxsim_k` |
+| env `ATELIER_MASS_CALIBRATION_COSINE_ALPHA` | `ATELIER_MASS_CALIBRATION_MAXSIM_ALPHA` |
+| env `ATELIER_COSINE_UNION_FOCAL_K` / `_ALPHA` | `ATELIER_MAXSIM_UNION_FOCAL_K` / `_ALPHA` |
+| env `ATELIER_CLASSIFY_COSINE_LATE_INTERACTION` | `ATELIER_CLASSIFY_MAXSIM_ENABLED` |
+| env `ATELIER_BOOTSTRAP_CHANNEL_AGREEMENT_COSINE_K` | `ATELIER_BOOTSTRAP_CHANNEL_AGREEMENT_MAXSIM_K` |
+
+Also renamed: module `late_interaction_bridge.py` → `maxsim_bridge.py`;
+`try_compute_cosine_mass` → `try_compute_maxsim_mass`; `LateInteractionUnavailable`
+→ `MaxSimUnavailable`; `late_interaction_to_mass` → `maxsim_to_mass`; the DST
+fusion source key, `INDEPENDENT_TIER` member, and per-column result keys
+`cosine_path`/`cosine_attribution` → `maxsim_*`.  The `cosine` source name in
+result/`evidence_sources` artifacts becomes `maxsim` — old run artifacts keyed
+on `cosine` are not migrated (roll-forward; re-run to regenerate).  Genuine
+single-vector cosine (subsumption/ontology alignment, label-propagation
+similarity, UMAP `metric="cosine"`) is unchanged.
+
+See [`docs/src/architecture/maxsim-channel.md`](docs/src/architecture/maxsim-channel.md).
+
+---
+
 ## v0.5.1 — 2026-05-31
 
 Consolidation release.  Brings the deployment/UAT line

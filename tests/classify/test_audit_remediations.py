@@ -465,7 +465,7 @@ from types import SimpleNamespace as _NS
 
 
 def _ts(code: str, pos: float, neg: float = 0.0, vpr: float = 1.0):
-    """Minimal TagScore-shaped object for late_interaction_to_mass tests."""
+    """Minimal TagScore-shaped object for maxsim_to_mass tests."""
     return _NS(
         code=code, positive_score=pos, negative_score=neg,
         verifier_pass_rate=vpr,
@@ -474,7 +474,7 @@ def _ts(code: str, pos: float, neg: float = 0.0, vpr: float = 1.0):
 
 def test_rec1_k_populated_with_negative_evidence(frame: FrameOfDiscernment):
     """K is populated when the negative channel has non-vacuous mass."""
-    from atelier.classify.mass_functions import late_interaction_to_mass
+    from atelier.classify.mass_functions import maxsim_to_mass
 
     # Positive evidence for NAMEFULL (1.1.1.9.1), negative against the
     # same code — high-conflict scenario, K should be > 0.
@@ -482,20 +482,20 @@ def test_rec1_k_populated_with_negative_evidence(frame: FrameOfDiscernment):
         _ts("1.1.1.9.1", pos=0.9, neg=0.8),
         _ts("1.1.1.4.1.1", pos=0.3, neg=0.0),
     ]
-    mass = late_interaction_to_mass(scores, frame)
+    mass = maxsim_to_mass(scores, frame)
     assert mass.channel_conflict_k is not None, "K must be populated"
     assert mass.channel_conflict_k > 0.0, "non-trivial conflict expected"
 
 
 def test_rec1_k_zero_on_vacuous_negative_channel(frame: FrameOfDiscernment):
     """K = 0.0 when no anti-example evidence triggers the negative channel."""
-    from atelier.classify.mass_functions import late_interaction_to_mass
+    from atelier.classify.mass_functions import maxsim_to_mass
 
     scores = [
         _ts("1.1.1.9.1", pos=0.9, neg=0.0),  # zero negative → vacuous
         _ts("1.1.1.4.1.1", pos=0.3, neg=0.0),
     ]
-    mass = late_interaction_to_mass(scores, frame)
+    mass = maxsim_to_mass(scores, frame)
     assert mass.channel_conflict_k == 0.0
 
 
@@ -504,7 +504,7 @@ def test_rec6_subtree_concentration_populated_for_leaf_top1(
 ):
     """When top-1 is a leaf, _significant_subtree fires and
     subtree_concentration is non-None on the returned mass."""
-    from atelier.classify.mass_functions import late_interaction_to_mass
+    from atelier.classify.mass_functions import maxsim_to_mass
 
     # Concentrate cosine in a single leaf subtree — _significant_subtree
     # should find an LCA at some concentration > 0.
@@ -512,7 +512,7 @@ def test_rec6_subtree_concentration_populated_for_leaf_top1(
         _ts("1.1.1.9.1", pos=0.95, neg=0.0),
         _ts("1.1.1.4.1.1", pos=0.10, neg=0.0),
     ]
-    mass = late_interaction_to_mass(scores, frame)
+    mass = maxsim_to_mass(scores, frame)
     assert mass.subtree_concentration is not None, (
         "leaf top-1 must populate subtree_concentration"
     )

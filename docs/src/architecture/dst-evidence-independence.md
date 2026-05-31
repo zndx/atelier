@@ -321,7 +321,7 @@ Two quality indicators:
 
 Weighted blend (`w_abs = 0.6, w_marg = 0.4`), clamped to
 `[reliability_floor, reliability_ceiling] = [0.10, 1 −
-classify_discount_cosine]`. The ceiling preserves the legacy
+classify_discount_maxsim]`. The ceiling preserves the legacy
 maximum-mass behavior under sharp signal; the floor keeps cosine
 contributing some mass even under noise.
 

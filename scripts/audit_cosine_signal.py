@@ -68,7 +68,7 @@ def audit_subtree_correctness(rows: list[dict]) -> dict:
     examples: dict[str, list] = defaultdict(list)
 
     for c in rows:
-        tk = (c.get("cosine_attribution") or {}).get("top_k") or []
+        tk = (c.get("maxsim_attribution") or {}).get("top_k") or []
         if not tk:
             continue
         top1 = tk[0]
@@ -104,7 +104,7 @@ def audit_default_pick_bias(rows: list[dict]) -> dict:
     """Audit 3: top-10 most-frequent cosine top-1 codes."""
     counter: Counter = Counter()
     for c in rows:
-        tk = (c.get("cosine_attribution") or {}).get("top_k") or []
+        tk = (c.get("maxsim_attribution") or {}).get("top_k") or []
         if tk:
             counter[tk[0]["code"]] += 1
     total = sum(counter.values())
@@ -409,7 +409,7 @@ def main() -> int:
     if args.live:
         print("Running Audit 2 (per-cluster K=25 rank distribution, live)...")
         try:
-            from atelier.classify.late_interaction_bridge import _resolve_qdrant_collection
+            from atelier.classify.maxsim_bridge import _resolve_qdrant_collection
             from atelier.config import load_config
         except ImportError as exc:
             print(f"ERROR: live mode requires atelier installed: {exc}", file=sys.stderr)

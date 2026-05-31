@@ -119,7 +119,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": True,
         "captions": {
             True: "Mnemonic fallback active — LLM evidence recovered for ~13% of corpus on the audit baseline.",
-            False: "Mnemonic emissions become vacuous LLM mass; recovery cohort falls back to cosine + ML alone.",
+            False: "Mnemonic emissions become vacuous LLM mass; recovery cohort falls back to maxsim + ML alone.",
         },
     },
     "classify_exclude_temp_tables": {
@@ -295,14 +295,14 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     "classify_bootstrap_indep_revisit_mass_threshold": {
         "hocon_path": "classify.bootstrap.indep_revisit_mass_threshold",
         "label": "Indep-Tier Revisit Threshold",
-        "description": "Minimum independent-tier consensus mass to fire an LLM revisit on cosine/pattern disagreement",
+        "description": "Minimum independent-tier consensus mass to fire an LLM revisit on maxsim/pattern disagreement",
         "group": "convergence",
         "type": "float",
         "min": 0.20,
         "max": 0.80,
         "step": 0.05,
         "default": 0.45,
-        "caption_template": "Trigger an LLM revisit when {{cosine, pattern, name_match}} agree on a code at ≥ {value} mass that disagrees with the LLM — lower = more revisits, higher = more conservative.",
+        "caption_template": "Trigger an LLM revisit when {{maxsim, pattern, name_match}} agree on a code at ≥ {value} mass that disagrees with the LLM — lower = more revisits, higher = more conservative.",
     },
     "classify_bootstrap_channel_agreement_min": {
         "hocon_path": "classify.bootstrap.channel_agreement_min",
@@ -314,7 +314,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 3,
         "step": 1,
         "default": 3,
-        "caption_template": "Lock columns where ≥ {value} of {{SVM, cosine-top-K, CatBoost}} agree with LLM — those skip revisit entirely. 0 = disabled (all columns eligible).",
+        "caption_template": "Lock columns where ≥ {value} of {{SVM, maxsim-top-K, CatBoost}} agree with LLM — those skip revisit entirely. 0 = disabled (all columns eligible).",
     },
     # ── Evidence & Fusion ─────────────────────────────────────────
     "classify_fusion_strategy": {
@@ -330,9 +330,9 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
             "yager": "Yager: [m1 ⊕ m2], conflict → Θ — preserves ignorance",
         },
     },
-    "classify_discount_cosine": {
-        "hocon_path": "classify.discounts.cosine",
-        "label": "Cosine Discount",
+    "classify_discount_maxsim": {
+        "hocon_path": "classify.discounts.maxsim",
+        "label": "MaxSim Discount",
         "description": "Mass allocated to ignorance from embedding similarity",
         "group": "evidence",
         "type": "float",
@@ -340,7 +340,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "max": 0.45,
         "step": 0.01,
         "default": 0.20,
-        "caption_template": "Reserve {value_pct}% of cosine mass as ignorance — lower = trust embedding similarity more, raise when cosine is misleading your labels.",
+        "caption_template": "Reserve {value_pct}% of maxsim mass as ignorance — lower = trust embedding similarity more, raise when maxsim is misleading your labels.",
     },
     "classify_discount_svm": {
         "hocon_path": "classify.discounts.svm",
@@ -486,17 +486,17 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "caption_template": "Flag as confusable when top-1 / top-2 belief < {value}×.",
     },
     # ── Mass-magnitude calibration (Phase 1 operating point) ─────
-    "classify_mass_calibration_cosine_alpha": {
-        "hocon_path": "classify.mass_calibration.cosine_alpha",
-        "label": "Cosine mass α",
-        "description": "Post-discount multiplier on cosine channel mass; <1 down-weights, >1 up-weights",
+    "classify_mass_calibration_maxsim_alpha": {
+        "hocon_path": "classify.mass_calibration.maxsim_alpha",
+        "label": "MaxSim mass α",
+        "description": "Post-discount multiplier on maxsim channel mass; <1 down-weights, >1 up-weights",
         "group": "evidence",
         "type": "float",
         "min": 0.0,
         "max": 5.0,
         "step": 0.05,
         "default": 1.0,
-        "caption_template": "Cosine channel mass × {value} — Phase 1 sweep found α=0.5 optimal (cosine's 53% standalone top-1 didn't justify its 0.80 max mass).",
+        "caption_template": "MaxSim channel mass × {value} — Phase 1 sweep found α=0.5 optimal (maxsim's 53% standalone top-1 didn't justify its 0.80 max mass).",
     },
     "classify_mass_calibration_svm_alpha": {
         "hocon_path": "classify.mass_calibration.svm_alpha",
@@ -534,10 +534,10 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 1.0,
         "caption_template": "LLM channel mass × {value} — Phase 1 found α=0.0-0.1 optimal when supervised channels are calibrated; LLM becomes appellate referee, not equal voter.",
     },
-    "classify_cosine_union_focal_k": {
-        "hocon_path": "classify.cosine.union_focal_k",
-        "label": "Cosine union-focal K",
-        "description": "Build cosine mass on the top-K union focal element ('answer is in this set'); 0 disables",
+    "classify_maxsim_union_focal_k": {
+        "hocon_path": "classify.maxsim.union_focal_k",
+        "label": "MaxSim union-focal K",
+        "description": "Build maxsim mass on the top-K union focal element ('answer is in this set'); 0 disables",
         "group": "evidence",
         "type": "int",
         "min": 0,
@@ -546,9 +546,9 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 0,
         "caption_template": "K={value}: 0 keeps per-tag singletons; >0 builds a single top-K union focal. Phase 1 found K=3 structurally optimal; K>3 dilutes the focal even though raw recall keeps climbing.",
     },
-    "classify_cosine_union_focal_alpha": {
-        "hocon_path": "classify.cosine.union_focal_alpha",
-        "label": "Cosine union-focal α",
+    "classify_maxsim_union_focal_alpha": {
+        "hocon_path": "classify.maxsim.union_focal_alpha",
+        "label": "MaxSim union-focal α",
         "description": "Mass assigned to the top-K union focal (rest goes to Θ); only used when K>0",
         "group": "evidence",
         "type": "float",
@@ -649,7 +649,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": True,
         "captions": {
             True: "Reference columns are excluded — classifier only sees natural-named columns on the UAT synth corpus (production default).",
-            False: "Answer-key columns flow through the full classifier (LLM + cosine + CatBoost + SVM + DST fusion) as ordinary inputs and may influence classification results for adjacent columns.",
+            False: "Answer-key columns flow through the full classifier (LLM + maxsim + CatBoost + SVM + DST fusion) as ordinary inputs and may influence classification results for adjacent columns.",
         },
     },
     "row_mc_k": {

@@ -78,7 +78,7 @@ def main() -> int:
             limit=args.top_k,
             with_payload=True,
         )
-        # Per late_interaction_bridge: normalize by query token count
+        # Per maxsim_bridge: normalize by query token count
         top_k_list = []
         for p in results.points:
             code = (p.payload or {}).get("code")

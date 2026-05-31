@@ -57,13 +57,13 @@ step("PWD", lambda: os.getcwd())
 # ── Imports ──────────────────────────────────────────────────────
 print("\n=== Bridge imports ===")
 step("import bridge", lambda: __import__(
-    "atelier.classify.late_interaction_bridge",
-    fromlist=["try_compute_cosine_mass", "is_enabled",
+    "atelier.classify.maxsim_bridge",
+    fromlist=["try_compute_maxsim_mass", "is_enabled",
               "_resolve_qdrant_collection", "_auto_promote_latest"],
 ).__name__)
 
-from atelier.classify.late_interaction_bridge import (  # noqa: E402
-    try_compute_cosine_mass, is_enabled, _resolve_qdrant_collection,
+from atelier.classify.maxsim_bridge import (  # noqa: E402
+    try_compute_maxsim_mass, is_enabled, _resolve_qdrant_collection,
     _auto_promote_latest,
 )
 
@@ -72,8 +72,8 @@ print("\n=== Config flag ===")
 from atelier.config import load_config  # noqa: E402
 cfg = load_config()
 step("is_enabled(cfg)", lambda: is_enabled(cfg))
-step("cfg.classify_cosine_late_interaction_enabled",
-     lambda: getattr(cfg, "classify_cosine_late_interaction_enabled", "<missing>"))
+step("cfg.classify_maxsim_enabled",
+     lambda: getattr(cfg, "classify_maxsim_enabled", "<missing>"))
 step("cfg.classify_taxonomy_id",
      lambda: getattr(cfg, "classify_taxonomy_id", "<missing>"))
 
@@ -148,7 +148,7 @@ def _live_bridge_call():
             return ("row id | int64 | 1, 2, 3 | cardinality=1000 | "
                     "avg_len=1.0 | numeric=1.00")
 
-    out = try_compute_cosine_mass(
+    out = try_compute_maxsim_mass(
         cfg=cfg, column_features=Features(),
         column_name="row_id", table_name="academic_records",
         samples=["1", "2", "3"],

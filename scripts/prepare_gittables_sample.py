@@ -95,7 +95,7 @@ def _classify_seed_columns(table, columns: set[str]) -> list[str]:
 
         result = _classify_column(
             col, category_set, frame,
-            use_cosine=True,
+            use_maxsim=True,
             discounts=discounts,
         )
 

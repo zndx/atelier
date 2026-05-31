@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Verify Phase 2 wiring: production code path under defaults and calibrated config.
 
-Uses the ACTUAL production mass functions (late_interaction_to_mass,
+Uses the ACTUAL production mass functions (maxsim_to_mass,
 combine_multiple from atelier.classify) on 5ef4868c's evidence.
 
 Defaults must reproduce baseline; calibrated config must achieve
@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from atelier.classify.mass_functions import late_interaction_to_mass
+from atelier.classify.mass_functions import maxsim_to_mass
 from atelier.classify.belief import (
     BeliefAssignment, FocalElement, FrameOfDiscernment, combine_multiple,
 )
@@ -102,10 +102,10 @@ def score(records, topk_data, frame, *,
         tk = topk_data.get(key, {}).get("top_k", [])
         scored_tags = [(t["code"], t["maxsim_score"]) for t in tk]
         assignments = []
-        # Cosine: use production late_interaction_to_mass with the
+        # Cosine: use production maxsim_to_mass with the
         # wired calibration params.
         if scored_tags:
-            cos_mass = late_interaction_to_mass(
+            cos_mass = maxsim_to_mass(
                 scored_tags, frame,
                 alpha=a_cos,
                 union_focal_k=union_focal_k,
@@ -122,7 +122,7 @@ def score(records, topk_data, frame, *,
                     es[chan], frame, alpha))
         combined = fuse(assignments)
         if combined is None:
-            pred = fallback_top1(es, {"cosine"} if a_llm > 0 else {"cosine", "llm"})
+            pred = fallback_top1(es, {"maxsim"} if a_llm > 0 else {"maxsim", "llm"})
             fb += 1
         else:
             pred = pignistic_top1(combined, frame)

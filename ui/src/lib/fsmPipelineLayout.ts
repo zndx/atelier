@@ -65,7 +65,7 @@ const PHASES: PhaseDef[] = [
     state: "CLASSIFYING",
     label: "Classifying",
     description:
-      "Final per-column DST evidence fusion across name match, pattern, cosine, LLM, CatBoost, SVM.",
+      "Final per-column DST evidence fusion across name match, pattern, maxsim, LLM, CatBoost, SVM.",
   },
   {
     state: "FUSING",

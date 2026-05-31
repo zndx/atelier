@@ -234,7 +234,7 @@ class BootstrapConfig:
     # 0 disables the gate.  3 = all three must agree (99.1% accuracy
     # on 5ef4868c sensitivity study).
     channel_agreement_min: int = 3
-    channel_agreement_cosine_k: int = 3
+    channel_agreement_maxsim_k: int = 3
     # Wall-clock deadline for the LLM sweep.  ``0`` (default) disables
     # the brake — the attempts cap and consecutive-failure breaker cover
     # the dead-endpoint case, and a healthy-but-slow sweep (large vocab
@@ -283,8 +283,8 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         channel_agreement_min=getattr(
             cfg, "classify_bootstrap_channel_agreement_min", 3,
         ),
-        channel_agreement_cosine_k=getattr(
-            cfg, "classify_bootstrap_channel_agreement_cosine_k", 3,
+        channel_agreement_maxsim_k=getattr(
+            cfg, "classify_bootstrap_channel_agreement_maxsim_k", 3,
         ),
     )
 
@@ -1102,7 +1102,7 @@ def _run_ml_validation(
             llm_code=llm_code,
             llm_confidence=llm_conf,
             llm_discount=llm_disc,
-            use_cosine=has_embeddings,
+            use_maxsim=has_embeddings,
             discounts=discounts,
         )
 
@@ -1154,7 +1154,7 @@ def _run_ml_validation(
 def _channel_agrees_with_llm(
     ch_ev: dict[str, dict[str, float]],
     llm_code: str,
-    cosine_k: int = 3,
+    maxsim_k: int = 3,
 ) -> int:
     """Count how many ML channels (SVM, cosine, CatBoost) agree with LLM.
 
@@ -1169,9 +1169,9 @@ def _channel_agrees_with_llm(
             top1 = max(ev, key=ev.get).rstrip("*")
             if top1 == llm_code:
                 agree += 1
-    cosine_ev = ch_ev.get("cosine")
-    if cosine_ev:
-        topk = sorted(cosine_ev, key=cosine_ev.get, reverse=True)[:cosine_k]
+    maxsim_ev = ch_ev.get("maxsim")
+    if maxsim_ev:
+        topk = sorted(maxsim_ev, key=maxsim_ev.get, reverse=True)[:maxsim_k]
         if llm_code in [c.rstrip("*") for c in topk]:
             agree += 1
     return agree
@@ -1199,20 +1199,20 @@ def _channel_agreement_locked(
     if min_agree <= 0:
         return set()
 
-    cosine_k = cfg.channel_agreement_cosine_k
+    maxsim_k = cfg.channel_agreement_maxsim_k
     locked: set[str] = set()
     for name in column_names:
         llm_code = state.labels.get(name)
         if not llm_code:
             continue
         ch_ev = state.channel_evidence.get(name, {})
-        if ch_ev and _channel_agrees_with_llm(ch_ev, llm_code, cosine_k) >= min_agree:
+        if ch_ev and _channel_agrees_with_llm(ch_ev, llm_code, maxsim_k) >= min_agree:
             locked.add(name)
 
     if locked:
         logger.info(
-            "Channel-agreement lock: %d/%d columns (min_agree=%d, cosine_k=%d)",
-            len(locked), len(column_names), min_agree, cosine_k,
+            "Channel-agreement lock: %d/%d columns (min_agree=%d, maxsim_k=%d)",
+            len(locked), len(column_names), min_agree, maxsim_k,
         )
     return locked
 
@@ -1273,7 +1273,7 @@ def _identify_disagreements(
     return [name for name, _, _ in disagreements]
 
 
-_REVISIT_CHANNELS = ("cosine", "svm", "catboost")
+_REVISIT_CHANNELS = ("maxsim", "svm", "catboost")
 
 
 def _format_channel_signals(
@@ -1290,7 +1290,7 @@ def _format_channel_signals(
         ev = channel_evidence.get(ch)
         if not ev:
             continue
-        top_k = 3 if ch == "cosine" else 1
+        top_k = 3 if ch == "maxsim" else 1
         sorted_codes = sorted(ev.items(), key=lambda x: -x[1])[:top_k]
         candidates = []
         for code, mass in sorted_codes:

@@ -8,9 +8,18 @@ modified, redistributed, or used in any other manner without the express
 written consent of Cloudera, Inc.
 -->
 
-# Late-Interaction Multi-Vector Cosine via Qdrant
+# MaxSim Channel — ColBERT Late-Interaction via Qdrant
 
-This note specifies the next layer of the cosine evidence source: a
+> **Naming.** This DST evidence channel is named **`maxsim`** — after the
+> scoring operation Qdrant performs (a sum of per-query-token max cosines
+> over the ColBERT multi-vector field), not the single-vector cosine it
+> replaced. The per-token metric is cosine and the encoder is ColBERT, but
+> the channel's identity — the key in `source_masses`, `INDEPENDENT_TIER`,
+> the `classify.maxsim.*` config namespace, and the `classify.discounts.maxsim`
+> discount — is `maxsim`. The legacy single-vector `cosine` channel is
+> retired (no fallback). Historical sprint notes may still say "cosine".
+
+This note specifies the maxsim evidence source: a
 multi-vector late-interaction (ColBERT-style) representation per
 annotation, stored in Qdrant, with enrichment supplied by an Agent-SDK
 curation loop and procedural deterministic verifiers.  It composes
@@ -67,7 +76,7 @@ The motivating failure modes resolve through token-level alignment:
   matching that dense single-vector cosine collapses.
 - **Parent-pull** — parent-path tokens in the annotation text provide
   hierarchical context.  The hierarchical aggregation in
-  `_late_interaction_positive_mass` continues to flow residual mass
+  `_maxsim_positive_mass` continues to flow residual mass
   to internal-node focal elements when subtree-level signal is what's
   available.
 
@@ -120,7 +129,7 @@ integration for taxonomies Ægir has not been adapted to.
                  ▼  Qdrant query_points (using="colbert", MaxSim)
           top-K annotations ranked by MaxSim score
                  │
-                 ▼  late_interaction_to_mass
+                 ▼  maxsim_to_mass
           mass function (Haenni-Hartmann reliability shaping)
                  │
                  ▼  DST fusion (existing pipeline)
@@ -395,7 +404,7 @@ as vocabularies scale across deployments.
 
 ## Mass function construction
 
-`mass_functions.late_interaction_to_mass(scores, frame)` produces a
+`mass_functions.maxsim_to_mass(scores, frame)` produces a
 `BeliefAssignment` over the candidate frame from the Qdrant MaxSim
 scores.
 
@@ -568,7 +577,7 @@ classify {
     # when the late-interaction flag is on and the path cannot run
     # (no enriched collection, Qdrant unreachable, qdrant-client
     # missing), the pipeline logs WARNING + marks the run degraded
-    # via `cosine_path` in the per-column result.
+    # via `maxsim_path` in the per-column result.
     late_interaction {
       enabled = true
       enabled = ${?ATELIER_CLASSIFY_COSINE_LATE_INTERACTION}
@@ -588,7 +597,7 @@ path is the production cosine source under this design.  The flag
 exists for emergency rollback only — leaving the pipeline in legacy
 single-vector cosine is a deployment-degraded state, not a normal
 operating mode, and runs in that state are tagged with
-`cosine_path: "legacy_degraded:<reason>"` in the per-column result
+`maxsim_path: "legacy_degraded:<reason>"` in the per-column result
 so the degradation is visible in operator-facing artifacts.
 
 ## Deferred work

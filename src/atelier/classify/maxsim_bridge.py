@@ -15,7 +15,7 @@ ablate over.  Qdrant performs the late-interaction MaxSim; the bridge
 converts top-K scores to a DST mass function.
 
 When the flag is true and the late-interaction path cannot run, the
-bridge raises ``LateInteractionUnavailable`` so the pipeline fails
+bridge raises ``MaxSimUnavailable`` so the pipeline fails
 fast in the FSM rather than silently falling back to legacy
 single-vector cosine.  Silent fallback is the no-silent-DST-
 degradation anti-pattern: it has historically destroyed accuracy by
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # ── Fail-fast contract ────────────────────────────────────────────
 
 
-class LateInteractionUnavailable(RuntimeError):
+class MaxSimUnavailable(RuntimeError):
     """Raised when the late-interaction path is enabled but cannot run.
 
     Per the no-silent-DST-degradation rule, the pipeline does NOT fall
@@ -69,18 +69,16 @@ def is_enabled(cfg) -> bool:
     if cfg is None:
         return False
     try:
-        v = getattr(cfg, "classify_cosine_late_interaction_enabled", None)
+        v = getattr(cfg, "classify_maxsim_enabled", None)
         if v is not None:
             return bool(v)
         clf = getattr(cfg, "classify", None)
         if clf is not None:
-            cosine = getattr(clf, "cosine", None)
-            if cosine is not None:
-                li = getattr(cosine, "late_interaction", None)
-                if li is not None:
-                    return bool(getattr(li, "enabled", False))
+            maxsim = getattr(clf, "maxsim", None)
+            if maxsim is not None:
+                return bool(getattr(maxsim, "enabled", False))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("late_interaction.is_enabled probe failed: %s", exc)
+        logger.debug("maxsim.is_enabled probe failed: %s", exc)
     return False
 
 
@@ -191,7 +189,7 @@ def _get_qdrant_client(qdrant_url: str):
 # ── Public entry point ────────────────────────────────────────────
 
 
-def try_compute_cosine_mass(
+def try_compute_maxsim_mass(
     *,
     cfg,
     column_features,
@@ -218,13 +216,13 @@ def try_compute_cosine_mass(
     _ = embed  # legacy param — ColBERT encoder is self-supplied
     if not is_enabled(cfg):
         # Operator-explicit disable — only path that returns None.  All
-        # other failure modes raise LateInteractionUnavailable so the
+        # other failure modes raise MaxSimUnavailable so the
         # pipeline fails fast rather than silently degrading DST.
         return None, "explicit_disable", None
 
     resolved = _resolve_qdrant_collection(cfg)
     if resolved is None:
-        raise LateInteractionUnavailable(
+        raise MaxSimUnavailable(
             "degraded_no_collection",
             "No 'current' Qdrant collection registered for the active "
             "taxonomy.  Run scripts/enrich_annotations.py to populate "
@@ -235,7 +233,7 @@ def try_compute_cosine_mass(
     try:
         import qdrant_client as _qdrant  # noqa: F401
     except ImportError as exc:
-        raise LateInteractionUnavailable(
+        raise MaxSimUnavailable(
             "degraded_no_qdrant_client",
             "qdrant_client is not importable — deployment is missing "
             "a required dependency.",
@@ -243,7 +241,7 @@ def try_compute_cosine_mass(
 
     client = _get_qdrant_client(qdrant_url)
     if client is None:
-        raise LateInteractionUnavailable(
+        raise MaxSimUnavailable(
             "degraded_qdrant_connect",
             f"QdrantClient could not connect to {qdrant_url!r}.",
         )
@@ -252,7 +250,7 @@ def try_compute_cosine_mass(
         from qdrant_client.http import models as qm
 
         from atelier.classify.colbert_encoder import get_encoder, set_model_name
-        from atelier.classify.mass_functions import late_interaction_to_mass
+        from atelier.classify.mass_functions import maxsim_to_mass
         from atelier.enrichment.qdrant_writer import COLBERT_VECTOR_NAME
 
         colbert_model = getattr(cfg, "classify_colbert_model", None)
@@ -286,7 +284,7 @@ def try_compute_cosine_mass(
         )
 
         if not results.points:
-            raise LateInteractionUnavailable(
+            raise MaxSimUnavailable(
                 "degraded_empty_results",
                 f"Qdrant returned zero points for collection "
                 f"{collection!r}; the taxonomy collection is empty or "
@@ -296,7 +294,7 @@ def try_compute_cosine_mass(
         # Normalize MaxSim scores to [0, 1].  Qdrant's MaxSim sums
         # per-query-token max-cosines; dividing by the query token
         # count recovers the mean per-token similarity, which is the
-        # scale _cosine_reliability's sigmoid was calibrated for.
+        # scale _maxsim_reliability's sigmoid was calibrated for.
         scored_tags: list[tuple[str, float]] = []
         for point in results.points:
             code = (point.payload or {}).get("code")
@@ -311,7 +309,7 @@ def try_compute_cosine_mass(
             sample_codes = [
                 (p.payload or {}).get("code", "?") for p in results.points[:3]
             ]
-            raise LateInteractionUnavailable(
+            raise MaxSimUnavailable(
                 "degraded_namespace_mismatch",
                 f"CODE NAMESPACE MISMATCH — Qdrant returned "
                 f"{len(results.points)} results but none are in the "
@@ -320,12 +318,12 @@ def try_compute_cosine_mass(
                 f"Re-enrich against the current taxonomy.",
             )
 
-        mass = late_interaction_to_mass(
+        mass = maxsim_to_mass(
             scored_tags, frame,
-            alpha=getattr(cfg, "classify_mass_calibration_cosine_alpha", 1.0),
-            union_focal_k=int(getattr(cfg, "classify_cosine_union_focal_k", 0)),
+            alpha=getattr(cfg, "classify_mass_calibration_maxsim_alpha", 1.0),
+            union_focal_k=int(getattr(cfg, "classify_maxsim_union_focal_k", 0)),
             union_focal_alpha=float(
-                getattr(cfg, "classify_cosine_union_focal_alpha", 0.45)
+                getattr(cfg, "classify_maxsim_union_focal_alpha", 0.45)
             ),
         )
 
@@ -336,18 +334,18 @@ def try_compute_cosine_mass(
         )
         return mass, "ok", attribution
 
-    except LateInteractionUnavailable:
+    except MaxSimUnavailable:
         # Already a typed fail-fast exception — propagate as-is so the
         # pipeline sees the status string intact.
         raise
     except Exception as exc:
         logger.warning(
             "late_interaction: scoring raised for %s.%s — re-raising as "
-            "LateInteractionUnavailable so the pipeline fails fast "
+            "MaxSimUnavailable so the pipeline fails fast "
             "(no silent fallback to legacy single-vector cosine)",
             table_name, column_name, exc_info=True,
         )
-        raise LateInteractionUnavailable(
+        raise MaxSimUnavailable(
             "degraded_score_error",
             f"Late-interaction scoring raised "
             f"{type(exc).__name__}: {exc!r} for "

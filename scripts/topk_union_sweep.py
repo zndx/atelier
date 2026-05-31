@@ -112,7 +112,7 @@ def main() -> int:
 
     def score(*, k, alpha_cos_union, alpha_svm=15, alpha_cb=0.7,
               alpha_llm=None):
-        exclude = {"cosine"}
+        exclude = {"maxsim"}
         if alpha_llm is None:
             exclude.add("llm")
         correct = 0

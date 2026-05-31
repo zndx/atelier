@@ -134,7 +134,7 @@ def gather_traces(
     }
 
     for c in classifications:
-        tk = (c.get("cosine_attribution") or {}).get("top_k") or []
+        tk = (c.get("maxsim_attribution") or {}).get("top_k") or []
         top1_code = tk[0]["code"] if tk else None
         ref = c.get("reference_code") or None
         col = f"{c.get('table_name')}.{c.get('column_name')}"

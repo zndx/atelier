@@ -76,7 +76,7 @@ gateway:
 # in a follow-up.
 #
 #   just optimize agent  [args]   # reference curation (Agent SDK auto-run)
-#   just optimize cosine [args]   # ColBERT/Qdrant enrichment optimization
+#   just optimize maxsim [args]   # ColBERT/Qdrant enrichment optimization
 #   just optimize svm    [args]   # NHSVM domain adaptation (procedural generators)
 #
 # Both `agent` and `--agent` forms are accepted for ergonomic flexibility.
@@ -102,7 +102,7 @@ optimize mode="help" *ARGS="":
     if [[ " {{ARGS}} " == *" --help "* ]] || [[ " {{ARGS}} " == *" -h "* ]]; then
       case "{{mode}}" in
         agent|--agent)  python scripts/build_agent_mediated.py --help ;;
-        cosine|--cosine) python scripts/semantic_optimize.py --help ;;
+        maxsim|--maxsim) python scripts/semantic_optimize.py --help ;;
         svm|--svm)      bash scripts/run_corpus_expansion_pipeline.sh --help ;;
       esac
       exit 0
@@ -117,22 +117,22 @@ optimize mode="help" *ARGS="":
         python scripts/build_agent_mediated.py {{ARGS}}
         python scripts/run_curate_agent_sdk.py
         ;;
-      cosine|--cosine)
+      maxsim|--maxsim)
         python scripts/semantic_optimize.py {{ARGS}}
         ;;
       svm|--svm)
         # Dual-gate convergence: coverage audit → agent SDK authorship →
         # corpus generation → Phase D training/eval → refinement loop
         # (Gate A: TARGET_ACCURACY) → uplift gate (Gate B: mutual
-        # affirmation with cosine).  See plan and phase gate brief at
+        # affirmation with maxsim).  See plan and phase gate brief at
         # docs/notes/2026-05-25/phase_gate_brief.md.
         bash scripts/run_corpus_expansion_pipeline.sh {{ARGS}}
         ;;
       ""|help|--help|-h)
-        echo "Usage: just optimize <agent|cosine|svm> [args...]"
+        echo "Usage: just optimize <agent|maxsim|svm> [args...]"
         echo ""
         echo "  agent   reference curation via Agent SDK (build → agent → apply)"
-        echo "  cosine  ColBERT/Qdrant enrichment optimization (semantic_optimize.py)"
+        echo "  maxsim  ColBERT/Qdrant enrichment optimization (semantic_optimize.py)"
         echo "  svm     NHSVM domain adaptation via procedural generators"
         echo ""
         echo "Pass --help after the mode for backing-script help."
@@ -140,7 +140,7 @@ optimize mode="help" *ARGS="":
         ;;
       *)
         echo "Unknown mode: {{mode}}" >&2
-        echo "Usage: just optimize <agent|cosine|svm> [args...]" >&2
+        echo "Usage: just optimize <agent|maxsim|svm> [args...]" >&2
         exit 1
         ;;
     esac

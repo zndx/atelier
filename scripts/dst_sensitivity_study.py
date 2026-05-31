@@ -64,7 +64,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from atelier.classify.belief import FrameOfDiscernment
 from atelier.classify.late_interaction import TagScore
-from atelier.classify.mass_functions import late_interaction_to_mass
+from atelier.classify.mass_functions import maxsim_to_mass
 from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
 
 logger = logging.getLogger("dst_sensitivity_study")
@@ -215,7 +215,7 @@ def test_mass_conservation(frame) -> StudyResult:
                 positives={"left_a_1": p, "right_1": 0.5},
                 negatives={"left_a": n},
             )
-            mass = late_interaction_to_mass(scores, frame)
+            mass = maxsim_to_mass(scores, frame)
             total = sum(mass.masses.values())
             result.cells_evaluated += 1
             if not (abs(total - 1.0) < 1e-9):
@@ -241,7 +241,7 @@ def test_monotonicity_positive(frame) -> StudyResult:
     for p in [round(0.05 * i, 2) for i in range(21)]:
         positives = {target: p, **competitors}
         scores = _build_scores(positives=positives)
-        mass = late_interaction_to_mass(scores, frame)
+        mass = maxsim_to_mass(scores, frame)
         bel = _belief_of_code(mass, target, frame)
         beliefs.append((p, bel))
         result.cells_evaluated += 1
@@ -281,7 +281,7 @@ def test_anti_monotonicity_negative(frame) -> StudyResult:
     singleton_masses: list[tuple[float, float]] = []
     for n in [round(0.05 * j, 2) for j in range(21)]:
         scores = _build_scores(positives=positives, negatives={target: n})
-        mass = late_interaction_to_mass(scores, frame)
+        mass = maxsim_to_mass(scores, frame)
         sfe = frame.singletons[target]
         sm = mass.masses.get(sfe, 0.0)
         singleton_masses.append((n, sm))
@@ -324,7 +324,7 @@ def test_conflict_k_transit(frame) -> StudyResult:
     from atelier.classify.belief import dempster_combine
     from atelier.classify.mass_functions import (
         _AttenuatedTagScore, _late_interaction_negative_mass,
-        _late_interaction_positive_mass,
+        _maxsim_positive_mass,
     )
 
     result = StudyResult(invariant="conflict_k_transit", cells_evaluated=0)
@@ -346,7 +346,7 @@ def test_conflict_k_transit(frame) -> StudyResult:
                     negative_score=s.negative_score * s.verifier_pass_rate,
                 ) for s in scores
             ]
-            m_pos = _late_interaction_positive_mass(
+            m_pos = _maxsim_positive_mass(
                 attenuated, frame, discount=0.20, reliability_floor=0.10,
             )
             m_neg = _late_interaction_negative_mass(
@@ -433,7 +433,7 @@ def test_ranking_stability(frame, epsilon: float = 0.01,
     ]
     for config_idx, config in enumerate(base_configs):
         base_scores = _build_scores(**config)
-        base_mass = late_interaction_to_mass(base_scores, frame)
+        base_mass = maxsim_to_mass(base_scores, frame)
         base_top = _top_code(base_mass, frame)
         instability_count = 0
         differing_picks: dict[str, int] = {}
@@ -448,7 +448,7 @@ def test_ranking_stability(frame, epsilon: float = 0.01,
             }
             scores = _build_scores(positives=perturbed_positives,
                                    negatives=perturbed_negatives)
-            mass = late_interaction_to_mass(scores, frame)
+            mass = maxsim_to_mass(scores, frame)
             top = _top_code(mass, frame)
             result.cells_evaluated += 1
             if top != base_top:
@@ -518,7 +518,7 @@ def test_aggregation_threshold_cliff(frame) -> StudyResult:
                 "right_2": 0.1,
                 "peer": 0.1,
             })
-            mass = late_interaction_to_mass(scores, frame)
+            mass = maxsim_to_mass(scores, frame)
             parent_mass = mass.masses.get(parent_internal, 0.0) if parent_internal else 0.0
             result.cells_evaluated += 1
             samples.append({
@@ -590,7 +590,7 @@ def test_aggregation_vs_leaf_competition(frame) -> StudyResult:
                 "right_1": 0.2,
                 "peer": 0.1,
             })
-            mass = late_interaction_to_mass(scores, frame)
+            mass = maxsim_to_mass(scores, frame)
             leaf_mass = mass.masses.get(target_leaf_fe, 0.0)
             parent_mass = (mass.masses.get(parent_internal, 0.0)
                            if parent_internal else 0.0)
@@ -652,7 +652,7 @@ def test_internal_node_top1_switch(frame) -> StudyResult:
             "right_1": 0.3,
             "peer": 0.2,
         })
-        mass = late_interaction_to_mass(scores, frame)
+        mass = maxsim_to_mass(scores, frame)
         leaf_mass = mass.masses.get(leaf_fe, 0.0)
         internal_mass = mass.masses.get(internal_fe, 0.0) if internal_fe else 0.0
         # Determine top-1 by mass (singleton or internal)
@@ -737,7 +737,7 @@ def test_aggregation_under_anti_example(frame) -> StudyResult:
             },
             negatives={"left_a": neg_on_parent},
         )
-        mass = late_interaction_to_mass(scores, frame)
+        mass = maxsim_to_mass(scores, frame)
         leaf_mass = mass.masses.get(leaf_fe, 0.0)
         parent_mass = mass.masses.get(parent_internal, 0.0) if parent_internal else 0.0
         competing_mass = mass.masses.get(competing_fe, 0.0)
@@ -797,7 +797,7 @@ def test_verifier_pass_rate_effect(frame) -> StudyResult:
     for vr in [round(0.05 * i, 2) for i in range(21)]:
         scores = _build_scores(positives=positives,
                                verifier_rates={target: vr})
-        mass = late_interaction_to_mass(scores, frame)
+        mass = maxsim_to_mass(scores, frame)
         sfe = frame.singletons[target]
         singleton_masses.append((vr, mass.masses.get(sfe, 0.0)))
         result.cells_evaluated += 1

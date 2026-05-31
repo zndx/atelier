@@ -339,7 +339,7 @@ def check_regressions(
         emb = r.get("embedding_text", "")
         if not ref or not emb:
             continue
-        pre_top1_attr = r.get("cosine_attribution", {}).get("top_k", [])
+        pre_top1_attr = r.get("maxsim_attribution", {}).get("top_k", [])
         pre_top1 = (pre_top1_attr[0].get("code", "").rstrip("*") if pre_top1_attr else None)
         pre_match = is_subtree_match(pre_top1, ref)
         vecs = encoder.encode_single(emb)
@@ -543,7 +543,7 @@ def build_cluster(target_code: str, target_label: str, classifications: list[dic
         ref = c.get("reference_code")
         if not is_subtree_match(ref, target_code):
             continue
-        tk = (c.get("cosine_attribution") or {}).get("top_k") or []
+        tk = (c.get("maxsim_attribution") or {}).get("top_k") or []
         top1 = (tk[0].get("code", "").rstrip("*") if tk else None)
         if is_subtree_match(top1, target_code):
             continue  # already correct under cosine — not a failure

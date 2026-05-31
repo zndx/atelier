@@ -23,7 +23,7 @@ written consent of Cloudera, Inc.
 - [Classification Pipeline](./architecture/classification.md)
 - [Pipeline Phases (FSM Walk-Through)](./architecture/pipeline-phases.md)
 - [DST Evidence Independence](./architecture/dst-evidence-independence.md)
-- [Late-Interaction Multi-Vector Cosine via Qdrant](./architecture/late-interaction-cosine.md)
+- [MaxSim Channel (ColBERT Late-Interaction) via Qdrant](./architecture/maxsim-channel.md)
 - [Nautilus Mid-Run Watcher](./architecture/nautilus.md)
 - [Monte Carlo Sampling](./architecture/monte-carlo.md)
 - [GPU Acceleration](./architecture/gpu.md)

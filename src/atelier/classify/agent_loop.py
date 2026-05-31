@@ -436,7 +436,7 @@ def _handle_get_column_detail(
         llm_code=llm_code,
         llm_confidence=llm_conf,
         llm_discount=boot_cfg.llm_discount,
-        use_cosine=True,
+        use_maxsim=True,
         discounts=discounts,
     )
 

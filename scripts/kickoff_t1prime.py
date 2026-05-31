@@ -46,12 +46,12 @@ from pathlib import Path
 
 # Phase 1.5 operating point — match what the resweep landed on
 CALIBRATION_OVERLAY = {
-    "classify_mass_calibration_cosine_alpha": 0.5,
+    "classify_mass_calibration_maxsim_alpha": 0.5,
     "classify_mass_calibration_svm_alpha": 0.5,
     "classify_mass_calibration_catboost_alpha": 0.7,
     "classify_mass_calibration_llm_alpha": 0.1,
-    "classify_cosine_union_focal_k": 3,
-    "classify_cosine_union_focal_alpha": 0.45,
+    "classify_maxsim_union_focal_k": 3,
+    "classify_maxsim_union_focal_alpha": 0.45,
     "classify_svm_source": "registered",
 }
 

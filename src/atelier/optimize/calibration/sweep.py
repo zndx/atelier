@@ -5,7 +5,7 @@ re-fuses via Dempster's rule, scores against the curated reference.
 No pipeline runs, no LLM calls, no model retraining.
 
 The α values output here translate directly into runtime config knobs
-(``classify.mass_calibration.{cosine_alpha, svm_alpha, catboost_alpha}``)
+(``classify.mass_calibration.{maxsim_alpha, svm_alpha, catboost_alpha}``)
 applied inside ``mass_functions.py``.
 
 Usage:
@@ -185,7 +185,7 @@ def main() -> int:
                    help="Exclude LLM from fusion (LLM-as-Appellate scenario)")
     p.add_argument("--exclude-channels", default="",
                    help="Additional channels to drop (comma-separated)")
-    p.add_argument("--alpha-cosine", type=str, default="0.3,0.5,0.7,1.0")
+    p.add_argument("--alpha-maxsim", type=str, default="0.3,0.5,0.7,1.0")
     p.add_argument("--alpha-svm", type=str, default="1.0,5.0,15.0,30.0")
     p.add_argument("--alpha-catboost", type=str, default="0.7,1.0,1.3,1.6")
     p.add_argument("--alpha-llm", type=str, default="1.0",
@@ -221,17 +221,17 @@ def main() -> int:
           f"(fallback on {baseline_fb} K=1 columns)")
 
     # Sweep
-    a_cos = _parse_floats(args.alpha_cosine)
+    a_max = _parse_floats(args.alpha_maxsim)
     a_svm = _parse_floats(args.alpha_svm)
     a_cat = _parse_floats(args.alpha_catboost)
     a_llm = _parse_floats(args.alpha_llm)
-    n_combos = len(a_cos) * len(a_svm) * len(a_cat) * len(a_llm)
-    print(f"\nsweeping {len(a_cos)}×{len(a_svm)}×{len(a_cat)}×{len(a_llm)}"
+    n_combos = len(a_max) * len(a_svm) * len(a_cat) * len(a_llm)
+    print(f"\nsweeping {len(a_max)}×{len(a_svm)}×{len(a_cat)}×{len(a_llm)}"
           f" = {n_combos} combos...\n")
 
     results = []
-    for ac, av, ab, al in product(a_cos, a_svm, a_cat, a_llm):
-        alphas = {"cosine": ac, "svm": av, "catboost": ab, "llm": al}
+    for ac, av, ab, al in product(a_max, a_svm, a_cat, a_llm):
+        alphas = {"maxsim": ac, "svm": av, "catboost": ab, "llm": al}
         correct, n, fb = score_config(
             records, alphas, frame, include_llm=not args.no_llm,
             exclude_channels=extra_exclude,
@@ -240,7 +240,7 @@ def main() -> int:
 
     results.sort(reverse=True)
     print(f"=== TOP {args.top_n} ===")
-    print(f"{'acc':>8}  {'α_cos':>6} {'α_svm':>6} {'α_cb':>6} {'α_llm':>6}  "
+    print(f"{'acc':>8}  {'α_max':>6} {'α_svm':>6} {'α_cb':>6} {'α_llm':>6}  "
           f"{'correct':>12}  {'fallback':>10}  Δ vs base")
     for acc, ac, av, ab, al, correct, n, fb in results[:args.top_n]:
         delta = (correct - baseline_correct) / baseline_n
@@ -249,7 +249,7 @@ def main() -> int:
               f"{100*delta:+6.2f}pp")
 
     best = results[0]
-    print(f"\nbest: α_cosine={best[1]} α_svm={best[2]} "
+    print(f"\nbest: α_maxsim={best[1]} α_svm={best[2]} "
           f"α_catboost={best[3]} α_llm={best[4]}  →  {100*best[0]:.2f}% "
           f"({100*(best[5]-baseline_correct)/baseline_n:+.2f}pp), "
           f"fallback on {best[7]}/{best[6]} columns "

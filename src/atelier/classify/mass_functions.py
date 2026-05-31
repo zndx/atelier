@@ -11,7 +11,7 @@
 Each converter transforms a specific evidence source into a BeliefAssignment
 (mass function) compatible with Dempster's rule of combination.
 
-Six evidence sources: cosine similarity (M0), pattern detection (M0),
+Six evidence sources: maxsim retrieval (M0), pattern detection (M0),
 name matching (M0), LLM classification (M1), CatBoost (M2), SVM (M2).
 """
 
@@ -59,7 +59,7 @@ class DiscountConfig:
     eliminate the residual LLM dependency.
     """
 
-    cosine: float = 0.20
+    maxsim: float = 0.20
     svm: float = 0.55
     pattern_theta: float = 0.25
     name_match_exact: float = 0.70
@@ -76,7 +76,7 @@ class DiscountConfig:
     def from_cfg(cls, cfg) -> DiscountConfig:
         """Build from an AtelierConfig (reads classify_discount_* fields)."""
         return cls(
-            cosine=cfg.classify_discount_cosine,
+            maxsim=cfg.classify_discount_maxsim,
             svm=cfg.classify_discount_svm,
             pattern_theta=cfg.classify_discount_pattern_theta,
             name_match_exact=cfg.classify_discount_name_match_exact,
@@ -195,7 +195,7 @@ def _redistribute_confusable_mass(
 # ── Cosine similarity ────────────────────────────────────────────────
 
 
-def _cosine_reliability(
+def _maxsim_reliability(
     top1_sim: float,
     top2_sim: float | None,
     *,
@@ -207,7 +207,7 @@ def _cosine_reliability(
     w_abs: float = 0.6,
     w_marg: float = 0.4,
 ) -> float:
-    """Reliability factor α(s₁, s₂) for the cosine source.
+    """Reliability factor α(s₁, s₂) for the maxsim (ColBERT late-interaction) source.
 
     Implements Haenni & Hartmann 2006, *Modeling Partially Reliable
     Information Sources: A General Approach Based on Dempster-Shafer
@@ -263,7 +263,7 @@ def _margin_weight(
     candidates.  When the margin is narrow, the formula reduces to
     classical softmax allocation across the candidate set.
 
-    Complements ``_cosine_reliability``: α gates *how much* mass
+    Complements ``_maxsim_reliability``: α gates *how much* mass
     cosine contributes; this gates *how concentrated* that mass is.
     """
     if top2_sim is None:
@@ -283,7 +283,7 @@ def _significant_subtree(
     descendant leaves capture ≥ ``concentration_threshold`` of the
     softmax probability mass.
 
-    Used by ``late_interaction_to_mass`` to redirect residual evidence
+    Used by ``maxsim_to_mass`` to redirect residual evidence
     mass to a subtree-level internal node when cosine has clear localization to
     a subtree but ambiguity within it.  When the most-specific such
     internal node exists, ``(focal_element, concentration_fraction)``
@@ -334,18 +334,18 @@ def _significant_subtree(
 
 
 # Legacy single-vector ``cosine_to_mass`` removed 2026-05-25.  The
-# late-interaction multi-vector path (`late_interaction_to_mass` below)
+# late-interaction multi-vector path (`maxsim_to_mass` below)
 # is the only supported cosine channel mass function.  Per the
 # no-silent-DST-degradation rule, the prior single-vector function was
 # eliminated rather than left as an importable fallback — any future
 # operator who wants single-vector behavior must explicitly reintroduce
 # a function (with the requisite operator-review trail that decision
 # deserves).  See docs/notes/2026-05-25/phase_gate_brief.md and
-# late_interaction_bridge.py's fail-fast contract for the broader
+# maxsim_bridge.py's fail-fast contract for the broader
 # discipline this enforces.
 
 
-def late_interaction_to_mass(
+def maxsim_to_mass(
     scores: list,
     frame: FrameOfDiscernment,
     *,
@@ -366,7 +366,7 @@ def late_interaction_to_mass(
 
     1. **Per-tag (default, ``union_focal_k=0``)** — uses Haenni-Hartmann
        reliability shaping, margin-aware allocation, and hierarchical-
-       subtree aggregation via :func:`_late_interaction_positive_mass`.
+       subtree aggregation via :func:`_maxsim_positive_mass`.
        Mass on per-tag singleton or internal-node focals.  ``alpha``
        post-scales the result.
 
@@ -383,7 +383,7 @@ def late_interaction_to_mass(
         return frame.vacuous()
 
     if union_focal_k > 0:
-        return _late_interaction_union_focal_mass(
+        return _maxsim_union_focal_mass(
             scores, frame, k=union_focal_k, alpha=union_focal_alpha,
         )
 
@@ -400,7 +400,7 @@ def late_interaction_to_mass(
                 negative_score=getattr(s, "negative_score", 0.0),
             ))
 
-    result = _late_interaction_positive_mass(
+    result = _maxsim_positive_mass(
         normalized, frame,
         discount=discount, reliability_floor=reliability_floor,
     )
@@ -409,7 +409,7 @@ def late_interaction_to_mass(
     return result
 
 
-def _late_interaction_union_focal_mass(
+def _maxsim_union_focal_mass(
     scores: list,
     frame: FrameOfDiscernment,
     *,
@@ -490,13 +490,13 @@ def _apply_alpha_scaling(
 
 @dataclass(frozen=True)
 class _AttenuatedTagScore:
-    """Internal: minimal interface for late_interaction_to_mass."""
+    """Internal: minimal interface for maxsim_to_mass."""
     code: str
     positive_score: float
     negative_score: float = 0.0
 
 
-def _late_interaction_positive_mass(
+def _maxsim_positive_mass(
     scores: list,
     frame: FrameOfDiscernment,
     *,
@@ -552,7 +552,7 @@ def _late_interaction_positive_mass(
     top1 = sorted_sims[0]
     top2 = sorted_sims[1] if len(sorted_sims) > 1 else None
 
-    alpha = _cosine_reliability(
+    alpha = _maxsim_reliability(
         top1, top2, floor=reliability_floor, ceiling=1.0 - discount,
     )
     margin_w = _margin_weight(top1, top2)
@@ -627,7 +627,7 @@ def _late_interaction_positive_mass(
         neg_probs = {c: e / total_neg for c, e in exp_negs.items()}
         sorted_neg = sorted(neg_sims.values(), reverse=True)
         neg_top2 = sorted_neg[1] if len(sorted_neg) > 1 else None
-        neg_alpha = _cosine_reliability(
+        neg_alpha = _maxsim_reliability(
             max_neg, neg_top2, floor=reliability_floor, ceiling=1.0 - discount,
         )
         channel_conflict_k = sum(

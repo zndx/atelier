@@ -169,7 +169,7 @@ def main() -> int:
     affected = []
     for c in classifications:
         pred = c.get("predicted_code")
-        attribution = c.get("cosine_attribution") or {}
+        attribution = c.get("maxsim_attribution") or {}
         top_k_baseline = attribution.get("top_k") or []
         old_top1 = (top_k_baseline[0]["code"]
                     if top_k_baseline else pred)

@@ -90,7 +90,7 @@ def run_synth_train_eval(
 
         for ts in all_samples:
             for col in ts.columns:
-                result = _classify_column(col, category_set, frame, use_cosine=True)
+                result = _classify_column(col, category_set, frame, use_maxsim=True)
                 classifications.append(result)
 
                 sources = result.get("evidence_sources", {})
@@ -229,7 +229,7 @@ def run_real_data_eval(
 
         for ts in real_samples:
             for col in ts.columns:
-                result = _classify_column(col, category_set, frame, use_cosine=True)
+                result = _classify_column(col, category_set, frame, use_maxsim=True)
                 classifications.append(result)
                 sources = result.get("evidence_sources", {})
                 all_sources.update(sources.keys())

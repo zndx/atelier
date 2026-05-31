@@ -167,7 +167,7 @@ def _load_enriched_concept_signatures_from_qdrant(
     """Load enriched annotation payloads directly from Qdrant collection.
 
     Returns {user_code: concept_text} or None on failure.
-    Mirrors the resolution pattern from late_interaction_bridge.py.
+    Mirrors the resolution pattern from maxsim_bridge.py.
     """
     try:
         from atelier.db.dao import AtelierDao
@@ -265,7 +265,7 @@ def _load_enriched_concept_signatures_from_qdrant(
 
 
 def _resolve_taxonomy_id(cfg) -> str:
-    """Derive taxonomy_id from config — mirrors late_interaction_bridge."""
+    """Derive taxonomy_id from config — mirrors maxsim_bridge."""
     if cfg is None:
         return "default"
     explicit = getattr(cfg, "classify_taxonomy_id", None)

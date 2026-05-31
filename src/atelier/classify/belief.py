@@ -54,7 +54,7 @@ class BeliefAssignment:
     Only focal elements (m(A) > 0) are stored.
 
     Optional diagnostic fields are populated by specific source-mass
-    constructors (e.g. :func:`mass_functions.late_interaction_to_mass`).
+    constructors (e.g. :func:`mass_functions.maxsim_to_mass`).
     They carry per-call observability — DST channel-conflict and
     subtree-concentration values that would otherwise be log-only —
     to make sweep outputs self-diagnosing.  None means "not measured".

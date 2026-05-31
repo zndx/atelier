@@ -799,7 +799,7 @@ def build_batch_user_prompt(
                 for sig in ch_signals:
                     ch = sig["channel"]
                     cands = sig["candidates"]
-                    ch_label = {"cosine": "Cosine top-3", "svm": "SVM", "catboost": "CatBoost"}.get(ch, ch)
+                    ch_label = {"maxsim": "MaxSim top-3", "svm": "SVM", "catboost": "CatBoost"}.get(ch, ch)
                     parts_str = ", ".join(f"{lbl} ({m:.2f})" for lbl, m in cands)
                     lines.append(f"  {ch_label:14s}: {parts_str}")
 

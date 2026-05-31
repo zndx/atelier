@@ -37,7 +37,7 @@ output of refinement.
 
 Preconditions:
   - Qdrant running with the current ColBERT collection populated by
-    `just optimize cosine`.  The bridge raises LateInteractionUnavailable
+    `just optimize cosine`.  The bridge raises MaxSimUnavailable
     if not — that's a precondition failure, not a gate failure.
   - ATELIER_DB_URL set so the bridge can resolve the active taxonomy.
   - Synth corpus present at the configured corpus directory (defaults
@@ -82,8 +82,8 @@ from atelier.classify.belief import (
 )
 from atelier.classify.factorized_nhsvm import fit_factorized_nhsvm
 from atelier.classify.features import extract_features
-from atelier.classify.late_interaction_bridge import (
-    LateInteractionUnavailable, try_compute_cosine_mass,
+from atelier.classify.maxsim_bridge import (
+    MaxSimUnavailable, try_compute_maxsim_mass,
 )
 from atelier.classify.mass_functions import nhsvm_to_mass
 from reflect_nhsvm import (
@@ -692,7 +692,7 @@ def main() -> int:
     # Useful when running outside the live App pod (no PGlite) but with
     # a known Qdrant collection.
     if args.qdrant_url and args.qdrant_collection:
-        import atelier.classify.late_interaction_bridge as _bridge
+        import atelier.classify.maxsim_bridge as _bridge
         _bridge._resolve_qdrant_collection = (
             lambda cfg, _url=args.qdrant_url, _col=args.qdrant_collection:
             (_url, _col)
@@ -741,7 +741,7 @@ def main() -> int:
     )
 
     # Resolve Qdrant collection (for the report header)
-    from atelier.classify.late_interaction_bridge import _resolve_qdrant_collection
+    from atelier.classify.maxsim_bridge import _resolve_qdrant_collection
     resolved = _resolve_qdrant_collection(cfg)
     if resolved is None:
         log.error("No 'current' Qdrant collection registered.  "
@@ -760,14 +760,14 @@ def main() -> int:
         # Cosine mass via the production bridge
         cf = _column_features_for_row(row)
         try:
-            m_cos, status, attr = try_compute_cosine_mass(
+            m_cos, status, attr = try_compute_maxsim_mass(
                 cfg=cfg, column_features=cf,
                 column_name=row.column, table_name=row.table,
                 samples=row.sample_values,
                 neighbor_column_names=row.siblings_full,
                 pattern_summary=None, frame=frame,
             )
-        except LateInteractionUnavailable as exc:
+        except MaxSimUnavailable as exc:
             log.error("Late-interaction unavailable for %s.%s: %s",
                       row.table, row.column, exc)
             return 3

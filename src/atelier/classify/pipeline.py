@@ -47,8 +47,8 @@ from atelier.classify.mass_functions import (
     DEFAULT_PATTERN_MAP,
     DiscountConfig,
     catboost_to_mass,
-    # cosine_to_mass removed 2026-05-25 — late_interaction_to_mass via
-    # late_interaction_bridge.try_compute_cosine_mass is the only
+    # cosine_to_mass removed 2026-05-25 — maxsim_to_mass via
+    # maxsim_bridge.try_compute_maxsim_mass is the only
     # cosine-channel path (no silent fallback to legacy single-vector)
     llm_to_mass,
     name_match_to_mass,
@@ -1873,7 +1873,7 @@ def run_classification_pipeline(
                     llm_code=llm_code,
                     llm_confidence=llm_conf,
                     llm_discount=boot_cfg.llm_discount,
-                    use_cosine=has_embeddings,
+                    use_maxsim=has_embeddings,
                     discounts=discounts,
                     fusion_strategy=cfg.classify_fusion_strategy,
                     resolve_llm_annotation_mnemonic=getattr(
@@ -2633,7 +2633,7 @@ def _build_confusable_pairs(
 # Future work to admit SVM here cleanly: switch the alignment to a
 # BM25 + transformer-reranker path that doesn't share an LLM with
 # the runtime sweep — see ``ontology_alignment.py`` module docstring.
-INDEPENDENT_TIER: frozenset[str] = frozenset({"cosine", "pattern", "name_match"})
+INDEPENDENT_TIER: frozenset[str] = frozenset({"maxsim", "pattern", "name_match"})
 
 
 def _resolved_pattern_map_for(category_set: HierarchicalCategorySet) -> dict[str, str]:
@@ -2658,7 +2658,7 @@ def _classify_column(
     llm_confidence: float = 0.0,
     llm_alternatives: list[dict] | None = None,
     llm_discount: float = 0.15,
-    use_cosine: bool = True,
+    use_maxsim: bool = True,
     discounts: DiscountConfig | None = None,
     fusion_strategy: str = "dempster",
     resolve_llm_annotation_mnemonic: bool = True,
@@ -2728,19 +2728,19 @@ def _classify_column(
     # weaker evidence source historically destroyed accuracy by mixing
     # a non-equivalent signal into DST fusion without the operator
     # knowing.  If late-interaction can't run, the pipeline raises
-    # LateInteractionUnavailable and the FSM fails the run loudly.
+    # MaxSimUnavailable and the FSM fails the run loudly.
     # See docs/src/architecture/late-interaction-cosine.md.
-    cosine_path = "unused"  # 'late_interaction' | 'explicit_disable' | 'unused'
-    cosine_attribution: dict | None = None  # per-decision SHAP surface;
+    maxsim_path = "unused"  # 'late_interaction' | 'explicit_disable' | 'unused'
+    maxsim_attribution: dict | None = None  # per-decision SHAP surface;
                                             # populated only when
                                             # late-interaction ran cleanly
-    if use_cosine:
-        from atelier.classify.late_interaction_bridge import (
-            LateInteractionUnavailable,
-            try_compute_cosine_mass as _try_late_interaction,
+    if use_maxsim:
+        from atelier.classify.maxsim_bridge import (
+            MaxSimUnavailable,
+            try_compute_maxsim_mass as _try_late_interaction,
         )
         try:
-            late_mass, late_status, cosine_attribution = _try_late_interaction(
+            late_mass, late_status, maxsim_attribution = _try_late_interaction(
                 cfg=cfg,
                 column_features=features,
                 column_name=col.name,
@@ -2751,7 +2751,7 @@ def _classify_column(
                 frame=frame,
                 embed=getattr(cfg, "_embedder", None),
             )
-        except LateInteractionUnavailable as exc:
+        except MaxSimUnavailable as exc:
             # Persist the first occurrence per process to a run-dir
             # artifact so the failure status (and any chained traceback)
             # survives independent of stdout capture.  Subsequent
@@ -2780,19 +2780,19 @@ def _classify_column(
             raise
 
         if late_mass is not None:
-            source_masses["cosine"] = late_mass
-            cosine_path = "late_interaction"
+            source_masses["maxsim"] = late_mass
+            maxsim_path = "late_interaction"
         else:
             # The only path that returns late_mass is None is when the
             # operator explicitly disabled the flag (``explicit_disable``).
-            # In that case the cosine evidence source is simply absent
+            # In that case the maxsim evidence source is simply absent
             # from DST fusion — by operator choice, not by silent
             # degradation.
             assert late_status == "explicit_disable", (
-                f"unexpected None mass from late-interaction bridge "
+                f"unexpected None mass from maxsim bridge "
                 f"with status {late_status!r}"
             )
-            cosine_path = "explicit_disable"
+            maxsim_path = "explicit_disable"
 
         # Legacy single-vector cosine fallback (``embedding.classify_cosine``)
         # was removed here.  Do NOT reintroduce — it would silently
@@ -2903,16 +2903,16 @@ def _classify_column(
     #          "internal" if it's an internal-node tag.  This is the
     #          discontinuity boundary identified by Finding 6 of the
     #          DST sensitivity study (Δmass 0.57 across the switch).
-    # channel_conflict_k / subtree_concentration: read off the cosine
-    #          source mass (populated by late_interaction_to_mass when
+    # channel_conflict_k / subtree_concentration: read off the maxsim
+    #          source mass (populated by maxsim_to_mass when
     #          the late path fires; None otherwise).  Per Findings 1+4.
     top_kind = "internal" if best_code in frame.internal_nodes else "leaf"
-    _cosine_ba = source_masses.get("cosine")
+    _maxsim_ba = source_masses.get("maxsim")
     late_interaction_channel_conflict_k = (
-        getattr(_cosine_ba, "channel_conflict_k", None) if _cosine_ba else None
+        getattr(_maxsim_ba, "channel_conflict_k", None) if _maxsim_ba else None
     )
     subtree_concentration = (
-        getattr(_cosine_ba, "subtree_concentration", None) if _cosine_ba else None
+        getattr(_maxsim_ba, "subtree_concentration", None) if _maxsim_ba else None
     )
 
     return {
@@ -2957,14 +2957,14 @@ def _classify_column(
         # source not enabled for this run).  Aggregating across columns
         # in the run artifact gives operators a per-run health view of
         # the cosine evidence path.
-        "cosine_path": cosine_path,
+        "maxsim_path": maxsim_path,
         # Per-decision SHAP surface for the late-interaction cosine
         # source: top-K post-fusion tags + per-role contribution
-        # breakdowns.  None when cosine_path is not 'late_interaction'
+        # breakdowns.  None when maxsim_path is not 'late_interaction'
         # (legacy paths don't expose per-role attribution).  See
         # docs/src/architecture/late-interaction-cosine.md § SHAP /
         # SAGE shift under late interaction.
-        "cosine_attribution": cosine_attribution,
+        "maxsim_attribution": maxsim_attribution,
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine
