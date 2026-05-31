@@ -69,6 +69,82 @@ gateway:
     env -i $(cat build/config/atelier.env 2>/dev/null | xargs) PATH="$$PATH" \
         uv run uvicorn atelier.gateway:app --reload --host 0.0.0.0 --port ${CDSW_APP_PORT:-8090}
 
+# ── Optimize (in-situ domain adaptation) ─────────────────────────
+
+# Unified in-situ domain-adaptation orchestrator.  Initial-steps scaffold;
+# scripts under scripts/ are intended to fold into src/atelier/optimize/
+# in a follow-up.
+#
+#   just optimize agent  [args]   # reference curation (Agent SDK auto-run)
+#   just optimize cosine [args]   # ColBERT/Qdrant enrichment optimization
+#   just optimize svm    [args]   # NHSVM domain adaptation (procedural generators)
+#
+# Both `agent` and `--agent` forms are accepted for ergonomic flexibility.
+#
+# CAI-WORKAROUND: invocations use bare `python` (NOT `uv run python`) for
+# the same reason scripts/install_deps.py pip-installs RAPIDS directly:
+# uv's resolver cannot model cuml-cu12's wheel-stub, and `uv run` triggers
+# resolution on every invocation that the CAI Session pod cannot complete
+# (no GPU available, no operator-controllable way to add one).  Bare
+# `python` runs against the system Python that install_deps.py provisions
+# — same invocation pattern as bin/start-app.sh.  When the Session-pod
+# runtime gains GPU access — or cuml ships uv-resolvable wheels — restore
+# `uv run --frozen python ...` here so all just recipes share one
+# uv-native invocation discipline.  Tracked as a deferred architectural
+# ideal.  Other just recipes (`up`, `test`, `behave`, `proto`, `migrate`,
+# etc.) intentionally keep `uv run` because they target dev-time
+# orchestration with a uv-managed `.venv`, not in-situ CAI ops.
+optimize mode="help" *ARGS="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # If the operator passes --help/-h to a mode, surface the backing
+    # script's argparse help and stop — don't cascade into a real run.
+    if [[ " {{ARGS}} " == *" --help "* ]] || [[ " {{ARGS}} " == *" -h "* ]]; then
+      case "{{mode}}" in
+        agent|--agent)  python scripts/build_agent_mediated.py --help ;;
+        cosine|--cosine) python scripts/semantic_optimize.py --help ;;
+        svm|--svm)      bash scripts/run_corpus_expansion_pipeline.sh --help ;;
+      esac
+      exit 0
+    fi
+    case "{{mode}}" in
+      agent|--agent)
+        # build_agent_mediated.py: best-effort curation against the
+        # configured Hive data source by default. Pass --xlsx <path> as
+        # progressive enhancement to also include operator-review context.
+        # Persistence happens INSIDE the skill (curate-agent-mediated.md
+        # invokes apply_review.py per table), so no separate apply call.
+        python scripts/build_agent_mediated.py {{ARGS}}
+        python scripts/run_curate_agent_sdk.py
+        ;;
+      cosine|--cosine)
+        python scripts/semantic_optimize.py {{ARGS}}
+        ;;
+      svm|--svm)
+        # Dual-gate convergence: coverage audit → agent SDK authorship →
+        # corpus generation → Phase D training/eval → refinement loop
+        # (Gate A: TARGET_ACCURACY) → uplift gate (Gate B: mutual
+        # affirmation with cosine).  See plan and phase gate brief at
+        # docs/notes/2026-05-25/phase_gate_brief.md.
+        bash scripts/run_corpus_expansion_pipeline.sh {{ARGS}}
+        ;;
+      ""|help|--help|-h)
+        echo "Usage: just optimize <agent|cosine|svm> [args...]"
+        echo ""
+        echo "  agent   reference curation via Agent SDK (build → agent → apply)"
+        echo "  cosine  ColBERT/Qdrant enrichment optimization (semantic_optimize.py)"
+        echo "  svm     NHSVM domain adaptation via procedural generators"
+        echo ""
+        echo "Pass --help after the mode for backing-script help."
+        exit 0
+        ;;
+      *)
+        echo "Unknown mode: {{mode}}" >&2
+        echo "Usage: just optimize <agent|cosine|svm> [args...]" >&2
+        exit 1
+        ;;
+    esac
+
 # ── Database ─────────────────────────────────────────────────────
 
 # Helper: build dbmate-compatible URL (strip +psycopg, add sslmode=disable for local)

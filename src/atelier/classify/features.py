@@ -666,7 +666,7 @@ class ColumnFeatures:
             parts.append(f"numeric={self.numeric_ratio:.2f}")
 
         if _enabled("sibling_context") and self.sibling_names:
-            parts.append("siblings: " + ", ".join(self.sibling_names[:5]))
+            parts.append("siblings: " + ", ".join(self.sibling_names[:4]))
 
         if _enabled("source_table") and self.source_table:
             parts.append(f"table={self.source_table}")
@@ -725,7 +725,7 @@ class ColumnFeatures:
         else:
             patterns_text = ""
         if self.sibling_names:
-            siblings_text = "siblings: " + ", ".join(self.sibling_names[:5])
+            siblings_text = "siblings: " + ", ".join(self.sibling_names[:4])
         else:
             siblings_text = ""
         # value_description only when not already used as the name stand-in.
@@ -763,6 +763,41 @@ class ColumnFeatures:
 
 
 # ── Extraction ───────────────────────────────────────────────────────
+
+
+def _closest_siblings(target: str, all_cols: list[str], k: int = 4) -> list[str]:
+    """Pick the ``k`` table-position-closest columns to ``target``, returned
+    in column order.
+
+    Symmetric / centered when the target is interior to the table; shifts
+    asymmetrically toward whichever side has more columns when the target
+    is near a margin, so the returned set is always exactly ``k`` entries
+    (when the table has at least ``k+1`` columns).
+
+    Examples for a 10-column table (indices 0..9):
+        target idx 5 → siblings idx 3,4,6,7   (centered, 2/2 split)
+        target idx 2 → siblings idx 0,1,3,4   (centered, 2/2 split)
+        target idx 1 → siblings idx 0,2,3,4   (margin: 1 left, 3 right)
+        target idx 0 → siblings idx 1,2,3,4   (margin: 0 left, 4 right)
+        target idx 8 → siblings idx 5,6,7,9   (margin: 3 left, 1 right)
+        target idx 9 → siblings idx 5,6,7,8   (margin: 4 left, 0 right)
+
+    Tables shorter than ``k+1`` columns return whatever non-target columns
+    are available, in order.  Falls back to "first ``k`` non-target columns
+    in input order" if ``target`` is not present in ``all_cols`` (defensive
+    — some upstream callers may already exclude the target).
+    """
+    if not all_cols:
+        return []
+    try:
+        target_idx = all_cols.index(target)
+    except ValueError:
+        return [c for c in all_cols if c != target][:k]
+    candidates = sorted(
+        (abs(j - target_idx), j) for j in range(len(all_cols)) if j != target_idx
+    )
+    keep_indices = sorted(j for _, j in candidates[:k])
+    return [all_cols[j] for j in keep_indices]
 
 
 def extract_features(
@@ -835,7 +870,15 @@ def extract_features(
 
     num_ratio = _numeric_ratio(values) if values else None
 
-    sibling_names = [s.replace("_", " ") for s in siblings if s != column_name]
+    # Position-aware sibling selection: pick the 4 closest table-position
+    # neighbors, centered on the target where possible and shifted
+    # asymmetrically near the table margins.  The embedding text then
+    # carries LOCAL column context (the columns physically adjacent to
+    # the target in the table) rather than the first-N-of-table columns,
+    # which were the same set for every target and frequently included
+    # a non-informative row_id / serial.  See `_closest_siblings` below.
+    sibling_cols = _closest_siblings(column_name, siblings, k=4)
+    sibling_names = [s.replace("_", " ") for s in sibling_cols]
 
     generic = _is_generic_name(column_name)
     val_desc = _generate_value_description(values, col_type, patterns)

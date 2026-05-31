@@ -52,20 +52,35 @@ def _detect_gpu() -> bool:
 
 
 extras = ["viz", "agents"]
-if _detect_gpu():
-    print("\n--- CUDA GPU detected — including [gpu] extras ---")
-    extras.append("gpu")
-else:
-    print("\n--- No CUDA GPU detected — skipping [gpu] extras ---")
 
 # Install Python package + dependencies into system Python.
 # [viz] = pyarrow, pandas, sentence-transformers, umap (embedding pipeline)
 # [agents] = claude-agent-sdk, anthropic (Terminal + smoke test + validation)
-# [gpu] = cuml-cu12, cupy-cuda12x (only installed when nvidia-smi finds a device)
 print("\n--- Installing Python dependencies ---")
 extras_spec = ",".join(extras)
 subprocess.run([*pip, "install", "-e", f".[{extras_spec}]"], check=True)
 print("Python dependencies installed")
+
+# CAI-WORKAROUND: cuml-cu12 + cupy-cuda12x install via direct pip
+# (NOT as a pyproject [gpu] extra) because their wheel-stub install
+# mechanism — downloads the real wheel from pypi.nvidia.com gated on
+# nvidia-smi at install time — cannot be modeled by uv's resolver.
+# Keeping them out of pyproject.toml lets uv resolve cleanly on the
+# CAI Session pod (no GPU, no operator-controllable way to add one),
+# while preserving conditional install behavior on GPU hosts via this
+# block.  When the CAI Session-pod runtime gains GPU access — or when
+# cuml ships uv-resolvable wheels — restore the [gpu] extra in
+# pyproject.toml and revert this to:
+#     if _detect_gpu(): extras.append("gpu")
+# above, before the editable install.  See pyproject.toml comment.
+if _detect_gpu():
+    print("\n--- CUDA GPU detected — installing RAPIDS via direct pip ---")
+    subprocess.run([*pip, "install",
+                    "--extra-index-url", "https://pypi.nvidia.com/",
+                    "cuml-cu12>=24.10", "cupy-cuda12x>=13.0"], check=True)
+    print("RAPIDS installed")
+else:
+    print("\n--- No CUDA GPU detected — skipping RAPIDS install ---")
 
 # Verify atelier is importable
 subprocess.run(

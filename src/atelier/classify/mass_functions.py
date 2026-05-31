@@ -116,6 +116,14 @@ def _resolve_code_to_fe(
     Returns None when the code is unresolvable — caller should skip it
     (mass falls through to Theta).
     """
+    # Path-form lookup — translate mnemonic paths to hierarchical ids.
+    # Same pattern as _resolve_to_focal_element (line ~1318).
+    _cs = getattr(frame, "_category_set", None)
+    if _cs is not None and "." in code:
+        _p2i = getattr(_cs, "path_to_id", None)
+        if _p2i and code in _p2i:
+            code = _p2i[code]
+
     if code in frame.internal_nodes:
         return frame.internal_nodes[code]
     if code in frame.singletons:
@@ -275,8 +283,8 @@ def _significant_subtree(
     descendant leaves capture ≥ ``concentration_threshold`` of the
     softmax probability mass.
 
-    Used by ``cosine_to_mass`` to redirect residual evidence mass to a
-    subtree-level internal node when cosine has clear localization to
+    Used by ``late_interaction_to_mass`` to redirect residual evidence
+    mass to a subtree-level internal node when cosine has clear localization to
     a subtree but ambiguity within it.  When the most-specific such
     internal node exists, ``(focal_element, concentration_fraction)``
     is returned; otherwise ``(None, 0.0)``.
@@ -325,113 +333,16 @@ def _significant_subtree(
     return candidates[0][0], candidates[0][1]
 
 
-def cosine_to_mass(
-    similarities: dict[str, float],
-    frame: FrameOfDiscernment,
-    discount: float = 0.3,
-    *,
-    reliability_floor: float = 0.10,
-) -> BeliefAssignment:
-    """Convert cosine similarities to a mass function.
-
-    Applies reliability-shaped allocation per Haenni & Hartmann 2006
-    (see ``_cosine_reliability``): the source-reliability factor α
-    is computed dynamically from top-1 absolute similarity and
-    top-1/top-2 margin, replacing the static ``1 - discount``
-    evidence allocation.  ``discount`` is reinterpreted here as the
-    *complement of the reliability ceiling* — under sharp cosine
-    signal we recover the prior behavior (α ≈ 1 - discount); under
-    diffuse signal we allocate close to ``reliability_floor`` to
-    cosine and the remainder to Θ.
-
-    The α-bounded evidence mass is then split via margin-aware
-    allocation (``_margin_weight``): a sharp top-1 with a clear
-    top-1/top-2 margin concentrates mass on top-1 directly rather
-    than diluting through softmax over hundreds of siblings (the
-    pathology that motivated this change — see
-    ``docs/src/architecture/dst-evidence-independence.md``).
-
-    Args:
-        similarities: ``{code: cosine_similarity}`` over candidate
-            codes.  Values are raw cosines (typically 0-1 range for
-            sentence-transformer embeddings).
-        frame: The frame of discernment.
-        discount: Complement of the reliability ceiling
-            (``ceiling = 1 - discount``).  Default 0.30 preserves
-            the legacy maximum-mass behavior under sharp signal.
-        reliability_floor: Minimum reliability under any conditions.
-            Default 0.10 keeps cosine contributing some signal even
-            when noisy.
-    """
-    if not similarities:
-        return frame.vacuous()
-
-    # Restrict to codes that are real singletons in the frame.
-    in_frame = {code: sim for code, sim in similarities.items()
-                if code in frame.singletons}
-    if not in_frame:
-        return frame.vacuous()
-
-    sorted_sims = sorted(in_frame.values(), reverse=True)
-    top1 = sorted_sims[0]
-    top2 = sorted_sims[1] if len(sorted_sims) > 1 else None
-
-    # α — Haenni-Hartmann reliability bounded by [floor, ceiling].
-    alpha = _cosine_reliability(
-        top1, top2, floor=reliability_floor, ceiling=1.0 - discount,
-    )
-    # Margin weight — fraction of α to concentrate on top-1.
-    margin_w = _margin_weight(top1, top2)
-
-    # Softmax distribution across all in-frame singletons (used for
-    # the residual mass when margin is narrow, and for ranking when
-    # we need the top-1 code identity).
-    max_sim = top1
-    exp_sims = {code: math.exp(sim - max_sim) for code, sim in in_frame.items()}
-    total_exp = sum(exp_sims.values())
-    if total_exp <= 0:
-        return frame.vacuous()
-    softmax_probs = {code: ev / total_exp for code, ev in exp_sims.items()}
-
-    # Identify the top-1 code (deterministic tie-break by code id).
-    top1_code = max(in_frame.items(), key=lambda kv: (kv[1], kv[0]))[0]
-
-    # Margin-aware allocation:
-    #   m(top1) = α * margin_w   (concentrated on the decisive winner)
-    #   m(rest)  = α * (1 - margin_w)  → split between LCA internal
-    #     node (when top-K share an ancestor) and per-leaf softmax.
-    masses: dict[FocalElement, float] = {}
-    top1_share = alpha * margin_w
-    residual = alpha * (1.0 - margin_w)
-
-    # Hierarchical aggregation: walk up from the top-1 leaf, find
-    # the most-specific internal node whose descendants capture a
-    # significant fraction of softmax mass, and redirect that
-    # in-subtree residual to the internal-node focal element.  This
-    # gives Dempster fusion an honest disjunctive signal ("the
-    # answer is somewhere in subtree X") rather than diffuse leaf
-    # mass that gets lost when the LLM votes confidently in a
-    # different subtree.  See _significant_subtree.
-    subtree_fe, lca_concentration = _significant_subtree(
-        top1_code, softmax_probs, frame,
-    )
-
-    lca_share = residual * lca_concentration
-    leaf_residual = residual - lca_share
-
-    for code, prob in softmax_probs.items():
-        m = leaf_residual * prob
-        if code == top1_code:
-            m += top1_share
-        if m > 1e-15:
-            masses[frame.singleton(code)] = m
-
-    if subtree_fe is not None and lca_share > 1e-15:
-        masses[subtree_fe] = masses.get(subtree_fe, 0.0) + lca_share
-
-    masses[frame.theta] = max(0.0, 1.0 - alpha)
-    masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
+# Legacy single-vector ``cosine_to_mass`` removed 2026-05-25.  The
+# late-interaction multi-vector path (`late_interaction_to_mass` below)
+# is the only supported cosine channel mass function.  Per the
+# no-silent-DST-degradation rule, the prior single-vector function was
+# eliminated rather than left as an importable fallback — any future
+# operator who wants single-vector behavior must explicitly reintroduce
+# a function (with the requisite operator-review trail that decision
+# deserves).  See docs/notes/2026-05-25/phase_gate_brief.md and
+# late_interaction_bridge.py's fail-fast contract for the broader
+# discipline this enforces.
 
 
 def late_interaction_to_mass(
@@ -440,6 +351,9 @@ def late_interaction_to_mass(
     *,
     discount: float = 0.20,
     reliability_floor: float = 0.10,
+    alpha: float = 1.0,
+    union_focal_k: int = 0,
+    union_focal_alpha: float = 0.45,
 ) -> BeliefAssignment:
     """Convert ColBERT MaxSim scores to a DST mass function.
 
@@ -448,12 +362,30 @@ def late_interaction_to_mass(
     ColBERT token vectors and an annotation's ColBERT token vectors,
     computed natively by Qdrant.
 
-    Uses Haenni-Hartmann reliability shaping, margin-aware allocation,
-    and hierarchical-subtree aggregation via
-    :func:`_late_interaction_positive_mass`.
+    Two mass-shaping modes:
+
+    1. **Per-tag (default, ``union_focal_k=0``)** — uses Haenni-Hartmann
+       reliability shaping, margin-aware allocation, and hierarchical-
+       subtree aggregation via :func:`_late_interaction_positive_mass`.
+       Mass on per-tag singleton or internal-node focals.  ``alpha``
+       post-scales the result.
+
+    2. **Top-K union focal (``union_focal_k>0``)** — bypasses per-tag
+       allocation entirely and assigns ``union_focal_alpha`` mass to a
+       single focal element representing the union of the top-K
+       candidates ("the answer is in this candidate set").  This shape
+       matches cosine's actual signal: top-1 60.75% accurate, top-3
+       76.33%, but offline calibration shows K=3 is structurally
+       optimal for fusion (larger K dilutes the focal).  See
+       feedback_channel_evidence_shape_matches_dst_focal memory.
     """
     if not scores:
         return frame.vacuous()
+
+    if union_focal_k > 0:
+        return _late_interaction_union_focal_mass(
+            scores, frame, k=union_focal_k, alpha=union_focal_alpha,
+        )
 
     # Accept both legacy TagScore objects and the new (code, score)
     # tuples from the Qdrant MaxSim bridge.
@@ -468,10 +400,92 @@ def late_interaction_to_mass(
                 negative_score=getattr(s, "negative_score", 0.0),
             ))
 
-    return _late_interaction_positive_mass(
+    result = _late_interaction_positive_mass(
         normalized, frame,
         discount=discount, reliability_floor=reliability_floor,
     )
+    if alpha != 1.0:
+        result = _apply_alpha_scaling(result, alpha, frame)
+    return result
+
+
+def _late_interaction_union_focal_mass(
+    scores: list,
+    frame: FrameOfDiscernment,
+    *,
+    k: int,
+    alpha: float,
+) -> BeliefAssignment:
+    """Build mass on a single top-K union focal element.
+
+    Scores are assumed to be ordered by descending similarity (the
+    Qdrant late-interaction bridge sorts before passing).  Out-of-frame
+    codes are filtered out.  When the resulting union exactly matches
+    an existing internal-node focal, reuse it so fusion intersection
+    works against the frame's canonical FE.
+    """
+    in_frame_codes: list[str] = []
+    for s in scores:
+        code = s[0] if isinstance(s, tuple) else s.code
+        if code in frame.singletons or code in frame.internal_nodes:
+            in_frame_codes.append(code)
+            if len(in_frame_codes) >= k:
+                break
+    if not in_frame_codes:
+        return frame.vacuous()
+
+    codes_fs = frozenset(in_frame_codes)
+    fe: FocalElement | None = None
+    if len(codes_fs) == 1:
+        fe = frame.singletons.get(next(iter(codes_fs)))
+    if fe is None:
+        for node_fe in frame.internal_nodes.values():
+            if node_fe.codes == codes_fs:
+                fe = node_fe
+                break
+    if fe is None:
+        fe = FocalElement(codes=codes_fs, label=f"|cos-top{len(codes_fs)}|")
+
+    alpha_clamped = max(0.0, min(1.0, float(alpha)))
+    return BeliefAssignment(masses={
+        fe: alpha_clamped,
+        frame.theta: 1.0 - alpha_clamped,
+    })
+
+
+def _apply_alpha_scaling(
+    assignment: BeliefAssignment,
+    alpha: float,
+    frame: FrameOfDiscernment,
+) -> BeliefAssignment:
+    """Scale all non-Θ masses by ``alpha``; redistribute Θ.
+
+    α < 1.0 → reduce channel confidence (more mass to Θ).
+    α > 1.0 → expand channel confidence (less mass to Θ).
+    If scaled non-Θ total exceeds 1.0, masses are proportionally
+    shrunk to fit and Θ goes to 0 — calibration cannot create mass
+    beyond the frame.
+
+    The α=1.0 case returns the input unchanged (caller already
+    guards, but kept here as safety).
+    """
+    if alpha == 1.0:
+        return assignment
+    alpha = max(0.0, float(alpha))
+    scaled: dict[FocalElement, float] = {}
+    non_theta_sum = 0.0
+    for fe, m in assignment.masses.items():
+        if fe == frame.theta:
+            continue
+        scaled[fe] = m * alpha
+        non_theta_sum += scaled[fe]
+    if non_theta_sum > 1.0:
+        shrink = 1.0 / non_theta_sum
+        for fe in scaled:
+            scaled[fe] *= shrink
+        non_theta_sum = 1.0
+    scaled[frame.theta] = 1.0 - non_theta_sum
+    return BeliefAssignment(masses=scaled)
 
 
 @dataclass(frozen=True)
@@ -500,8 +514,9 @@ def _late_interaction_positive_mass(
     tags via a ``frame.singletons``-only filter.
 
     The reliability-shaping arithmetic (Haenni-Hartmann α-bounded
-    reliability, margin-aware allocation, softmax-over-residual) is a
-    direct adaptation of :func:`cosine_to_mass`.  The differences:
+    reliability, margin-aware allocation, softmax-over-residual) was
+    originally adapted from a now-removed single-vector
+    ``cosine_to_mass``.  The differences from that legacy form:
 
     1. **Filter accepts both singletons and internal nodes.**  The
        enriched annotation collection in Qdrant may carry first-class
@@ -1185,6 +1200,7 @@ def llm_to_mass(
     discount: float = 0.15,
     *,
     allow_annotation_fallback: bool = True,
+    alpha: float = 1.0,
 ) -> BeliefAssignment:
     """Convert LLM classification to a mass function.
 
@@ -1255,7 +1271,10 @@ def llm_to_mass(
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
     masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
+    result = BeliefAssignment(masses=masses)
+    if alpha != 1.0:
+        result = _apply_alpha_scaling(result, alpha, frame)
+    return result
 
 
 def _resolve_to_focal_element(
@@ -1264,12 +1283,17 @@ def _resolve_to_focal_element(
     *,
     allow_annotation_fallback: bool = True,
 ) -> FocalElement | None:
-    """Resolve an LLM-emitted code to a frame focal element.
+    """Resolve an LLM-emitted code or path to a frame focal element.
 
     Atlas-style governance treats every node in the taxonomy as a
     first-class tagging target, so a parent-level vote is a real
     answer — not a leaf-resolution failure.  We honor that here:
 
+      0. **Path form (preferred as of 2026-05-27)**: if ``code``
+         matches the category set's ``path_to_id`` map, translate
+         it to the hierarchical id and continue with step 1.  Path
+         form (``C_PID.C_FD.A_TXNAMT.TRANSDATE``) is the LLM
+         contract surface; downstream code keeps using ids.
       1. Code is a leaf singleton → singleton focal element.
       2. Code is an internal node (parent) with a curated focal
          element in the frame → internal-node focal element
@@ -1291,12 +1315,20 @@ def _resolve_to_focal_element(
          ``NAMEFULL``) instead of a numeric dot-code.  When paths
          1-4 fail and ``allow_annotation_fallback`` is True, look
          the mnemonic up in the frame's category-set index and
-         resolve to that node's focal element.  Closes the
-         33%-of-corpus "evidence_sources.llm = {}" gap that the
-         strict numeric resolver previously left open.
+         resolve to that node's focal element.  Retained as a
+         transitional safety net; the path-form contract should
+         make this fire only on truly-aberrant emissions which
+         the aberrant-callout revisit catches separately.
 
     Returns ``None`` for unresolvable / ambiguous codes.
     """
+    # Path-form lookup — direct translation to hierarchical id.
+    category_set = getattr(frame, "_category_set", None)
+    if category_set is not None and "." in code:
+        path_to_id = getattr(category_set, "path_to_id", None)
+        if path_to_id and code in path_to_id:
+            code = path_to_id[code]
+
     # Check internal_nodes BEFORE singletons: the unified frame puts
     # every code (leaf + internal) in singletons, so checking singletons
     # first would shadow the subtree FE that internal-node codes need.
@@ -1331,6 +1363,125 @@ def _resolve_to_focal_element(
     return None
 
 
+def walk_path_for_aberrant(
+    path: str,
+    frame: FrameOfDiscernment,
+) -> dict:
+    """Walk an emitted path segment-by-segment; on first aberrant segment
+    return targeted-feedback info for the revisit loop.
+
+    Returns a dict with one of two shapes:
+
+    - ``{"ok": True, "code": "<hierarchical_id>"}`` — path is valid
+      and resolves to an in-frame node.
+
+    - ``{"ok": False, "aberrant_segment": str, "valid_parent_path": str,
+      "valid_children": list[str], "reason": str}`` — first bad
+      segment located.  ``valid_children`` is the list of mnemonics
+      that ARE valid children of the parent reached so far, which
+      forms the body of the targeted revisit-loop feedback message.
+
+    The walk is greedy from the root forward.  An empty path or
+    one whose first segment isn't a known forest root yields
+    ``reason="unknown_root"``.  A segment that doesn't match any
+    valid child yields ``reason="aberrant_segment"``.
+    """
+    category_set = getattr(frame, "_category_set", None)
+    if category_set is None or not path:
+        return {"ok": False, "reason": "no_category_set",
+                "aberrant_segment": path}
+
+    path_to_id = getattr(category_set, "path_to_id", None) or {}
+    # Direct hit shortcut
+    if path in path_to_id:
+        return {"ok": True, "code": path_to_id[path]}
+
+    # Walk segments and locate the first one that isn't a valid child
+    # of the parent reached so far.
+    segments = path.split(".")
+    children_map = getattr(category_set, "children", None) or {}
+    id_to_path = getattr(category_set, "id_to_path", None) or {}
+    cur_code: str | None = None
+    valid_parent_path = ""
+
+    for i, seg in enumerate(segments):
+        # Build set of valid mnemonics under cur_code (None = forest roots)
+        kid_codes = children_map.get(cur_code, [])
+        if cur_code is None:
+            # forest roots — codes whose parent_code is None
+            kid_codes = [c.code for c in getattr(category_set,
+                                                  "all_categories", [])
+                         if c.parent_code is None]
+        # Map kid mnemonic → id
+        all_by_code = getattr(category_set, "all_by_code", {}) or {}
+        kid_mnemonic_to_id = {}
+        for kc in kid_codes:
+            cat = all_by_code.get(kc)
+            if cat is not None and cat.abbrev:
+                kid_mnemonic_to_id[cat.abbrev.strip()] = kc
+
+        if seg in kid_mnemonic_to_id:
+            cur_code = kid_mnemonic_to_id[seg]
+            valid_parent_path = id_to_path.get(cur_code, seg)
+            continue
+
+        # Aberrant: this segment doesn't match any valid child mnemonic.
+        valid_mnemonics = sorted(kid_mnemonic_to_id.keys())
+        if cur_code is None:
+            reason = "unknown_root"
+            parent_display = "(root)"
+        else:
+            reason = "aberrant_segment"
+            parent_display = valid_parent_path or cur_code
+        return {
+            "ok": False,
+            "aberrant_segment": seg,
+            "valid_parent_path": parent_display,
+            "valid_children": valid_mnemonics,
+            "reason": reason,
+            "segment_index": i,
+        }
+
+    # All segments consumed without aberrant — translate path to id.
+    if cur_code is not None:
+        return {"ok": True, "code": cur_code}
+    return {"ok": False, "reason": "empty_path", "aberrant_segment": ""}
+
+
+def aberrant_feedback_message(walk_result: dict) -> str:
+    """Format a targeted feedback message for the revisit loop.
+
+    Used by the pipeline's revisit-loop integration to re-call the
+    LLM with specific corrective signal — *"Your `NEWLEAF` is not a
+    valid child of `PII.IDENTITY.GOVID`. Valid children: SSN,
+    DRVRLIC, NATLID. Re-classify."*  Per
+    feedback_no_silent_dst_degradation: active feedback beats silent
+    rescue.
+    """
+    if walk_result.get("ok"):
+        return ""
+    reason = walk_result.get("reason", "unknown")
+    seg = walk_result.get("aberrant_segment", "")
+    parent = walk_result.get("valid_parent_path", "(root)")
+    valid = walk_result.get("valid_children", [])
+    if reason == "unknown_root":
+        return (
+            f"Your answer's first path segment `{seg}` is not a known "
+            f"forest root in the taxonomy. Valid roots: "
+            f"{', '.join(valid[:20]) if valid else '(none found)'}. "
+            f"Re-classify using a full dot-separated path that starts "
+            f"with one of these roots."
+        )
+    if reason == "aberrant_segment":
+        return (
+            f"Your answer's segment `{seg}` is not a valid child of "
+            f"`{parent}`. Valid children: "
+            f"{', '.join(valid) if valid else '(no children — leaf node)'}. "
+            f"Re-classify using only paths that match the taxonomy tree exactly."
+        )
+    return f"Could not resolve emitted path (reason: {reason})."
+
+
 # ── ML classifiers (CatBoost + SVM) ─────────────────────────────────
 
 
@@ -1343,6 +1494,7 @@ def catboost_to_mass(
     variance_scale: float = 1.6,
     max_discount: float = 0.50,
     fallback_discount: float = 0.15,
+    alpha: float = 1.0,
 ) -> BeliefAssignment:
     """Convert CatBoost predicted probabilities to a DST mass function.
 
@@ -1386,13 +1538,17 @@ def catboost_to_mass(
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
     masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
+    result = BeliefAssignment(masses=masses)
+    if alpha != 1.0:
+        result = _apply_alpha_scaling(result, alpha, frame)
+    return result
 
 
 def svm_to_mass(
     proba: dict[str, float],
     frame: FrameOfDiscernment,
     discount: float = 0.20,
+    alpha: float = 1.0,
 ) -> BeliefAssignment:
     """Convert SVM calibrated probabilities to a mass function.
 
@@ -1442,7 +1598,10 @@ def svm_to_mass(
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
     masses = _redistribute_confusable_mass(masses, frame)
-    return BeliefAssignment(masses=masses)
+    result = BeliefAssignment(masses=masses)
+    if alpha != 1.0:
+        result = _apply_alpha_scaling(result, alpha, frame)
+    return result
 
 
 def nhsvm_to_mass(
@@ -1453,6 +1612,7 @@ def nhsvm_to_mass(
     discount: float = 0.20,
     temperature: float = 1.0,
     distance_matrix: dict[tuple[str, str], float] | None = None,
+    mass_alpha: float = 1.0,
 ) -> BeliefAssignment:
     """Convert SVM probabilities to mass via NHSVM tree-distance reweighting.
 
@@ -1467,4 +1627,4 @@ def nhsvm_to_mass(
         proba, alphas, category_set, temperature,
         distance_matrix=distance_matrix,
     )
-    return svm_to_mass(reweighted, frame, discount=discount)
+    return svm_to_mass(reweighted, frame, discount=discount, alpha=mass_alpha)

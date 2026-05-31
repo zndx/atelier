@@ -16,7 +16,6 @@ import {
   Descriptions,
   message,
   Popconfirm,
-  Progress,
   Radio,
   Row,
   Select,
@@ -38,6 +37,8 @@ import {
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { useDataset } from "../contexts/DatasetContext";
+import { buildTaskTree } from "../components/buildTaskTree";
+import { PhaseProgress } from "../components/PhaseProgress";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -887,27 +888,45 @@ function ClassificationPipelineCard({ hasClassifyLlm }: { hasClassifyLlm?: boole
             </Descriptions.Item>
           )}
       </Descriptions>
-      {state === "LLM_SWEEP" &&
-        progress.columns_total != null &&
-        progress.llm_labeled != null && (
+      {/* Iteration banner — surfaces the bootstrap revisit loop's
+          outer cycle ("Iteration 2 of 5") above the phase tree.  See
+          .claude/plans/lovely-doodling-badger.md.  Server emits
+          iteration_max via _convergence_progress; iteration is at
+          each revisit-emission call site. */}
+      {fsm && state !== "IDLE" && progress.iteration_max != null && progress.iteration != null && (
+        <div style={{ marginTop: 12 }}>
+          <Alert
+            type={progress.convergence_reason ? "success" : "info"}
+            showIcon
+            message={`Iteration ${progress.iteration} of ${progress.iteration_max}`}
+            description={
+              progress.convergence_reason
+                ? `Converged: ${String(progress.convergence_reason)}`
+                : progress.disagreements_count != null
+                  ? `Revisiting ${progress.disagreements_count} disagreement${Number(progress.disagreements_count) === 1 ? "" : "s"}`
+                  : null
+            }
+          />
+        </div>
+      )}
+      {/* Nested progress tree (see .claude/plans/lovely-doodling-badger.md).
+          Default focus-mode: depth-0 Pipeline aggregate + the active
+          depth-1 phase + its depth-2 sub-phase row.  Pending and
+          complete phases are hidden so the operator's eye stays on
+          the row that's actually moving.  Pass ``showLineage: true``
+          to render the full pipeline tree (e.g. for retrospective
+          views). */}
+      {fsm && state !== "IDLE" && (() => {
+        const tasks = buildTaskTree(fsm);
+        if (tasks.length === 0) return null;
+        return (
           <div style={{ marginTop: 12 }}>
-            <Progress
-              percent={
-                Number(progress.columns_total) > 0
-                  ? Math.round(
-                      (Number(progress.llm_labeled) /
-                        Number(progress.columns_total)) *
-                        100,
-                    )
-                  : 0
-              }
-              format={() =>
-                `${progress.llm_labeled} / ${progress.columns_total} columns`
-              }
-              status="active"
-            />
+            {tasks.map((task) => (
+              <PhaseProgress key={task.id} task={task} />
+            ))}
           </div>
-        )}
+        );
+      })()}
       {fsm?.error && (
         <div style={{ marginTop: 12 }}>
           <Text type="danger">{fsm.error}</Text>
@@ -1571,135 +1590,9 @@ function DataSourceCard() {
   );
 }
 
-function ReferenceColumnHandlingCard() {
-  // UAT-compatibility toggle.  The synth corpus UAT uses pairs every
-  // natural-named column with an answer-key twin named attr_*, code_*,
-  // etc. — the numeric suffix literally IS the code.  Production
-  // column naming doesn't hit this regex, so the toggle is a no-op on
-  // real data.  Kept visible (not buried in Settings) because UAT
-  // reviewers want to see accuracy in both configurations.  This
-  // whole card — along with the backend flag — is slated for removal
-  // once the synth-dataset lineage retires.
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const load = () => {
-    setLoading(true);
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((body) => {
-        const values = body?.values ?? {};
-        const v = values["classify_exclude_reference_columns"];
-        setEnabled(typeof v === "boolean" ? v : true);
-      })
-      .catch(() => setEnabled(true))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  const toggle = async (next: boolean) => {
-    setSaving(true);
-    try {
-      const r = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classify_exclude_reference_columns: next }),
-      });
-      const body = await r.json();
-      if (!r.ok || body.error) {
-        message.error(body.error || `PATCH failed: ${r.status}`);
-      } else {
-        setEnabled(next);
-        message.success(
-          next
-            ? "Reference columns will be excluded on the next run."
-            : "Reference columns will be included on the next run.",
-        );
-      }
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Card
-      title={
-        <Space>
-          <span>Reference Column Handling</span>
-          <Tag color="gold" style={{ margin: 0 }}>
-            UAT compatibility
-          </Tag>
-        </Space>
-      }
-      extra={
-        <Space>
-          {loading ? (
-            <Spin size="small" />
-          ) : (
-            <>
-              <Text type="secondary">
-                {enabled ? "Excluded" : "Included"}
-              </Text>
-              <Switch
-                checked={enabled ?? true}
-                onChange={toggle}
-                loading={saving}
-                disabled={loading}
-              />
-            </>
-          )}
-        </Space>
-      }
-    >
-      <Paragraph style={{ marginBottom: 8 }}>
-        The UAT synth corpus pairs every natural-named column with an
-        answer-key twin (pattern below) whose numeric suffix literally
-        encodes the expected code. This toggle controls whether those
-        twins enter the classification pipeline. Nowhere in the
-        prediction path does the pipeline regex-decode the name; the
-        toggle is strictly a pre-filter over the sample set.
-      </Paragraph>
-      <Paragraph style={{ marginBottom: 8 }}>
-        <Text code>
-          ^(attr|code|col|data|field|item|key|ref|val|var)_\d+(_\d+)*$
-        </Text>
-      </Paragraph>
-      <Alert
-        type={enabled ? "info" : "warning"}
-        showIcon
-        message={
-          enabled
-            ? "Exclude mode (production default)"
-            : "Include mode"
-        }
-        description={
-          enabled ? (
-            <>
-              Answer-key columns such as{" "}
-              <Text code>attr_1_1_1_9_2_1</Text> are filtered out of
-              the sample set before the LLM sweep. On production data
-              the regex matches nothing, so this is a no-op there.
-            </>
-          ) : (
-            <>
-              Answer-key columns flow through the full classifier (LLM
-              + cosine + CatBoost + SVM + DST fusion) as ordinary
-              inputs and may influence classification results for
-              adjacent columns.
-            </>
-          )
-        }
-        style={{ marginBottom: 0 }}
-      />
-    </Card>
-  );
-}
+// ReferenceColumnHandlingCard removed: reference-column exclusion is
+// disabled at the pipeline level (all columns required for the current
+// configuration).  The backend flag is retained as inert schema only.
 
 function StatusBadge({ ok }: { ok: boolean }) {
   return ok ? (
@@ -2250,12 +2143,10 @@ export default function Status() {
         </Col>
       </Row>
 
-      {/* ── Reference Column Handling (UAT compatibility knob) ── */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24}>
-          <ReferenceColumnHandlingCard />
-        </Col>
-      </Row>
+      {/* Reference Column Handling card removed: capability disabled —
+          all columns (natural + reference) flow through the pipeline
+          unconditionally.  Component definition retained below for
+          history; not rendered. */}
 
       {/* ── SDK Validation ────────────────────────── */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>

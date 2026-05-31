@@ -131,6 +131,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.llm.temperature": ("classify_llm_temperature", float),
     "classify.llm.columns_per_call": ("classify_llm_columns_per_call", int),
     "classify.llm.min_columns_per_call": ("classify_llm_min_columns_per_call", int),
+    "classify.llm.revisit_columns_per_call": ("classify_llm_revisit_columns_per_call", int),
     "classify.llm.max_retries": ("classify_llm_max_retries", int),
     "classify.llm.disable_reasoning": ("classify_llm_disable_reasoning", bool),
     "classify.llm.reasoning_budget": ("classify_llm_reasoning_budget", int),
@@ -152,6 +153,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.exclude_temp_tables": ("classify_exclude_temp_tables", bool),
     "classify.table_exclude_patterns": ("classify_table_exclude_patterns", str),
     "classify.svm.enabled": ("classify_svm_enabled", bool),
+    "classify.svm.source": ("classify_svm_source", str),
     "classify.bootstrap.k_threshold": ("classify_bootstrap_k_threshold", float),
     "classify.bootstrap.coverage_target": ("classify_bootstrap_coverage_target", float),
     "classify.bootstrap.max_total_llm_calls": ("classify_bootstrap_max_total_llm_calls", int),
@@ -163,6 +165,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.bootstrap.bel_floor": ("classify_bootstrap_bel_floor", float),
     "classify.bootstrap.indep_revisit_mass_threshold": ("classify_bootstrap_indep_revisit_mass_threshold", float),
     "classify.bootstrap.top1_margin_threshold": ("classify_bootstrap_top1_margin_threshold", float),
+    "classify.bootstrap.channel_agreement_min": ("classify_bootstrap_channel_agreement_min", int),
+    "classify.bootstrap.channel_agreement_cosine_k": ("classify_bootstrap_channel_agreement_cosine_k", int),
     # DST discount factors
     "classify.discounts.cosine": ("classify_discount_cosine", float),
     # Late-interaction ColBERT cosine via Qdrant — feature-flag gated
@@ -180,6 +184,17 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.discounts.catboost_max": ("classify_discount_catboost_max", float),
     "classify.discounts.catboost_fallback": ("classify_discount_catboost_fallback", float),
     "classify.discounts.confusable_ratio_threshold": ("classify_discount_confusable_ratio_threshold", float),
+    # Mass-magnitude calibration (post-discount α scaling per channel).
+    # Defaults α=1.0 preserve historical behavior; tuning operating
+    # point identified in build/runs/calibration/findings_5ef4868c.md.
+    "classify.mass_calibration.cosine_alpha": ("classify_mass_calibration_cosine_alpha", float),
+    "classify.mass_calibration.svm_alpha": ("classify_mass_calibration_svm_alpha", float),
+    "classify.mass_calibration.catboost_alpha": ("classify_mass_calibration_catboost_alpha", float),
+    "classify.mass_calibration.llm_alpha": ("classify_mass_calibration_llm_alpha", float),
+    # Cosine top-K union focal element ("the answer is in this candidate set").
+    # K=0 disables (default, per-tag singletons preserve historical behavior).
+    "classify.cosine.union_focal_k": ("classify_cosine_union_focal_k", int),
+    "classify.cosine.union_focal_alpha": ("classify_cosine_union_focal_alpha", float),
     # CatBoost training hyperparameters
     "classify.catboost.iterations": ("classify_catboost_iterations", int),
     "classify.catboost.depth": ("classify_catboost_depth", int),
@@ -357,11 +372,12 @@ class AtelierConfig:
     classify_sample_size: int = 50
     classify_column_sample_limit: int = 1000
     classify_tables_limit: int = 100
-    # Reference-column exclusion — see config/base.conf for the
-    # regex pattern and rationale.  Kept as a toggle so UAT reviewers
-    # can demonstrate classifier quality in both configurations on
-    # the synth corpus that motivated it.
-    classify_exclude_reference_columns: bool = True
+    # Reference-column exclusion — DISABLED.  All columns (natural and
+    # reference) are required for the current configuration.  The field
+    # is retained as inert schema so historical snapshots still parse
+    # and external tooling that reads the dataclass keeps working; the
+    # pipeline never consults this value (see classify/pipeline.py).
+    classify_exclude_reference_columns: bool = False
     classify_embedding_model: str = "all-MiniLM-L6-v2"
     classify_embedding_device: str = "auto"
     classify_embedding_batch_size: int = 32
@@ -400,6 +416,7 @@ class AtelierConfig:
     # this size, at which point a per-batch failure is recorded rather
     # than the columns being silently dropped.  1 = per-column fallback.
     classify_llm_min_columns_per_call: int = 1
+    classify_llm_revisit_columns_per_call: int = 20
     classify_llm_max_retries: int = 3
     classify_llm_disable_reasoning: bool = False
     classify_llm_reasoning_budget: int = 8192
@@ -449,6 +466,7 @@ class AtelierConfig:
     # c0ceaf5c regression).  Set true to re-enable the alignment-based
     # SVM after the new training data is in place.
     classify_svm_enabled: bool = False
+    classify_svm_source: str = "registered"
     classify_bootstrap_k_threshold: float = 0.2
     classify_bootstrap_coverage_target: float = 1.0
     classify_bootstrap_max_total_llm_calls: int = 5000
@@ -464,6 +482,8 @@ class AtelierConfig:
     classify_bootstrap_indep_revisit_mass_threshold: float = 0.45
     # DST sensitivity Rec 3 — rank-instability revisit gate.
     classify_bootstrap_top1_margin_threshold: float = 0.05
+    classify_bootstrap_channel_agreement_min: int = 3
+    classify_bootstrap_channel_agreement_cosine_k: int = 3
 
     # DST discount factors.  ``catboost_*`` defaults are calibrated
     # well above the cosine discount because that source is LLM-
@@ -504,10 +524,25 @@ class AtelierConfig:
     classify_discount_catboost_max: float = 0.75
     classify_discount_catboost_fallback: float = 0.55
     classify_discount_confusable_ratio_threshold: float = 3.0
+    # Mass-magnitude calibration (post-discount α multipliers).
+    # Defaults are no-op; Phase 1 calibration sweep on 5ef4868c
+    # identified the operating point α_cosine=0.5, α_svm=15,
+    # α_catboost=0.7, α_llm=0.1 as offline-optimal (no-LLM equivalent).
+    classify_mass_calibration_cosine_alpha: float = 1.0
+    classify_mass_calibration_svm_alpha: float = 1.0
+    classify_mass_calibration_catboost_alpha: float = 1.0
+    classify_mass_calibration_llm_alpha: float = 1.0
+    # Cosine top-K union focal — "answer is in this candidate set"
+    # focal-element shape that matches cosine's actual signal (top-1
+    # 60.75%, top-3 76.33%).  K=0 (default) preserves the existing
+    # per-tag mass path.  K=3 is structurally optimal per Phase 1
+    # findings; K>3 dilutes the focal and underperforms.
+    classify_cosine_union_focal_k: int = 0
+    classify_cosine_union_focal_alpha: float = 0.45
 
     # CatBoost training hyperparameters
     classify_catboost_iterations: int = 1000
-    classify_catboost_depth: int = 6
+    classify_catboost_depth: int = 8
     classify_catboost_learning_rate: float = 0.10
     classify_catboost_fit_to_llm: bool = False
     classify_catboost_fit_to_llm_min_labels: int = 30

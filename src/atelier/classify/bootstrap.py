@@ -86,6 +86,45 @@ _FATAL_MSG_SUBSTRINGS: tuple[str, ...] = (
 )
 
 
+def _canonical_code(emitted: str, category_set) -> str:
+    """Translate an LLM-emitted classification to a canonical hierarchical id.
+
+    The LLM contract surface uses dot-separated mnemonic paths (e.g.
+    ``C_PID.C_FD.A_TXNAMT.TRANSDATE``) as of task #289; internal code
+    (state.labels, classifications.json, registry, mass functions)
+    uses hierarchical ids (e.g. ``1.2.2``).  This helper does the
+    boundary translation.
+
+    Accepts four shapes (in priority order):
+      1. Full mnemonic path → translate via category_set.path_to_id
+      2. Bare hierarchical id (legacy form) → pass through if in vocab
+      3. Bare mnemonic (transitional) → look up via by_abbrev
+      4. Unresolvable → return original (callers can detect by checking
+         membership in by_code or all_by_code)
+
+    Path translation lands here rather than in mass_functions because
+    state.labels (and downstream CatBoost training labels,
+    classifications.json) all need canonical ids; the mass function
+    boundary already handles both forms via _resolve_to_focal_element.
+    """
+    if not emitted or category_set is None:
+        return emitted
+    path_to_id = getattr(category_set, "path_to_id", None) or {}
+    if emitted in path_to_id:
+        return path_to_id[emitted]
+    by_code = getattr(category_set, "by_code", {}) or {}
+    if emitted in by_code:
+        return emitted
+    by_abbrev = getattr(category_set, "by_abbrev", {}) or {}
+    if emitted in by_abbrev:
+        return by_abbrev[emitted].code
+    # Case-insensitive transitional fallback
+    for ab, cat in by_abbrev.items():
+        if ab and ab.upper() == emitted.upper():
+            return cat.code
+    return emitted
+
+
 def _classify_error(exc: Exception) -> str:
     """Return ``"fatal"`` or ``"recoverable"`` for an LLM call exception.
 
@@ -153,6 +192,7 @@ class BootstrapConfig:
     coverage_target: float = 1.0
     confidence_floor: float = 0.5
     columns_per_call: int = 50
+    revisit_columns_per_call: int = 20
     # Floor for exhaustive-halving retry.  A failing batch is repeatedly
     # halved and recursed; 1 means "fall back to per-column attempts" so
     # no column is silently dropped.  Bump only when the backend cannot
@@ -189,6 +229,12 @@ class BootstrapConfig:
     # the cosine/pattern/name_match signal is too diffuse to act on
     # alone (the existing high-K branch still fires when relevant).
     indep_revisit_mass_threshold: float = 0.45
+    # Channel-agreement auto-accept: when >= N ML channels (SVM top-1,
+    # cosine top-K, CatBoost top-1) agree with LLM, skip revisit.
+    # 0 disables the gate.  3 = all three must agree (99.1% accuracy
+    # on 5ef4868c sensitivity study).
+    channel_agreement_min: int = 3
+    channel_agreement_cosine_k: int = 3
     # Wall-clock deadline for the LLM sweep.  ``0`` (default) disables
     # the brake — the attempts cap and consecutive-failure breaker cover
     # the dead-endpoint case, and a healthy-but-slow sweep (large vocab
@@ -213,6 +259,7 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         coverage_target=cfg.classify_bootstrap_coverage_target,
         columns_per_call=cfg.classify_llm_columns_per_call,
         min_columns_per_call=getattr(cfg, "classify_llm_min_columns_per_call", 1),
+        revisit_columns_per_call=getattr(cfg, "classify_llm_revisit_columns_per_call", 20),
         max_total_llm_calls=max_calls,
         max_total_llm_attempts=getattr(
             cfg, "classify_bootstrap_max_total_llm_attempts", 2 * max_calls,
@@ -232,6 +279,12 @@ def bootstrap_config_from_cfg(cfg) -> BootstrapConfig:
         ),
         top1_margin_threshold=getattr(
             cfg, "classify_bootstrap_top1_margin_threshold", 0.05,
+        ),
+        channel_agreement_min=getattr(
+            cfg, "classify_bootstrap_channel_agreement_min", 3,
+        ),
+        channel_agreement_cosine_k=getattr(
+            cfg, "classify_bootstrap_channel_agreement_cosine_k", 3,
         ),
     )
 
@@ -424,6 +477,16 @@ class BootstrapState:
     # See ``ColumnResidualSnapshot`` and
     # docs/src/architecture/dst-evidence-independence.md.
     column_history: dict[str, list[ColumnResidualSnapshot]] = field(default_factory=dict)
+    # Per-channel evidence from ML validation.  Maps column → channel
+    # → {code: mass} (top focals per channel, as produced by
+    # _mass_summary).  Consumed by _llm_revisit to surface per-channel
+    # signals so the LLM can do informed disagreement arbitration.
+    channel_evidence: dict[str, dict[str, dict[str, float]]] = field(default_factory=dict)
+    # Rich embedding text and belief path per column.  Populated by
+    # _run_ml_validation from combine_multiple results; surfaced to the
+    # LLM on revisit so it sees the same input the ML channels saw.
+    ml_embedding_text: dict[str, str] = field(default_factory=dict)
+    ml_belief_path: dict[str, list] = field(default_factory=dict)
 
 
 # ── Phase helpers ────────────────────────────────────────────────
@@ -878,7 +941,7 @@ def _llm_sweep(
                         f"{tname}.{c.column_name}"
                         if tname else c.column_name
                     )
-                    state.labels[key] = c.category_code
+                    state.labels[key] = _canonical_code(c.category_code, category_set)
                     state.confidence[key] = c.confidence
                     state.label_source[key] = "llm"
 
@@ -977,7 +1040,7 @@ def _llm_sweep(
                             f"{tname}.{c.column_name}"
                             if tname else c.column_name
                         )
-                        state.labels[key] = c.category_code
+                        state.labels[key] = _canonical_code(c.category_code, category_set)
                         state.confidence[key] = c.confidence
                         state.label_source[key] = "llm"
 
@@ -1003,6 +1066,8 @@ def _run_ml_validation(
     has_embeddings: bool,
     discounts: DiscountConfig | None = None,
     propagation_discount: float | None = None,
+    atelier_cfg=None,
+    progress_callback=None,
 ) -> None:
     """Phase 2: Run ML classification on all columns, compute K.
 
@@ -1010,10 +1075,18 @@ def _run_ml_validation(
     == "propagated") use a higher discount factor, giving less mass to
     LLM evidence and more to Theta. This lets DST conflict detection
     automatically escalate uncertain propagations.
+
+    ``progress_callback`` (optional): called every 25 columns with
+    ``{"current": <int>, "total": <int>}``.  Pipeline call sites pass
+    a closure that writes those values into the phase_heartbeat ctx,
+    so the UI tree-builder renders a determinate bar through this
+    multi-minute pass.  Defaults to None for non-pipeline callers.
     """
     from atelier.classify.pipeline import _classify_column
 
-    for name in column_names:
+    progress_every = 25
+    total = len(column_names)
+    for idx, name in enumerate(column_names):
         col = samples[name]
         llm_code = state.labels.get(name)
         llm_conf = state.confidence.get(name, 0.0)
@@ -1025,6 +1098,7 @@ def _run_ml_validation(
 
         result = _classify_column(
             col, category_set, frame,
+            cfg=atelier_cfg,
             llm_code=llm_code,
             llm_confidence=llm_conf,
             llm_discount=llm_disc,
@@ -1044,6 +1118,15 @@ def _run_ml_validation(
             # 1.0 (maximally stable) when the field is missing — i.e.,
             # pre-Stage-A result dicts; callers default to stable.
             state.ml_top1_margin[name] = float(result.get("top1_margin", 1.0) or 1.0)
+            ev_sources = result.get("evidence_sources")
+            if ev_sources:
+                state.channel_evidence[name] = ev_sources
+            embed_text = result.get("embedding_text")
+            if embed_text:
+                state.ml_embedding_text[name] = embed_text
+            bp = result.get("belief_path")
+            if bp:
+                state.ml_belief_path[name] = bp
 
         indep_code = result.get("independent_top1_code")
         if indep_code:
@@ -1055,42 +1138,113 @@ def _run_ml_validation(
                 result.get("independent_top1_conflict", 0.0) or 0.0,
             )
 
+        # Periodic progress emission for the UI tree-builder.  Every
+        # progress_every columns + once at the end so partial-batch
+        # tails still register a final tick.  Exception-safe — never
+        # let observability abort the validation pass.
+        if progress_callback is not None and (
+            (idx + 1) % progress_every == 0 or (idx + 1) == total
+        ):
+            try:
+                progress_callback({"current": idx + 1, "total": total})
+            except Exception:
+                pass
+
+
+def _channel_agrees_with_llm(
+    ch_ev: dict[str, dict[str, float]],
+    llm_code: str,
+    cosine_k: int = 3,
+) -> int:
+    """Count how many ML channels (SVM, cosine, CatBoost) agree with LLM.
+
+    Agreement definitions:
+      - SVM / CatBoost: channel top-1 == llm_code
+      - Cosine: llm_code appears in channel top-K
+    """
+    agree = 0
+    for ch in ("svm", "catboost"):
+        ev = ch_ev.get(ch)
+        if ev:
+            top1 = max(ev, key=ev.get).rstrip("*")
+            if top1 == llm_code:
+                agree += 1
+    cosine_ev = ch_ev.get("cosine")
+    if cosine_ev:
+        topk = sorted(cosine_ev, key=cosine_ev.get, reverse=True)[:cosine_k]
+        if llm_code in [c.rstrip("*") for c in topk]:
+            agree += 1
+    return agree
+
+
+def _channel_agreement_locked(
+    state: BootstrapState,
+    column_names: list[str],
+    cfg: BootstrapConfig,
+) -> set[str]:
+    """Return columns locked by channel-agreement auto-accept.
+
+    A column is locked when >= ``channel_agreement_min`` ML channels
+    (SVM top-1, cosine top-K, CatBoost top-1) agree with the LLM.
+    Locked columns must NOT enter the revisit queue from ANY path —
+    neither the disagreement gate nor the uncertainty gate.
+
+    With α_llm=0.1, belief is mechanically low (~0.30) on every column
+    because the LLM's mass contribution is attenuated.  The uncertainty
+    gate (bel < bel_floor) would re-add every column the agreement gate
+    removed.  The lock prevents this — when all channels agree, low
+    belief is an artifact of the calibration, not genuine uncertainty.
+    """
+    min_agree = cfg.channel_agreement_min
+    if min_agree <= 0:
+        return set()
+
+    cosine_k = cfg.channel_agreement_cosine_k
+    locked: set[str] = set()
+    for name in column_names:
+        llm_code = state.labels.get(name)
+        if not llm_code:
+            continue
+        ch_ev = state.channel_evidence.get(name, {})
+        if ch_ev and _channel_agrees_with_llm(ch_ev, llm_code, cosine_k) >= min_agree:
+            locked.add(name)
+
+    if locked:
+        logger.info(
+            "Channel-agreement lock: %d/%d columns (min_agree=%d, cosine_k=%d)",
+            len(locked), len(column_names), min_agree, cosine_k,
+        )
+    return locked
+
 
 def _identify_disagreements(
     state: BootstrapState,
     column_names: list[str],
     cfg: BootstrapConfig,
+    locked: set[str] | None = None,
 ) -> list[str]:
     """Find columns that warrant an LLM revisit.
 
-    A revisit fires when *either*:
+    Columns in ``locked`` (from ``_channel_agreement_locked``) are
+    excluded unconditionally — they are auto-accepted.
 
-    1. The independent-tier consensus (cosine + pattern + name_match)
-       has a top-1 prediction at meaningful mass (≥
-       ``indep_revisit_mass_threshold``) that disagrees with the LLM
-       vote.  This branch matters because the non-distinct ML
-       sources (CatBoost-fit-to-LLM strongly, the LLM-aligned SVM
-       weakly) cannot reliably contradict the LLM — see Shafer 1976
-       §11.3 on reliability discounting and Denoeux 2008 on
-       non-distinct evidence; the SVM's vocab-level alignment
-       dependency is documented in ``ontology_alignment.py``.  The
-       fully-fused ``ml_prediction`` therefore tracks the LLM
-       whenever the LLM is loud, masking genuine independent-source
-       disagreement.  Comparing LLM against the ``{cosine, pattern,
-       name_match}`` consensus restores a real cross-source
-       disagreement test.
+    Among unlocked columns, a revisit fires when *either*:
 
-    2. K is high *and* the fused prediction differs from LLM.  This
-       is the legacy gate, retained as a safety net for cases where
-       the independent consensus is diffuse but conflict is
-       diagnostically high (typical when the LLM is over-confident
-       on a code the ML cluster scattered against).
+    1. **Independent-tier disagreement**: the ``{cosine, pattern,
+       name_match}`` consensus has a top-1 at meaningful mass (≥
+       ``indep_revisit_mass_threshold``) that disagrees with LLM.
 
-    Indep-tier disagreement is prioritized in the returned ordering
-    because it carries the strongest soundness signal.
+    2. **High-K safety net**: fused prediction differs from LLM and
+       K > ``k_threshold``.
+
+    Indep-tier disagreement is prioritized in the returned ordering.
     """
+    locked = locked or set()
     disagreements: list[tuple[str, int, float]] = []
     for name in column_names:
+        if name in locked:
+            continue
+
         llm_code = state.labels.get(name)
         ml_code = state.ml_prediction.get(name)
         k = state.ml_conflict.get(name, 0.0)
@@ -1111,14 +1265,43 @@ def _identify_disagreements(
         )
 
         if fire_indep:
-            # Tier 0: indep-tier disagreement at meaningful mass.
             disagreements.append((name, 0, -indep_mass))
         elif fire_high_k:
-            # Tier 1: high-K legacy safety net.
             disagreements.append((name, 1, -k))
 
     disagreements.sort(key=lambda entry: (entry[1], entry[2]))
     return [name for name, _, _ in disagreements]
+
+
+_REVISIT_CHANNELS = ("cosine", "svm", "catboost")
+
+
+def _format_channel_signals(
+    channel_evidence: dict[str, dict[str, float]],
+    category_set,
+) -> list[dict]:
+    """Build per-channel candidate lists for the revisit prompt."""
+    id_to_path = getattr(category_set, "id_to_path", None) or {}
+    by_code = getattr(category_set, "by_code", {}) or {}
+    all_by_code = getattr(category_set, "all_by_code", {}) or {}
+
+    signals = []
+    for ch in _REVISIT_CHANNELS:
+        ev = channel_evidence.get(ch)
+        if not ev:
+            continue
+        top_k = 3 if ch == "cosine" else 1
+        sorted_codes = sorted(ev.items(), key=lambda x: -x[1])[:top_k]
+        candidates = []
+        for code, mass in sorted_codes:
+            raw_code = code.rstrip("*")
+            path = id_to_path.get(raw_code)
+            if not path:
+                cat = by_code.get(raw_code) or all_by_code.get(raw_code)
+                path = cat.label if cat else raw_code
+            candidates.append((path, round(mass, 3)))
+        signals.append({"channel": ch, "candidates": candidates})
+    return signals
 
 
 def _llm_revisit(
@@ -1170,12 +1353,14 @@ def _llm_revisit(
 
         revisit_context[name] = {
             "ml_prediction": ml_label or ml_code,
-            "belief": 0.0,
-            "plausibility": 0.0,
+            "belief": state.ml_belief.get(name, 0.0),
+            "plausibility": state.ml_plausibility.get(name, 0.0),
             "conflict": state.ml_conflict.get(name, 0),
             "confusable": confusable,
             "pattern_signals": pattern_signals,
             "value_description": value_description,
+            "embedding_text": state.ml_embedding_text.get(name, ""),
+            "belief_path": state.ml_belief_path.get(name, []),
             "previous": {
                 "code": llm_code,
                 "confidence": state.confidence.get(name, 0),
@@ -1185,6 +1370,9 @@ def _llm_revisit(
                 "label": indep_label,
                 "mass": round(state.independent_top1_mass.get(name, 0.0), 4),
             },
+            "channel_signals": _format_channel_signals(
+                state.channel_evidence.get(name, {}), category_set,
+            ),
         }
 
     # Group by table for coherent revisit context
@@ -1193,7 +1381,10 @@ def _llm_revisit(
         table = column_table.get(name, "__flat__")
         by_table.setdefault(table, []).append(name)
 
-    effective_batch = state.effective_batch_size or cfg.columns_per_call
+    effective_batch = min(
+        cfg.revisit_columns_per_call,
+        state.effective_batch_size or cfg.columns_per_call,
+    )
 
     for table_name, table_cols in by_table.items():
         for i in range(0, len(table_cols), effective_batch):
@@ -1232,7 +1423,7 @@ def _llm_revisit(
                         f"{tname}.{c.column_name}"
                         if tname else c.column_name
                     )
-                    state.labels[key] = c.category_code
+                    state.labels[key] = _canonical_code(c.category_code, category_set)
                     state.confidence[key] = c.confidence
                     state.label_source[key] = "llm_revisit"
 
@@ -1321,6 +1512,7 @@ def _identify_uncertain_columns(
     state: BootstrapState,
     column_names: list[str],
     cfg: BootstrapConfig,
+    locked: set[str] | None = None,
 ) -> list[str]:
     """Find columns where the prediction is uncertain.
 
@@ -1338,10 +1530,16 @@ def _identify_uncertain_columns(
       bel and tight gap, yet be one perturbation away from a
       different top-1.
 
+    Columns in ``locked`` (from ``_channel_agreement_locked``) are
+    excluded unconditionally — they are auto-accepted.
+
     Sorted by gap descending (most uncertain first).
     """
+    locked = locked or set()
     uncertain = []
     for name in column_names:
+        if name in locked:
+            continue
         if name not in state.labels:
             continue
         gap = state.ml_plausibility.get(name, 1.0) - state.ml_belief.get(name, 0.0)

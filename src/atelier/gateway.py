@@ -77,6 +77,19 @@ async def _lifespan(app: FastAPI):
             await asyncio.to_thread(_sync_orphaned_runs)
         except Exception as exc:
             _log.warning("Run-state sync skipped: %s", exc)
+        # Drain the restart-ready task queue BEFORE auto-start.  Tasks
+        # pre-enqueued from the Session pod or via the Web Terminal Agent
+        # (apply forward transforms, verify, render change-management
+        # guide) must land before the pipeline runs so it reads the
+        # post-apply Qdrant collection rather than racing it.  fsm_start
+        # itself gates on a clean queue (so warm-state enqueues from
+        # the Agent SDK also serialize correctly), but draining here at
+        # cold-start keeps the gateway-startup logs legible and means
+        # the first pipeline run doesn't pay the drain cost.
+        try:
+            await asyncio.to_thread(_kick_task_queue)
+        except Exception as exc:
+            _log.warning("Task queue dispatch skipped: %s", exc)
         try:
             await asyncio.to_thread(_maybe_auto_start_classify)
         except Exception as exc:
@@ -95,7 +108,22 @@ async def _lifespan(app: FastAPI):
                 pass
 
     cleanup_task = asyncio.create_task(_session_cleanup_loop())
+
+    # Forensics sampler: append memory/load/FSM/queue/RSS state to
+    # .app/forensics/samples.jsonl every 10s (override via
+    # ATELIER_FORENSICS_INTERVAL_S).  Survives across runs (appends;
+    # rotates at 50 MB).  Reader: .app/forensics/digest.py.  See
+    # src/atelier/forensics.py.
+    try:
+        from atelier import forensics as _forensics
+        forensics_task = _forensics.start_sampling_task()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Forensics sampler skipped: %s", exc)
+        forensics_task = None
+
     yield
+    if forensics_task is not None:
+        forensics_task.cancel()
     seed_task.cancel()
     cleanup_task.cancel()
 
@@ -696,6 +724,48 @@ def _maybe_auto_start_classify() -> None:
         "Classify auto-start dispatched (env default — no prior runs): %s → %s",
         source_id, result,
     )
+
+
+def _kick_task_queue() -> None:
+    """Drain the restart-ready task queue SYNCHRONOUSLY at lifespan boot.
+
+    See src/atelier/task_queue.py.  Tasks pre-enqueued from the Session
+    pod or the Web Terminal Agent (apply forward transforms, verify,
+    render change-management guide, etc.) drain here BEFORE auto-start
+    fires the classification pipeline — otherwise the pipeline races
+    the apply step and reads the pre-apply Qdrant collection.
+    Idempotent: handlers detect already-completed work and short-circuit.
+    Crash-safe: orphaned ``running`` entries left behind by an AMP
+    restart are recovered back to ``pending`` on the next boot.
+
+    Blocking: the gateway-startup logs are legible (the drain runs in
+    a single thread under to_thread, finishes, auto-start proceeds).
+    FastAPI's lifespan reaches ``yield`` after this returns; the
+    server doesn't accept requests until the drain completes.  For
+    long-running cohort applies that's tens of seconds of additional
+    boot time — acceptable for the consistency guarantee.
+
+    Failed tasks are recorded under ``build/data/task_queue/failed/``
+    for operator review; surface via ``python -m atelier.task_queue list``.
+    Subsequent ``fsm_start`` calls also run a drain+check via the
+    ``drain_then_check`` gate — handles the case where the operator
+    enqueues tasks via the Web Terminal Agent after boot.
+    """
+    try:
+        from atelier import task_handlers  # noqa: F401  — registers handlers
+        from atelier.task_queue import drain, list_handlers
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Task queue module unavailable: %s", exc)
+        return
+    _log.info(
+        "Task queue: %d handlers registered; draining pending tasks "
+        "synchronously before auto-start", len(list_handlers()),
+    )
+    try:
+        result = drain()
+        _log.info("Task queue drain complete: %s", result)
+    except Exception as exc:  # noqa: BLE001
+        _log.error("Task queue drain crashed: %s", exc, exc_info=True)
 
 
 def _discover_and_register_hive_sources() -> None:
@@ -2529,6 +2599,34 @@ def fsm_start(source_id: str | None = None):
                     "error": "No classification LLM configured. "
                     "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
+        # Gate: serialize on the task queue before dispatching the pipeline.
+        # Tasks enqueued from the Session pod or via the Web Terminal Agent
+        # (apply forward transforms, verify, render change-management guide,
+        # etc.) must complete before a classification run so the pipeline
+        # reads the post-apply Qdrant collection rather than racing it.
+        # Refuses the start when any task fails — the operator must resolve
+        # via `python -m atelier.task_queue {retry|cancel}` before retrying.
+        try:
+            from atelier import task_handlers  # noqa: F401 — registers handlers
+            from atelier.task_queue import drain_then_check
+            is_clean, queue_err, queue_state = drain_then_check()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Task queue gate failed to evaluate (%s) — proceeding with "
+                "pipeline start; investigate task_queue logs", exc,
+            )
+        else:
+            if not is_clean:
+                return {"started": False,
+                        "error": f"Task queue not clean: {queue_err}",
+                        "queue_state": queue_state}
+            if queue_state.get("drain", {}).get("ran"):
+                logger.info(
+                    "Pre-pipeline drain ran %d task(s); queue now clean, "
+                    "proceeding with pipeline start.",
+                    queue_state["drain"]["ran"],
+                )
+
         # Resolve source metadata: connection, database, vocab_uri.
         # Precedence ladder (lowest → highest):
         #   base.conf < .env.cai.enc < ATELIER_CLASSIFY_* operator env
@@ -2979,6 +3077,45 @@ _ui_dist = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"
 _ghostty_dir = _project_root / "ui" / "public" / "ghostty"
 if _ghostty_dir.exists():
     app.mount("/ghostty", StaticFiles(directory=str(_ghostty_dir)), name="ghostty")
+
+_bundle_path = _project_root / "build" / "atelier-state-bundle.tgz"
+
+
+@app.get("/api/bundle/download")
+def bundle_download():
+    """Stream the pre-built state bundle for exfiltration."""
+    if not _bundle_path.exists():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "No bundle found. Build it first."},
+        )
+    return FileResponse(
+        str(_bundle_path),
+        media_type="application/gzip",
+        filename="atelier-state-bundle.tgz",
+    )
+
+
+@app.get("/api/bundle/info")
+def bundle_info():
+    """Return bundle metadata (size, sha256) without downloading."""
+    if not _bundle_path.exists():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=404, content={"detail": "No bundle found."}
+        )
+    import hashlib
+
+    size = _bundle_path.stat().st_size
+    h = hashlib.sha256()
+    with open(_bundle_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return {"size_bytes": size, "sha256": h.hexdigest(), "filename": _bundle_path.name}
+
 
 if _ui_dist.exists():
     # Mount static assets (JS/CSS bundles)

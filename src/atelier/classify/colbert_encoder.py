@@ -162,9 +162,16 @@ def get_encoder() -> _ColBERTEncoder:
 
 
 def set_model_name(name: str) -> None:
-    """Override the ColBERT model (before first use)."""
+    """Override the ColBERT model (before first use).
+
+    No-op when the requested name matches the currently-loaded model —
+    avoids invalidating the cached encoder on every call from per-row
+    inference paths (the bridge calls this for each cosine query).
+    """
     global _model_name, _encoder
     with _lock:
+        if name == _model_name and _encoder is not None:
+            return
         _model_name = name
         _encoder = None
 

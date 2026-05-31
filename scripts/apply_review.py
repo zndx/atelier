@@ -267,16 +267,36 @@ def main() -> int:
             updated += 1
         else:
             added += 1
-        gt[key] = tag
+        # Canonical dual format — persistent taxonomy references must store
+        # mnemonic AND code together to guard against structural drift (see
+        # feedback memory: mnemonics-with-codes).  Writing the bare mnemonic
+        # string here would silently change meaning if a curator moves the
+        # mnemonic to a different code/subtree.
+        gt[key] = {
+            "mnemonic": tag,
+            "code": code,
+            "captured_at": now,
+            "source": "agent_mediated",
+        }
         audit[key] = audit_entry
 
-    # Update review state
+    # Update review state.  Read PRIOR state for this table and merge —
+    # if earlier batches already wrote decisions for some of the "missing"
+    # columns in THIS submission, they're not actually missing.  Compute
+    # completion from agent_mediated.json rather than the per-call view.
+    prior = state.get(table_name) or {}
+    already_decided = {
+        col for k in gt
+        if k.startswith(f"{table_name}.")
+        for col in [k.split(".", 1)[1]]
+    }
+    truly_missing = [c for c in missing if c not in already_decided]
     state[table_name] = {
-        "status": "complete" if not missing else "partial",
+        "status": "complete" if not truly_missing else "partial",
         "reviewed_at": now,
-        "decided_count": len(decisions),
-        "missing_count": len(missing),
-        "table_notes": payload.get("table_notes"),
+        "decided_count": sum(1 for k in gt if k.startswith(f"{table_name}.")),
+        "missing_count": len(truly_missing),
+        "table_notes": payload.get("table_notes") or prior.get("table_notes"),
     }
 
     _archive_artifacts()

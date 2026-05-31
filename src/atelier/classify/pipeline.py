@@ -42,11 +42,14 @@ from atelier.classify.belief import (
 from atelier.classify.evaluation import evaluate_classifications
 from atelier.classify.features import extract_features
 from atelier.classify.fsm import AgentFSM, FSMState
+from atelier.classify.phase_heartbeat import phase_heartbeat
 from atelier.classify.mass_functions import (
     DEFAULT_PATTERN_MAP,
     DiscountConfig,
     catboost_to_mass,
-    cosine_to_mass,
+    # cosine_to_mass removed 2026-05-25 — late_interaction_to_mass via
+    # late_interaction_bridge.try_compute_cosine_mass is the only
+    # cosine-channel path (no silent fallback to legacy single-vector)
     llm_to_mass,
     name_match_to_mass,
     nhsvm_to_mass,
@@ -118,6 +121,10 @@ def _convergence_progress(
         "gap_threshold": boot_cfg.gap_threshold,
         "bel_floor": boot_cfg.bel_floor,
         "clarity_target": boot_cfg.clarity_target,
+        # Iteration ceiling for the UI's "Iteration N of M" banner.
+        # Surfaced here (not at each call site) so every revisit
+        # emission inherits it via the **_convergence_progress spread.
+        "iteration_max": boot_cfg.max_iterations,
         # Thesis core: the LLM-labeled fraction *f* in the operator's
         # thesis, rendered explicitly.
         "llm_fit_labels": len(state.labels),
@@ -208,6 +215,7 @@ def _install_fit_to_llm_catboost(
     samples_by_name: dict[str, ColumnSample],
     category_set: HierarchicalCategorySet,
     save_path: Path | None = None,
+    progress_ctx: dict | None = None,
 ) -> None:
     """Fit an in-memory CatBoost on LLM-labeled columns and install it.
 
@@ -275,6 +283,7 @@ def _install_fit_to_llm_catboost(
         iterations=int(cfg.classify_catboost_iterations),
         depth=int(cfg.classify_catboost_depth),
         learning_rate=float(cfg.classify_catboost_learning_rate),
+        progress_ctx=progress_ctx,
     )
     if classifier is None:
         return
@@ -395,6 +404,78 @@ def _ensure_per_vocab_svm(
         "(%d classes)", bundle_path, len(model._classes),
     )
     return bundle_path
+
+
+def _ensure_registered_svm_head(
+    cfg, category_set,
+    *,
+    taxonomy_id: str = "default",
+    encoder: str = "answerdotai/ModernBERT-base",
+) -> bool:
+    """Load + install the currently-registered NHSVM head, if any.
+
+    Returns True when a head was loaded and installed; False when no
+    ``status='current'`` row exists for (taxonomy_id, encoder).
+
+    Compared to ``_ensure_per_vocab_svm`` (which trains a fresh
+    TF-IDF LinearSVC per run from enrichment payloads), this path
+    consumes a PERSISTENT head trained via ``just optimize svm`` and
+    promoted via ``atelier.registry.nhsvm_head.promote_to_current``.
+
+    Selector logic lives in ``run_classification_pipeline`` via
+    ``cfg.classify_svm_source`` — this function is the runtime
+    consumer of the registry.
+    """
+    from atelier.classify import ml_inference
+    from atelier.classify.factorized_nhsvm import NHSVMHeadAdapter
+    from atelier.registry.nhsvm_head import get_current
+
+    current = get_current(taxonomy_id, encoder)
+    if current is None:
+        logger.info(
+            "_ensure_registered_svm_head: no current head for "
+            "(taxonomy_id=%s, encoder=%s)",
+            taxonomy_id, encoder,
+        )
+        return False
+
+    artifact_path = Path(current["artifact_path"])
+    if not artifact_path.exists():
+        logger.warning(
+            "_ensure_registered_svm_head: registered head id=%s claims "
+            "artifact_path=%s but path missing — falling back",
+            current["id"], artifact_path,
+        )
+        return False
+
+    try:
+        device = "cuda" if _torch_cuda_available() else "cpu"
+        adapter = NHSVMHeadAdapter.load(artifact_path, device=device)
+    except Exception as exc:
+        logger.warning(
+            "_ensure_registered_svm_head: failed to load adapter from %s: "
+            "%s — falling back",
+            artifact_path, exc,
+        )
+        return False
+
+    ml_inference.install_svm(adapter)
+    logger.info(
+        "_ensure_registered_svm_head: installed NHSVM head id=%s "
+        "head_sig=%s training_mode=%s (n_classes=%d)",
+        current["id"], current["head_sig"], current["training_mode"],
+        len(adapter.classes_),
+    )
+    return True
+
+
+def _torch_cuda_available() -> bool:
+    """Best-effort CUDA detection without forcing torch import at module load."""
+    try:
+        import torch  # type: ignore
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
 
 
 def run_classification_pipeline(
@@ -614,6 +695,12 @@ def run_classification_pipeline(
     results_dir = build_dir / "results" / run_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # Export run dir so deep call sites (e.g., the late-interaction
+    # bridge error handler in _classify_column) can dump per-run
+    # diagnostics without threading results_dir through every signature.
+    import os as _os
+    _os.environ["ATELIER_RUN_DIR"] = str(results_dir)
+
     # Disk-space guard — refuse to start if projected free space falls
     # short of mean+2σ of historical run sizes (with headroom).  Better
     # to bail at iteration 0 than to die mid-run with a corrupt
@@ -670,7 +757,9 @@ def run_classification_pipeline(
         # while the work runs so nautilus's stall detector can
         # distinguish "actively waiting on Hive" from "thread died."
         # See atelier.classify.phase_heartbeat for the design.
-        from atelier.classify.phase_heartbeat import phase_heartbeat
+        # (phase_heartbeat is now hoisted to top-of-file imports so the
+        # post-sweep heartbeat wraps below can share it without a local
+        # re-import.)
         from atelier.classify.sampler import probe_connection
 
         # ── LOADING_VOCAB ────────────────────────────────────────
@@ -847,8 +936,15 @@ def run_classification_pipeline(
                 fsm, run_id, FSMState.SAMPLING,
                 interval_s=heartbeat_interval, label="sampling",
             ) as sampling_ctx:
+                # Determinate progress for the nested UI tree:
+                # ``current`` + ``total`` populate phase_heartbeat's
+                # structured sub_phase block.  ``tables_sampled`` /
+                # ``current_table`` kept for backcompat with the
+                # flat-rendering UI fields.
+                sampling_ctx["total"] = len(table_names)
                 for i, tname in enumerate(table_names):
                     sampling_ctx["tables_sampled"] = i
+                    sampling_ctx["current"] = i + 1
                     sampling_ctx["current_table"] = tname
                     try:
                         ts = sample_table_metadata(
@@ -858,6 +954,7 @@ def run_classification_pipeline(
                     except Exception as exc:
                         logger.warning("Failed to sample %s: %s", tname, exc)
                 sampling_ctx["tables_sampled"] = len(table_names)
+                sampling_ctx["current"] = len(table_names)
 
         # Strip tables that shouldn't be classified (vocabulary tables,
         # internal test leftovers).  The annotations table IS the vocab,
@@ -954,12 +1051,15 @@ def run_classification_pipeline(
         # var_26).  The original assumption that "the pattern doesn't
         # match production column names" was incorrect.
         #
-        # Gated by ``classify_exclude_reference_columns`` so UAT
-        # reviewers can demonstrate accuracy in both configurations
-        # (the toggle lives on the Status page).  Default ON; flag
-        # exists purely for the UAT synth corpus that motivated it
-        # and will be removed once that dataset is retired.
-        if cfg.classify_exclude_reference_columns and not _samples_from_hive:
+        # Reference-column exclusion is DISABLED at the pipeline level.
+        # The UAT synth corpus that motivated it pairs every natural-named
+        # column with an answer-key twin (attr_*, code_*, ...) whose numeric
+        # suffix encodes the expected code — but the current configuration
+        # requires ALL columns (both natural and reference) to flow through
+        # the classifier.  The flag (``cfg.classify_exclude_reference_columns``)
+        # and its Settings-overlay entry are retained as inert schema for
+        # back-compat with snapshots and external tooling, but never consulted.
+        if False and cfg.classify_exclude_reference_columns and not _samples_from_hive:
             from atelier.classify.meta_tagging_source import exclude_reference_columns
             pre_filter_cols = sum(len(t.columns) for t in all_samples)
             all_samples = exclude_reference_columns(all_samples)
@@ -1014,6 +1114,7 @@ def run_classification_pipeline(
             BootstrapState,
             FatalLLMError,
             bootstrap_config_from_cfg,
+            _channel_agreement_locked,
             _coverage,
             _identify_disagreements,
             _identify_uncertain_columns,
@@ -1054,23 +1155,77 @@ def run_classification_pipeline(
         # SVM/CatBoost pair without retraining.
 
         # Multi-run safety: clear any SVM that a prior pipeline run on
-        # this same process installed.  ``_ensure_per_vocab_svm``
-        # re-installs on success.  If it fails, the SVM source stays
-        # absent rather than carrying a stale prior-vocabulary model
-        # into the new frame.
+        # this same process installed.  The selector below
+        # re-installs on success.  If both paths fail, the SVM source
+        # stays absent rather than carrying a stale prior-vocabulary
+        # model into the new frame.
         ml_inference.reset_svm()
 
-        try:
-            _ensure_per_vocab_svm(
-                cfg, category_set,
-                cache_dir=build_dir / "cache" / "svm",
-                run_dir=results_dir,
-            )
-        except Exception as exc:
+        # SVM channel source selector.  See
+        # .claude/plans/lovely-doodling-badger.md Step 6 + the
+        # feedback_no_silent_dst_degradation memory rule.
+        svm_source = getattr(cfg, "classify_svm_source", "auto")
+        if svm_source not in ("registered", "per_vocab_legacy", "auto"):
             logger.warning(
-                "per-vocab SVM build failed — SVM evidence will be "
-                "absent for this run: %s", exc,
+                "classify.svm.source=%r is not a valid value; "
+                "falling back to 'auto'", svm_source,
             )
+            svm_source = "auto"
+
+        if svm_source == "registered":
+            # Strict path: a current registered head MUST exist.
+            if not _ensure_registered_svm_head(cfg, category_set):
+                raise RuntimeError(
+                    "classify.svm.source='registered' but no current head "
+                    "found in nhsvm_head_registry.  Promote a head via "
+                    "atelier.optimize.svm.promote.promote_head() + "
+                    "atelier.registry.nhsvm_head.promote_to_current() "
+                    "before running with this mode."
+                )
+            logger.info("SVM channel: registered NHSVM head path")
+        elif svm_source == "per_vocab_legacy":
+            # Strict legacy path — emergency rollback knob.
+            try:
+                _ensure_per_vocab_svm(
+                    cfg, category_set,
+                    cache_dir=build_dir / "cache" / "svm",
+                    run_dir=results_dir,
+                )
+                logger.info("SVM channel: per-vocab legacy LinearSVC path (forced)")
+            except Exception as exc:
+                logger.warning(
+                    "per-vocab SVM build failed — SVM evidence absent: %s",
+                    exc,
+                )
+        else:  # 'auto' (transitional default)
+            # Try registered; fall back loud-and-tagged to legacy.
+            # Per feedback_no_silent_dst_degradation: fallback to
+            # pre-enhancement state is *deployment-degraded*, logged
+            # loudly + tagged in operator artifacts.
+            if _ensure_registered_svm_head(cfg, category_set):
+                logger.info("SVM channel: registered NHSVM head path (auto-selected)")
+            else:
+                logger.warning(
+                    "degraded_no_head_registered: no current NHSVM head "
+                    "found in registry; SVM channel falls back to "
+                    "per-vocab TF-IDF LinearSVC.  Per "
+                    "feedback_hierarchical_svm_only memory rule, the "
+                    "fallback violates hierarchical=True; promote a "
+                    "reference-primary head via "
+                    "atelier.optimize.svm.promote.promote_head() to "
+                    "restore the architecturally-correct channel."
+                )
+                try:
+                    _ensure_per_vocab_svm(
+                        cfg, category_set,
+                        cache_dir=build_dir / "cache" / "svm",
+                        run_dir=results_dir,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "per-vocab legacy fallback ALSO failed — SVM evidence "
+                        "absent for this run: %s", exc,
+                    )
 
         # Try sentence-transformers for cosine
         has_embeddings = False
@@ -1183,12 +1338,26 @@ def run_classification_pipeline(
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
             progress_callback=_sweep_progress,
+            category_set=category_set,
         )
 
         # ── Label Propagation ──────────────────────────────────────
         if mc_plan and not mc_plan.is_passthrough:
             from atelier.classify.monte_carlo import propagate_labels as _propagate
             _propagate(state, mc_plan, samples_by_name, mc_cfg)
+            # Refresh the UI count: propagation fills the un-sampled
+            # tail, but _sweep_progress only fires from inside
+            # _llm_sweep — without this the Status card freezes at the
+            # sweep's final llm_labeled value (e.g. 1148/1149 for a
+            # 1149-column corpus with 1148 directly sampled).
+            _sweep_progress({
+                "phase": "propagation_complete",
+                "columns_labeled": len(state.labels),
+                "llm_calls_total": state.llm_calls_total,
+                "truncation_count": state.truncation_count,
+                "failed_columns": len(state.failed_columns),
+                "batches_attempted": 0,
+            })
 
         coverage = _coverage(state, column_names)
         logger.info(
@@ -1203,12 +1372,32 @@ def run_classification_pipeline(
         # evidence fusion + SHAP/SAGE attribute against the model that
         # agrees with the LLM by construction.  Replaces the pre-trained
         # classify_catboost_model_path for the rest of this run only.
+        #
+        # Wrapped in phase_heartbeat so FSM.updated_at advances every
+        # 5s while training runs — distinguishes "actively training a
+        # large CatBoost" from "thread died."  Training on a 1149-column
+        # corpus is 30-50 min on this hardware; without the heartbeat
+        # the Status UI freezes at the last LLM_SWEEP heartbeat
+        # ("sweep_success_d0") for that entire window.  State stays
+        # LLM_SWEEP — only the sub-phase label changes.
         if getattr(cfg, "classify_catboost_fit_to_llm", False):
             try:
-                _install_fit_to_llm_catboost(
-                    cfg, state, samples_by_name, category_set,
-                    save_path=results_dir / "catboost_fit_to_llm.cbm",
-                )
+                with phase_heartbeat(
+                    fsm, run_id, FSMState.LLM_SWEEP,
+                    interval_s=heartbeat_interval,
+                    label="fit_to_llm_training",
+                ) as catboost_ctx:
+                    # Thread the heartbeat ctx into CatBoost's training
+                    # loop so the per-iteration callback can populate
+                    # current/total — phase_heartbeat reads those into
+                    # the structured sub_phase block on each tick,
+                    # giving the UI a determinate bar throughout the
+                    # ~30-50 min training window.
+                    _install_fit_to_llm_catboost(
+                        cfg, state, samples_by_name, category_set,
+                        save_path=results_dir / "catboost_fit_to_llm.cbm",
+                        progress_ctx=catboost_ctx,
+                    )
             except Exception as exc:
                 logger.warning("fit_to_llm install failed (non-fatal): %s", exc)
 
@@ -1222,19 +1411,42 @@ def run_classification_pipeline(
         # MC-aware discount: propagated labels get higher discount
         prop_discount = mc_cfg.propagation_discount if mc_plan and not mc_plan.is_passthrough else None
 
-        _run_ml_validation(
-            state, boot_cfg, column_names, samples_by_name,
-            category_set, frame, has_embeddings, discounts=discounts,
-            propagation_discount=prop_discount,
-        )
+        # Wrap the initial ML validation pass in a phase_heartbeat —
+        # iterating _classify_column over 1149 columns takes many
+        # minutes (Qdrant query + DST fusion per column).  Without the
+        # 5s heartbeat tick, FSM.updated_at would only move when the
+        # whole pass completes, indistinguishable from a hung daemon.
+        # State is already VALIDATING (advanced just above); the
+        # "ml_validation" label matches the sub-phase the manual
+        # fsm.advance writes.
+        with phase_heartbeat(
+            fsm, run_id, FSMState.VALIDATING,
+            interval_s=heartbeat_interval,
+            label="ml_validation",
+        ) as val_ctx:
+            # Per-column progress: bootstrap._run_ml_validation calls
+            # this every 25 columns with {current, total}.  Phase_heartbeat
+            # reads those into the structured sub_phase block on each
+            # 5s tick so the UI tree-builder renders a determinate bar.
+            def _ml_validate_progress(p: dict) -> None:
+                val_ctx["current"] = p.get("current", 0)
+                val_ctx["total"] = p.get("total", 0)
+            _run_ml_validation(
+                state, boot_cfg, column_names, samples_by_name,
+                category_set, frame, has_embeddings, discounts=discounts,
+                propagation_discount=prop_discount,
+                atelier_cfg=cfg,
+                progress_callback=_ml_validate_progress,
+            )
 
-        disagreements = _identify_disagreements(state, column_names, boot_cfg)
+        locked = _channel_agreement_locked(state, column_names, boot_cfg)
+        disagreements = _identify_disagreements(state, column_names, boot_cfg, locked=locked)
         mean_k = _mean_k(state, column_names)
         mean_gap = _mean_gap(state, column_names)
 
         logger.info(
-            "ML validation: mean_gap=%.3f, mean_K=%.3f, disagreements=%d",
-            mean_gap, mean_k, len(disagreements),
+            "ML validation: mean_gap=%.3f, mean_K=%.3f, disagreements=%d, locked=%d",
+            mean_gap, mean_k, len(disagreements), len(locked),
         )
 
         # ── TARGETED REVISIT LOOP ────────────────────────────────
@@ -1288,7 +1500,7 @@ def run_classification_pipeline(
                 )
                 fallback_candidates: list[str] = list(disagreements)
                 fb_uncertain = _identify_uncertain_columns(
-                    state, column_names, boot_cfg,
+                    state, column_names, boot_cfg, locked=locked,
                 )
                 seen = set(fallback_candidates)
                 for n in fb_uncertain:
@@ -1312,9 +1524,11 @@ def run_classification_pipeline(
                         state, boot_cfg, column_names, samples_by_name,
                         category_set, frame, has_embeddings,
                         discounts=discounts,
+                        atelier_cfg=cfg,
                     )
+                    locked = _channel_agreement_locked(state, column_names, boot_cfg)
                     fallback_candidates = list(_identify_uncertain_columns(
-                        state, column_names, boot_cfg,
+                        state, column_names, boot_cfg, locked=locked,
                     ))
             # Carry the agent's structured tag (if it picked one) and
             # its prose reason as a separate detail field.  Tag drives
@@ -1341,7 +1555,7 @@ def run_classification_pipeline(
             # Mirrors the ``max_iterations >= 2`` directive in 0c0170f.
             for iteration in range(1, boot_cfg.max_iterations + 1):
                 revisit_candidates = list(disagreements)
-                uncertain = _identify_uncertain_columns(state, column_names, boot_cfg)
+                uncertain = _identify_uncertain_columns(state, column_names, boot_cfg, locked=locked)
                 # Dedupe while preserving disagreement ordering (highest K first).
                 seen = set(revisit_candidates)
                 for name in uncertain:
@@ -1445,6 +1659,7 @@ def run_classification_pipeline(
                     state, boot_cfg, column_names, samples_by_name,
                     category_set, frame, has_embeddings, discounts=discounts,
                     propagation_discount=prop_discount,
+                    atelier_cfg=cfg,
                 )
 
                 # Row MC: record label history for stability tracking
@@ -1455,7 +1670,8 @@ def run_classification_pipeline(
                                 state.labels[name]
                             )
 
-                disagreements = _identify_disagreements(state, column_names, boot_cfg)
+                locked = _channel_agreement_locked(state, column_names, boot_cfg)
+                disagreements = _identify_disagreements(state, column_names, boot_cfg, locked=locked)
                 mean_k = _mean_k(state, column_names)
                 mean_gap = _mean_gap(state, column_names)
                 coverage = _coverage(state, column_names)
@@ -1629,32 +1845,47 @@ def run_classification_pipeline(
             )
 
         classifications: list[dict[str, Any]] = []
-        for col in all_columns:
-            # Cross-table state dicts are keyed by ``qualified_name``
-            # (see the keying note above where ``samples_by_name`` is
-            # built); ``col.name`` is the bare canonical column id and
-            # would silently miss every entry past the first cross-
-            # table collision.
-            qkey = col.qualified_name
-            llm_code = state.labels.get(qkey)
-            llm_conf = state.confidence.get(qkey, 0.0)
-            result = _classify_column(
-                col, category_set, frame,
-                llm_code=llm_code,
-                llm_confidence=llm_conf,
-                llm_discount=boot_cfg.llm_discount,
-                use_cosine=has_embeddings,
-                discounts=discounts,
-                fusion_strategy=cfg.classify_fusion_strategy,
-                resolve_llm_annotation_mnemonic=getattr(
-                    cfg, "classify_resolve_llm_annotation_mnemonic", True,
-                ),
-                svm_hierarchical=svm_hierarchical,
-                nhsvm_temperature=nhsvm_temp,
-                nhsvm_alphas=nhsvm_alphas,
-                nhsvm_distance_matrix=nhsvm_dist_matrix,
-            )
-            classifications.append(result)
+        # Wrap the final-classification pass in phase_heartbeat for
+        # the same reason VALIDATING is wrapped — _classify_column on
+        # ~1149 columns runs many minutes (Qdrant query + DST fusion
+        # per column).  Without the tick, FSM.updated_at only moves
+        # at phase entry/exit.  The progress ctx populates the
+        # structured sub_phase block; UI renders a determinate bar
+        # via the tree-builder.
+        with phase_heartbeat(
+            fsm, run_id, FSMState.CLASSIFYING,
+            interval_s=heartbeat_interval,
+            label="final_classification",
+        ) as cls_ctx:
+            cls_ctx["total"] = len(all_columns)
+            for cls_idx, col in enumerate(all_columns):
+                # Cross-table state dicts are keyed by ``qualified_name``
+                # (see the keying note above where ``samples_by_name`` is
+                # built); ``col.name`` is the bare canonical column id and
+                # would silently miss every entry past the first cross-
+                # table collision.
+                qkey = col.qualified_name
+                llm_code = state.labels.get(qkey)
+                llm_conf = state.confidence.get(qkey, 0.0)
+                result = _classify_column(
+                    col, category_set, frame,
+                    cfg=cfg,
+                    llm_code=llm_code,
+                    llm_confidence=llm_conf,
+                    llm_discount=boot_cfg.llm_discount,
+                    use_cosine=has_embeddings,
+                    discounts=discounts,
+                    fusion_strategy=cfg.classify_fusion_strategy,
+                    resolve_llm_annotation_mnemonic=getattr(
+                        cfg, "classify_resolve_llm_annotation_mnemonic", True,
+                    ),
+                    svm_hierarchical=svm_hierarchical,
+                    nhsvm_temperature=nhsvm_temp,
+                    nhsvm_alphas=nhsvm_alphas,
+                    nhsvm_distance_matrix=nhsvm_dist_matrix,
+                )
+                classifications.append(result)
+                cls_ctx["current"] = cls_idx + 1
 
         fsm.advance(run_id, FSMState.FUSING, progress={
             "columns_classified": len(classifications),
@@ -1697,7 +1928,13 @@ def run_classification_pipeline(
                 cautious_audit = {"enabled": True, "error": str(exc)}
 
         # ── EVALUATING ───────────────────────────────────────────
+        # Two emissions bookend the phase: one at entry (so the UI's
+        # tree-builder gets a phase-started row immediately) and one
+        # after evaluation completes (carrying the final summary).
+        # Per-column granularity is overkill — the phase is seconds-
+        # to-tens-of-seconds on the largest corpora.
         fsm.advance(run_id, FSMState.EVALUATING, progress={
+            "phase": "scoring_start",
             "columns_fused": len(classifications),
         })
 
@@ -2416,6 +2653,7 @@ def _classify_column(
     category_set: HierarchicalCategorySet,
     frame: FrameOfDiscernment,
     *,
+    cfg=None,
     llm_code: str | None = None,
     llm_confidence: float = 0.0,
     llm_alternatives: list[dict] | None = None,
@@ -2485,21 +2723,23 @@ def _classify_column(
         source_masses["pattern"] = pattern_mass
 
     # 3. Cosine evidence — late-interaction multi-vector via Qdrant is the
-    # production path (default on); the legacy single-vector path remains
-    # as a transitional emergency fallback only.  See
-    # docs/src/architecture/late-interaction-cosine.md.
-    cosine_path = "unused"  # 'late_interaction' | 'legacy_explicit' |
-                            # 'legacy_degraded:<reason>' | 'unused'
+    # ONLY supported path.  Per the no-silent-DST-degradation rule, the
+    # legacy single-vector fallback was removed: silent fallback to a
+    # weaker evidence source historically destroyed accuracy by mixing
+    # a non-equivalent signal into DST fusion without the operator
+    # knowing.  If late-interaction can't run, the pipeline raises
+    # LateInteractionUnavailable and the FSM fails the run loudly.
+    # See docs/src/architecture/late-interaction-cosine.md.
+    cosine_path = "unused"  # 'late_interaction' | 'explicit_disable' | 'unused'
     cosine_attribution: dict | None = None  # per-decision SHAP surface;
                                             # populated only when
                                             # late-interaction ran cleanly
     if use_cosine:
-        late_mass = None
-        late_status = "explicit_disable"
+        from atelier.classify.late_interaction_bridge import (
+            LateInteractionUnavailable,
+            try_compute_cosine_mass as _try_late_interaction,
+        )
         try:
-            from atelier.classify.late_interaction_bridge import (
-                try_compute_cosine_mass as _try_late_interaction,
-            )
             late_mass, late_status, cosine_attribution = _try_late_interaction(
                 cfg=cfg,
                 column_features=features,
@@ -2511,55 +2751,52 @@ def _classify_column(
                 frame=frame,
                 embed=getattr(cfg, "_embedder", None),
             )
-        except Exception as exc:
-            # The bridge owns its own error handling; reaching here means
-            # the bridge module itself failed to import or its top-level
-            # call raised.  Treat as a deployment issue, log loudly.
-            logger.warning(
-                "late_interaction bridge raised unexpectedly for %s: %s "
-                "(deployment issue; investigate)",
-                col.name, exc,
+        except LateInteractionUnavailable as exc:
+            # Persist the first occurrence per process to a run-dir
+            # artifact so the failure status (and any chained traceback)
+            # survives independent of stdout capture.  Subsequent
+            # occurrences are skipped to avoid IO churn.  Then re-raise
+            # so the FSM advances to ERROR — no silent legacy fallback.
+            logger.error(
+                "late_interaction unavailable for %s.%s (status=%s); "
+                "failing the run rather than degrading DST silently",
+                getattr(col, "table_name", "?"), col.name, exc.status,
+                exc_info=True,
             )
-            late_status = "degraded_bridge_error"
+            try:
+                import os
+                import traceback as _tb
+                run_dir = os.environ.get("ATELIER_RUN_DIR") or os.environ.get("ATELIER_CURRENT_RUN_DIR")
+                if run_dir:
+                    err_path = os.path.join(run_dir, "late_interaction_error.txt")
+                    if not os.path.exists(err_path):
+                        with open(err_path, "w") as _f:
+                            _f.write(f"column: {getattr(col, 'table_name', '?')}.{col.name}\n")
+                            _f.write(f"status: {exc.status}\n")
+                            _f.write(f"exception_repr: {exc!r}\n\n")
+                            _f.write(_tb.format_exc())
+            except Exception:  # noqa: BLE001 — best-effort diag, never mask the raise
+                pass
+            raise
 
         if late_mass is not None:
             source_masses["cosine"] = late_mass
             cosine_path = "late_interaction"
         else:
-            # Fallback to legacy single-vector cosine.  When the operator
-            # explicitly disabled late-interaction, this is silent.  When
-            # the flag is on but the late path failed, emit a WARNING and
-            # tag the column result as degraded so the run artifact
-            # surfaces the issue — leaving the pipeline in degraded mode
-            # is a deployment problem, not a normal operating state.
-            if late_status == "explicit_disable":
-                cosine_path = "legacy_explicit"
-            else:
-                cosine_path = f"legacy_degraded:{late_status}"
-                logger.warning(
-                    "late_interaction unavailable for %s.%s (status=%s); "
-                    "falling back to legacy single-vector cosine — this "
-                    "is a transitional emergency fallback only, not a "
-                    "normal operating mode.  Investigate and restore the "
-                    "late-interaction path (run scripts/enrich_annotations.py "
-                    "or check Qdrant connectivity).",
-                    getattr(col, "table_name", "?"), col.name, late_status,
-                )
+            # The only path that returns late_mass is None is when the
+            # operator explicitly disabled the flag (``explicit_disable``).
+            # In that case the cosine evidence source is simply absent
+            # from DST fusion — by operator choice, not by silent
+            # degradation.
+            assert late_status == "explicit_disable", (
+                f"unexpected None mass from late-interaction bridge "
+                f"with status {late_status!r}"
+            )
+            cosine_path = "explicit_disable"
 
-            try:
-                from atelier.classify.embedding import classify_cosine as _cosine
-                similarities = _cosine(features, category_set)
-                cosine_mass = cosine_to_mass(
-                    similarities, frame, discount=discounts.cosine,
-                )
-                source_masses["cosine"] = cosine_mass
-            except Exception as exc:
-                logger.warning(
-                    "Cosine evidence unavailable for %s.%s "
-                    "(legacy fallback also failed: %s); "
-                    "fusion proceeds without cosine for this column.",
-                    getattr(col, "table_name", "?"), col.name, exc,
-                )
+        # Legacy single-vector cosine fallback (``embedding.classify_cosine``)
+        # was removed here.  Do NOT reintroduce — it would silently
+        # degrade DST and re-open the no-silent-DST-degradation footgun.
 
     # 4. LLM evidence (always present in pipeline; absent only in offline seed prep)
     if llm_code:
@@ -2568,6 +2805,7 @@ def _classify_column(
             llm_alternatives or [],
             frame, discount=llm_discount,
             allow_annotation_fallback=resolve_llm_annotation_mnemonic,
+            alpha=getattr(cfg, "classify_mass_calibration_llm_alpha", 1.0),
         )
         if not _is_vacuous(llm_mass_val):
             source_masses["llm"] = llm_mass_val
@@ -2584,6 +2822,7 @@ def _classify_column(
                 variance_scale=discounts.catboost_variance_scale,
                 max_discount=discounts.catboost_max,
                 fallback_discount=discounts.catboost_fallback,
+                alpha=getattr(cfg, "classify_mass_calibration_catboost_alpha", 1.0),
             )
             if not _is_vacuous(cb_mass):
                 source_masses["catboost"] = cb_mass
@@ -2602,14 +2841,19 @@ def _classify_column(
         from atelier.classify.ml_inference import predict_svm
         svm_proba = predict_svm(features)
         if svm_proba:
+            svm_mass_alpha = getattr(cfg, "classify_mass_calibration_svm_alpha", 1.0)
             if svm_hierarchical and nhsvm_alphas:
                 svm_mass = nhsvm_to_mass(
                     svm_proba, frame, category_set, nhsvm_alphas,
                     discount=discounts.svm, temperature=nhsvm_temperature,
                     distance_matrix=nhsvm_distance_matrix,
+                    mass_alpha=svm_mass_alpha,
                 )
             else:
-                svm_mass = svm_to_mass(svm_proba, frame, discount=discounts.svm)
+                svm_mass = svm_to_mass(
+                    svm_proba, frame,
+                    discount=discounts.svm, alpha=svm_mass_alpha,
+                )
             if not _is_vacuous(svm_mass):
                 source_masses["svm"] = svm_mass
     except Exception as exc:
@@ -3264,9 +3508,10 @@ def _compute_projection(
     fired — Extend handles the None case by re-fitting with a warning.
     """
     # Try UMAP + sentence-transformers for high-quality projection.
-    # When the optional [gpu] extra is installed and a GPU is available,
-    # prefer cuml.UMAP (an order of magnitude faster on large corpora);
-    # otherwise fall back to umap-learn (CPU).
+    # When cuml is installed (via scripts/install_deps.py's GPU-detected
+    # pip-direct block — see CAI-WORKAROUND there) and a GPU is
+    # available, prefer cuml.UMAP (an order of magnitude faster on
+    # large corpora); otherwise fall back to umap-learn (CPU).
     try:
         from atelier.classify.embedding import _get_model, get_batch_size
         import numpy as np

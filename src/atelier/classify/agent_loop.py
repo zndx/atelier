@@ -297,9 +297,12 @@ def _handle_revisit_columns(
     frame: FrameOfDiscernment,
     has_embeddings: bool,
     discounts: DiscountConfig | None = None,
+    *,
+    atelier_cfg=None,
 ) -> dict[str, Any]:
     """Revisit selected columns then revalidate ML on all columns."""
     from atelier.classify.bootstrap import (
+        _channel_agreement_locked,
         _llm_revisit,
         _mean_k,
         _run_ml_validation,
@@ -318,9 +321,11 @@ def _handle_revisit_columns(
     _run_ml_validation(
         state, boot_cfg, all_column_names, samples,
         category_set, frame, has_embeddings, discounts=discounts,
+        atelier_cfg=atelier_cfg,
     )
 
-    disagreements = _identify_disagreements(state, all_column_names, boot_cfg)
+    locked = _channel_agreement_locked(state, all_column_names, boot_cfg)
+    disagreements = _identify_disagreements(state, all_column_names, boot_cfg, locked=locked)
     new_mean_k = _mean_k(state, all_column_names)
     record_iteration_metrics(
         state, all_column_names, len(disagreements), boot_cfg,
@@ -345,6 +350,7 @@ def _handle_check_convergence(
 ) -> dict[str, Any]:
     """Return convergence metrics from BootstrapState."""
     from atelier.classify.bootstrap import (
+        _channel_agreement_locked,
         _coverage,
         _mean_k,
         _max_k,
@@ -357,8 +363,9 @@ def _handle_check_convergence(
         _identify_uncertain_columns,
     )
 
-    disagreements = _identify_disagreements(state, column_names, boot_cfg)
-    uncertain = _identify_uncertain_columns(state, column_names, boot_cfg)
+    locked = _channel_agreement_locked(state, column_names, boot_cfg)
+    disagreements = _identify_disagreements(state, column_names, boot_cfg, locked=locked)
+    uncertain = _identify_uncertain_columns(state, column_names, boot_cfg, locked=locked)
 
     return {
         "iteration": state.iteration,
@@ -410,6 +417,8 @@ def _handle_get_column_detail(
     frame: FrameOfDiscernment,
     boot_cfg: BootstrapConfig,
     discounts: DiscountConfig | None = None,
+    *,
+    atelier_cfg=None,
 ) -> dict[str, Any]:
     """Deep-dive: re-run _classify_column and return full evidence breakdown."""
     col = samples.get(col_name)
@@ -423,6 +432,7 @@ def _handle_get_column_detail(
 
     result = _classify_column(
         col, category_set, frame,
+        cfg=atelier_cfg,
         llm_code=llm_code,
         llm_confidence=llm_conf,
         llm_discount=boot_cfg.llm_discount,
@@ -520,6 +530,7 @@ def _format_initial_state(
 ) -> str:
     """Summarize current state for the agent's first turn."""
     from atelier.classify.bootstrap import (
+        _channel_agreement_locked,
         _coverage,
         _mean_gap,
         _mean_k,
@@ -527,7 +538,8 @@ def _format_initial_state(
         _identify_disagreements,
     )
 
-    disagreements = _identify_disagreements(state, column_names, boot_cfg)
+    locked = _channel_agreement_locked(state, column_names, boot_cfg)
+    disagreements = _identify_disagreements(state, column_names, boot_cfg, locked=locked)
     coverage = _coverage(state, column_names)
     mean_gap = _mean_gap(state, column_names)
     mean_k = _mean_k(state, column_names)
@@ -593,6 +605,7 @@ def _dispatch_tool(
             state, boot_cfg, backend, system_prompt,
             valid_cols, column_names, samples, column_table,
             category_set, frame, has_embeddings, discounts,
+            atelier_cfg=cfg,
         )
 
     elif tool_name == "check_convergence":
@@ -603,6 +616,7 @@ def _dispatch_tool(
         return _handle_get_column_detail(
             state, col_name, samples, category_set,
             frame, boot_cfg, discounts,
+            atelier_cfg=cfg,
         )
 
     elif tool_name == "declare_converged":

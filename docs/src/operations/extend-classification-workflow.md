@@ -397,11 +397,15 @@ into pre-documented failure modes:
 - **System-vs-Person URL** —
   `page_ref`, `media_ref` wanting `PRSNURL`/`INPPHOTO`, still
   getting `SYSURL`
-- **Network identifier confusion** —
-  `network_addr` wanting `DEVMACADDR`, still getting `IPADDR`
+- **Network identifier domain-adaptation gap** —
+  `network_addr` wanting `DEVMACADDR`, still getting `IPADDR` —
+  the SVM has not been trained on synthetic examples that
+  separate MAC-shape from IPv4-shape
 
 These are the targets for the recipe-driven dense-synth SVM
-retraining workstream (parked pending implementation).
+retraining workstream (parked pending implementation) — the
+generators need to teach the SVM patterns the pretrained models
+cannot read.
 
 ---
 
@@ -452,7 +456,7 @@ extend runs produced before the colocation fix landed):
 
 - **Recipe-driven SVM retraining** to address the 8 remaining
   operator-curated misses (parked; needs synth-generator
-  densification around documented confusion pairs)
+  densification around the documented domain-adaptation gaps)
 - **Cautious-review threshold tuning** to align parent classify
   predictions more closely with extend (A/B candidate)
 - **Multi-reviewer ground truth** to replace the single-operator

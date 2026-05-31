@@ -94,14 +94,42 @@ architectural separation of feature spaces and training signals:
 | CatBoost | Dense embedding + 12 features | Synthetic data generators | Gradient-boosted ensemble |
 | **SVM** | **Sparse TF-IDF (char 3-6 + word 1-2 n-grams)** | **Synthetic data generators** | **Lexical surface patterns** |
 
-The SVM is architecturally the most important independence guarantee. While
-cosine similarity and CatBoost both operate on the same dense
-sentence-transformer embedding (384 dimensions from `all-MiniLM-L6-v2`), the
-SVM operates on an entirely orthogonal feature representation: **sparse TF-IDF
-character and word n-grams** extracted by `sklearn.pipeline.Pipeline` +
-`FeatureUnion`. This means the SVM captures lexical surface patterns
-(abbreviations, digit sequences, camelCase fragments) that the dense embedding
-may collapse — providing genuine corrective signal in DST fusion.
+The SVM is Atelier's **domain-adaptation channel**.  Cosine and the
+frontier LLM both rely on pretrained models that read the columns whose
+names and values carry meaning a web-text-trained model can grip on
+(`email_address`, `transaction_amount`, ISO dates).  Many columns in
+deployed enterprise data are not like that: opaque names (`val_09`,
+`col_73`, `ref_addr`), opaque values (hex digests, internal serial
+codes, prefix-stripped tokens), or both.  Pretrained models have nothing
+to grip on for those — the signal lives only in domain-specific shape
+(format, length, character-class distribution, prefix vocabulary) that
+must be learned from data shaped like the deployed distribution.  The
+SVM is trained on synthetic corpora produced by procedural generators
+in `src/atelier/classify/synth_generators.py`, so it learns precisely
+those patterns.  The SVM and cosine therefore operate on **disjoint
+signal populations** — semantic-bearing columns versus inscrutable
+ones — which makes their evidence sources structurally, not merely
+statistically, independent under DST.
+
+A subtler point worth naming: the historical "confusable pair" framing
+attributed to the data what often lived in the *featurizer*.  Char-n-gram
+TF-IDF treating Brazilian CPF identifiers as date-shaped, or sub-word
+tokenization splitting similar-looking strings into overlapping tokens,
+are tokenization artifacts — properties of the model, not the data.
+Domain-adapted training on synthetic-corpus examples that match the
+deployed distribution sees past those artifacts; the SVM is not
+"resolving confusables" but reading columns that pretrained models
+fundamentally cannot.
+
+Architecturally this also provides the most important independence
+guarantee in the DST stack.  While cosine similarity and CatBoost both
+operate on the same dense sentence-transformer embedding (384 dimensions
+from `all-MiniLM-L6-v2`), the SVM operates on a fully orthogonal feature
+representation: **sparse TF-IDF character and word n-grams** extracted by
+`sklearn.pipeline.Pipeline` + `FeatureUnion`.  The SVM captures lexical
+surface patterns (abbreviations, digit sequences, camelCase fragments)
+that the dense embedding collapses — providing genuine corrective
+signal in DST fusion.
 
 #### SVM Architecture (adopted from Signals)
 
@@ -216,27 +244,41 @@ High K means the sources disagree — a valuable diagnostic signal. Note that
 K is **not** the convergence criterion — see [Belief-Gap Convergence](#belief-gap-convergence)
 below.
 
-### Confusable Pairs
+### Compound Focal Elements (Uncertainty Representation)
 
-When DST evidence splits between two known-confusing categories, mass is
-redistributed from the runner-up singleton to a **compound focal element**
-representing the pair. This captures honest ambiguity instead of forcing a
-singleton prediction that may be wrong.
+When DST evidence splits closely between two singleton categories,
+collapsing to a single top-1 prediction misrepresents what the evidence
+actually says.  DST's native vocabulary for this is the **compound focal
+element**: a portion of the runner-up's mass transfers to a focal
+element representing the *union* of the two singletons, honestly
+reflecting that the evidence supports the disjunction but does not
+discriminate between members.  This is the same DST math that supports
+queries at any node in the hierarchy via `belief_at()` — the compound
+mass propagates up to the common ancestor, so belief at any level
+reflects the combined evidence.
 
-Four confusable pairs are active (filtered to vocabulary at runtime):
+The mechanism is unconditional DST: any two singletons whose masses
+split closely qualify in principle.  In practice the implementation
+maintains a short registry of category pairs where the transfer is
+routinely activated — examples below, filtered to vocabulary at
+runtime.  These are **illustrations of cases where the mechanism
+activates**, not a definitional list of categories the classifier is
+expected to "confuse".
 
-| Pair | Rationale |
-|------|-----------|
+| Example pair | Why mass-splitting is common |
+|---|---|
 | Record Identifier ↔ Device Identifier | Both are opaque identifiers; context determines which |
 | Timestamp ↔ Date of Birth | Both are temporal; DOB is a specific semantic subtype |
 | Transaction Amount ↔ Bank Account Number | Both are financial numbers |
 | IP Address ↔ Device Identifier | IP addresses can identify devices |
 
-**Mechanics**: When the top-2 singleton masses form a known pair and their
-ratio is below `confusable_ratio_threshold` (default 3.0), half of the
-runner-up's mass transfers to the pair focal element. The pair's mass
-propagates up the hierarchy via `belief_at()` — Bel at the common ancestor
-reflects the combined evidence.
+**Mechanics**: when the top-2 singleton masses match a registered pair
+and their ratio is below `confusable_ratio_threshold` (default 3.0),
+half of the runner-up's mass transfers to the compound focal element.
+Belief at the common ancestor then reflects the combined evidence via
+`belief_at()` propagation.  (The config knob retains its historical
+name for backward compatibility; the mechanism itself is honest
+uncertainty representation, not pair-discrimination.)
 
 ### Pattern Validation
 
@@ -331,7 +373,7 @@ src/atelier/classify/
 ├── ml_inference.py      # Lazy-loading inference wrappers
 ├── evaluation.py        # Structured evaluation (per-category P/R/F1, confusion matrix)
 ├── train_eval_cycle.py  # Synth → train → classify → evaluate orchestrator
-├── mock_llm.py          # Realistic mock LLM (confusable pairs, seeded mistakes)
+├── mock_llm.py          # Realistic mock LLM (seeded uncertainty + mass-splitting between close categories)
 ├── sage.py              # SAGE feature importance (permutation-based, GPU-aware)
 ├── shap_explanations.py # Per-item SHAP feature attribution (TreeSHAP + PermutationSHAP)
 ├── pipeline.py          # Full pipeline orchestration (6 sources + MC + background SHAP)
@@ -600,7 +642,7 @@ classify.discounts {
     catboost_variance_scale = 1.6    # Variance-to-discount scaling
     catboost_max = 0.50              # Cap on adaptive discount
     catboost_fallback = 0.15         # When no variance available
-    confusable_ratio_threshold = 3.0 # CatBoost confusable pair threshold
+    confusable_ratio_threshold = 3.0 # Mass-split ratio that triggers compound focal element transfer
 }
 ```
 

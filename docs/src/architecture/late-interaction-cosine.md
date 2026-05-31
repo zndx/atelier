@@ -341,10 +341,12 @@ difference shapes content quality:
   generality level — without further specificity to a child*
   looks like.  Children are listed so the model knows what
   specializations would NOT route here.  Anti-examples are
-  hierarchically aware: the confusable_tag may be a sibling at the
-  same level OR a sibling of an ancestor, because the late-
-  interaction architecture's anti-example evidence applies
-  regardless of where in the tree the confusable target lives.
+  hierarchically aware: the `confusable_tag` field (a vestigial name
+  retained for schema stability — see `anti_example_targets_exist`
+  verifier) may point to a sibling at the same level OR a sibling of
+  an ancestor, because the late-interaction architecture's anti-example
+  evidence applies regardless of where in the tree the negative
+  exemplar lives.
 
 ## Late-interaction execution
 

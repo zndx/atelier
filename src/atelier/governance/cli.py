@@ -64,6 +64,11 @@ def _cmd_taxonomy(args: argparse.Namespace) -> int:
 
     connection = args.connection or cfg.classify_connection_name or None
     try:
+        # hierarchical=False intentional: Atlas's classification-type model is
+        # flat (one entity-tag per category, no parent/child relationship).
+        # This CLI emits TaxonomyNode records for Atlas sync, not for training.
+        # Atelier's classifiers are still hierarchical — see
+        # feedback_hierarchical_svm_only.md.
         cset = load_annotations_from_hive(
             cfg,
             connection_name=connection,

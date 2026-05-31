@@ -199,17 +199,78 @@ def load_reference_csv(
     return mapping
 
 
+def _is_dual_format_entry(v: object) -> bool:
+    """Detect dual-format entry: dict with ``mnemonic`` and/or ``code`` keys.
+
+    Distinguishes from the legacy nested-by-table form
+    ``{table: {col: mnemonic}}``, whose values are plain strings.
+    """
+    return isinstance(v, dict) and ("mnemonic" in v or "code" in v)
+
+
+def _resolve_entry(
+    qkey: str,
+    v: object,
+    by_abbrev: dict,
+    unresolved: set[str],
+    drift_events: list[dict],
+) -> str | None:
+    """Resolve one reference entry to a code, honoring dual-format
+    captured codes and recording structural drift.
+
+    Dual-format entries store both ``mnemonic`` and ``code``; the
+    captured ``code`` is authoritative because mnemonics can be moved
+    within the ontology by curators (structural drift).  When the
+    current mnemonic→code resolution disagrees with the captured
+    code, the disagreement is recorded as a drift event for operator
+    visibility — the captured code still wins.
+    """
+    if _is_dual_format_entry(v):
+        captured_code = v.get("code")
+        mnemonic = v.get("mnemonic")
+        if captured_code:
+            if mnemonic and by_abbrev:
+                cat = by_abbrev.get(mnemonic.upper()) or by_abbrev.get(mnemonic)
+                if cat is not None and cat.code != captured_code:
+                    drift_events.append({
+                        "qkey": qkey,
+                        "mnemonic": mnemonic,
+                        "captured_code": captured_code,
+                        "current_code": cat.code,
+                    })
+            return captured_code
+        if mnemonic:
+            cat = by_abbrev.get(mnemonic.upper()) or by_abbrev.get(mnemonic)
+            if cat is not None:
+                return cat.code
+            unresolved.add(mnemonic)
+        return None
+    if isinstance(v, str) and v:
+        cat = by_abbrev.get(v.upper()) or by_abbrev.get(v)
+        if cat is not None:
+            return cat.code
+        unresolved.add(v)
+    return None
+
+
 def load_reference_agent_mediated(
     path: Path,
     category_set: "CategorySet | None" = None,
 ) -> dict[str, str]:
     """Load an agent-mediated reference JSON and return ``{key: code}``.
 
-    The agent-mediated artifact is ``{table.column: MNEMONIC}`` or
-    nested ``{table: {column: MNEMONIC}}``.  Mnemonics are resolved
-    to numeric codes via the category set so that
-    ``ColumnSample.reference_code`` carries the same form as
-    ``best_code`` at comparison time.
+    Supported entry shapes:
+
+    * **Dual format** (preferred) — ``{"mnemonic": "EMAIL", "code":
+      "1.1.1.9.3.1", "captured_at": "...", "source": "..."}``.  The
+      ``code`` is authoritative; the ``mnemonic`` is the human anchor.
+      A structural-drift event is logged when the current mnemonic→code
+      resolution disagrees with the captured code (curator-induced
+      ontology motion); the captured code still wins.
+    * **Legacy mnemonic-only** — ``"EMAIL"``.  Resolved against the
+      current category_set; carries no drift guard.
+    * **Legacy nested-by-table** — ``{"table": {"col": "EMAIL"}}``.
+      Flattened into qualified keys at load time.
 
     Keys are indexed in both qualified (``table.column``) and bare
     (``column``) forms so ``apply_reference`` resolves either shape.
@@ -239,31 +300,32 @@ def load_reference_agent_mediated(
 
     flat: dict[str, str] = {}
     unresolved: set[str] = set()
+    drift_events: list[dict] = []
+
     for k, v in raw.items():
-        if isinstance(v, dict):
+        # Legacy nested-by-table form: dict whose values are themselves
+        # mnemonic strings (NOT a dual-format entry).
+        if isinstance(v, dict) and not _is_dual_format_entry(v):
             for col, ann in v.items():
-                if not ann or not isinstance(ann, str):
+                if not ann:
                     continue
-                cat = by_abbrev.get(ann.upper()) or by_abbrev.get(ann)
-                if cat is not None:
-                    qname = f"{k}.{col}"
-                    flat[qname] = cat.code
-                    flat.setdefault(col, cat.code)
-                else:
-                    unresolved.add(ann)
-        elif isinstance(v, str) and v:
-            cat = by_abbrev.get(v.upper()) or by_abbrev.get(v)
-            if cat is not None:
-                flat[k] = cat.code
-                if "." in k:
-                    bare = k.split(".", 1)[1]
-                    flat.setdefault(bare, cat.code)
-            else:
-                unresolved.add(v)
+                qname = f"{k}.{col}"
+                code = _resolve_entry(qname, ann, by_abbrev, unresolved, drift_events)
+                if code is not None:
+                    flat[qname] = code
+                    flat.setdefault(col, code)
+            continue
+        # Either dual-format entry or legacy mnemonic-only string.
+        code = _resolve_entry(k, v, by_abbrev, unresolved, drift_events)
+        if code is not None:
+            flat[k] = code
+            if "." in k:
+                bare = k.split(".", 1)[1]
+                flat.setdefault(bare, code)
 
     resolved = len({v for v in flat.values()})
     total_entries = sum(
-        len(v) if isinstance(v, dict) else 1
+        len(v) if isinstance(v, dict) and not _is_dual_format_entry(v) else 1
         for v in raw.values()
     )
     log.info(
@@ -277,6 +339,14 @@ def load_reference_agent_mediated(
             len(unresolved),
             ", ".join(sorted(unresolved)[:10])
             + ("…" if len(unresolved) > 10 else ""),
+        )
+    if drift_events:
+        log.warning(
+            "Agent-mediated reference: %d structural-drift event(s) — "
+            "captured code disagrees with current mnemonic resolution. "
+            "Using captured codes (per no-silent-drift policy). "
+            "First 5: %s",
+            len(drift_events), drift_events[:5],
         )
     return flat
 

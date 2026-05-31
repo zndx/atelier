@@ -346,6 +346,11 @@ def main(argv: list[str] | None = None) -> int:
                 summary=summary,
             )
             logger.info("Registered taxonomy collection in PGlite (id=%s)", row_id)
+            from atelier.db.dao import AtelierDao
+            if AtelierDao().set_current_taxonomy_collection(row_id):
+                logger.info("Promoted taxonomy collection %s to 'current'", row_id)
+            else:
+                logger.warning("Failed to promote taxonomy collection %s", row_id)
         except Exception as exc:  # noqa: BLE001 — registration failure is non-fatal
             logger.warning("PGlite registration failed (non-fatal): %s", exc)
 

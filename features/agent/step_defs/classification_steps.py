@@ -658,9 +658,16 @@ def step_cosine_similarities(context, label, sim1, sim2):
 
 @when("I convert similarities to mass")
 def step_cosine_to_mass(context):
-    from atelier.classify.mass_functions import cosine_to_mass
-    context.cosine_mass = cosine_to_mass(
-        context.cosine_similarities, context.cosine_frame, discount=0.30,
+    # Migrated 2026-05-25 from removed `cosine_to_mass`.  The
+    # late-interaction mass function takes (code, score) tuples
+    # instead of a dict; semantically equivalent for these tests
+    # (Haenni-Hartmann reliability + margin-aware allocation +
+    # LCA-subtree aggregation are shared between the legacy single-
+    # vector path and the late-interaction multi-vector path).
+    from atelier.classify.mass_functions import late_interaction_to_mass
+    scored = [(c, s) for c, s in context.cosine_similarities.items()]
+    context.cosine_mass = late_interaction_to_mass(
+        scored, context.cosine_frame, discount=0.30,
     )
 
 
@@ -747,9 +754,10 @@ def step_cosine_within_subtree(context, top1, sim_low, sim_high):
 
 @when("I convert similarities to mass with hierarchical aggregation")
 def step_convert_with_hierarchical(context):
-    from atelier.classify.mass_functions import cosine_to_mass
-    context.loan_cosine_mass = cosine_to_mass(
-        context.loan_sims, context.loan_frame, discount=0.30,
+    from atelier.classify.mass_functions import late_interaction_to_mass
+    scored = [(c, s) for c, s in context.loan_sims.items()]
+    context.loan_cosine_mass = late_interaction_to_mass(
+        scored, context.loan_frame, discount=0.30,
     )
 
 
@@ -780,7 +788,7 @@ def step_belief_exceeds(context, label_a, label_b):
 @given('a HierarchicalClassification where the LLM voted "{llm_code}" but cosine localizes to "Financial Data"')
 def step_hc_llm_vs_cosine(context, llm_code):
     from atelier.classify.belief import FrameOfDiscernment, HierarchicalClassification
-    from atelier.classify.mass_functions import cosine_to_mass, llm_to_mass
+    from atelier.classify.mass_functions import late_interaction_to_mass, llm_to_mass
     cs = _build_loan_hierarchy()
     frame = FrameOfDiscernment(cs)
     sims = {
@@ -790,7 +798,9 @@ def step_hc_llm_vs_cosine(context, llm_code):
         "1.1.1.1.3": 0.46,
         "1.1.1.1.4": 0.47,
     }
-    cosine_m = cosine_to_mass(sims, frame, discount=0.30)
+    cosine_m = late_interaction_to_mass(
+        [(c, s) for c, s in sims.items()], frame, discount=0.30,
+    )
     llm_m = llm_to_mass(llm_code, 0.92, [], frame, discount=0.10)
     context.loan_hc = HierarchicalClassification.from_combined_evidence(
         source_masses={"cosine": cosine_m, "llm": llm_m},

@@ -147,11 +147,24 @@ def predict_svm(features) -> dict[str, float] | None:
 
     Returns:
         {code: probability} dict, or None if model not loaded.
+
+    Dispatch:
+      - If the installed model exposes ``predict_proba_features``
+        (current contract: ``NHSVMHeadAdapter``), pass the full
+        ``ColumnFeatures`` so the model can include sibling enrichment
+        in its text + match the training-time input shape.
+      - Otherwise, fall back to the legacy ``predict_proba_single``
+        text interface (current contract: ``SVMClassifier``).
     """
     model = get_svm()
     if model is None:
         return None
 
+    # Richer features-aware path (NHSVMHeadAdapter exposes this).
+    if hasattr(model, "predict_proba_features"):
+        return model.predict_proba_features(features)
+
+    # Legacy SVMClassifier interface — plain text in, dict out.
     from atelier.classify.svm_classifier import build_svm_text
 
     text = build_svm_text(

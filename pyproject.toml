@@ -54,15 +54,24 @@ dependencies = [
     "cdpcurl>=1.0.0",
 ]
 
-[project.optional-dependencies]
-# RAPIDS GPU extras for UMAP 2D projection acceleration.
-# Installs cuml (CUDA 12 wheel) for cuml.manifold.UMAP, falling back to
-# umap-learn at runtime when not installed.  Not pulled into the default
-# install — CPU-only workstations and non-GPU CAI deployments skip it.
-gpu = [
-    "cuml-cu12>=24.10",
-    "cupy-cuda12x>=13.0",
-]
+# CAI-WORKAROUND: cuml-cu12 + cupy-cuda12x are installed by
+# scripts/install_deps.py via direct pip when nvidia-smi is present,
+# NOT as a [gpu] extra here.  Reason: cuml-cu12's wheel-stub install
+# mechanism (downloads the real wheel from pypi.nvidia.com gated on
+# nvidia-smi at install time) cannot be modeled by uv's resolver,
+# which assumes standard pip-discoverable wheels.  Any uv touch on
+# pyproject.toml fails when these packages are listed here, on hosts
+# without GPU — including the CAI Session pod where ad-hoc dev
+# happens (no operator-controllable way to add GPU to that runtime
+# even though the rest of the CAI environment has plenty available).
+#
+# When the CAI Session-pod runtime gains GPU access — or when cuml
+# ships uv-resolvable wheels — restore as:
+#     [project.optional-dependencies]
+#     gpu = ["cuml-cu12>=24.10", "cupy-cuda12x>=13.0"]
+# and revert scripts/install_deps.py's pip-direct block to:
+#     extras.append("gpu")  # if GPU detected
+# Tracked as a deferred architectural ideal — uv-native end-to-end.
 
 [dependency-groups]
 dev = [
