@@ -12,9 +12,9 @@ its referent **CCO module** and **ICE trichotomy** class. Per-table
 data carries its own upstream license (below). No customer/UAT data —
 by construction (public GitTables only; answer-key names excluded).
 
-- CCO modules covered: 9/11 (Agent, Artifact, Currency Unit, Event, Facility, Geospatial, Information Entity, Quality, Time)
+- CCO modules covered: 10/11 (Agent, Artifact, Currency Unit, Event, Extended Relation, Facility, Geospatial, Information Entity, Quality, Time)
 - leaf types: 30
-- train rows: 210  |  held-out: 120 (covered: 52, weak: 68)
+- train rows: 210  |  held-out: 120 (covered: 57, weak: 63)
 
 ## Leaf types → CCO module / ICE class / DBpedia IRI
 
@@ -22,7 +22,6 @@ by construction (public GitTables only; answer-key names excluded).
 |---|---|---|---|---|
 | `GT.AGENT.ARTIST` | artist | Agent | DesignativeICE | http://dbpedia.org/ontology/artist |
 | `GT.AGENT.AUTHOR` | author | Agent | DesignativeICE | http://dbpedia.org/ontology/author |
-| `GT.AGENT.COMPANY` | company | Agent | DesignativeICE | http://dbpedia.org/ontology/company |
 | `GT.AGENT.ORGANISATION` | organisation | Agent | DesignativeICE | http://dbpedia.org/ontology/organisation |
 | `GT.AGENT.PERSON` | person | Agent | DesignativeICE | http://dbpedia.org/ontology/person |
 | `GT.ARTIFACT.BRAND` | brand | Artifact | DesignativeICE | http://dbpedia.org/ontology/brand |
@@ -35,7 +34,6 @@ by construction (public GitTables only; answer-key names excluded).
 | `GT.FACILITY.BUILDING` | building | Facility | DesignativeICE | http://dbpedia.org/ontology/building |
 | `GT.GEO.ADDRESS` | address | Geospatial | DesignativeICE | http://dbpedia.org/ontology/address |
 | `GT.GEO.CITY` | city | Geospatial | DesignativeICE | http://dbpedia.org/ontology/city |
-| `GT.GEO.COUNTRY` | country | Geospatial | DesignativeICE | http://dbpedia.org/ontology/country |
 | `GT.GEO.PLACE` | place | Geospatial | DesignativeICE | http://dbpedia.org/ontology/place |
 | `GT.GEO.STATE` | state | Geospatial | DesignativeICE | http://dbpedia.org/ontology/state |
 | `GT.INFO.DESCRIPTION` | description | Information Entity | DescriptiveICE | http://dbpedia.org/ontology/description |
@@ -46,8 +44,10 @@ by construction (public GitTables only; answer-key names excluded).
 | `GT.QUAL.TEMPERATURE` | temperature | Quality | DescriptiveICE | http://dbpedia.org/ontology/temperature |
 | `GT.QUAL.WEIGHT` | weight | Quality | DescriptiveICE | http://dbpedia.org/ontology/weight |
 | `GT.QUAL.WIDTH` | width | Quality | DescriptiveICE | http://dbpedia.org/ontology/width |
+| `GT.REL.CURRENCY` | currency | Extended Relation | None | https://dbpedia.org/ontology/currency |
+| `GT.REL.PUBLICATIONDATE` | publicationDate | Extended Relation | None | https://dbpedia.org/ontology/publicationDate |
+| `GT.REL.PUBLISHER` | publisher | Extended Relation | None | https://dbpedia.org/ontology/publisher |
 | `GT.TIME.DATE` | date | Time | DescriptiveICE | http://dbpedia.org/ontology/date |
-| `GT.TIME.DURATION` | duration | Time | DescriptiveICE | http://dbpedia.org/ontology/duration |
 | `GT.TIME.TIME` | time | Time | DescriptiveICE | http://dbpedia.org/ontology/time |
 | `GT.TIME.YEAR` | year | Time | DescriptiveICE | http://dbpedia.org/ontology/year |
 
@@ -66,13 +66,6 @@ by construction (public GitTables only; answer-key names excluded).
 | 10022 | MIT License | https://github.com/alixaxel/dump.HN/blob/11fd7291c89c68daf4196a47e8cfa47e4df30c8d/data/items/2009/02/20/07-08.csv |
 | 100295 | Creative Commons Zero v1.0 Universal | https://github.com/rogerhyam/open_plant_names/blob/a90878a8fa8421a17b8feccb0e13250e51c0d49f/data/names/G/Gymnosteris.csv |
 | 10117 | Creative Commons Zero v1.0 Universal | https://github.com/rogerhyam/open_plant_names/blob/a90878a8fa8421a17b8feccb0e13250e51c0d49f/data/names/K/Kulkarniella.csv |
-| 12579 | MIT License | https://github.com/ARMcK-hub/MarketAnalytica/blob/bdf89464d024dd832b491e1c839a51e4b269f2f7/Project_Files/%23%20Archive/Resources/Fortune500_RawCSV/fortune500-2017.csv |
-| 12981 | MIT License | https://github.com/Shofiul-Alam/magento-app/blob/4a03c899eabbf707260bcdea6c802d583aa4be2f/src/vendor/magento/magento2-base/dev/tests/integration/testsuite/Magento/CustomerImportExport/Model/Import/_files/two_addresses_import_update.csv |
-| 1425 | MIT License | https://github.com/microsoftgraph/dataconnect-solutions/blob/ed8a1f666d1a0e7b8433434dc1107add261a36fd/solutions/projectstaffing/jgraph/hr-data/src/test/resources/test-data/test-06/expected-output/hr-data.csv |
-| 17895 | MIT License | https://github.com/sturrion/stock-market-investment-tools/blob/16c600b1fc38b3d02e03aee46747bdb4552a5ba8/data/sp500.csv |
-| 193035 | GNU Affero General Public License v3.0 | https://github.com/soklim/BPH_Asset/blob/bfb2587678a8c58c86d850bb9e6c64b8f5b7d546/tests/_data/IMPORT_ASSETS.csv |
-| 193077 | GNU Affero General Public License v3.0 | https://github.com/imammahudi/Management-Asset/blob/c25d68be2fe916667a5d435bdba7b3bd6c69a319/tests/_data/IMPORT_ASSETS.csv |
-| 193270 | GNU Affero General Public License v3.0 | https://github.com/JamesDavidsonddls/snipeitddls/blob/f374ac1bf705c3bb06e2847f8cce143635aca7e4/tests/_data/IMPORT_ASSETS.csv |
 | 10028 | MIT License | https://github.com/sopeeweje/NLP-AI-Medicine/blob/be9d2ccf9db1461569b7ca7f05242799dfefe38a/results/07-11-2021--155122/clusters_test/cluster-17.csv |
 | 102530 | MIT License | https://github.com/digital-land/brownfield-land-pipeline/blob/04613fc57efe205239056739629a969b387526ef/var/harmonised/964617aa91b0152ff3e8a90e896df6b4ebc95c4add8a5f7bbcccc4151109d360.csv |
 | 12100 | MIT License | https://github.com/hiteeshpm/Business_Intelligence_and_Business_Analysis/blob/0d82a8b58a724c2cbfaa7533f25b4db9806b6cdd/Final%20Datasets/Data%2017-18/Order%2017-18.csv |
@@ -124,8 +117,6 @@ by construction (public GitTables only; answer-key names excluded).
 | 121418 | GNU Affero General Public License v3.0 | https://github.com/omusico/SelkirkCRM/blob/f2d551a7b37cec4e244daa3ae609524736d51387/SelkirkData/Export/Selkirk_Client_imp_tpl.csv |
 | 122432 | GNU General Public License v3.0 | https://github.com/ari-dasci/S-SDG-Decision/blob/c3211c90697b69db25f6f76d870a7953dccde8ff/exports/ODS-12/wikisurvey_19765_nonvotes_2021-01-14T16_48_44Z.csv |
 | 12600 | The Unlicense | https://github.com/open-austin/construction-permits/blob/0464af73e913012b56518a8a1e5b3b641c367a99/data/1999/1999-06-29.csv |
-| 102244 | MIT License | https://github.com/Bambamoussa/EXTRACTOR2020/blob/c9197497d0cc5915ac815187d7047ba181ebcd00/output/wikitext/Comparison_of_eDonkey_software-2.csv |
-| 10296 | MIT License | https://github.com/BPEsenegal/BPE/blob/23b48b08e8bafe5049a1f77c121b20947a5337f3/data/by_country/Iran.csv |
 | 10382 | MIT License | https://github.com/RCN/events-scraper/blob/e2146c977e00931e20e2545706d3aabe1c071d40/data/results/permit-2014-1639_plain.csv |
 | 1291 | MIT License | https://github.com/RCN/events-scraper/blob/e2146c977e00931e20e2545706d3aabe1c071d40/data/results/permit-2013-1873_plain.csv |
 | 13079 | MIT License | https://github.com/terminological/bibliographic-api-client/blob/02bc088e6b514b8001d5273f45982d3b68966fc8/src/test/resources/modelReferences.csv |
@@ -157,16 +148,24 @@ by construction (public GitTables only; answer-key names excluded).
 | 10654 | GNU General Public License v3.0 | https://github.com/brady-haffey/collector-examples/blob/800da0b591847178beede49ced372bf5ff4e4ed4/web/Default/DefaultSurveys/autism_quotient.csv |
 | 11663 | Creative Commons Zero v1.0 Universal | https://github.com/preprocessed-connectomes-project/giavasis2015-QAP-paper/blob/789429fc79771ab830c0597728a6e1006be6350a/data_analysis/func_corr_scan_params.csv |
 | 1182 | MIT License | https://github.com/m-hasan-n/hlp/blob/fc73f1966fe3acb178863846544abbede79d6104/dataset/sub_22/T107/scene/scene_layout_T107.csv |
+| Book_1jour-1jeu.com_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_5carti.ro_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_7books.hu_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_80mundos.com_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_abbeville.com_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_abebooks.co.uk_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_abebooks.fr_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_11x17.pt_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_2014brazil.co.uk_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_24symbols.com_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_4thestate.co.uk_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_5sentidoseditora.pt_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
+| Book_abramsandchronicle.co.uk_September2020_CPA | WDC SOTAB v2 (research use) | https://webdatacommons.org/structureddata/sotab/ |
 | 100 | GNU General Public License v3.0 | https://github.com/rvalla/SETM/blob/adc8d3e1a624be4d4ab7ce986ba3a33e7a6cd18d/HumanToHumanModel/SimulationData/Infections/02092020_5K_360d_ATST04501_0_infections.csv |
 | 10075 | Apache License 2.0 | https://github.com/MayankAgarwal/DiskDriveDaysPredictor/blob/2f67a777617ae1f201648394981eeffeba50b611/Code/Data/Western%20Digital/WDC%20WD1600AAJS/WD-WMAYV2570576.csv |
 | 100836 | GNU General Public License v3.0 | https://github.com/jjmcnelis/nasa-cmr-inventory/blob/36a3de753b71c559a795e61d0a4aa5756647ddd0/projects/ornldaac/atom/ATom_UHSAS_Data_1619/gr.csv |
 | 100845 | MIT License | https://github.com/xasos/IlliniGuide/blob/a2695decde1479843503e52fb48677c9d75d559a/data/ReviewsCSV/CSV's/Dov_Weiss_1_reviews.csv |
 | 1013 | MIT License | https://github.com/xasos/IlliniGuide/blob/a2695decde1479843503e52fb48677c9d75d559a/data/ReviewsCSV/CSV's/Alfred_Roca_1_reviews.csv |
-| 10092 | MIT License | https://github.com/vrajat/lineage/blob/61fcddbf97e2cd85a725afec0522a915f91f807c/catalog/src/test/resources/redshift_queries.csv |
-| 10150 | MIT License | https://github.com/AnushaNathRoy/Youtube-Study-Buddy/blob/cc99d722543333f3c5b6df0fe266290f01260189/Youtube-Study-Buddy%20App/transcript_csv.csv |
-| 1158 | GNU General Public License v3.0 | https://github.com/hendrikschippers/CNI-Cell-Tracker/blob/b78276a86d734e5005de7fade3d8cebd6b1b00d2/Measurements/OnePlus%208Pro/HAM/2021_01_12%20OP8%20to%20HAM/IperfTransferLog/2021_01_12/IperfIntervalLog_2021_01_12.csv |
-| 134694 | Apache License 2.0 | https://github.com/nattimmis/GoogleAiReleases/blob/999a7a7ce3af6051593b6e947fc251fbbb29bb23/summae/testdata/truth.valid.csv |
-| 13531 | MIT License | https://github.com/WillAbides/klbjplaylist/blob/78fdd0fea0dc057f760317c1d91d39f0e1da562e/data/plays-2021-02-28.csv |
 | 10054 | MIT License | https://github.com/Eliseowzy/financialFraudDetection/blob/ddf57c2ecfab25fc2989adb0283aef56a8156a62/programm/data/email_corpus_by_person/james_foster_enron_com.csv |
 | 10116 | MIT License | https://github.com/Eliseowzy/financialFraudDetection/blob/ddf57c2ecfab25fc2989adb0283aef56a8156a62/programm/data/email_corpus_by_person/eloan_mcfeely_eloan_com.csv |
 | 1012 | University of Illinois/NCSA Open Source License | https://github.com/rai-project/dlperf/blob/88ce34751cf83dd3aecf5967922664341df4b2fc/assets/cudnn_advised_latency/batchsize_64/Tesla_M60/BVLC_CaffeNet.csv |

@@ -55,6 +55,12 @@
       "cco_module": "Quality"
     },
     {
+      "code": "GT.REL",
+      "label": "Extended Relation",
+      "parent_code": "GT",
+      "cco_module": "Extended Relation"
+    },
+    {
       "code": "GT.TIME",
       "label": "Time",
       "parent_code": "GT",
@@ -87,20 +93,6 @@
       "cco_annotations": {
         "acronym": "AUTHOR",
         "definition_source": "http://dbpedia.org/ontology/author"
-      },
-      "is_leaf": true
-    },
-    {
-      "code": "GT.AGENT.COMPANY",
-      "label": "company",
-      "parent_code": "GT.AGENT",
-      "dbpedia_iri": "http://dbpedia.org/ontology/company",
-      "cco_module": "AGENT",
-      "cco_module_label": "Agent",
-      "ice_class": "DesignativeICE",
-      "cco_annotations": {
-        "acronym": "COMPANY",
-        "definition_source": "http://dbpedia.org/ontology/company"
       },
       "is_leaf": true
     },
@@ -273,20 +265,6 @@
       "is_leaf": true
     },
     {
-      "code": "GT.GEO.COUNTRY",
-      "label": "country",
-      "parent_code": "GT.GEO",
-      "dbpedia_iri": "http://dbpedia.org/ontology/country",
-      "cco_module": "GEO",
-      "cco_module_label": "Geospatial",
-      "ice_class": "DesignativeICE",
-      "cco_annotations": {
-        "acronym": "COUNTRY",
-        "definition_source": "http://dbpedia.org/ontology/country"
-      },
-      "is_leaf": true
-    },
-    {
       "code": "GT.GEO.PLACE",
       "label": "place",
       "parent_code": "GT.GEO",
@@ -427,6 +405,48 @@
       "is_leaf": true
     },
     {
+      "code": "GT.REL.CURRENCY",
+      "label": "currency",
+      "parent_code": "GT.REL",
+      "dbpedia_iri": "https://dbpedia.org/ontology/currency",
+      "cco_module": "REL",
+      "cco_module_label": "Extended Relation",
+      "ice_class": null,
+      "cco_annotations": {
+        "acronym": "CURRENCY",
+        "definition_source": "https://dbpedia.org/ontology/currency"
+      },
+      "is_leaf": true
+    },
+    {
+      "code": "GT.REL.PUBLICATIONDATE",
+      "label": "publicationDate",
+      "parent_code": "GT.REL",
+      "dbpedia_iri": "https://dbpedia.org/ontology/publicationDate",
+      "cco_module": "REL",
+      "cco_module_label": "Extended Relation",
+      "ice_class": null,
+      "cco_annotations": {
+        "acronym": "PUBLICATIONDATE",
+        "definition_source": "https://dbpedia.org/ontology/publicationDate"
+      },
+      "is_leaf": true
+    },
+    {
+      "code": "GT.REL.PUBLISHER",
+      "label": "publisher",
+      "parent_code": "GT.REL",
+      "dbpedia_iri": "https://dbpedia.org/ontology/publisher",
+      "cco_module": "REL",
+      "cco_module_label": "Extended Relation",
+      "ice_class": null,
+      "cco_annotations": {
+        "acronym": "PUBLISHER",
+        "definition_source": "https://dbpedia.org/ontology/publisher"
+      },
+      "is_leaf": true
+    },
+    {
       "code": "GT.TIME.DATE",
       "label": "date",
       "parent_code": "GT.TIME",
@@ -437,20 +457,6 @@
       "cco_annotations": {
         "acronym": "DATE",
         "definition_source": "http://dbpedia.org/ontology/date"
-      },
-      "is_leaf": true
-    },
-    {
-      "code": "GT.TIME.DURATION",
-      "label": "duration",
-      "parent_code": "GT.TIME",
-      "dbpedia_iri": "http://dbpedia.org/ontology/duration",
-      "cco_module": "TIME",
-      "cco_module_label": "Time",
-      "ice_class": "DescriptiveICE",
-      "cco_annotations": {
-        "acronym": "DURATION",
-        "definition_source": "http://dbpedia.org/ontology/duration"
       },
       "is_leaf": true
     },

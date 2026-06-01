@@ -166,7 +166,7 @@ def gittables_candidates(max_scan: int):
                 cco = LEAF_CCO.get(lbl)
                 if cco is None or REF_COL_RE.match(col):
                     continue
-                cands[lbl].append({
+                cands[f"{cco[0]}:{lbl}"].append({
                     "file": str(f), "table_id": table_id, "column": col,
                     "leaf": lbl, "cco_module": cco[0], "ice_class": cco[1],
                     "iri": info.get("id"), "description": info.get("description"),
@@ -201,6 +201,102 @@ def read_values(file: str, column: str):
         return []
 
 
+def _cand_values(c: dict) -> list[str]:
+    """Pre-loaded values (CPA / json.gz producers) or lazy parquet read
+    (GitTables). Producer-agnostic so the row-building below is uniform."""
+    if c.get("sample_values") is not None:
+        return list(c["sample_values"])[:N_VALUES]
+    return read_values(c["file"], c["column"])
+
+
+# ── SOTAB CPA producer: Extended Relation (REL) data face ─────────────
+SOTAB_DIR = Path("/raid/datasets/sotab")
+_CPA_CSV = SOTAB_DIR / "sotab_cpa_train_dbpedia.csv"
+_CPA_TABLES = SOTAB_DIR / "Train"
+# Curated CPA relations -> REL leaves. Each is a DBpedia property a column
+# expresses about the table's main entity — the relational data CTA cannot
+# reach. (Some labels coincide with CTA types, e.g. price/author, but here
+# they are RELATIONS, not entity types — hence the module-namespaced keys.)
+CPA_RELATIONS = {
+    "author", "publisher", "director", "artist", "price", "currency",
+    "publicationDate", "releaseDate", "country", "city", "rating", "brand",
+}
+
+
+def _load_cpa_column(table_path: Path, col_index: int) -> tuple[list[str], str]:
+    import pandas as pd
+    try:
+        df = pd.read_json(table_path, compression="gzip", lines=True)
+    except Exception:
+        return [], "object"
+    if col_index >= df.shape[1]:
+        return [], "object"
+    out, seen = [], set()
+    for v in df.iloc[:, col_index].tolist():
+        if v is None:
+            continue
+        s = str(v).strip()
+        if not s or s.lower() in ("none", "nan") or s in seen:
+            continue
+        seen.add(s)
+        out.append(s[:80])
+        if len(out) >= N_VALUES:
+            break
+    return out, str(df.dtypes.iloc[col_index])
+
+
+def sotab_cpa_candidates(max_per_rel: int = 14) -> dict:
+    """Producer: SOTAB CPA columns -> Extended Relation (REL) leaves.
+
+    Each column expresses a relation (DBpedia property) to the table's main
+    entity. This is the data face of the Extended Relation module — CPA, not
+    CTA — that legitimately moves REL from annotation-partial to data-covered.
+    """
+    if not _CPA_CSV.exists():
+        return {}
+    by_rel: dict[str, list] = defaultdict(list)
+    for line in _CPA_CSV.read_text().splitlines()[1:]:
+        p = line.split(",")
+        if len(p) < 4:
+            continue
+        table, _main_i, col_i, iri = p[0], p[1], p[2], p[3]
+        rel = iri.rsplit("/", 1)[-1]
+        if rel not in CPA_RELATIONS:
+            continue
+        try:
+            by_rel[rel].append((table, int(col_i), iri))
+        except ValueError:
+            continue
+    cands: dict[str, list[dict]] = defaultdict(list)
+    for rel, entries in by_rel.items():
+        entries.sort(key=lambda e: (e[0], e[1]))
+        seen_t: set[str] = set()
+        for table, col_i, iri in entries:
+            if table in seen_t:
+                continue
+            seen_t.add(table)
+            tpath = _CPA_TABLES / table
+            if not tpath.exists():
+                continue
+            vals, ctype = _load_cpa_column(tpath, col_i)
+            if not vals:
+                continue
+            entity = table.split("_", 1)[0]
+            cands[f"REL:{rel}"].append({
+                "code": f"GT.REL.{_slug(rel)}", "leaf": rel,
+                "cco_module": "REL", "ice_class": None, "iri": iri,
+                "description": f"DBpedia relation '{rel}' to the {entity} subject.",
+                "table_id": table.replace(".json.gz", ""), "column": f"c{col_i}",
+                "column_type": ctype, "sample_values": vals, "siblings": [entity],
+                "sim": 1.0,  # CPA labels are ground truth
+                "license": "WDC SOTAB v2 (research use)",
+                "csv_url": "https://webdatacommons.org/structureddata/sotab/",
+            })
+            if len(cands[f"REL:{rel}"]) >= max_per_rel:
+                break
+    return cands
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-scan", type=int, default=14000)
@@ -211,27 +307,32 @@ def main() -> int:
         return 1
 
     print(f"scanning ~{args.max_scan} strided parquet files in {RAID_DIR} ...")
-    # Producer fan-in: GitTables CTA today; EAV/CPA/SOTAB producers append
-    # to `cands` here as they land (additive, module-generic downstream).
+    # Producer fan-in: GitTables CTA + SOTAB CPA (Extended Relation). Each
+    # producer yields the same candidate shape keyed by "<MODULE>:<label>";
+    # downstream selection/leaf-building read the module from the candidate.
     cands, scanned, total, sampled = gittables_candidates(args.max_scan)
     print(f"scanned {scanned} labeled parquets ({sampled} sampled of {total} total)")
+    cpa = sotab_cpa_candidates()
+    for k, v in cpa.items():
+        cands[k].extend(v)
+    print(f"  + CPA producer: {len(cpa)} relation leaves for the REL module")
 
     # Keep leaves with enough candidates; prefer CCO-module diversity:
     # round-robin one type per module before filling, so every module that
     # CAN be covered gets at least one leaf.
-    eligible = {lbl: c for lbl, c in cands.items() if len(c) >= MIN_PER_TYPE}
+    eligible = {k: c for k, c in cands.items() if len(c) >= MIN_PER_TYPE}
     by_mod: dict[str, list[str]] = defaultdict(list)
-    for lbl in eligible:
-        by_mod[LEAF_CCO[lbl][0]].append(lbl)
+    for k in eligible:
+        by_mod[cands[k][0]["cco_module"]].append(k)
     for m in by_mod:
-        by_mod[m].sort(key=lambda l: -len(eligible[l]))
+        by_mod[m].sort(key=lambda kk: -len(eligible[kk]))
     chosen: list[str] = []
     while len(chosen) < MAX_TYPES and any(by_mod.values()):
         for m in sorted(by_mod):
             if by_mod[m] and len(chosen) < MAX_TYPES:
                 chosen.append(by_mod[m].pop(0))
-    chosen = sorted(chosen, key=lambda l: (LEAF_CCO[l][0], l))
-    mods_covered = sorted({LEAF_CCO[l][0] for l in chosen})
+    chosen = sorted(chosen, key=lambda kk: (cands[kk][0]["cco_module"], kk))
+    mods_covered = sorted({cands[kk][0]["cco_module"] for kk in chosen})
     print(f"eligible types: {len(eligible)}; selected {len(chosen)} across "
           f"{len(mods_covered)} CCO modules {mods_covered}")
     print(f"  leaves: {chosen}")
@@ -248,17 +349,21 @@ def main() -> int:
     enrich: dict[str, dict] = {}
     prov_rows: list[dict] = []
 
-    for lbl in chosen:
-        cco, ice = LEAF_CCO[lbl]
+    ICE_FULL = {"DES": "DesignativeICE", "DSC": "DescriptiveICE",
+                "PRE": "PrescriptiveICE"}
+    for key in chosen:
+        c0 = cands[key][0]
+        cco = c0["cco_module"]
+        ice = c0.get("ice_class")
+        lbl = c0["leaf"]
         modules_used[cco] = CCO_MODULES[cco]
-        code = f"GT.{cco}.{_slug(lbl)}"
-        iri = next((c["iri"] for c in cands[lbl] if c["iri"]), None)
-        desc = next((c["description"] for c in cands[lbl] if c.get("description")), None)
+        code = c0.get("code") or f"GT.{cco}.{_slug(lbl)}"
+        iri = next((c["iri"] for c in cands[key] if c.get("iri")), None)
+        desc = next((c["description"] for c in cands[key] if c.get("description")), None)
         leaves.append({"code": code, "label": lbl, "parent_code": f"GT.{cco}",
                        "dbpedia_iri": iri, "cco_module": cco,
                        "cco_module_label": CCO_MODULES[cco],
-                       "ice_class": {"DES": "DesignativeICE", "DSC": "DescriptiveICE",
-                                     "PRE": "PrescriptiveICE"}[ice],
+                       "ice_class": ICE_FULL.get(ice),
                        # CCO ExtendedRelationOntology annotations this term
                        # satisfies (acronym, definition_source) — grounding our
                        # own taxonomy in the module. has_token_unit stays unset
@@ -267,7 +372,7 @@ def main() -> int:
                            mnemonic=_slug(lbl), dbpedia_iri=iri),
                        "is_leaf": True})
 
-        picks = sorted(cands[lbl], key=lambda c: (str(c["table_id"]), c["column"]))
+        picks = sorted(cands[key], key=lambda c: (str(c["table_id"]), str(c["column"])))
         seen, uniq = set(), []
         for c in picks:
             k = (c["table_id"], c["column"])
@@ -279,7 +384,7 @@ def main() -> int:
 
         proto, hints = [], set()
         for c in train_c:
-            vals = read_values(c["file"], c["column"])
+            vals = _cand_values(c)
             hints.add(c["column"])
             for v in vals[:3]:
                 if v not in proto and len(proto) < N_PROTOTYPES:
@@ -292,7 +397,7 @@ def main() -> int:
             prov_rows.append({"code": code, "table_id": c["table_id"],
                               "license": c["license"], "csv_url": c["csv_url"]})
         for c in held_c:
-            vals = read_values(c["file"], c["column"])
+            vals = _cand_values(c)
             hints.add(c["column"])
             heldout_rows.append({
                 "table": str(c["table_id"]), "column": c["column"],
@@ -304,7 +409,7 @@ def main() -> int:
         enrich[code] = {
             "code": code, "label": lbl, "mnemonic": _slug(lbl),
             "cco_module": cco,
-            "description": desc or f"DBpedia ontology type '{lbl}' ({iri}).",
+            "description": desc or f"DBpedia term '{lbl}' ({iri}).",
             "prototype_values": proto[:N_PROTOTYPES],
             "name_hints": sorted(hints), "value_patterns": [],
         }

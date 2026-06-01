@@ -91,7 +91,7 @@ column expresses — the only vehicle for the relational module.
 | 8 | **Event** | `cco:Act` / process (occurrent) | CTA ★☆☆ | ✗ | Aegir (todo) |
 | 9 | **Artifact** | `cco:Artifact` | CTA ★☆☆ (thin in web tables) | ✗ | Aegir (todo) |
 | 10 | **Facility** | `cco:Facility` | CTA ★☆☆ (thin) | ✗ | Aegir (todo) |
-| 11 | **Extended Relation** | object properties (is_input_of, affects…) | **CPA** ✓ | ✗ (needs CPA slice) | Aegir (imported) |
+| 11 | **Extended Relation** | object properties (is_input_of, affects…) | **CPA** ✓ | ✓ SOTAB CPA relation leaves | Aegir (imported) |
 
 Readable `cco:` labels follow the vocab-README convention; canonical
 `ont…` IRIs resolve from the module TTLs (Aegir's grounding job). Only the
@@ -126,16 +126,23 @@ for wide tables.
 - **Recovered by strided scanning**: Event, Artifact, Facility — sparse in
   the corpus *prefix* but present once the scan strides across all ~562k
   tables; the `test-gittables` fixture now includes all three.
-- **EAV-gated**: Units of Measure and Extended Relation — surfaced by
-  EAV-pattern tables (in progress; see above), with CPA
-  (`/raid/datasets/sotab/sotab_cpa_*`) a complementary wide-table route to
-  Extended Relation.
+- **CPA-covered**: Extended Relation — `sotab_cpa_candidates()` adds
+  `GT.REL.*` leaves from `/raid/datasets/sotab/sotab_cpa_*`, where each
+  column is annotated by the relation (DBpedia property) it expresses to the
+  table's subject. This is the data face CTA cannot reach.
+- **EAV-gated**: Units of Measure — units are value-level in wide/CPA
+  tables; only an EAV unit column makes them a column type.
 
-**Net: 9 of 11 modules already reached** by the strided GitTables CTA
-fixture (Information Entity, Agent, Time, Quality, Geospatial, Currency,
-Event, Artifact, Facility). The residual 2 (Units of Measure, Extended
-Relation) are EAV-gated, not data-scarce — admitting EAV tables closes the
-gap to 11/11.
+**Net: 10 of 11 modules data-covered** — the strided GitTables CTA fixture
+(Information Entity, Agent, Time, Quality, Geospatial, Currency, Event,
+Artifact, Facility) plus the SOTAB CPA producer (Extended Relation). The
+residual 1 (Units of Measure) is EAV-gated, not data-scarce — admitting EAV
+tables closes the gap to 11/11.
+
+Module coverage ≠ per-read resolution: once Extended Relation is *covered*
+(the vocabulary exists), a relational read whose relation is unresolved is
+still a positively-represented `relation: UNRESOLVED` absence — the two are
+deliberately decoupled.
 
 ## Division of labor
 
@@ -154,11 +161,10 @@ gap to 11/11.
    referent `cco_module` + ICE trichotomy class; the coverage matrix falls
    out of the taxonomy (populated modules vs gaps).
 2. **Broaden the fixture across modules** — DONE. Strided scanning across
-   the full corpus took the fixture to **9 of 11 modules** (30 leaf types).
-3. **Admit EAV-pattern tables** (in progress) → Units of Measure + Extended
-   Relation as classifiable column content (10–11/11). CPA
-   (SOTAB-CPA-derived held-out set) is a complementary wide-table route to
-   Extended Relation.
+   the full corpus took the fixture to 9 modules (CTA), and the SOTAB CPA
+   producer added Extended Relation → **10 of 11** (30 leaf types).
+3. **Admit EAV-pattern tables** (in progress) → Units of Measure as
+   classifiable column content (11/11) — the last EAV-gated module.
 4. **Module-level coverage scenario** — a BDD/eval assertion that reports
    per-CCO-module coverage and fails if a targeted module regresses to zero
    exercised leaves.

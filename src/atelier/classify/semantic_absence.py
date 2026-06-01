@@ -29,13 +29,7 @@ gating is the minimum that makes absence visible and non-assumable.
 """
 from __future__ import annotations
 
-import json
-from functools import lru_cache
-from pathlib import Path
-
 UNRESOLVED = "UNRESOLVED"
-
-_MANIFEST = Path(__file__).resolve().parent / "ontology" / "cco_modules.json"
 
 # Each absence axis is the *unfilled* instance of a canonical CCO annotation
 # property from the ExtendedRelationOntology — grounding the absence in CCO
@@ -68,17 +62,10 @@ INTERFACE_AXES: dict[str, tuple[str, ...]] = {
     "CUR": ("currency_unit",),
 }
 
-# The relation axis is context-dependent (relational / EAV reads, or a
-# pivot/materialized view detached from its association table), gated on the
-# Extended Relation module rather than a single referent module.
+# The relation axis is context-dependent: a relational / EAV read (or a
+# pivot/materialized view detached from its association table) whose relation
+# to the subject is not resolved.
 RELATION_AXIS = "relation"
-
-
-@lru_cache(maxsize=1)
-def _module_status() -> dict[str, str]:
-    """code -> applied_status ('covered' | 'pending') from the manifest."""
-    data = json.loads(_MANIFEST.read_text())
-    return {m["code"]: m["applied_status"] for m in data["modules"]}
 
 
 def unresolved_axes(
@@ -91,17 +78,14 @@ def unresolved_axes(
 
     In wide-table CTA these axes are never resolved (units/currency live
     inside values; relations in schema), so they surface as absent. An
-    EAV / unit resolver fills ``resolved`` to clear them.
+    EAV / unit / relation resolver fills ``resolved`` to clear them.
     """
     have = set(resolved or ())
     axes = [a for a in INTERFACE_AXES.get(referent_module or "", ()) if a not in have]
-    if (
-        relational_context
-        and _module_status().get("REL") != "covered"
-        and RELATION_AXIS not in have
-    ):
-        # 'partial' (annotation properties reachable) still leaves DATA-level
-        # relations un-modeled — the relation axis is absent until 'covered'.
+    if relational_context and RELATION_AXIS not in have:
+        # Per-read resolution, NOT module coverage: even once the Extended
+        # Relation vocabulary exists ('covered'), a relational read whose
+        # relation isn't resolved still leaves the relation axis absent.
         axes.append(RELATION_AXIS)
     return axes
 
