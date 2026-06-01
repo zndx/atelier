@@ -70,6 +70,10 @@ class ReferenceCategory:
     # set by CCO-rooted taxonomies such as the test-gittables fixture.
     cco_module: str | None = None
     ice_class: str | None = None
+    # CCO ExtendedRelationOntology annotation properties this term satisfies
+    # (acronym, definition_source, …) — keyed by property name; see
+    # atelier.classify.cco_annotations. None / empty until grounded.
+    cco_annotations: dict[str, str] | None = None
 
     @property
     def atlas_type_name(self) -> str:

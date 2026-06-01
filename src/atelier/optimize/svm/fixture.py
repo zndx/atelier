@@ -81,7 +81,8 @@ def load_fixture_category_set():
             code=lf["code"], label=lf["label"],
             embedding_text=f"{lf['label']}. {desc}",
             description=desc, parent_code=lf["parent_code"],
-            cco_module=lf.get("cco_module"), ice_class=lf.get("ice_class")))
+            cco_module=lf.get("cco_module"), ice_class=lf.get("ice_class"),
+            cco_annotations=lf.get("cco_annotations")))
     return HierarchicalCategorySet(name="test-gittables", categories=cats)
 
 

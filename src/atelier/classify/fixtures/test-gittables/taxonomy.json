@@ -70,6 +70,10 @@
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "ARTIST",
+        "definition_source": "http://dbpedia.org/ontology/artist"
+      },
       "is_leaf": true
     },
     {
@@ -80,6 +84,10 @@
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "AUTHOR",
+        "definition_source": "http://dbpedia.org/ontology/author"
+      },
       "is_leaf": true
     },
     {
@@ -90,6 +98,10 @@
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "COMPANY",
+        "definition_source": "http://dbpedia.org/ontology/company"
+      },
       "is_leaf": true
     },
     {
@@ -100,6 +112,10 @@
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "ORGANISATION",
+        "definition_source": "http://dbpedia.org/ontology/organisation"
+      },
       "is_leaf": true
     },
     {
@@ -110,6 +126,10 @@
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "PERSON",
+        "definition_source": "http://dbpedia.org/ontology/person"
+      },
       "is_leaf": true
     },
     {
@@ -120,6 +140,10 @@
       "cco_module": "ARTIFACT",
       "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "BRAND",
+        "definition_source": "http://dbpedia.org/ontology/brand"
+      },
       "is_leaf": true
     },
     {
@@ -130,6 +154,10 @@
       "cco_module": "ARTIFACT",
       "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "MODEL",
+        "definition_source": "http://dbpedia.org/ontology/model"
+      },
       "is_leaf": true
     },
     {
@@ -140,6 +168,10 @@
       "cco_module": "ARTIFACT",
       "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "PRODUCT",
+        "definition_source": "http://dbpedia.org/ontology/product"
+      },
       "is_leaf": true
     },
     {
@@ -150,6 +182,10 @@
       "cco_module": "CUR",
       "cco_module_label": "Currency Unit",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "COST",
+        "definition_source": "http://dbpedia.org/ontology/cost"
+      },
       "is_leaf": true
     },
     {
@@ -160,6 +196,10 @@
       "cco_module": "CUR",
       "cco_module_label": "Currency Unit",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "CURRENCY",
+        "definition_source": "http://dbpedia.org/ontology/currency"
+      },
       "is_leaf": true
     },
     {
@@ -170,6 +210,10 @@
       "cco_module": "CUR",
       "cco_module_label": "Currency Unit",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "PRICE",
+        "definition_source": "http://dbpedia.org/ontology/price"
+      },
       "is_leaf": true
     },
     {
@@ -180,6 +224,10 @@
       "cco_module": "EVENT",
       "cco_module_label": "Event",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "EVENT",
+        "definition_source": "http://dbpedia.org/ontology/event"
+      },
       "is_leaf": true
     },
     {
@@ -190,6 +238,10 @@
       "cco_module": "FACILITY",
       "cco_module_label": "Facility",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "BUILDING",
+        "definition_source": "http://dbpedia.org/ontology/building"
+      },
       "is_leaf": true
     },
     {
@@ -200,6 +252,10 @@
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "ADDRESS",
+        "definition_source": "http://dbpedia.org/ontology/address"
+      },
       "is_leaf": true
     },
     {
@@ -210,6 +266,10 @@
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "CITY",
+        "definition_source": "http://dbpedia.org/ontology/city"
+      },
       "is_leaf": true
     },
     {
@@ -220,6 +280,10 @@
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "COUNTRY",
+        "definition_source": "http://dbpedia.org/ontology/country"
+      },
       "is_leaf": true
     },
     {
@@ -230,6 +294,10 @@
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "PLACE",
+        "definition_source": "http://dbpedia.org/ontology/place"
+      },
       "is_leaf": true
     },
     {
@@ -240,6 +308,10 @@
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "STATE",
+        "definition_source": "http://dbpedia.org/ontology/state"
+      },
       "is_leaf": true
     },
     {
@@ -250,6 +322,10 @@
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "DESCRIPTION",
+        "definition_source": "http://dbpedia.org/ontology/description"
+      },
       "is_leaf": true
     },
     {
@@ -260,6 +336,10 @@
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "ID",
+        "definition_source": "http://dbpedia.org/ontology/id"
+      },
       "is_leaf": true
     },
     {
@@ -270,6 +350,10 @@
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "NAME",
+        "definition_source": "http://dbpedia.org/ontology/name"
+      },
       "is_leaf": true
     },
     {
@@ -280,6 +364,10 @@
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
+      "cco_annotations": {
+        "acronym": "TITLE",
+        "definition_source": "http://dbpedia.org/ontology/title"
+      },
       "is_leaf": true
     },
     {
@@ -290,6 +378,10 @@
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "LENGTH",
+        "definition_source": "http://dbpedia.org/ontology/length"
+      },
       "is_leaf": true
     },
     {
@@ -300,6 +392,10 @@
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "TEMPERATURE",
+        "definition_source": "http://dbpedia.org/ontology/temperature"
+      },
       "is_leaf": true
     },
     {
@@ -310,6 +406,10 @@
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "WEIGHT",
+        "definition_source": "http://dbpedia.org/ontology/weight"
+      },
       "is_leaf": true
     },
     {
@@ -320,6 +420,10 @@
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "WIDTH",
+        "definition_source": "http://dbpedia.org/ontology/width"
+      },
       "is_leaf": true
     },
     {
@@ -330,6 +434,10 @@
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "DATE",
+        "definition_source": "http://dbpedia.org/ontology/date"
+      },
       "is_leaf": true
     },
     {
@@ -340,6 +448,10 @@
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "DURATION",
+        "definition_source": "http://dbpedia.org/ontology/duration"
+      },
       "is_leaf": true
     },
     {
@@ -350,6 +462,10 @@
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "TIME",
+        "definition_source": "http://dbpedia.org/ontology/time"
+      },
       "is_leaf": true
     },
     {
@@ -360,6 +476,10 @@
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "cco_annotations": {
+        "acronym": "YEAR",
+        "definition_source": "http://dbpedia.org/ontology/year"
+      },
       "is_leaf": true
     }
   ]

@@ -43,6 +43,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+from atelier.classify.cco_annotations import ground_term_annotations
+
 # ── Configuration ────────────────────────────────────────────────────
 RAID_DIR = Path("/raid/datasets/gittables")
 OUT_DIR = Path("src/atelier/classify/fixtures/test-gittables")
@@ -250,7 +252,14 @@ def main() -> int:
                        "dbpedia_iri": iri, "cco_module": cco,
                        "cco_module_label": CCO_MODULES[cco],
                        "ice_class": {"DES": "DesignativeICE", "DSC": "DescriptiveICE",
-                                     "PRE": "PrescriptiveICE"}[ice], "is_leaf": True})
+                                     "PRE": "PrescriptiveICE"}[ice],
+                       # CCO ExtendedRelationOntology annotations this term
+                       # satisfies (acronym, definition_source) — grounding our
+                       # own taxonomy in the module. has_token_unit stays unset
+                       # (the unit is the semantic absence).
+                       "cco_annotations": ground_term_annotations(
+                           mnemonic=_slug(lbl), dbpedia_iri=iri),
+                       "is_leaf": True})
 
         picks = sorted(cands[lbl], key=lambda c: (str(c["table_id"]), c["column"]))
         seen, uniq = set(), []

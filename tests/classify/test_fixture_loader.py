@@ -56,3 +56,30 @@ def test_train_rows_match_row_schema():
     assert len(rows) >= 100
     r = rows[0]
     assert r.column and r.code and isinstance(r.sample_values, list)
+
+
+def test_taxonomy_terms_grounded_in_cco_annotations():
+    # Carving into the void: our taxonomy terms (ICEs) satisfy CCO
+    # ExtendedRelationOntology annotation properties, grounded from metadata
+    # we already have.
+    from atelier.classify.cco_annotations import CCO_ANNOTATION_PROPERTIES
+
+    cs = load_fixture_category_set()
+    grounded = [c for c in cs.all_categories if getattr(c, "cco_annotations", None)]
+    assert grounded, "fixture leaves must carry CCO-grounded annotations"
+    c = grounded[0]
+    assert "acronym" in c.cco_annotations           # ont00001753 <- mnemonic
+    assert "definition_source" in c.cco_annotations  # ont00001754 <- dbpedia IRI
+    assert set(c.cco_annotations) <= set(CCO_ANNOTATION_PROPERTIES)
+    # has_token_unit stays UNSET — the unit is the semantic absence, not a
+    # filled annotation (the still-open part of the Extended Relation module).
+    assert "has_token_unit" not in c.cco_annotations
+
+
+def test_quality_leaf_grounded_annotations_coexist_with_unit_absence():
+    cs = load_fixture_category_set()
+    q = next(c for c in cs.all_categories if getattr(c, "cco_module", None) == "QUAL")
+    hc = HierarchicalClassification(category=q, confidence=0.9, evidence="")
+    # Filled annotation properties AND the explicit unit absence, side by side.
+    assert "acronym" in (q.cco_annotations or {})
+    assert hc.semantic_absences == {"unit": "UNRESOLVED"}

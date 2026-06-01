@@ -44,11 +44,13 @@ _MANIFEST = Path(__file__).resolve().parent / "ontology" / "cco_modules.json"
 # content entities — which our taxonomy terms are — so the same module also
 # gives us `acronym` (ont00001753) ≡ our abbrev/mnemonic and `definition
 # source` (ont00001754) ≡ our DBpedia-IRI provenance, reachable now.)
+from atelier.classify.cco_annotations import HAS_TOKEN_UNIT
+
 AXIS_CCO_PROPERTY: dict[str, str] = {
     # "has token unit" — the measurement/currency unit of the token used to
     # express an ICE; the formal slot a resolved unit or currency fills.
-    "unit": "https://www.commoncoreontologies.org/ont00001752",
-    "currency_unit": "https://www.commoncoreontologies.org/ont00001752",
+    "unit": HAS_TOKEN_UNIT,
+    "currency_unit": HAS_TOKEN_UNIT,
 }
 
 
