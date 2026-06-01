@@ -13,11 +13,13 @@ ignorance; the ``Pl − Bel`` belief gap), extended to *frame-incompleteness*:
   - Semantic absence says: "a whole *axis* isn't in the frame at all."
 
 Both are uncertainty in Audun Jøsang's sense (the ``u`` of a subjective-logic
-opinion). Omitting them is the Mars-Climate-Orbiter failure class: a
-classification that looks complete but silently drops the load-bearing
-dimension, detonating at a downstream boundary where a consumer assumes a
-value (kg-vs-lb, USD-vs-EUR, or a pivot/materialized view copied without its
-association table). See docs/src/architecture/cco-coverage.md and the
+opinion). Omitting an un-modeled axis is not neutral: the classification
+looks complete while silently dropping a load-bearing dimension, and because
+the axis isn't in the frame, the omission is un-flaggable at the source and
+only surfaces where a downstream consumer assumes a value (kg-vs-lb,
+USD-vs-EUR, a pivot/materialized view copied without its association table).
+Representing it explicitly is the epistemically honest alternative. See
+docs/src/architecture/cco-coverage.md and the
 ``feedback_positively_manage_semantic_absence`` /
 ``feedback_cco_completeness_is_correctness`` directives.
 

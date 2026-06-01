@@ -64,6 +64,12 @@ class ReferenceCategory:
     taxonomy: str = "annotations"
     parent_code: str | None = None
     sensitivity: dict[str, str] | None = None
+    # Referent CCO module (e.g. "QUAL", "AGENT", "GEO") + ICE trichotomy
+    # class — queryable metadata used to detect semantic absence (a value's
+    # unit/currency/relation axis). None on the ICE-only production vocab;
+    # set by CCO-rooted taxonomies such as the test-gittables fixture.
+    cco_module: str | None = None
+    ice_class: str | None = None
 
     @property
     def atlas_type_name(self) -> str:

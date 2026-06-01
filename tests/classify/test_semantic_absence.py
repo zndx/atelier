@@ -1,15 +1,16 @@
 # Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
 
-"""Mars-Climate-Orbiter guard: semantic absence is surfaced, never silent.
+"""Epistemic-completeness guard: semantic absence is surfaced, never silent.
 
-These tests are the standing assertion behind
-``feedback_cco_completeness_is_correctness`` and
-``feedback_positively_manage_semantic_absence``: a measurement / monetary /
-relational classification must carry an explicit ``UNRESOLVED`` token for its
-un-modeled interface axis, and any claim depending on that axis must be
-gated — so no downstream consumer can silently assume a unit, currency, or
-relation (the kg-vs-lb mismatch that destroyed the Mars Climate Orbiter; the
-pivot view copied without its association table).
+The standing assertion behind ``feedback_positively_manage_semantic_absence``
+and ``feedback_cco_completeness_is_correctness``: an un-modeled interface axis
+(a value's unit / currency / relation) is frame-incompleteness uncertainty
+and must be represented explicitly — a measurement / monetary / relational
+classification carries an ``UNRESOLVED`` token for that axis, and any claim
+depending on it is gated, so no downstream consumer can silently assume.
+(The canonical real-world cost of such a silent unit assumption is the Mars
+Climate Orbiter; the relational case is a pivot view copied without its
+association table.)
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from atelier.classify.semantic_absence import (
 
 
 def test_measurement_surfaces_unit_absence():
-    # A column classified as a Quality (mass/length/width) — the MCO case.
+    # A column classified as a Quality (mass/length/width).
     absence = semantic_absence("QUAL")
     assert absence == {"unit": UNRESOLVED}, (
         "a measurement classification must positively represent the missing "
@@ -60,3 +61,20 @@ def test_claim_gated_until_axis_resolved():
 
     ok2, blocking2 = gate_claim("QUAL", {"unit"}, resolved={"unit"})
     assert ok2 is True and blocking2 == []
+
+
+def test_classification_exposes_absence_from_category_module():
+    # The output wiring: a classification whose predicted category carries a
+    # referent cco_module surfaces the absence; an ICE-only category does not.
+    from atelier.classify.belief import HierarchicalClassification
+    from atelier.classify.taxonomy import ReferenceCategory
+
+    quality_cat = ReferenceCategory(
+        code="GT.QUAL.MASS", label="mass", embedding_text="mass", cco_module="QUAL",
+    )
+    hc = HierarchicalClassification(category=quality_cat, confidence=0.9, evidence="")
+    assert hc.semantic_absences == {"unit": UNRESOLVED}
+
+    ice_cat = ReferenceCategory(code="ICE.X", label="x", embedding_text="x")
+    hc_ice = HierarchicalClassification(category=ice_cat, confidence=0.9, evidence="")
+    assert hc_ice.semantic_absences == {}

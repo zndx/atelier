@@ -2990,6 +2990,11 @@ def _classify_column(
         # docs/src/architecture/late-interaction-cosine.md § SHAP /
         # SAGE shift under late interaction.
         "maxsim_attribution": maxsim_attribution,
+        # Explicitly-represented frame-incompleteness: interface axes the
+        # predicted category's referent leaves un-modeled (a value's
+        # unit/currency/relation), as {axis: "UNRESOLVED"}. Empty until the
+        # vocab carries cco_module. So a consumer cannot silently assume.
+        "semantic_absences": hc.semantic_absences,
         "embedding_text": features.to_embedding_text(),
         "pattern_signals": features.pattern_signals,
         # Canonical ICE.* metadata for fired patterns — feeds cosine

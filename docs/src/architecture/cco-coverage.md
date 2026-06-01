@@ -22,22 +22,27 @@ we iterated toward the PII/metadata target. The program goal is now
 ## Why completeness is correctness, not thoroughness
 
 Treat full 11/11 coverage as a **correctness and safety invariant**, not a
-milestone. Incomplete ontological coverage does not yield partially-correct
-output — it yields *confident, complete-looking, catastrophically-wrong*
-output. This is the **Mars Climate Orbiter** failure class (1999, $327M lost
-to a `lbf·s` vs `N·s` mismatch at a software boundary; neither side had a
-bug).
+milestone. This is an *epistemic* claim: incomplete ontological coverage does
+not yield partially-correct output — it yields *confident, complete-looking*
+output that has silently dropped a load-bearing dimension.
 
-That is not a loose analogy — it is our exact gap. The two modules we don't
-yet cover, **Units of Measure** and **Extended Relation**, are precisely the
-*interface-semantics* modules: a measurement value is meaningless without
-its unit; an entity/column is meaningless in isolation without its
-relations. A classifier that labels a column `mass` but cannot represent the
-**unit** emits a valid-looking classification that silently drops the
-load-bearing dimension — and **you cannot flag what you cannot represent**,
-so the gap is invisible at the source and detonates downstream, wherever a
-consumer (Atlas sync, data integration, cross-column compatibility, an
-EAV/relational read) fills the missing axis with its own assumption.
+The two modules we don't yet cover, **Units of Measure** and **Extended
+Relation**, are precisely the *interface-semantics* modules: a measurement
+value is meaningless without its unit; an entity/column is meaningless in
+isolation without its relations. A classifier that labels a column `mass` but
+cannot represent the **unit** emits a valid-looking classification missing
+the load-bearing axis — and **you cannot flag what you cannot represent**, so
+the omission is invisible at the source and only surfaces downstream, wherever
+a consumer (Atlas sync, data integration, cross-column compatibility, an
+EAV/relational read) fills the missing axis with its own assumption. (The
+canonical real-world cost of exactly this — a silent unit assumption at a
+boundary — is the Mars Climate Orbiter.)
+
+The principled response is epistemic honesty: represent the un-modeled axis
+explicitly as first-class uncertainty (Jøsang subjective logic; the DST core
+already does this for within-frame ignorance via Θ and `Pl − Bel`), rather
+than letting it default to a silent assumption. See
+`atelier.classify.semantic_absence`.
 
 Design consequences (binding):
 

@@ -491,6 +491,22 @@ class HierarchicalClassification:
     _frame: FrameOfDiscernment | None = field(default=None, repr=False, compare=False)
     _category_set: object | None = field(default=None, repr=False, compare=False)
 
+    @property
+    def semantic_absences(self) -> dict[str, str]:
+        """Interface axes the predicted category's referent leaves un-modeled,
+        represented explicitly as ``{axis: 'UNRESOLVED'}``.
+
+        Frame-incompleteness uncertainty (a value's unit / currency / relation
+        that the classification cannot carry), the companion of the within-
+        frame ignorance already tracked via Θ and ``Pl − Bel``. Empty when the
+        predicted category carries no ``cco_module`` (e.g. the ICE-only
+        production vocab) — nothing is claimed absent until the referent is
+        known. See :mod:`atelier.classify.semantic_absence`.
+        """
+        from atelier.classify.semantic_absence import semantic_absence
+
+        return semantic_absence(getattr(self.category, "cco_module", None))
+
     def belief_at(self, code: str) -> float:
         """Bel(code) — belief that the column is this category."""
         if self.belief_assignment is None:
