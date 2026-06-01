@@ -48,7 +48,7 @@ def test_fit_prerequisites_hold():
     assert len(alphas) == len(cs.all_categories)
     any_leaf = next(c for c in cs.all_categories if getattr(c, "cco_module", None))
     path = cs.path_from_root(any_leaf.code)
-    assert path[0] == "GT" and path[-1] == any_leaf.code
+    assert path[0] == "SDG" and path[-1] == any_leaf.code
 
 
 def test_train_rows_match_row_schema():

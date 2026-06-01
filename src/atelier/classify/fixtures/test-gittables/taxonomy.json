@@ -1,81 +1,85 @@
 {
   "taxonomy_id": "test-gittables",
   "root": {
-    "code": "GT",
-    "label": "GitTables Semantic Type (CCO-rooted)",
+    "code": "SDG",
+    "label": "SDG Data Element",
+    "cco_iri": "https://www.commoncoreontologies.org/ont00000958",
     "parent_code": null
   },
   "internal": [
     {
-      "code": "GT.AGENT",
+      "code": "SDG.AGENT",
       "label": "Agent",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Agent"
     },
     {
-      "code": "GT.ARTIFACT",
+      "code": "SDG.ARTIFACT",
       "label": "Artifact",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Artifact"
     },
     {
-      "code": "GT.CUR",
+      "code": "SDG.CUR",
       "label": "Currency Unit",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Currency Unit"
     },
     {
-      "code": "GT.EVENT",
+      "code": "SDG.EVENT",
       "label": "Event",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Event"
     },
     {
-      "code": "GT.FACILITY",
+      "code": "SDG.FACILITY",
       "label": "Facility",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Facility"
     },
     {
-      "code": "GT.GEO",
+      "code": "SDG.GEO",
       "label": "Geospatial",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Geospatial"
     },
     {
-      "code": "GT.INFO",
+      "code": "SDG.INFO",
       "label": "Information Entity",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Information Entity"
     },
     {
-      "code": "GT.QUAL",
+      "code": "SDG.QUAL",
       "label": "Quality",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Quality"
     },
     {
-      "code": "GT.REL",
+      "code": "SDG.REL",
       "label": "Extended Relation",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Extended Relation"
     },
     {
-      "code": "GT.TIME",
+      "code": "SDG.TIME",
       "label": "Time",
-      "parent_code": "GT",
+      "parent_code": "SDG",
       "cco_module": "Time"
     }
   ],
   "leaves": [
     {
-      "code": "GT.AGENT.ARTIST",
+      "code": "SDG.AGENT.ARTIST",
       "label": "artist",
-      "parent_code": "GT.AGENT",
+      "parent_code": "SDG.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/artist",
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:artist",
       "cco_annotations": {
         "acronym": "ARTIST",
         "definition_source": "http://dbpedia.org/ontology/artist"
@@ -83,13 +87,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.AGENT.AUTHOR",
+      "code": "SDG.AGENT.AUTHOR",
       "label": "author",
-      "parent_code": "GT.AGENT",
+      "parent_code": "SDG.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/author",
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:author",
       "cco_annotations": {
         "acronym": "AUTHOR",
         "definition_source": "http://dbpedia.org/ontology/author"
@@ -97,13 +104,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.AGENT.ORGANISATION",
+      "code": "SDG.AGENT.ORGANISATION",
       "label": "organisation",
-      "parent_code": "GT.AGENT",
+      "parent_code": "SDG.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/organisation",
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:organisation",
       "cco_annotations": {
         "acronym": "ORGANISATION",
         "definition_source": "http://dbpedia.org/ontology/organisation"
@@ -111,13 +121,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.AGENT.PERSON",
+      "code": "SDG.AGENT.PERSON",
       "label": "person",
-      "parent_code": "GT.AGENT",
+      "parent_code": "SDG.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/person",
       "cco_module": "AGENT",
       "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:person",
       "cco_annotations": {
         "acronym": "PERSON",
         "definition_source": "http://dbpedia.org/ontology/person"
@@ -125,13 +138,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.ARTIFACT.BRAND",
+      "code": "SDG.ARTIFACT.BRAND",
       "label": "brand",
-      "parent_code": "GT.ARTIFACT",
+      "parent_code": "SDG.ARTIFACT",
       "dbpedia_iri": "http://dbpedia.org/ontology/brand",
       "cco_module": "ARTIFACT",
       "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:brand",
       "cco_annotations": {
         "acronym": "BRAND",
         "definition_source": "http://dbpedia.org/ontology/brand"
@@ -139,13 +155,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.ARTIFACT.MODEL",
+      "code": "SDG.ARTIFACT.MODEL",
       "label": "model",
-      "parent_code": "GT.ARTIFACT",
+      "parent_code": "SDG.ARTIFACT",
       "dbpedia_iri": "http://dbpedia.org/ontology/model",
       "cco_module": "ARTIFACT",
       "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:model",
       "cco_annotations": {
         "acronym": "MODEL",
         "definition_source": "http://dbpedia.org/ontology/model"
@@ -153,13 +172,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.ARTIFACT.PRODUCT",
+      "code": "SDG.ARTIFACT.PRODUCT",
       "label": "product",
-      "parent_code": "GT.ARTIFACT",
+      "parent_code": "SDG.ARTIFACT",
       "dbpedia_iri": "http://dbpedia.org/ontology/product",
       "cco_module": "ARTIFACT",
       "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:product",
       "cco_annotations": {
         "acronym": "PRODUCT",
         "definition_source": "http://dbpedia.org/ontology/product"
@@ -167,13 +189,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.CUR.COST",
+      "code": "SDG.CUR.COST",
       "label": "cost",
-      "parent_code": "GT.CUR",
+      "parent_code": "SDG.CUR",
       "dbpedia_iri": "http://dbpedia.org/ontology/cost",
       "cco_module": "CUR",
       "cco_module_label": "Currency Unit",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:cost",
       "cco_annotations": {
         "acronym": "COST",
         "definition_source": "http://dbpedia.org/ontology/cost"
@@ -181,13 +206,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.CUR.CURRENCY",
+      "code": "SDG.CUR.CURRENCY",
       "label": "currency",
-      "parent_code": "GT.CUR",
+      "parent_code": "SDG.CUR",
       "dbpedia_iri": "http://dbpedia.org/ontology/currency",
       "cco_module": "CUR",
       "cco_module_label": "Currency Unit",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:currency",
       "cco_annotations": {
         "acronym": "CURRENCY",
         "definition_source": "http://dbpedia.org/ontology/currency"
@@ -195,13 +223,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.CUR.PRICE",
+      "code": "SDG.CUR.PRICE",
       "label": "price",
-      "parent_code": "GT.CUR",
+      "parent_code": "SDG.CUR",
       "dbpedia_iri": "http://dbpedia.org/ontology/price",
       "cco_module": "CUR",
       "cco_module_label": "Currency Unit",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:price",
       "cco_annotations": {
         "acronym": "PRICE",
         "definition_source": "http://dbpedia.org/ontology/price"
@@ -209,13 +240,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.EVENT.EVENT",
+      "code": "SDG.EVENT.EVENT",
       "label": "event",
-      "parent_code": "GT.EVENT",
+      "parent_code": "SDG.EVENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/event",
       "cco_module": "EVENT",
       "cco_module_label": "Event",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:event",
       "cco_annotations": {
         "acronym": "EVENT",
         "definition_source": "http://dbpedia.org/ontology/event"
@@ -223,13 +257,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.FACILITY.BUILDING",
+      "code": "SDG.FACILITY.BUILDING",
       "label": "building",
-      "parent_code": "GT.FACILITY",
+      "parent_code": "SDG.FACILITY",
       "dbpedia_iri": "http://dbpedia.org/ontology/building",
       "cco_module": "FACILITY",
       "cco_module_label": "Facility",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:building",
       "cco_annotations": {
         "acronym": "BUILDING",
         "definition_source": "http://dbpedia.org/ontology/building"
@@ -237,13 +274,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.GEO.ADDRESS",
+      "code": "SDG.GEO.ADDRESS",
       "label": "address",
-      "parent_code": "GT.GEO",
+      "parent_code": "SDG.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/address",
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:address",
       "cco_annotations": {
         "acronym": "ADDRESS",
         "definition_source": "http://dbpedia.org/ontology/address"
@@ -251,13 +291,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.GEO.CITY",
+      "code": "SDG.GEO.CITY",
       "label": "city",
-      "parent_code": "GT.GEO",
+      "parent_code": "SDG.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/city",
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:city",
       "cco_annotations": {
         "acronym": "CITY",
         "definition_source": "http://dbpedia.org/ontology/city"
@@ -265,13 +308,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.GEO.PLACE",
+      "code": "SDG.GEO.PLACE",
       "label": "place",
-      "parent_code": "GT.GEO",
+      "parent_code": "SDG.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/place",
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:place",
       "cco_annotations": {
         "acronym": "PLACE",
         "definition_source": "http://dbpedia.org/ontology/place"
@@ -279,13 +325,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.GEO.STATE",
+      "code": "SDG.GEO.STATE",
       "label": "state",
-      "parent_code": "GT.GEO",
+      "parent_code": "SDG.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/state",
       "cco_module": "GEO",
       "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:state",
       "cco_annotations": {
         "acronym": "STATE",
         "definition_source": "http://dbpedia.org/ontology/state"
@@ -293,13 +342,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.INFO.DESCRIPTION",
+      "code": "SDG.INFO.DESCRIPTION",
       "label": "description",
-      "parent_code": "GT.INFO",
+      "parent_code": "SDG.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/description",
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:description",
       "cco_annotations": {
         "acronym": "DESCRIPTION",
         "definition_source": "http://dbpedia.org/ontology/description"
@@ -307,13 +359,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.INFO.ID",
+      "code": "SDG.INFO.ID",
       "label": "id",
-      "parent_code": "GT.INFO",
+      "parent_code": "SDG.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/id",
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:id",
       "cco_annotations": {
         "acronym": "ID",
         "definition_source": "http://dbpedia.org/ontology/id"
@@ -321,13 +376,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.INFO.NAME",
+      "code": "SDG.INFO.NAME",
       "label": "name",
-      "parent_code": "GT.INFO",
+      "parent_code": "SDG.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/name",
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:name",
       "cco_annotations": {
         "acronym": "NAME",
         "definition_source": "http://dbpedia.org/ontology/name"
@@ -335,13 +393,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.INFO.TITLE",
+      "code": "SDG.INFO.TITLE",
       "label": "title",
-      "parent_code": "GT.INFO",
+      "parent_code": "SDG.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/title",
       "cco_module": "INFO",
       "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000686",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:title",
       "cco_annotations": {
         "acronym": "TITLE",
         "definition_source": "http://dbpedia.org/ontology/title"
@@ -349,13 +410,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.QUAL.LENGTH",
+      "code": "SDG.QUAL.LENGTH",
       "label": "length",
-      "parent_code": "GT.QUAL",
+      "parent_code": "SDG.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/length",
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:length",
       "cco_annotations": {
         "acronym": "LENGTH",
         "definition_source": "http://dbpedia.org/ontology/length"
@@ -363,13 +427,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.QUAL.TEMPERATURE",
+      "code": "SDG.QUAL.TEMPERATURE",
       "label": "temperature",
-      "parent_code": "GT.QUAL",
+      "parent_code": "SDG.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/temperature",
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:temperature",
       "cco_annotations": {
         "acronym": "TEMPERATURE",
         "definition_source": "http://dbpedia.org/ontology/temperature"
@@ -377,13 +444,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.QUAL.WEIGHT",
+      "code": "SDG.QUAL.WEIGHT",
       "label": "weight",
-      "parent_code": "GT.QUAL",
+      "parent_code": "SDG.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/weight",
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:weight",
       "cco_annotations": {
         "acronym": "WEIGHT",
         "definition_source": "http://dbpedia.org/ontology/weight"
@@ -391,13 +461,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.QUAL.WIDTH",
+      "code": "SDG.QUAL.WIDTH",
       "label": "width",
-      "parent_code": "GT.QUAL",
+      "parent_code": "SDG.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/width",
       "cco_module": "QUAL",
       "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:width",
       "cco_annotations": {
         "acronym": "WIDTH",
         "definition_source": "http://dbpedia.org/ontology/width"
@@ -405,13 +478,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.REL.CURRENCY",
+      "code": "SDG.REL.CURRENCY",
       "label": "currency",
-      "parent_code": "GT.REL",
+      "parent_code": "SDG.REL",
       "dbpedia_iri": "https://dbpedia.org/ontology/currency",
       "cco_module": "REL",
       "cco_module_label": "Extended Relation",
       "ice_class": null,
+      "ice_class_iri": null,
+      "sdg_property": "describesProperty",
+      "sdg_term": "sdg:currency",
       "cco_annotations": {
         "acronym": "CURRENCY",
         "definition_source": "https://dbpedia.org/ontology/currency"
@@ -419,13 +495,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.REL.PUBLICATIONDATE",
+      "code": "SDG.REL.PUBLICATIONDATE",
       "label": "publicationDate",
-      "parent_code": "GT.REL",
+      "parent_code": "SDG.REL",
       "dbpedia_iri": "https://dbpedia.org/ontology/publicationDate",
       "cco_module": "REL",
       "cco_module_label": "Extended Relation",
       "ice_class": null,
+      "ice_class_iri": null,
+      "sdg_property": "describesProperty",
+      "sdg_term": "sdg:publicationDate",
       "cco_annotations": {
         "acronym": "PUBLICATIONDATE",
         "definition_source": "https://dbpedia.org/ontology/publicationDate"
@@ -433,13 +512,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.REL.PUBLISHER",
+      "code": "SDG.REL.PUBLISHER",
       "label": "publisher",
-      "parent_code": "GT.REL",
+      "parent_code": "SDG.REL",
       "dbpedia_iri": "https://dbpedia.org/ontology/publisher",
       "cco_module": "REL",
       "cco_module_label": "Extended Relation",
       "ice_class": null,
+      "ice_class_iri": null,
+      "sdg_property": "describesProperty",
+      "sdg_term": "sdg:publisher",
       "cco_annotations": {
         "acronym": "PUBLISHER",
         "definition_source": "https://dbpedia.org/ontology/publisher"
@@ -447,13 +529,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.TIME.DATE",
+      "code": "SDG.TIME.DATE",
       "label": "date",
-      "parent_code": "GT.TIME",
+      "parent_code": "SDG.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/date",
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:date",
       "cco_annotations": {
         "acronym": "DATE",
         "definition_source": "http://dbpedia.org/ontology/date"
@@ -461,13 +546,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.TIME.TIME",
+      "code": "SDG.TIME.TIME",
       "label": "time",
-      "parent_code": "GT.TIME",
+      "parent_code": "SDG.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/time",
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:time",
       "cco_annotations": {
         "acronym": "TIME",
         "definition_source": "http://dbpedia.org/ontology/time"
@@ -475,13 +563,16 @@
       "is_leaf": true
     },
     {
-      "code": "GT.TIME.YEAR",
+      "code": "SDG.TIME.YEAR",
       "label": "year",
-      "parent_code": "GT.TIME",
+      "parent_code": "SDG.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/year",
       "cco_module": "TIME",
       "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
+      "ice_class_iri": "https://www.commoncoreontologies.org/ont00000853",
+      "sdg_property": "hasValueType",
+      "sdg_term": "sdg:year",
       "cco_annotations": {
         "acronym": "YEAR",
         "definition_source": "http://dbpedia.org/ontology/year"

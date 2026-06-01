@@ -1,6 +1,6 @@
 {
-  "GT.AGENT.ARTIST": {
-    "code": "GT.AGENT.ARTIST",
+  "SDG.AGENT.ARTIST": {
+    "code": "SDG.AGENT.ARTIST",
     "label": "artist",
     "mnemonic": "ARTIST",
     "cco_module": "AGENT",
@@ -18,8 +18,8 @@
     ],
     "value_patterns": []
   },
-  "GT.AGENT.AUTHOR": {
-    "code": "GT.AGENT.AUTHOR",
+  "SDG.AGENT.AUTHOR": {
+    "code": "SDG.AGENT.AUTHOR",
     "label": "author",
     "mnemonic": "AUTHOR",
     "cco_module": "AGENT",
@@ -41,8 +41,8 @@
     ],
     "value_patterns": []
   },
-  "GT.AGENT.ORGANISATION": {
-    "code": "GT.AGENT.ORGANISATION",
+  "SDG.AGENT.ORGANISATION": {
+    "code": "SDG.AGENT.ORGANISATION",
     "label": "organisation",
     "mnemonic": "ORGANISATION",
     "cco_module": "AGENT",
@@ -63,8 +63,8 @@
     ],
     "value_patterns": []
   },
-  "GT.AGENT.PERSON": {
-    "code": "GT.AGENT.PERSON",
+  "SDG.AGENT.PERSON": {
+    "code": "SDG.AGENT.PERSON",
     "label": "person",
     "mnemonic": "PERSON",
     "cco_module": "AGENT",
@@ -85,8 +85,8 @@
     ],
     "value_patterns": []
   },
-  "GT.ARTIFACT.BRAND": {
-    "code": "GT.ARTIFACT.BRAND",
+  "SDG.ARTIFACT.BRAND": {
+    "code": "SDG.ARTIFACT.BRAND",
     "label": "brand",
     "mnemonic": "BRAND",
     "cco_module": "ARTIFACT",
@@ -108,8 +108,8 @@
     ],
     "value_patterns": []
   },
-  "GT.ARTIFACT.MODEL": {
-    "code": "GT.ARTIFACT.MODEL",
+  "SDG.ARTIFACT.MODEL": {
+    "code": "SDG.ARTIFACT.MODEL",
     "label": "model",
     "mnemonic": "MODEL",
     "cco_module": "ARTIFACT",
@@ -127,8 +127,8 @@
     ],
     "value_patterns": []
   },
-  "GT.ARTIFACT.PRODUCT": {
-    "code": "GT.ARTIFACT.PRODUCT",
+  "SDG.ARTIFACT.PRODUCT": {
+    "code": "SDG.ARTIFACT.PRODUCT",
     "label": "product",
     "mnemonic": "PRODUCT",
     "cco_module": "ARTIFACT",
@@ -154,8 +154,8 @@
     ],
     "value_patterns": []
   },
-  "GT.CUR.COST": {
-    "code": "GT.CUR.COST",
+  "SDG.CUR.COST": {
+    "code": "SDG.CUR.COST",
     "label": "cost",
     "mnemonic": "COST",
     "cco_module": "CUR",
@@ -173,8 +173,8 @@
     ],
     "value_patterns": []
   },
-  "GT.CUR.CURRENCY": {
-    "code": "GT.CUR.CURRENCY",
+  "SDG.CUR.CURRENCY": {
+    "code": "SDG.CUR.CURRENCY",
     "label": "currency",
     "mnemonic": "CURRENCY",
     "cco_module": "CUR",
@@ -190,8 +190,8 @@
     ],
     "value_patterns": []
   },
-  "GT.CUR.PRICE": {
-    "code": "GT.CUR.PRICE",
+  "SDG.CUR.PRICE": {
+    "code": "SDG.CUR.PRICE",
     "label": "price",
     "mnemonic": "PRICE",
     "cco_module": "CUR",
@@ -211,8 +211,8 @@
     ],
     "value_patterns": []
   },
-  "GT.EVENT.EVENT": {
-    "code": "GT.EVENT.EVENT",
+  "SDG.EVENT.EVENT": {
+    "code": "SDG.EVENT.EVENT",
     "label": "event",
     "mnemonic": "EVENT",
     "cco_module": "EVENT",
@@ -232,8 +232,8 @@
     ],
     "value_patterns": []
   },
-  "GT.FACILITY.BUILDING": {
-    "code": "GT.FACILITY.BUILDING",
+  "SDG.FACILITY.BUILDING": {
+    "code": "SDG.FACILITY.BUILDING",
     "label": "building",
     "mnemonic": "BUILDING",
     "cco_module": "FACILITY",
@@ -253,8 +253,8 @@
     ],
     "value_patterns": []
   },
-  "GT.GEO.ADDRESS": {
-    "code": "GT.GEO.ADDRESS",
+  "SDG.GEO.ADDRESS": {
+    "code": "SDG.GEO.ADDRESS",
     "label": "address",
     "mnemonic": "ADDRESS",
     "cco_module": "GEO",
@@ -281,8 +281,8 @@
     ],
     "value_patterns": []
   },
-  "GT.GEO.CITY": {
-    "code": "GT.GEO.CITY",
+  "SDG.GEO.CITY": {
+    "code": "SDG.GEO.CITY",
     "label": "city",
     "mnemonic": "CITY",
     "cco_module": "GEO",
@@ -301,8 +301,8 @@
     ],
     "value_patterns": []
   },
-  "GT.GEO.PLACE": {
-    "code": "GT.GEO.PLACE",
+  "SDG.GEO.PLACE": {
+    "code": "SDG.GEO.PLACE",
     "label": "place",
     "mnemonic": "PLACE",
     "cco_module": "GEO",
@@ -325,8 +325,8 @@
     ],
     "value_patterns": []
   },
-  "GT.GEO.STATE": {
-    "code": "GT.GEO.STATE",
+  "SDG.GEO.STATE": {
+    "code": "SDG.GEO.STATE",
     "label": "state",
     "mnemonic": "STATE",
     "cco_module": "GEO",
@@ -344,8 +344,8 @@
     ],
     "value_patterns": []
   },
-  "GT.INFO.DESCRIPTION": {
-    "code": "GT.INFO.DESCRIPTION",
+  "SDG.INFO.DESCRIPTION": {
+    "code": "SDG.INFO.DESCRIPTION",
     "label": "description",
     "mnemonic": "DESCRIPTION",
     "cco_module": "INFO",
@@ -369,8 +369,8 @@
     ],
     "value_patterns": []
   },
-  "GT.INFO.ID": {
-    "code": "GT.INFO.ID",
+  "SDG.INFO.ID": {
+    "code": "SDG.INFO.ID",
     "label": "id",
     "mnemonic": "ID",
     "cco_module": "INFO",
@@ -397,8 +397,8 @@
     ],
     "value_patterns": []
   },
-  "GT.INFO.NAME": {
-    "code": "GT.INFO.NAME",
+  "SDG.INFO.NAME": {
+    "code": "SDG.INFO.NAME",
     "label": "name",
     "mnemonic": "NAME",
     "cco_module": "INFO",
@@ -419,8 +419,8 @@
     ],
     "value_patterns": []
   },
-  "GT.INFO.TITLE": {
-    "code": "GT.INFO.TITLE",
+  "SDG.INFO.TITLE": {
+    "code": "SDG.INFO.TITLE",
     "label": "title",
     "mnemonic": "TITLE",
     "cco_module": "INFO",
@@ -440,8 +440,8 @@
     ],
     "value_patterns": []
   },
-  "GT.QUAL.LENGTH": {
-    "code": "GT.QUAL.LENGTH",
+  "SDG.QUAL.LENGTH": {
+    "code": "SDG.QUAL.LENGTH",
     "label": "length",
     "mnemonic": "LENGTH",
     "cco_module": "QUAL",
@@ -462,8 +462,8 @@
     ],
     "value_patterns": []
   },
-  "GT.QUAL.TEMPERATURE": {
-    "code": "GT.QUAL.TEMPERATURE",
+  "SDG.QUAL.TEMPERATURE": {
+    "code": "SDG.QUAL.TEMPERATURE",
     "label": "temperature",
     "mnemonic": "TEMPERATURE",
     "cco_module": "QUAL",
@@ -483,8 +483,8 @@
     ],
     "value_patterns": []
   },
-  "GT.QUAL.WEIGHT": {
-    "code": "GT.QUAL.WEIGHT",
+  "SDG.QUAL.WEIGHT": {
+    "code": "SDG.QUAL.WEIGHT",
     "label": "weight",
     "mnemonic": "WEIGHT",
     "cco_module": "QUAL",
@@ -504,8 +504,8 @@
     ],
     "value_patterns": []
   },
-  "GT.QUAL.WIDTH": {
-    "code": "GT.QUAL.WIDTH",
+  "SDG.QUAL.WIDTH": {
+    "code": "SDG.QUAL.WIDTH",
     "label": "width",
     "mnemonic": "WIDTH",
     "cco_module": "QUAL",
@@ -527,8 +527,8 @@
     ],
     "value_patterns": []
   },
-  "GT.REL.CURRENCY": {
-    "code": "GT.REL.CURRENCY",
+  "SDG.REL.CURRENCY": {
+    "code": "SDG.REL.CURRENCY",
     "label": "currency",
     "mnemonic": "CURRENCY",
     "cco_module": "REL",
@@ -551,8 +551,8 @@
     ],
     "value_patterns": []
   },
-  "GT.REL.PUBLICATIONDATE": {
-    "code": "GT.REL.PUBLICATIONDATE",
+  "SDG.REL.PUBLICATIONDATE": {
+    "code": "SDG.REL.PUBLICATIONDATE",
     "label": "publicationDate",
     "mnemonic": "PUBLICATIONDATE",
     "cco_module": "REL",
@@ -574,8 +574,8 @@
     ],
     "value_patterns": []
   },
-  "GT.REL.PUBLISHER": {
-    "code": "GT.REL.PUBLISHER",
+  "SDG.REL.PUBLISHER": {
+    "code": "SDG.REL.PUBLISHER",
     "label": "publisher",
     "mnemonic": "PUBLISHER",
     "cco_module": "REL",
@@ -599,8 +599,8 @@
     ],
     "value_patterns": []
   },
-  "GT.TIME.DATE": {
-    "code": "GT.TIME.DATE",
+  "SDG.TIME.DATE": {
+    "code": "SDG.TIME.DATE",
     "label": "date",
     "mnemonic": "DATE",
     "cco_module": "TIME",
@@ -624,8 +624,8 @@
     ],
     "value_patterns": []
   },
-  "GT.TIME.TIME": {
-    "code": "GT.TIME.TIME",
+  "SDG.TIME.TIME": {
+    "code": "SDG.TIME.TIME",
     "label": "time",
     "mnemonic": "TIME",
     "cco_module": "TIME",
@@ -650,8 +650,8 @@
     ],
     "value_patterns": []
   },
-  "GT.TIME.YEAR": {
-    "code": "GT.TIME.YEAR",
+  "SDG.TIME.YEAR": {
+    "code": "SDG.TIME.YEAR",
     "label": "year",
     "mnemonic": "YEAR",
     "cco_module": "TIME",

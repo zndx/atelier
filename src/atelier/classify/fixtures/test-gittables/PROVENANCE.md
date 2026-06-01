@@ -20,36 +20,36 @@ by construction (public GitTables only; answer-key names excluded).
 
 | Code | Label | CCO module | ICE class | DBpedia IRI |
 |---|---|---|---|---|
-| `GT.AGENT.ARTIST` | artist | Agent | DesignativeICE | http://dbpedia.org/ontology/artist |
-| `GT.AGENT.AUTHOR` | author | Agent | DesignativeICE | http://dbpedia.org/ontology/author |
-| `GT.AGENT.ORGANISATION` | organisation | Agent | DesignativeICE | http://dbpedia.org/ontology/organisation |
-| `GT.AGENT.PERSON` | person | Agent | DesignativeICE | http://dbpedia.org/ontology/person |
-| `GT.ARTIFACT.BRAND` | brand | Artifact | DesignativeICE | http://dbpedia.org/ontology/brand |
-| `GT.ARTIFACT.MODEL` | model | Artifact | DesignativeICE | http://dbpedia.org/ontology/model |
-| `GT.ARTIFACT.PRODUCT` | product | Artifact | DesignativeICE | http://dbpedia.org/ontology/product |
-| `GT.CUR.COST` | cost | Currency Unit | DescriptiveICE | http://dbpedia.org/ontology/cost |
-| `GT.CUR.CURRENCY` | currency | Currency Unit | DesignativeICE | http://dbpedia.org/ontology/currency |
-| `GT.CUR.PRICE` | price | Currency Unit | DescriptiveICE | http://dbpedia.org/ontology/price |
-| `GT.EVENT.EVENT` | event | Event | DesignativeICE | http://dbpedia.org/ontology/event |
-| `GT.FACILITY.BUILDING` | building | Facility | DesignativeICE | http://dbpedia.org/ontology/building |
-| `GT.GEO.ADDRESS` | address | Geospatial | DesignativeICE | http://dbpedia.org/ontology/address |
-| `GT.GEO.CITY` | city | Geospatial | DesignativeICE | http://dbpedia.org/ontology/city |
-| `GT.GEO.PLACE` | place | Geospatial | DesignativeICE | http://dbpedia.org/ontology/place |
-| `GT.GEO.STATE` | state | Geospatial | DesignativeICE | http://dbpedia.org/ontology/state |
-| `GT.INFO.DESCRIPTION` | description | Information Entity | DescriptiveICE | http://dbpedia.org/ontology/description |
-| `GT.INFO.ID` | id | Information Entity | DesignativeICE | http://dbpedia.org/ontology/id |
-| `GT.INFO.NAME` | name | Information Entity | DesignativeICE | http://dbpedia.org/ontology/name |
-| `GT.INFO.TITLE` | title | Information Entity | DesignativeICE | http://dbpedia.org/ontology/title |
-| `GT.QUAL.LENGTH` | length | Quality | DescriptiveICE | http://dbpedia.org/ontology/length |
-| `GT.QUAL.TEMPERATURE` | temperature | Quality | DescriptiveICE | http://dbpedia.org/ontology/temperature |
-| `GT.QUAL.WEIGHT` | weight | Quality | DescriptiveICE | http://dbpedia.org/ontology/weight |
-| `GT.QUAL.WIDTH` | width | Quality | DescriptiveICE | http://dbpedia.org/ontology/width |
-| `GT.REL.CURRENCY` | currency | Extended Relation | None | https://dbpedia.org/ontology/currency |
-| `GT.REL.PUBLICATIONDATE` | publicationDate | Extended Relation | None | https://dbpedia.org/ontology/publicationDate |
-| `GT.REL.PUBLISHER` | publisher | Extended Relation | None | https://dbpedia.org/ontology/publisher |
-| `GT.TIME.DATE` | date | Time | DescriptiveICE | http://dbpedia.org/ontology/date |
-| `GT.TIME.TIME` | time | Time | DescriptiveICE | http://dbpedia.org/ontology/time |
-| `GT.TIME.YEAR` | year | Time | DescriptiveICE | http://dbpedia.org/ontology/year |
+| `SDG.AGENT.ARTIST` | artist | Agent | DesignativeICE | http://dbpedia.org/ontology/artist |
+| `SDG.AGENT.AUTHOR` | author | Agent | DesignativeICE | http://dbpedia.org/ontology/author |
+| `SDG.AGENT.ORGANISATION` | organisation | Agent | DesignativeICE | http://dbpedia.org/ontology/organisation |
+| `SDG.AGENT.PERSON` | person | Agent | DesignativeICE | http://dbpedia.org/ontology/person |
+| `SDG.ARTIFACT.BRAND` | brand | Artifact | DesignativeICE | http://dbpedia.org/ontology/brand |
+| `SDG.ARTIFACT.MODEL` | model | Artifact | DesignativeICE | http://dbpedia.org/ontology/model |
+| `SDG.ARTIFACT.PRODUCT` | product | Artifact | DesignativeICE | http://dbpedia.org/ontology/product |
+| `SDG.CUR.COST` | cost | Currency Unit | DescriptiveICE | http://dbpedia.org/ontology/cost |
+| `SDG.CUR.CURRENCY` | currency | Currency Unit | DesignativeICE | http://dbpedia.org/ontology/currency |
+| `SDG.CUR.PRICE` | price | Currency Unit | DescriptiveICE | http://dbpedia.org/ontology/price |
+| `SDG.EVENT.EVENT` | event | Event | DesignativeICE | http://dbpedia.org/ontology/event |
+| `SDG.FACILITY.BUILDING` | building | Facility | DesignativeICE | http://dbpedia.org/ontology/building |
+| `SDG.GEO.ADDRESS` | address | Geospatial | DesignativeICE | http://dbpedia.org/ontology/address |
+| `SDG.GEO.CITY` | city | Geospatial | DesignativeICE | http://dbpedia.org/ontology/city |
+| `SDG.GEO.PLACE` | place | Geospatial | DesignativeICE | http://dbpedia.org/ontology/place |
+| `SDG.GEO.STATE` | state | Geospatial | DesignativeICE | http://dbpedia.org/ontology/state |
+| `SDG.INFO.DESCRIPTION` | description | Information Entity | DescriptiveICE | http://dbpedia.org/ontology/description |
+| `SDG.INFO.ID` | id | Information Entity | DesignativeICE | http://dbpedia.org/ontology/id |
+| `SDG.INFO.NAME` | name | Information Entity | DesignativeICE | http://dbpedia.org/ontology/name |
+| `SDG.INFO.TITLE` | title | Information Entity | DesignativeICE | http://dbpedia.org/ontology/title |
+| `SDG.QUAL.LENGTH` | length | Quality | DescriptiveICE | http://dbpedia.org/ontology/length |
+| `SDG.QUAL.TEMPERATURE` | temperature | Quality | DescriptiveICE | http://dbpedia.org/ontology/temperature |
+| `SDG.QUAL.WEIGHT` | weight | Quality | DescriptiveICE | http://dbpedia.org/ontology/weight |
+| `SDG.QUAL.WIDTH` | width | Quality | DescriptiveICE | http://dbpedia.org/ontology/width |
+| `SDG.REL.CURRENCY` | currency | Extended Relation | None | https://dbpedia.org/ontology/currency |
+| `SDG.REL.PUBLICATIONDATE` | publicationDate | Extended Relation | None | https://dbpedia.org/ontology/publicationDate |
+| `SDG.REL.PUBLISHER` | publisher | Extended Relation | None | https://dbpedia.org/ontology/publisher |
+| `SDG.TIME.DATE` | date | Time | DescriptiveICE | http://dbpedia.org/ontology/date |
+| `SDG.TIME.TIME` | time | Time | DescriptiveICE | http://dbpedia.org/ontology/time |
+| `SDG.TIME.YEAR` | year | Time | DescriptiveICE | http://dbpedia.org/ontology/year |
 
 ## Per-table upstream source + license
 

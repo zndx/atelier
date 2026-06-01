@@ -127,7 +127,7 @@ for wide tables.
   the corpus *prefix* but present once the scan strides across all ~562k
   tables; the `test-gittables` fixture now includes all three.
 - **CPA-covered**: Extended Relation — `sotab_cpa_candidates()` adds
-  `GT.REL.*` leaves from `/raid/datasets/sotab/sotab_cpa_*`, where each
+  `SDG.REL.*` leaves from `/raid/datasets/sotab/sotab_cpa_*`, where each
   column is annotated by the relation (DBpedia property) it expresses to the
   table's subject. This is the data face CTA cannot reach.
 - **EAV-gated**: Units of Measure — units are value-level in wide/CPA

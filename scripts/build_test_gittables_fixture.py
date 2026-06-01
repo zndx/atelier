@@ -283,7 +283,7 @@ def sotab_cpa_candidates(max_per_rel: int = 14) -> dict:
                 continue
             entity = table.split("_", 1)[0]
             cands[f"REL:{rel}"].append({
-                "code": f"GT.REL.{_slug(rel)}", "leaf": rel,
+                "code": f"SDG.REL.{_slug(rel)}", "leaf": rel,
                 "cco_module": "REL", "ice_class": None, "iri": iri,
                 "description": f"DBpedia relation '{rel}' to the {entity} subject.",
                 "table_id": table.replace(".json.gz", ""), "column": f"c{col_i}",
@@ -349,28 +349,46 @@ def main() -> int:
     enrich: dict[str, dict] = {}
     prov_rows: list[dict] = []
 
+    # Verified CCO ICE-trichotomy IRIs (published develop catalog,
+    # InformationEntityOntology.ttl) — NOT fabricated.
     ICE_FULL = {"DES": "DesignativeICE", "DSC": "DescriptiveICE",
                 "PRE": "PrescriptiveICE"}
+    ICE_IRI = {"DES": "https://www.commoncoreontologies.org/ont00000686",
+               "DSC": "https://www.commoncoreontologies.org/ont00000853",
+               "PRE": "https://www.commoncoreontologies.org/ont00000965"}
+    sdg_requirements: list[dict] = []
     for key in chosen:
         c0 = cands[key][0]
         cco = c0["cco_module"]
         ice = c0.get("ice_class")
         lbl = c0["leaf"]
         modules_used[cco] = CCO_MODULES[cco]
-        code = c0.get("code") or f"GT.{cco}.{_slug(lbl)}"
+        code = c0.get("code") or f"SDG.{cco}.{_slug(lbl)}"
         iri = next((c["iri"] for c in cands[key] if c.get("iri")), None)
         desc = next((c["description"] for c in cands[key] if c.get("description")), None)
-        leaves.append({"code": code, "label": lbl, "parent_code": f"GT.{cco}",
+        # SDG grounding: a CTA leaf is a value type (sdg:hasValueType); a CPA
+        # (REL) leaf is a relation (sdg:describesProperty) — see
+        # docs/src/architecture/sdg-fixture-grounding.md. Both ground in CCO.
+        sdg_property = "describesProperty" if cco == "REL" else "hasValueType"
+        sdg_term = f"sdg:{lbl}"
+        leaves.append({"code": code, "label": lbl, "parent_code": f"SDG.{cco}",
                        "dbpedia_iri": iri, "cco_module": cco,
                        "cco_module_label": CCO_MODULES[cco],
                        "ice_class": ICE_FULL.get(ice),
+                       "ice_class_iri": ICE_IRI.get(ice),
+                       "sdg_property": sdg_property, "sdg_term": sdg_term,
                        # CCO ExtendedRelationOntology annotations this term
-                       # satisfies (acronym, definition_source) — grounding our
-                       # own taxonomy in the module. has_token_unit stays unset
-                       # (the unit is the semantic absence).
+                       # satisfies (acronym, definition_source). has_token_unit
+                       # stays unset (the unit is the semantic absence).
                        "cco_annotations": ground_term_annotations(
                            mnemonic=_slug(lbl), dbpedia_iri=iri),
                        "is_leaf": True})
+        sdg_requirements.append({
+            "sdg_term": sdg_term, "label": lbl, "sdg_property": sdg_property,
+            "cco_module": cco, "cco_module_label": CCO_MODULES[cco],
+            "ice_class": ICE_FULL.get(ice), "ice_class_iri": ICE_IRI.get(ice),
+            "definition_source": iri, "status": "proposed-extension",
+        })
 
         picks = sorted(cands[key], key=lambda c: (str(c["table_id"]), str(c["column"])))
         seen, uniq = set(), []
@@ -416,9 +434,13 @@ def main() -> int:
 
     taxonomy = {
         "taxonomy_id": "test-gittables",
-        "root": {"code": "GT", "label": "GitTables Semantic Type (CCO-rooted)",
+        # SDG-grounded root: an Information Content Entity (cco:ont00000958,
+        # verified). The taxonomy is a test-scoped subset of SDG, NOT a
+        # standalone namespace — see docs/src/architecture/sdg-fixture-grounding.md.
+        "root": {"code": "SDG", "label": "SDG Data Element",
+                 "cco_iri": "https://www.commoncoreontologies.org/ont00000958",
                  "parent_code": None},
-        "internal": [{"code": f"GT.{m}", "label": lab, "parent_code": "GT",
+        "internal": [{"code": f"SDG.{m}", "label": lab, "parent_code": "SDG",
                       "cco_module": lab}
                      for m, lab in sorted(modules_used.items())],
         "leaves": leaves,
@@ -432,6 +454,16 @@ def main() -> int:
         for r in heldout_rows:
             fh.write(json.dumps(r) + "\n")
     (OUT_DIR / "enrichment_payloads.json").write_text(json.dumps(enrich, indent=2) + "\n")
+    # The requirements artifact Aegir consumes: the value-type / relation terms
+    # this fixture needs, as proposed SDG extensions grounded in verified CCO.
+    (OUT_DIR / "sdg_requirements.json").write_text(json.dumps({
+        "taxonomy_id": "test-gittables",
+        "note": "Proposed SDG terms (value types via sdg:hasValueType, "
+                "relations via sdg:describesProperty) the fixture exercises. "
+                "For Aegir to adopt or refine into sdg-vocab.ttl + catalogs. "
+                "CCO IRIs verified against the published develop catalog.",
+        "terms": sorted(sdg_requirements, key=lambda t: (t["cco_module"], t["sdg_term"])),
+    }, indent=2) + "\n")
 
     cov = sum(1 for r in heldout_rows if r["covered"])
     lines = [

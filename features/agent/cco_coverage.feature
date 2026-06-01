@@ -24,7 +24,16 @@ Feature: The test-gittables taxonomy realizes CCO module coverage
     # CPA gives the data face CTA cannot reach: a column annotated by the
     # relation it expresses, distinct from its entity-type twin.
     Then the "REL" module has leaves grounded in DBpedia relation properties
-    And the relation leaf "GT.REL.CURRENCY" is distinct from the type leaf "GT.CUR.CURRENCY"
+    And the relation leaf "SDG.REL.CURRENCY" is distinct from the type leaf "SDG.CUR.CURRENCY"
+
+  Scenario: Leaves are grounded in SDG terms over verified CCO IRIs
+    # The fixture is a test-scoped subset of SDG, not a one-off namespace:
+    # each leaf is a proposed SDG term expressed via an SDG property, and
+    # every ICE class resolves to a CCO IRI verified against the published
+    # ontology. The build emits the requirements artifact Aegir consumes.
+    Then every leaf is an SDG term via "hasValueType" or "describesProperty"
+    And every ICE class resolves to a verified CCO IRI
+    And the fixture emits an SDG requirements artifact for Aegir
 
   Scenario: A measurement classification surfaces its unit absence
     When I classify a Quality leaf of the taxonomy

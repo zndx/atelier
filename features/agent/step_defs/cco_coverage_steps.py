@@ -17,6 +17,12 @@ def _manifest() -> dict:
     return json.loads(p.read_text())
 
 
+def _fixture_file(name: str) -> dict:
+    import atelier.classify
+    p = Path(atelier.classify.__file__).parent / "fixtures" / "test-gittables" / name
+    return json.loads(p.read_text())
+
+
 @given("the test-gittables taxonomy is loaded")
 def step_load_taxonomy(context):
     from atelier.optimize.svm.fixture import load_fixture_category_set
@@ -121,3 +127,35 @@ def step_relational_read(context):
 def step_relation_surfaced(context, val):
     assert context.rel_absence.get("relation") == val, \
         f"per-read relation absence must survive REL being covered: {context.rel_absence}"
+
+
+_VERIFIED_ICE_IRI = {
+    "DesignativeICE": "https://www.commoncoreontologies.org/ont00000686",
+    "DescriptiveICE": "https://www.commoncoreontologies.org/ont00000853",
+    "PrescriptiveICE": "https://www.commoncoreontologies.org/ont00000965",
+}
+
+
+@then('every leaf is an SDG term via "{p1}" or "{p2}"')
+def step_sdg_property(context, p1, p2):
+    for lf in _fixture_file("taxonomy.json")["leaves"]:
+        assert lf.get("sdg_property") in (p1, p2), \
+            f"{lf['code']} sdg_property={lf.get('sdg_property')}"
+        assert str(lf.get("sdg_term", "")).startswith("sdg:"), \
+            f"{lf['code']} not an sdg: term"
+
+
+@then("every ICE class resolves to a verified CCO IRI")
+def step_ice_iri(context):
+    for lf in _fixture_file("taxonomy.json")["leaves"]:
+        ic = lf.get("ice_class")
+        if ic:  # REL (relation) leaves carry no ICE trichotomy class
+            assert lf.get("ice_class_iri") == _VERIFIED_ICE_IRI[ic], \
+                f"{lf['code']} ICE IRI not the verified CCO IRI"
+
+
+@then("the fixture emits an SDG requirements artifact for Aegir")
+def step_sdg_requirements(context):
+    req = _fixture_file("sdg_requirements.json")
+    assert req.get("terms"), "sdg_requirements must list proposed SDG terms"
+    assert all(t["status"] == "proposed-extension" for t in req["terms"])

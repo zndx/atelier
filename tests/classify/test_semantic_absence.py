@@ -82,7 +82,7 @@ def test_classification_exposes_absence_from_category_module():
     from atelier.classify.taxonomy import ReferenceCategory
 
     quality_cat = ReferenceCategory(
-        code="GT.QUAL.MASS", label="mass", embedding_text="mass", cco_module="QUAL",
+        code="SDG.QUAL.MASS", label="mass", embedding_text="mass", cco_module="QUAL",
     )
     hc = HierarchicalClassification(category=quality_cat, confidence=0.9, evidence="")
     assert hc.semantic_absences == {"unit": UNRESOLVED}
