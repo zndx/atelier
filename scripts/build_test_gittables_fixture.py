@@ -247,7 +247,8 @@ def main() -> int:
         iri = next((c["iri"] for c in cands[lbl] if c["iri"]), None)
         desc = next((c["description"] for c in cands[lbl] if c.get("description")), None)
         leaves.append({"code": code, "label": lbl, "parent_code": f"GT.{cco}",
-                       "dbpedia_iri": iri, "cco_module": CCO_MODULES[cco],
+                       "dbpedia_iri": iri, "cco_module": cco,
+                       "cco_module_label": CCO_MODULES[cco],
                        "ice_class": {"DES": "DesignativeICE", "DSC": "DescriptiveICE",
                                      "PRE": "PrescriptiveICE"}[ice], "is_leaf": True})
 
@@ -287,7 +288,7 @@ def main() -> int:
 
         enrich[code] = {
             "code": code, "label": lbl, "mnemonic": _slug(lbl),
-            "cco_module": CCO_MODULES[cco],
+            "cco_module": cco,
             "description": desc or f"DBpedia ontology type '{lbl}' ({iri}).",
             "prototype_values": proto[:N_PROTOTYPES],
             "name_hints": sorted(hints), "value_patterns": [],
@@ -335,7 +336,7 @@ def main() -> int:
         "|---|---|---|---|---|",
     ]
     for lf in leaves:
-        lines.append(f"| `{lf['code']}` | {lf['label']} | {lf['cco_module']} | "
+        lines.append(f"| `{lf['code']}` | {lf['label']} | {lf['cco_module_label']} | "
                      f"{lf['ice_class']} | {lf['dbpedia_iri']} |")
     lines += ["", "## Per-table upstream source + license", "",
               "| Table ID | License | Source CSV |", "|---|---|---|"]

@@ -3,7 +3,7 @@
     "code": "GT.AGENT.ARTIST",
     "label": "artist",
     "mnemonic": "ARTIST",
-    "cco_module": "Agent",
+    "cco_module": "AGENT",
     "description": "The performer or creator of the musical work.",
     "prototype_values": [
       "The Chipmunks With David Seville",
@@ -22,7 +22,7 @@
     "code": "GT.AGENT.AUTHOR",
     "label": "author",
     "mnemonic": "AUTHOR",
-    "cco_module": "Agent",
+    "cco_module": "AGENT",
     "description": "DBpedia ontology type 'author' (http://dbpedia.org/ontology/author).",
     "prototype_values": [
       "Q655719",
@@ -45,7 +45,7 @@
     "code": "GT.AGENT.COMPANY",
     "label": "company",
     "mnemonic": "COMPANY",
-    "cco_module": "Agent",
+    "cco_module": "AGENT",
     "description": "DBpedia ontology type 'company' (http://dbpedia.org/ontology/company).",
     "prototype_values": [
       "Walmart",
@@ -70,7 +70,7 @@
     "code": "GT.AGENT.ORGANISATION",
     "label": "organisation",
     "mnemonic": "ORGANISATION",
-    "cco_module": "Agent",
+    "cco_module": "AGENT",
     "description": "DBpedia ontology type 'organisation' (http://dbpedia.org/ontology/organisation).",
     "prototype_values": [
       "UNIV OF MASSACHUSETTS MED SCH WORCESTER",
@@ -92,7 +92,7 @@
     "code": "GT.AGENT.PERSON",
     "label": "person",
     "mnemonic": "PERSON",
-    "cco_module": "Agent",
+    "cco_module": "AGENT",
     "description": "DBpedia ontology type 'person' (http://dbpedia.org/ontology/person).",
     "prototype_values": [
       "Mrs. Angela Allen",
@@ -114,7 +114,7 @@
     "code": "GT.ARTIFACT.BRAND",
     "label": "brand",
     "mnemonic": "BRAND",
-    "cco_module": "Artifact",
+    "cco_module": "ARTIFACT",
     "description": "DBpedia ontology type 'brand' (http://dbpedia.org/ontology/brand).",
     "prototype_values": [
       "importoscholar",
@@ -137,7 +137,7 @@
     "code": "GT.ARTIFACT.MODEL",
     "label": "model",
     "mnemonic": "MODEL",
-    "cco_module": "Artifact",
+    "cco_module": "ARTIFACT",
     "description": "DBpedia ontology type 'model' (http://dbpedia.org/ontology/model).",
     "prototype_values": [
       "model_google_calendar",
@@ -156,7 +156,7 @@
     "code": "GT.ARTIFACT.PRODUCT",
     "label": "product",
     "mnemonic": "PRODUCT",
-    "cco_module": "Artifact",
+    "cco_module": "ARTIFACT",
     "description": "DBpedia ontology type 'product' (http://dbpedia.org/ontology/product).",
     "prototype_values": [
       "sulfate / thiosulfate ABC transporter - periplasmic binding protein CysP",
@@ -183,7 +183,7 @@
     "code": "GT.CUR.COST",
     "label": "cost",
     "mnemonic": "COST",
-    "cco_module": "Currency Unit",
+    "cco_module": "CUR",
     "description": "Cost of building an ArchitecturalStructure, Ship, etc",
     "prototype_values": [
       "28384000000",
@@ -202,7 +202,7 @@
     "code": "GT.CUR.CURRENCY",
     "label": "currency",
     "mnemonic": "CURRENCY",
-    "cco_module": "Currency Unit",
+    "cco_module": "CUR",
     "description": "DBpedia ontology type 'currency' (http://dbpedia.org/ontology/currency).",
     "prototype_values": [
       "USD",
@@ -219,7 +219,7 @@
     "code": "GT.CUR.PRICE",
     "label": "price",
     "mnemonic": "PRICE",
-    "cco_module": "Currency Unit",
+    "cco_module": "CUR",
     "description": "The price of something, eg a journal. For \"total money earned by an Athlete\" use gross",
     "prototype_values": [
       "2",
@@ -240,7 +240,7 @@
     "code": "GT.EVENT.EVENT",
     "label": "event",
     "mnemonic": "EVENT",
-    "cco_module": "Event",
+    "cco_module": "EVENT",
     "description": "DBpedia ontology type 'event' (http://dbpedia.org/ontology/event).",
     "prototype_values": [
       "2/7/2020, 09:44:45:432 PM",
@@ -261,7 +261,7 @@
     "code": "GT.FACILITY.BUILDING",
     "label": "building",
     "mnemonic": "BUILDING",
-    "cco_module": "Facility",
+    "cco_module": "FACILITY",
     "description": "DBpedia ontology type 'building' (http://dbpedia.org/ontology/building).",
     "prototype_values": [
       "0",
@@ -282,7 +282,7 @@
     "code": "GT.GEO.ADDRESS",
     "label": "address",
     "mnemonic": "ADDRESS",
-    "cco_module": "Geospatial",
+    "cco_module": "GEO",
     "description": "Address of something as literal. Usually Building, but we also use it for the address of a Region's or Settlement's government",
     "prototype_values": [
       "387 Grimes Green Apt. 801\nPagetown, NM 44165",
@@ -310,7 +310,7 @@
     "code": "GT.GEO.CITY",
     "label": "city",
     "mnemonic": "CITY",
-    "cco_module": "Geospatial",
+    "cco_module": "GEO",
     "description": "DBpedia ontology type 'city' (http://dbpedia.org/ontology/city).",
     "prototype_values": [
       "Tokyo",
@@ -330,7 +330,7 @@
     "code": "GT.GEO.COUNTRY",
     "label": "country",
     "mnemonic": "COUNTRY",
-    "cco_module": "Geospatial",
+    "cco_module": "GEO",
     "description": "The country where the thing is located.",
     "prototype_values": [
       "Japan",
@@ -351,7 +351,7 @@
     "code": "GT.GEO.PLACE",
     "label": "place",
     "mnemonic": "PLACE",
-    "cco_module": "Geospatial",
+    "cco_module": "GEO",
     "description": "DBpedia ontology type 'place' (http://dbpedia.org/ontology/place).",
     "prototype_values": [
       "Ap\u00e9ritif Restaurant & Bar",
@@ -375,7 +375,7 @@
     "code": "GT.GEO.STATE",
     "label": "state",
     "mnemonic": "STATE",
-    "cco_module": "Geospatial",
+    "cco_module": "GEO",
     "description": "DBpedia ontology type 'state' (http://dbpedia.org/ontology/state).",
     "prototype_values": [
       "REGULAR",
@@ -394,7 +394,7 @@
     "code": "GT.INFO.DESCRIPTION",
     "label": "description",
     "mnemonic": "DESCRIPTION",
-    "cco_module": "Information Entity",
+    "cco_module": "INFO",
     "description": "Short description of a person",
     "prototype_values": [
       "Lightweight, Portable, Flexible Distributed/Mobile Deep Learning with Dynamic, M",
@@ -419,7 +419,7 @@
     "code": "GT.INFO.ID",
     "label": "id",
     "mnemonic": "ID",
-    "cco_module": "Information Entity",
+    "cco_module": "INFO",
     "description": "DBpedia ontology type 'id' (http://dbpedia.org/ontology/id).",
     "prototype_values": [
       "access_google_calendar_all",
@@ -447,7 +447,7 @@
     "code": "GT.INFO.NAME",
     "label": "name",
     "mnemonic": "NAME",
-    "cco_module": "Information Entity",
+    "cco_module": "INFO",
     "description": "DBpedia ontology type 'name' (http://dbpedia.org/ontology/name).",
     "prototype_values": [
       "latent_period_mean",
@@ -469,7 +469,7 @@
     "code": "GT.INFO.TITLE",
     "label": "title",
     "mnemonic": "TITLE",
-    "cco_module": "Information Entity",
+    "cco_module": "INFO",
     "description": "DBpedia ontology type 'title' (http://dbpedia.org/ontology/title).",
     "prototype_values": [
       "Top Activities of the Product Owner | Agile Software Development",
@@ -490,7 +490,7 @@
     "code": "GT.QUAL.LENGTH",
     "label": "length",
     "mnemonic": "LENGTH",
-    "cco_module": "Quality",
+    "cco_module": "QUAL",
     "description": "DBpedia ontology type 'length' (http://dbpedia.org/ontology/length).",
     "prototype_values": [
       "134.47791",
@@ -512,7 +512,7 @@
     "code": "GT.QUAL.TEMPERATURE",
     "label": "temperature",
     "mnemonic": "TEMPERATURE",
-    "cco_module": "Quality",
+    "cco_module": "QUAL",
     "description": "DBpedia ontology type 'temperature' (http://dbpedia.org/ontology/temperature).",
     "prototype_values": [
       "61 %",
@@ -533,7 +533,7 @@
     "code": "GT.QUAL.WEIGHT",
     "label": "weight",
     "mnemonic": "WEIGHT",
-    "cco_module": "Quality",
+    "cco_module": "QUAL",
     "description": "DBpedia ontology type 'weight' (http://dbpedia.org/ontology/weight).",
     "prototype_values": [
       "145.60000610351562",
@@ -554,7 +554,7 @@
     "code": "GT.QUAL.WIDTH",
     "label": "width",
     "mnemonic": "WIDTH",
-    "cco_module": "Quality",
+    "cco_module": "QUAL",
     "description": "DBpedia ontology type 'width' (http://dbpedia.org/ontology/width).",
     "prototype_values": [
       "5",
@@ -577,7 +577,7 @@
     "code": "GT.TIME.DATE",
     "label": "date",
     "mnemonic": "DATE",
-    "cco_module": "Time",
+    "cco_module": "TIME",
     "description": "DBpedia ontology type 'date' (http://dbpedia.org/ontology/date).",
     "prototype_values": [
       "1",
@@ -602,7 +602,7 @@
     "code": "GT.TIME.DURATION",
     "label": "duration",
     "mnemonic": "DURATION",
-    "cco_module": "Time",
+    "cco_module": "TIME",
     "description": "The duration of the item (movie, audio recording, event, etc.) in ISO 8601 date format",
     "prototype_values": [
       "90",
@@ -624,7 +624,7 @@
     "code": "GT.TIME.TIME",
     "label": "time",
     "mnemonic": "TIME",
-    "cco_module": "Time",
+    "cco_module": "TIME",
     "description": "DBpedia ontology type 'time' (http://dbpedia.org/ontology/time).",
     "prototype_values": [
       "2013-12-16 12:52 AM",
@@ -650,7 +650,7 @@
     "code": "GT.TIME.YEAR",
     "label": "year",
     "mnemonic": "YEAR",
-    "cco_module": "Time",
+    "cco_module": "TIME",
     "description": "DBpedia ontology type 'year' (http://dbpedia.org/ontology/year).",
     "prototype_values": [
       "1890",

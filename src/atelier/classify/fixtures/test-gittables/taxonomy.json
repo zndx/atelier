@@ -67,7 +67,8 @@
       "label": "artist",
       "parent_code": "GT.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/artist",
-      "cco_module": "Agent",
+      "cco_module": "AGENT",
+      "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -76,7 +77,8 @@
       "label": "author",
       "parent_code": "GT.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/author",
-      "cco_module": "Agent",
+      "cco_module": "AGENT",
+      "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -85,7 +87,8 @@
       "label": "company",
       "parent_code": "GT.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/company",
-      "cco_module": "Agent",
+      "cco_module": "AGENT",
+      "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -94,7 +97,8 @@
       "label": "organisation",
       "parent_code": "GT.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/organisation",
-      "cco_module": "Agent",
+      "cco_module": "AGENT",
+      "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -103,7 +107,8 @@
       "label": "person",
       "parent_code": "GT.AGENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/person",
-      "cco_module": "Agent",
+      "cco_module": "AGENT",
+      "cco_module_label": "Agent",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -112,7 +117,8 @@
       "label": "brand",
       "parent_code": "GT.ARTIFACT",
       "dbpedia_iri": "http://dbpedia.org/ontology/brand",
-      "cco_module": "Artifact",
+      "cco_module": "ARTIFACT",
+      "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -121,7 +127,8 @@
       "label": "model",
       "parent_code": "GT.ARTIFACT",
       "dbpedia_iri": "http://dbpedia.org/ontology/model",
-      "cco_module": "Artifact",
+      "cco_module": "ARTIFACT",
+      "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -130,7 +137,8 @@
       "label": "product",
       "parent_code": "GT.ARTIFACT",
       "dbpedia_iri": "http://dbpedia.org/ontology/product",
-      "cco_module": "Artifact",
+      "cco_module": "ARTIFACT",
+      "cco_module_label": "Artifact",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -139,7 +147,8 @@
       "label": "cost",
       "parent_code": "GT.CUR",
       "dbpedia_iri": "http://dbpedia.org/ontology/cost",
-      "cco_module": "Currency Unit",
+      "cco_module": "CUR",
+      "cco_module_label": "Currency Unit",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -148,7 +157,8 @@
       "label": "currency",
       "parent_code": "GT.CUR",
       "dbpedia_iri": "http://dbpedia.org/ontology/currency",
-      "cco_module": "Currency Unit",
+      "cco_module": "CUR",
+      "cco_module_label": "Currency Unit",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -157,7 +167,8 @@
       "label": "price",
       "parent_code": "GT.CUR",
       "dbpedia_iri": "http://dbpedia.org/ontology/price",
-      "cco_module": "Currency Unit",
+      "cco_module": "CUR",
+      "cco_module_label": "Currency Unit",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -166,7 +177,8 @@
       "label": "event",
       "parent_code": "GT.EVENT",
       "dbpedia_iri": "http://dbpedia.org/ontology/event",
-      "cco_module": "Event",
+      "cco_module": "EVENT",
+      "cco_module_label": "Event",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -175,7 +187,8 @@
       "label": "building",
       "parent_code": "GT.FACILITY",
       "dbpedia_iri": "http://dbpedia.org/ontology/building",
-      "cco_module": "Facility",
+      "cco_module": "FACILITY",
+      "cco_module_label": "Facility",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -184,7 +197,8 @@
       "label": "address",
       "parent_code": "GT.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/address",
-      "cco_module": "Geospatial",
+      "cco_module": "GEO",
+      "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -193,7 +207,8 @@
       "label": "city",
       "parent_code": "GT.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/city",
-      "cco_module": "Geospatial",
+      "cco_module": "GEO",
+      "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -202,7 +217,8 @@
       "label": "country",
       "parent_code": "GT.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/country",
-      "cco_module": "Geospatial",
+      "cco_module": "GEO",
+      "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -211,7 +227,8 @@
       "label": "place",
       "parent_code": "GT.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/place",
-      "cco_module": "Geospatial",
+      "cco_module": "GEO",
+      "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -220,7 +237,8 @@
       "label": "state",
       "parent_code": "GT.GEO",
       "dbpedia_iri": "http://dbpedia.org/ontology/state",
-      "cco_module": "Geospatial",
+      "cco_module": "GEO",
+      "cco_module_label": "Geospatial",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -229,7 +247,8 @@
       "label": "description",
       "parent_code": "GT.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/description",
-      "cco_module": "Information Entity",
+      "cco_module": "INFO",
+      "cco_module_label": "Information Entity",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -238,7 +257,8 @@
       "label": "id",
       "parent_code": "GT.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/id",
-      "cco_module": "Information Entity",
+      "cco_module": "INFO",
+      "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -247,7 +267,8 @@
       "label": "name",
       "parent_code": "GT.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/name",
-      "cco_module": "Information Entity",
+      "cco_module": "INFO",
+      "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -256,7 +277,8 @@
       "label": "title",
       "parent_code": "GT.INFO",
       "dbpedia_iri": "http://dbpedia.org/ontology/title",
-      "cco_module": "Information Entity",
+      "cco_module": "INFO",
+      "cco_module_label": "Information Entity",
       "ice_class": "DesignativeICE",
       "is_leaf": true
     },
@@ -265,7 +287,8 @@
       "label": "length",
       "parent_code": "GT.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/length",
-      "cco_module": "Quality",
+      "cco_module": "QUAL",
+      "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -274,7 +297,8 @@
       "label": "temperature",
       "parent_code": "GT.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/temperature",
-      "cco_module": "Quality",
+      "cco_module": "QUAL",
+      "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -283,7 +307,8 @@
       "label": "weight",
       "parent_code": "GT.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/weight",
-      "cco_module": "Quality",
+      "cco_module": "QUAL",
+      "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -292,7 +317,8 @@
       "label": "width",
       "parent_code": "GT.QUAL",
       "dbpedia_iri": "http://dbpedia.org/ontology/width",
-      "cco_module": "Quality",
+      "cco_module": "QUAL",
+      "cco_module_label": "Quality",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -301,7 +327,8 @@
       "label": "date",
       "parent_code": "GT.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/date",
-      "cco_module": "Time",
+      "cco_module": "TIME",
+      "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -310,7 +337,8 @@
       "label": "duration",
       "parent_code": "GT.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/duration",
-      "cco_module": "Time",
+      "cco_module": "TIME",
+      "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -319,7 +347,8 @@
       "label": "time",
       "parent_code": "GT.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/time",
-      "cco_module": "Time",
+      "cco_module": "TIME",
+      "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     },
@@ -328,7 +357,8 @@
       "label": "year",
       "parent_code": "GT.TIME",
       "dbpedia_iri": "http://dbpedia.org/ontology/year",
-      "cco_module": "Time",
+      "cco_module": "TIME",
+      "cco_module_label": "Time",
       "ice_class": "DescriptiveICE",
       "is_leaf": true
     }

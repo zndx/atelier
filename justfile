@@ -121,12 +121,20 @@ optimize mode="help" *ARGS="":
         python scripts/semantic_optimize.py {{ARGS}}
         ;;
       svm|--svm)
-        # Dual-gate convergence: coverage audit → agent SDK authorship →
-        # corpus generation → Phase D training/eval → refinement loop
-        # (Gate A: TARGET_ACCURACY) → uplift gate (Gate B: mutual
-        # affirmation with maxsim).  See plan and phase gate brief at
-        # docs/notes/2026-05-25/phase_gate_brief.md.
-        bash scripts/run_corpus_expansion_pipeline.sh {{ARGS}}
+        if [[ " {{ARGS}} " == *" --fixture "* ]]; then
+          # Hermetic public-fixture fast path: train + promote an NHSVM head
+          # from the committed test-gittables fixture (no Hive, no agent, no
+          # LLM; fail-closed). Deterministic; gives the SVM critical-path test
+          # a registered head on demand under taxonomy_id=test-gittables.
+          uv run --no-sync python -m atelier.optimize.svm.fixture {{ARGS}}
+        else
+          # Dual-gate convergence: coverage audit → agent SDK authorship →
+          # corpus generation → Phase D training/eval → refinement loop
+          # (Gate A: TARGET_ACCURACY) → uplift gate (Gate B: mutual
+          # affirmation with maxsim).  See plan and phase gate brief at
+          # docs/notes/2026-05-25/phase_gate_brief.md.
+          bash scripts/run_corpus_expansion_pipeline.sh {{ARGS}}
+        fi
         ;;
       ""|help|--help|-h)
         echo "Usage: just optimize <agent|maxsim|svm> [args...]"
