@@ -57,6 +57,7 @@ from features.agent.step_defs.gpu_sage_parity_steps import *  # noqa: F401,F403
 from features.agent.step_defs.supervisor_steps import *  # noqa: F401,F403
 from features.agent.step_defs.coverage_guarantees_steps import *  # noqa: F401,F403
 from features.agent.step_defs.cco_coverage_steps import *  # noqa: F401,F403
+from features.agent.step_defs.optimize_svm_critical_path_steps import *  # noqa: F401,F403
 from features.agent.step_defs.artifact_set_steps import *  # noqa: F401,F403
 from features.agent.step_defs.extend_pipeline_steps import *  # noqa: F401,F403
 from features.agent.step_defs.governance_cost_model_steps import *  # noqa: F401,F403
