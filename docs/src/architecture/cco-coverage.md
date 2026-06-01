@@ -19,6 +19,38 @@ we iterated toward the PII/metadata target. The program goal is now
   public-data fixtures (GitTables/SOTAB) that *exercise* every reachable
   module, and a coverage evaluation that reports module-level completeness.
 
+## Why completeness is correctness, not thoroughness
+
+Treat full 11/11 coverage as a **correctness and safety invariant**, not a
+milestone. Incomplete ontological coverage does not yield partially-correct
+output — it yields *confident, complete-looking, catastrophically-wrong*
+output. This is the **Mars Climate Orbiter** failure class (1999, $327M lost
+to a `lbf·s` vs `N·s` mismatch at a software boundary; neither side had a
+bug).
+
+That is not a loose analogy — it is our exact gap. The two modules we don't
+yet cover, **Units of Measure** and **Extended Relation**, are precisely the
+*interface-semantics* modules: a measurement value is meaningless without
+its unit; an entity/column is meaningless in isolation without its
+relations. A classifier that labels a column `mass` but cannot represent the
+**unit** emits a valid-looking classification that silently drops the
+load-bearing dimension — and **you cannot flag what you cannot represent**,
+so the gap is invisible at the source and detonates downstream, wherever a
+consumer (Atlas sync, data integration, cross-column compatibility, an
+EAV/relational read) fills the missing axis with its own assumption.
+
+Design consequences (binding):
+
+1. **Incompleteness must be loud.** A measurement column with no resolvable
+   unit carries an explicit `unit: UNRESOLVED` token (mirroring the
+   pipeline's UNRESOLVED strata) so no consumer can silently assume.
+2. **Gate claims on missing axes.** Refuse assertions that depend on
+   un-modeled semantics (e.g. "these two `mass` columns are compatible")
+   until the relevant module is represented.
+3. **EAV/Units is correctness work, prioritized now** — not phase-3
+   coverage. EAV tables make units *explicit data* instead of an implicit
+   wide-table assumption (see the table-shape note below).
+
 ## The classification-target nuance
 
 Every column Atelier classifies is an **Information Content Entity**
