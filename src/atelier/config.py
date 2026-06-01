@@ -119,6 +119,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.meta_tagging_dir": ("classify_meta_tagging_dir", str),
     "classify.reference_uri": ("classify_reference_uri", str),
     "classify.reference_database": ("classify_reference_database", str),
+    "classify.taxonomy_id": ("classify_taxonomy_id", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm.hierarchical": ("classify_svm_hierarchical", bool),
@@ -408,6 +409,12 @@ class AtelierConfig:
     # ATELIER_REFERENCE_DATABASE only when using the deprecated Hive
     # reference path; the public GitTables/SOTAB fixture path needs none.
     classify_reference_database: str = ""
+    # Taxonomy/collection identity used to resolve the registered NHSVM head
+    # AND the Qdrant maxsim collection. Default "default"; set to isolate a
+    # test taxonomy (e.g. "test-gittables") so a fixture head/collection
+    # cannot collide with production. Read by both _ensure_registered_svm_head
+    # and the enrichment/maxsim path so the two stay consistent.
+    classify_taxonomy_id: str = "default"
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"

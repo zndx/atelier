@@ -426,7 +426,7 @@ def _ensure_per_vocab_svm(
 def _ensure_registered_svm_head(
     cfg, category_set,
     *,
-    taxonomy_id: str = "default",
+    taxonomy_id: str | None = None,
     encoder: str = "answerdotai/ModernBERT-base",
 ) -> bool:
     """Load + install the currently-registered NHSVM head, if any.
@@ -447,12 +447,20 @@ def _ensure_registered_svm_head(
     from atelier.classify.factorized_nhsvm import NHSVMHeadAdapter
     from atelier.registry.nhsvm_head import get_current
 
-    current = get_current(taxonomy_id, encoder)
+    # Resolve taxonomy_id from config (mirrors the enrichment/maxsim path's
+    # _resolve_taxonomy_id) so the registered head and the Qdrant collection
+    # are looked up under the SAME taxonomy — previously hardcoded "default",
+    # which broke isolation for a test/alternate taxonomy.
+    tax_id: str = (
+        taxonomy_id or getattr(cfg, "classify_taxonomy_id", None) or "default"
+    )
+
+    current = get_current(tax_id, encoder)
     if current is None:
         logger.info(
             "_ensure_registered_svm_head: no current head for "
             "(taxonomy_id=%s, encoder=%s)",
-            taxonomy_id, encoder,
+            tax_id, encoder,
         )
         return False
 

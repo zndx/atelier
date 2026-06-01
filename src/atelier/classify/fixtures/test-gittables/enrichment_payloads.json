@@ -1,0 +1,668 @@
+{
+  "GT.AGENT.ARTIST": {
+    "code": "GT.AGENT.ARTIST",
+    "label": "artist",
+    "mnemonic": "ARTIST",
+    "cco_module": "Agent",
+    "description": "The performer or creator of the musical work.",
+    "prototype_values": [
+      "The Chipmunks With David Seville",
+      "The Platters",
+      "The Teddy Bears",
+      "Prince And The Revolution",
+      "Robert Palmer",
+      "Pet Shop Boys"
+    ],
+    "name_hints": [
+      "artist"
+    ],
+    "value_patterns": []
+  },
+  "GT.AGENT.AUTHOR": {
+    "code": "GT.AGENT.AUTHOR",
+    "label": "author",
+    "mnemonic": "AUTHOR",
+    "cco_module": "Agent",
+    "description": "DBpedia ontology type 'author' (http://dbpedia.org/ontology/author).",
+    "prototype_values": [
+      "Q655719",
+      "Cogn.",
+      "Gogn.",
+      "there",
+      "ced",
+      "Elepsis"
+    ],
+    "name_hints": [
+      "Author",
+      "author_ids",
+      "author_name",
+      "author_url",
+      "authors"
+    ],
+    "value_patterns": []
+  },
+  "GT.AGENT.COMPANY": {
+    "code": "GT.AGENT.COMPANY",
+    "label": "company",
+    "mnemonic": "COMPANY",
+    "cco_module": "Agent",
+    "description": "DBpedia ontology type 'company' (http://dbpedia.org/ontology/company).",
+    "prototype_values": [
+      "Walmart",
+      "Berkshire Hathaway",
+      "Apple",
+      "Norma Fisher",
+      "Jorge Sullivan",
+      "3M Company"
+    ],
+    "name_hints": [
+      "Company",
+      "CompanyName_s",
+      "Company_Litho",
+      "Company_LithoCode",
+      "company",
+      "companyBankDetails.importId",
+      "company_name"
+    ],
+    "value_patterns": []
+  },
+  "GT.AGENT.ORGANISATION": {
+    "code": "GT.AGENT.ORGANISATION",
+    "label": "organisation",
+    "mnemonic": "ORGANISATION",
+    "cco_module": "Agent",
+    "description": "DBpedia ontology type 'organisation' (http://dbpedia.org/ontology/organisation).",
+    "prototype_values": [
+      "UNIV OF MASSACHUSETTS MED SCH WORCESTER",
+      "MEDICAL UNIVERSITY OF SOUTH CAROLINA",
+      "UNIVERSITY OF PITTSBURGH AT PITTSBURGH",
+      "Bromsgrove District Council",
+      "http://opendatacommunities.org/id/district-council/bromsgrove",
+      "McCullough Inc"
+    ],
+    "name_hints": [
+      "Organisation",
+      "OrganisationLabel",
+      "OrganisationURI",
+      "organization"
+    ],
+    "value_patterns": []
+  },
+  "GT.AGENT.PERSON": {
+    "code": "GT.AGENT.PERSON",
+    "label": "person",
+    "mnemonic": "PERSON",
+    "cco_module": "Agent",
+    "description": "DBpedia ontology type 'person' (http://dbpedia.org/ontology/person).",
+    "prototype_values": [
+      "Mrs. Angela Allen",
+      "William Robbins",
+      "Terri Johnson",
+      "Anthony Ware",
+      "Ariel Barajas",
+      "Stephanie Martin"
+    ],
+    "name_hints": [
+      "LonePerson",
+      "Person",
+      "Someone",
+      "someone"
+    ],
+    "value_patterns": []
+  },
+  "GT.ARTIFACT.BRAND": {
+    "code": "GT.ARTIFACT.BRAND",
+    "label": "brand",
+    "mnemonic": "BRAND",
+    "cco_module": "Artifact",
+    "description": "DBpedia ontology type 'brand' (http://dbpedia.org/ontology/brand).",
+    "prototype_values": [
+      "importoscholar",
+      "importoedu pack",
+      "exportiedu pack",
+      "Commander\u00ae",
+      "exportiexporti",
+      "edu packimporto"
+    ],
+    "name_hints": [
+      "Brand",
+      "Sub-brand",
+      "brand",
+      "brand_id",
+      "brands"
+    ],
+    "value_patterns": []
+  },
+  "GT.ARTIFACT.MODEL": {
+    "code": "GT.ARTIFACT.MODEL",
+    "label": "model",
+    "mnemonic": "MODEL",
+    "cco_module": "Artifact",
+    "description": "DBpedia ontology type 'model' (http://dbpedia.org/ontology/model).",
+    "prototype_values": [
+      "model_google_calendar",
+      "model_account_rc_type",
+      "model_account_rc_type_tax",
+      "model_crm_tracking_medium",
+      "model_crm_tracking_source",
+      "model_crm_lead"
+    ],
+    "name_hints": [
+      "model_id:id"
+    ],
+    "value_patterns": []
+  },
+  "GT.ARTIFACT.PRODUCT": {
+    "code": "GT.ARTIFACT.PRODUCT",
+    "label": "product",
+    "mnemonic": "PRODUCT",
+    "cco_module": "Artifact",
+    "description": "DBpedia ontology type 'product' (http://dbpedia.org/ontology/product).",
+    "prototype_values": [
+      "sulfate / thiosulfate ABC transporter - periplasmic binding protein CysP",
+      "sulfate adenylyltransferase, CysD subunit",
+      "sulfite reductase, flavoprotein subunit",
+      "Carrot",
+      "Whole Wheat",
+      "Chocolate Chip"
+    ],
+    "name_hints": [
+      "DeviceProduct",
+      "Product",
+      "gene_product",
+      "magebuzz_featured_product",
+      "product",
+      "productName",
+      "product_changed_websites",
+      "product_label",
+      "product_name"
+    ],
+    "value_patterns": []
+  },
+  "GT.CUR.COST": {
+    "code": "GT.CUR.COST",
+    "label": "cost",
+    "mnemonic": "COST",
+    "cco_module": "Currency Unit",
+    "description": "Cost of building an ArchitecturalStructure, Ship, etc",
+    "prototype_values": [
+      "28384000000",
+      "4033000000",
+      "3526000000",
+      "0",
+      "3795000000",
+      "3319000000"
+    ],
+    "name_hints": [
+      "costOfRevenue"
+    ],
+    "value_patterns": []
+  },
+  "GT.CUR.CURRENCY": {
+    "code": "GT.CUR.CURRENCY",
+    "label": "currency",
+    "mnemonic": "CURRENCY",
+    "cco_module": "Currency Unit",
+    "description": "DBpedia ontology type 'currency' (http://dbpedia.org/ontology/currency).",
+    "prototype_values": [
+      "USD",
+      "JPY",
+      "EUR"
+    ],
+    "name_hints": [
+      "currency",
+      "financialCurrency"
+    ],
+    "value_patterns": []
+  },
+  "GT.CUR.PRICE": {
+    "code": "GT.CUR.PRICE",
+    "label": "price",
+    "mnemonic": "PRICE",
+    "cco_module": "Currency Unit",
+    "description": "The price of something, eg a journal. For \"total money earned by an Athlete\" use gross",
+    "prototype_values": [
+      "2",
+      "0.0061286404",
+      "5.4",
+      "4",
+      "-0.13230142",
+      "2.53"
+    ],
+    "name_hints": [
+      "priceHint",
+      "priceToBook",
+      "regularMarketPrice"
+    ],
+    "value_patterns": []
+  },
+  "GT.EVENT.EVENT": {
+    "code": "GT.EVENT.EVENT",
+    "label": "event",
+    "mnemonic": "EVENT",
+    "cco_module": "Event",
+    "description": "DBpedia ontology type 'event' (http://dbpedia.org/ontology/event).",
+    "prototype_values": [
+      "2/7/2020, 09:44:45:432 PM",
+      "2/7/2020, 10:42:01:227 PM",
+      "2/7/2020, 07:59:36:606 PM",
+      "Rain"
+    ],
+    "name_hints": [
+      "EVENT_DT",
+      "EVENT_ID",
+      "EVENT_NAME",
+      "Events",
+      "event_timestamp_t"
+    ],
+    "value_patterns": []
+  },
+  "GT.FACILITY.BUILDING": {
+    "code": "GT.FACILITY.BUILDING",
+    "label": "building",
+    "mnemonic": "BUILDING",
+    "cco_module": "Facility",
+    "description": "DBpedia ontology type 'building' (http://dbpedia.org/ontology/building).",
+    "prototype_values": [
+      "0",
+      "1000"
+    ],
+    "name_hints": [
+      "Building",
+      "Building (per pupil)",
+      "BuildingCondition",
+      "BuildingElevationUnit",
+      "BuildingExteriorOpening",
+      "BuildingTIV",
+      "BuildingValuation"
+    ],
+    "value_patterns": []
+  },
+  "GT.GEO.ADDRESS": {
+    "code": "GT.GEO.ADDRESS",
+    "label": "address",
+    "mnemonic": "ADDRESS",
+    "cco_module": "Geospatial",
+    "description": "Address of something as literal. Usually Building, but we also use it for the address of a Region's or Settlement's government",
+    "prototype_values": [
+      "387 Grimes Green Apt. 801\nPagetown, NM 44165",
+      "139 John Divide Suite 115\nRodriguezside, VT 16860",
+      "894 Davis Union\nStewartbury, HI 25324",
+      "848 Melissa Springs Suite 947\nKellerstad, MD 80819",
+      "30413 Norton Isle Suite 012\nNorth Lisa, ND 79428",
+      "39916 Mitchell Crescent\nNew Andrewburgh, DE 63315"
+    ],
+    "name_hints": [
+      "ADDRESS DETAILS",
+      "Address",
+      "Email",
+      "Hashed IP Address",
+      "_address_default_billing_",
+      "_address_default_shipping_",
+      "_email",
+      "address",
+      "email",
+      "geocoded_address"
+    ],
+    "value_patterns": []
+  },
+  "GT.GEO.CITY": {
+    "code": "GT.GEO.CITY",
+    "label": "city",
+    "mnemonic": "CITY",
+    "cco_module": "Geospatial",
+    "description": "DBpedia ontology type 'city' (http://dbpedia.org/ontology/city).",
+    "prototype_values": [
+      "Tokyo",
+      "Washington",
+      "Education includes a BA in psychology from Colorado State University in 1970.  S",
+      "Kirkland",
+      "Redmond",
+      "Madrid"
+    ],
+    "name_hints": [
+      "City",
+      "city"
+    ],
+    "value_patterns": []
+  },
+  "GT.GEO.COUNTRY": {
+    "code": "GT.GEO.COUNTRY",
+    "label": "country",
+    "mnemonic": "COUNTRY",
+    "cco_module": "Geospatial",
+    "description": "The country where the thing is located.",
+    "prototype_values": [
+      "Japan",
+      "yes",
+      "no",
+      "IP to Country",
+      "United States",
+      "Iran"
+    ],
+    "name_hints": [
+      " IP to Country ",
+      "Country",
+      "country"
+    ],
+    "value_patterns": []
+  },
+  "GT.GEO.PLACE": {
+    "code": "GT.GEO.PLACE",
+    "label": "place",
+    "mnemonic": "PLACE",
+    "cco_module": "Geospatial",
+    "description": "DBpedia ontology type 'place' (http://dbpedia.org/ontology/place).",
+    "prototype_values": [
+      "Ap\u00e9ritif Restaurant & Bar",
+      "Room 4 Dessert",
+      "Six Senses Uluwatu Bali",
+      "Ubud, Indonesia",
+      "Kedewatan, Indonesia",
+      "Uluwatu, Indonesia"
+    ],
+    "name_hints": [
+      "Place",
+      "Rider Place",
+      "place",
+      "placeLocation",
+      "placeType",
+      "placeURL"
+    ],
+    "value_patterns": []
+  },
+  "GT.GEO.STATE": {
+    "code": "GT.GEO.STATE",
+    "label": "state",
+    "mnemonic": "STATE",
+    "cco_module": "Geospatial",
+    "description": "DBpedia ontology type 'state' (http://dbpedia.org/ontology/state).",
+    "prototype_values": [
+      "REGULAR",
+      "POST",
+      "DC",
+      "PRE"
+    ],
+    "name_hints": [
+      "State",
+      "marketState",
+      "state"
+    ],
+    "value_patterns": []
+  },
+  "GT.INFO.DESCRIPTION": {
+    "code": "GT.INFO.DESCRIPTION",
+    "label": "description",
+    "mnemonic": "DESCRIPTION",
+    "cco_module": "Information Entity",
+    "description": "Short description of a person",
+    "prototype_values": [
+      "Lightweight, Portable, Flexible Distributed/Mobile Deep Learning with Dynamic, M",
+      "Relax! Flux is the ML library that doesn't make you tensor.",
+      "Ko University deep learning framework.",
+      "child-2",
+      "child-5",
+      "child-7"
+    ],
+    "name_hints": [
+      " description",
+      "Description",
+      "Requires Control Description",
+      "Sample_description",
+      "description",
+      "logicDescription",
+      "user_description"
+    ],
+    "value_patterns": []
+  },
+  "GT.INFO.ID": {
+    "code": "GT.INFO.ID",
+    "label": "id",
+    "mnemonic": "ID",
+    "cco_module": "Information Entity",
+    "description": "DBpedia ontology type 'id' (http://dbpedia.org/ontology/id).",
+    "prototype_values": [
+      "access_google_calendar_all",
+      "access_google_calendar",
+      "1",
+      "2",
+      "3",
+      "7272988"
+    ],
+    "name_hints": [
+      "basionym_id",
+      "citation_id",
+      "gbif_id",
+      "id",
+      "indexfungorum_id",
+      "ipni_id",
+      "publication_id",
+      "type_id",
+      "wfo_id",
+      "\ufeffid"
+    ],
+    "value_patterns": []
+  },
+  "GT.INFO.NAME": {
+    "code": "GT.INFO.NAME",
+    "label": "name",
+    "mnemonic": "NAME",
+    "cco_module": "Information Entity",
+    "description": "DBpedia ontology type 'name' (http://dbpedia.org/ontology/name).",
+    "prototype_values": [
+      "latent_period_mean",
+      "latent_period_standard_deviation",
+      "presymptomatic_period_mean",
+      "access_google_calendar_all",
+      "access_google_calendar",
+      "Boerlagea"
+    ],
+    "name_hints": [
+      "Name",
+      "UserDisplayName",
+      "gran_name",
+      "name"
+    ],
+    "value_patterns": []
+  },
+  "GT.INFO.TITLE": {
+    "code": "GT.INFO.TITLE",
+    "label": "title",
+    "mnemonic": "TITLE",
+    "cco_module": "Information Entity",
+    "description": "DBpedia ontology type 'title' (http://dbpedia.org/ontology/title).",
+    "prototype_values": [
+      "Top Activities of the Product Owner | Agile Software Development",
+      "Paid apps finally infiltrating Android Market?",
+      "Google \"Video Search\" turns into \"YouTube Search\"",
+      "Deriving a Clinical Decision Rule for Suicide Risk in the Emergency Department S",
+      "Leveraging deep learning and clinical notes for surveillance and prediction of i",
+      "Harnessing Computerized Adaptive Testing, Transdiagnostic Theories of Suicidal B"
+    ],
+    "name_hints": [
+      "Title",
+      "Title:",
+      "title"
+    ],
+    "value_patterns": []
+  },
+  "GT.QUAL.LENGTH": {
+    "code": "GT.QUAL.LENGTH",
+    "label": "length",
+    "mnemonic": "LENGTH",
+    "cco_module": "Quality",
+    "description": "DBpedia ontology type 'length' (http://dbpedia.org/ontology/length).",
+    "prototype_values": [
+      "134.47791",
+      "264.75057",
+      "189.83138",
+      "256.0",
+      "5.0",
+      "76.8"
+    ],
+    "name_hints": [
+      "Code length",
+      "Data_length",
+      "base_length",
+      "length"
+    ],
+    "value_patterns": []
+  },
+  "GT.QUAL.TEMPERATURE": {
+    "code": "GT.QUAL.TEMPERATURE",
+    "label": "temperature",
+    "mnemonic": "TEMPERATURE",
+    "cco_module": "Quality",
+    "description": "DBpedia ontology type 'temperature' (http://dbpedia.org/ontology/temperature).",
+    "prototype_values": [
+      "61 %",
+      "67 %",
+      "64 %",
+      "35 F",
+      "34 F",
+      "37 F"
+    ],
+    "name_hints": [
+      "Humidity",
+      "Temperature",
+      "TemperatureF"
+    ],
+    "value_patterns": []
+  },
+  "GT.QUAL.WEIGHT": {
+    "code": "GT.QUAL.WEIGHT",
+    "label": "weight",
+    "mnemonic": "WEIGHT",
+    "cco_module": "Quality",
+    "description": "DBpedia ontology type 'weight' (http://dbpedia.org/ontology/weight).",
+    "prototype_values": [
+      "145.60000610351562",
+      "79.83219199999999",
+      "80.0",
+      "91.2",
+      "50.20000076293945",
+      "0.2"
+    ],
+    "name_hints": [
+      "Weight",
+      "searchindex_weight",
+      "weight"
+    ],
+    "value_patterns": []
+  },
+  "GT.QUAL.WIDTH": {
+    "code": "GT.QUAL.WIDTH",
+    "label": "width",
+    "mnemonic": "WIDTH",
+    "cco_module": "Quality",
+    "description": "DBpedia ontology type 'width' (http://dbpedia.org/ontology/width).",
+    "prototype_values": [
+      "5",
+      "3",
+      "7",
+      "700",
+      "341",
+      "480"
+    ],
+    "name_hints": [
+      " Filter Width",
+      " IFMAP Width",
+      "PixelSpacing",
+      "btn_width",
+      "width"
+    ],
+    "value_patterns": []
+  },
+  "GT.TIME.DATE": {
+    "code": "GT.TIME.DATE",
+    "label": "date",
+    "mnemonic": "DATE",
+    "cco_module": "Time",
+    "description": "DBpedia ontology type 'date' (http://dbpedia.org/ontology/date).",
+    "prototype_values": [
+      "1",
+      "2",
+      "5",
+      "2013-09-10 16:25:32.0",
+      "2013-09-10 16:39:31.0",
+      "2013-09-10 18:29:18.0"
+    ],
+    "name_hints": [
+      "CreationDate",
+      "DateUTC",
+      "Infection date",
+      "cmr_revision_date",
+      "date",
+      "dividendDate",
+      "rDate"
+    ],
+    "value_patterns": []
+  },
+  "GT.TIME.DURATION": {
+    "code": "GT.TIME.DURATION",
+    "label": "duration",
+    "mnemonic": "DURATION",
+    "cco_module": "Time",
+    "description": "The duration of the item (movie, audio recording, event, etc.) in ISO 8601 date format",
+    "prototype_values": [
+      "90",
+      "3.958",
+      "1.292",
+      "2.375",
+      "734000",
+      "0"
+    ],
+    "name_hints": [
+      "AcquisitionDuration",
+      "AssignmentDurationInSeconds",
+      "duration",
+      "duration_months"
+    ],
+    "value_patterns": []
+  },
+  "GT.TIME.TIME": {
+    "code": "GT.TIME.TIME",
+    "label": "time",
+    "mnemonic": "TIME",
+    "cco_module": "Time",
+    "description": "DBpedia ontology type 'time' (http://dbpedia.org/ontology/time).",
+    "prototype_values": [
+      "2013-12-16 12:52 AM",
+      "2013-12-16 1:52 AM",
+      "2013-12-16 2:52 AM",
+      "12:00 AM",
+      "1:00 AM",
+      "2:00 AM"
+    ],
+    "name_hints": [
+      "RealTime(ms)",
+      "Time",
+      "TimeCDT",
+      "TimeGenerated",
+      "Time_stamp",
+      "cooking_time",
+      "fullTimeEmployees",
+      "regularMarketTime"
+    ],
+    "value_patterns": []
+  },
+  "GT.TIME.YEAR": {
+    "code": "GT.TIME.YEAR",
+    "label": "year",
+    "mnemonic": "YEAR",
+    "cco_module": "Time",
+    "description": "DBpedia ontology type 'year' (http://dbpedia.org/ontology/year).",
+    "prototype_values": [
+      "1890",
+      "2021",
+      "1898",
+      "1921",
+      "1925",
+      "1952"
+    ],
+    "name_hints": [
+      "year"
+    ],
+    "value_patterns": []
+  }
+}

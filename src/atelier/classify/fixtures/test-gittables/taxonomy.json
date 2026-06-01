@@ -1,0 +1,336 @@
+{
+  "taxonomy_id": "test-gittables",
+  "root": {
+    "code": "GT",
+    "label": "GitTables Semantic Type (CCO-rooted)",
+    "parent_code": null
+  },
+  "internal": [
+    {
+      "code": "GT.AGENT",
+      "label": "Agent",
+      "parent_code": "GT",
+      "cco_module": "Agent"
+    },
+    {
+      "code": "GT.ARTIFACT",
+      "label": "Artifact",
+      "parent_code": "GT",
+      "cco_module": "Artifact"
+    },
+    {
+      "code": "GT.CUR",
+      "label": "Currency Unit",
+      "parent_code": "GT",
+      "cco_module": "Currency Unit"
+    },
+    {
+      "code": "GT.EVENT",
+      "label": "Event",
+      "parent_code": "GT",
+      "cco_module": "Event"
+    },
+    {
+      "code": "GT.FACILITY",
+      "label": "Facility",
+      "parent_code": "GT",
+      "cco_module": "Facility"
+    },
+    {
+      "code": "GT.GEO",
+      "label": "Geospatial",
+      "parent_code": "GT",
+      "cco_module": "Geospatial"
+    },
+    {
+      "code": "GT.INFO",
+      "label": "Information Entity",
+      "parent_code": "GT",
+      "cco_module": "Information Entity"
+    },
+    {
+      "code": "GT.QUAL",
+      "label": "Quality",
+      "parent_code": "GT",
+      "cco_module": "Quality"
+    },
+    {
+      "code": "GT.TIME",
+      "label": "Time",
+      "parent_code": "GT",
+      "cco_module": "Time"
+    }
+  ],
+  "leaves": [
+    {
+      "code": "GT.AGENT.ARTIST",
+      "label": "artist",
+      "parent_code": "GT.AGENT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/artist",
+      "cco_module": "Agent",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.AGENT.AUTHOR",
+      "label": "author",
+      "parent_code": "GT.AGENT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/author",
+      "cco_module": "Agent",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.AGENT.COMPANY",
+      "label": "company",
+      "parent_code": "GT.AGENT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/company",
+      "cco_module": "Agent",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.AGENT.ORGANISATION",
+      "label": "organisation",
+      "parent_code": "GT.AGENT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/organisation",
+      "cco_module": "Agent",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.AGENT.PERSON",
+      "label": "person",
+      "parent_code": "GT.AGENT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/person",
+      "cco_module": "Agent",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.ARTIFACT.BRAND",
+      "label": "brand",
+      "parent_code": "GT.ARTIFACT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/brand",
+      "cco_module": "Artifact",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.ARTIFACT.MODEL",
+      "label": "model",
+      "parent_code": "GT.ARTIFACT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/model",
+      "cco_module": "Artifact",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.ARTIFACT.PRODUCT",
+      "label": "product",
+      "parent_code": "GT.ARTIFACT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/product",
+      "cco_module": "Artifact",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.CUR.COST",
+      "label": "cost",
+      "parent_code": "GT.CUR",
+      "dbpedia_iri": "http://dbpedia.org/ontology/cost",
+      "cco_module": "Currency Unit",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.CUR.CURRENCY",
+      "label": "currency",
+      "parent_code": "GT.CUR",
+      "dbpedia_iri": "http://dbpedia.org/ontology/currency",
+      "cco_module": "Currency Unit",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.CUR.PRICE",
+      "label": "price",
+      "parent_code": "GT.CUR",
+      "dbpedia_iri": "http://dbpedia.org/ontology/price",
+      "cco_module": "Currency Unit",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.EVENT.EVENT",
+      "label": "event",
+      "parent_code": "GT.EVENT",
+      "dbpedia_iri": "http://dbpedia.org/ontology/event",
+      "cco_module": "Event",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.FACILITY.BUILDING",
+      "label": "building",
+      "parent_code": "GT.FACILITY",
+      "dbpedia_iri": "http://dbpedia.org/ontology/building",
+      "cco_module": "Facility",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.GEO.ADDRESS",
+      "label": "address",
+      "parent_code": "GT.GEO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/address",
+      "cco_module": "Geospatial",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.GEO.CITY",
+      "label": "city",
+      "parent_code": "GT.GEO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/city",
+      "cco_module": "Geospatial",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.GEO.COUNTRY",
+      "label": "country",
+      "parent_code": "GT.GEO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/country",
+      "cco_module": "Geospatial",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.GEO.PLACE",
+      "label": "place",
+      "parent_code": "GT.GEO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/place",
+      "cco_module": "Geospatial",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.GEO.STATE",
+      "label": "state",
+      "parent_code": "GT.GEO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/state",
+      "cco_module": "Geospatial",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.INFO.DESCRIPTION",
+      "label": "description",
+      "parent_code": "GT.INFO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/description",
+      "cco_module": "Information Entity",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.INFO.ID",
+      "label": "id",
+      "parent_code": "GT.INFO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/id",
+      "cco_module": "Information Entity",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.INFO.NAME",
+      "label": "name",
+      "parent_code": "GT.INFO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/name",
+      "cco_module": "Information Entity",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.INFO.TITLE",
+      "label": "title",
+      "parent_code": "GT.INFO",
+      "dbpedia_iri": "http://dbpedia.org/ontology/title",
+      "cco_module": "Information Entity",
+      "ice_class": "DesignativeICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.QUAL.LENGTH",
+      "label": "length",
+      "parent_code": "GT.QUAL",
+      "dbpedia_iri": "http://dbpedia.org/ontology/length",
+      "cco_module": "Quality",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.QUAL.TEMPERATURE",
+      "label": "temperature",
+      "parent_code": "GT.QUAL",
+      "dbpedia_iri": "http://dbpedia.org/ontology/temperature",
+      "cco_module": "Quality",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.QUAL.WEIGHT",
+      "label": "weight",
+      "parent_code": "GT.QUAL",
+      "dbpedia_iri": "http://dbpedia.org/ontology/weight",
+      "cco_module": "Quality",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.QUAL.WIDTH",
+      "label": "width",
+      "parent_code": "GT.QUAL",
+      "dbpedia_iri": "http://dbpedia.org/ontology/width",
+      "cco_module": "Quality",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.TIME.DATE",
+      "label": "date",
+      "parent_code": "GT.TIME",
+      "dbpedia_iri": "http://dbpedia.org/ontology/date",
+      "cco_module": "Time",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.TIME.DURATION",
+      "label": "duration",
+      "parent_code": "GT.TIME",
+      "dbpedia_iri": "http://dbpedia.org/ontology/duration",
+      "cco_module": "Time",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.TIME.TIME",
+      "label": "time",
+      "parent_code": "GT.TIME",
+      "dbpedia_iri": "http://dbpedia.org/ontology/time",
+      "cco_module": "Time",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    },
+    {
+      "code": "GT.TIME.YEAR",
+      "label": "year",
+      "parent_code": "GT.TIME",
+      "dbpedia_iri": "http://dbpedia.org/ontology/year",
+      "cco_module": "Time",
+      "ice_class": "DescriptiveICE",
+      "is_leaf": true
+    }
+  ]
+}

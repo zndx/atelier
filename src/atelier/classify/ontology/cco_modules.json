@@ -1,0 +1,18 @@
+{
+  "_comment": "Canonical Common Core Ontologies (CCO v2.1) module manifest — the COMPLETE set of 11 domain modules (per develop catalog-v001.xml; bfo-core is the BFO import, not a CCO module). This is the completeness anchor: coverage is measured against all 11, so partial coverage reads honestly (e.g. 9/11). Grounding/import of the module TTLs is Aegir's job; this file lets the applied side (fixtures, coverage eval) reference the complete set. reachable_via: which annotation shape surfaces the module — CTA (column type), CPA (column property/relation), EAV (entity-attribute-value tables relocate units+relations into column content). See docs/src/architecture/cco-coverage.md.",
+  "cco_version": "2.1",
+  "catalog_ref": "https://github.com/CommonCoreOntology/CommonCoreOntologies/blob/develop/src/cco-modules/catalog-v001.xml",
+  "modules": [
+    {"code": "INFO", "label": "Information Entity", "ttl": "InformationEntityOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered", "note": "Atelier's ICE classification root (cco:ont00000958); Designative/Descriptive/Prescriptive trichotomy"},
+    {"code": "AGENT", "label": "Agent", "ttl": "AgentOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "TIME", "label": "Time", "ttl": "TimeOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "QUAL", "label": "Quality", "ttl": "QualityOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "GEO", "label": "Geospatial", "ttl": "GeospatialOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "CUR", "label": "Currency Unit", "ttl": "CurrencyUnitOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "EVENT", "label": "Event", "ttl": "EventOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "ARTIFACT", "label": "Artifact", "ttl": "ArtifactOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "FACILITY", "label": "Facility", "ttl": "FacilityOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
+    {"code": "UNIT", "label": "Units of Measure", "ttl": "UnitsOfMeasureOntology.ttl", "reachable_via": ["EAV"], "applied_status": "pending", "note": "Units are value-level in wide tables; an EAV unit column makes them a column type"},
+    {"code": "REL", "label": "Extended Relation", "ttl": "ExtendedRelationOntology.ttl", "reachable_via": ["EAV", "CPA"], "applied_status": "pending", "note": "Relations are column properties; EAV attribute column or SOTAB CPA surfaces them"}
+  ]
+}
