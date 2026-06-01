@@ -12,7 +12,7 @@
     {"code": "EVENT", "label": "Event", "ttl": "EventOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
     {"code": "ARTIFACT", "label": "Artifact", "ttl": "ArtifactOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
     {"code": "FACILITY", "label": "Facility", "ttl": "FacilityOntology.ttl", "reachable_via": ["CTA"], "applied_status": "covered"},
-    {"code": "UNIT", "label": "Units of Measure", "ttl": "UnitsOfMeasureOntology.ttl", "reachable_via": ["EAV"], "applied_status": "pending", "note": "Units are value-level in wide tables; an EAV unit column makes them a column type"},
-    {"code": "REL", "label": "Extended Relation", "ttl": "ExtendedRelationOntology.ttl", "reachable_via": ["EAV", "CPA"], "applied_status": "pending", "note": "Relations are column properties; EAV attribute column or SOTAB CPA surfaces them"}
+    {"code": "UNIT", "label": "Units of Measure", "ttl": "UnitsOfMeasureOntology.ttl", "reachable_via": ["EAV", "annotation"], "applied_status": "pending", "note": "Units are value-level in wide tables; an EAV unit column makes them a column type. The link from an ICE to its unit is cco:has_token_unit (ont00001752, ExtendedRelationOntology) — the formal slot our 'unit: UNRESOLVED' absence fills."},
+    {"code": "REL", "label": "Extended Relation", "ttl": "ExtendedRelationOntology.ttl", "reachable_via": ["annotation", "EAV", "CPA"], "applied_status": "partial", "note": "Data-level relations are EAV/CPA-gated, BUT this module's annotation properties apply to our taxonomy terms (ICEs) NOW: has_token_unit (ont00001752), acronym (ont00001753) = our abbrev/mnemonic, definition_source (ont00001754) = our DBpedia-IRI provenance. Carve in by grounding the taxonomy's own annotations."}
   ]
 }

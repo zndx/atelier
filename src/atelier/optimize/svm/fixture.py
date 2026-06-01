@@ -146,18 +146,84 @@ def build_and_promote_fixture_head(taxonomy_id: str = "test-gittables") -> dict:
     return row
 
 
+def build_fixture_collection(taxonomy_id: str = "test-gittables") -> str:
+    """ColBERT-encode the committed enrichment payloads and upsert them into
+    the test-gittables Qdrant collection, then register it as ``current`` so
+    the maxsim bridge resolves it. Returns the collection name.
+
+    Runs under the devenv stack (Qdrant + ColBERT encoder + registry DB);
+    hermetic and deterministic given the committed enrichment.
+    """
+    from atelier.classify.colbert_encoder import get_encoder
+    from atelier.config import load_config
+    from atelier.db.dao import AtelierDao
+    from atelier.enrichment.qdrant_writer import (
+        AnnotationVectors, build_point, collection_name_for,
+        compose_annotation_text, ensure_collection, taxonomy_version_hash,
+        upsert_point,
+    )
+    from qdrant_client import QdrantClient
+
+    _assert_hermetic()
+    cfg = load_config()
+    enrich = json.loads((FIXTURE_DIR / "enrichment_payloads.json").read_text())
+    source_rows = list(enrich.values())  # each: code/label/mnemonic/description/...
+    aug, model = "fixture", "colbert-ir/colbertv2.0"
+    coll = collection_name_for(taxonomy_id, aug)
+
+    client = QdrantClient(host=cfg.qdrant_host, port=cfg.qdrant_http_port)
+    encoder = get_encoder()
+    dim = int(encoder.encode_single("probe").shape[1])
+    ensure_collection(client, collection=coll, embedding_dim=dim, recreate=True)
+
+    vh = taxonomy_version_hash(source_rows)
+    for row in source_rows:
+        text = compose_annotation_text(row) or row.get("label") or row["code"]
+        vecs = AnnotationVectors(colbert=encoder.encode_single(text).tolist())
+        point = build_point(
+            source_row=row, enrichment=row, vectors=vecs, verifier_results={},
+            taxonomy_id=taxonomy_id, taxonomy_version_hash_value=vh,
+            taxonomy_version_label="fixture", augmentation_version=aug,
+            embedding_model=model, embedding_dim=dim,
+            generated_at="fixture", generated_by="fixture")
+        upsert_point(client, collection=coll, point=point)
+
+    dao = AtelierDao()
+    coll_id = f"{taxonomy_id}-{aug}-{vh[:8]}"
+    try:
+        dao.register_taxonomy_collection(
+            id=coll_id, taxonomy_id=taxonomy_id, source_table="test-gittables",
+            qdrant_collection=coll, augmentation_version=aug,
+            embedding_model=model, embedding_dim=dim,
+            summary="public test-gittables fixture maxsim collection")
+    except Exception as exc:  # already registered on a prior identical build
+        log.info("collection %s already registered (%s)", coll_id, exc)
+    dao.set_current_taxonomy_collection(coll_id)
+    log.info("built + promoted fixture collection %s (%d points)", coll, len(source_rows))
+    return coll
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    ap = argparse.ArgumentParser(description="Hermetic test-gittables NHSVM head")
+    ap = argparse.ArgumentParser(description="Hermetic test-gittables fixture build")
     ap.add_argument("--fixture", action="store_true",
                     help="(accepted for `just optimize svm --fixture` routing)")
     ap.add_argument("--taxonomy-id", default="test-gittables")
+    ap.add_argument("--head-only", action="store_true",
+                    help="promote the NHSVM head only (skip the maxsim collection)")
+    ap.add_argument("--collection-only", action="store_true",
+                    help="build the maxsim collection only (skip the head)")
     args = ap.parse_args(argv)
-    row = build_and_promote_fixture_head(taxonomy_id=args.taxonomy_id)
-    print(f"promoted: id={row['id']} head_sig={row['head_sig']} "
-          f"taxonomy_id={row['taxonomy_id']} status=current")
+
+    if not args.collection_only:
+        row = build_and_promote_fixture_head(taxonomy_id=args.taxonomy_id)
+        print(f"promoted head: id={row['id']} head_sig={row['head_sig']} "
+              f"taxonomy_id={row['taxonomy_id']} status=current")
+    if not args.head_only:
+        coll = build_fixture_collection(taxonomy_id=args.taxonomy_id)
+        print(f"promoted collection: {coll} status=current")
     return 0
 
 

@@ -37,6 +37,26 @@ UNRESOLVED = "UNRESOLVED"
 
 _MANIFEST = Path(__file__).resolve().parent / "ontology" / "cco_modules.json"
 
+# Each absence axis is the *unfilled* instance of a canonical CCO annotation
+# property from the ExtendedRelationOntology — grounding the absence in CCO
+# rather than an ad-hoc string. `unit: UNRESOLVED` is literally an unfilled
+# `cco:has token unit`. (These annotation properties apply to information
+# content entities — which our taxonomy terms are — so the same module also
+# gives us `acronym` (ont00001753) ≡ our abbrev/mnemonic and `definition
+# source` (ont00001754) ≡ our DBpedia-IRI provenance, reachable now.)
+AXIS_CCO_PROPERTY: dict[str, str] = {
+    # "has token unit" — the measurement/currency unit of the token used to
+    # express an ICE; the formal slot a resolved unit or currency fills.
+    "unit": "https://www.commoncoreontologies.org/ont00001752",
+    "currency_unit": "https://www.commoncoreontologies.org/ont00001752",
+}
+
+
+def cco_property_for_axis(axis: str) -> str | None:
+    """Canonical CCO annotation property an absence axis is the unfilled
+    instance of (ExtendedRelationOntology), or None if not yet grounded."""
+    return AXIS_CCO_PROPERTY.get(axis)
+
 # Value-level interface axes a referent CCO module carries — the dimensions
 # whose silent omission causes boundary failures. A measurement magnitude is
 # meaningless without its unit; a monetary amount without its currency unit.
@@ -75,9 +95,11 @@ def unresolved_axes(
     axes = [a for a in INTERFACE_AXES.get(referent_module or "", ()) if a not in have]
     if (
         relational_context
-        and _module_status().get("REL") == "pending"
+        and _module_status().get("REL") != "covered"
         and RELATION_AXIS not in have
     ):
+        # 'partial' (annotation properties reachable) still leaves DATA-level
+        # relations un-modeled — the relation axis is absent until 'covered'.
         axes.append(RELATION_AXIS)
     return axes
 

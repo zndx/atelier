@@ -16,10 +16,22 @@ from __future__ import annotations
 
 from atelier.classify.semantic_absence import (
     UNRESOLVED,
+    cco_property_for_axis,
     gate_claim,
     semantic_absence,
     unresolved_axes,
 )
+
+
+def test_unit_absence_is_grounded_in_cco_has_token_unit():
+    # The absence axis is the unfilled instance of a canonical CCO property
+    # (ExtendedRelationOntology has_token_unit ont00001752), not an ad-hoc str.
+    assert cco_property_for_axis("unit") == (
+        "https://www.commoncoreontologies.org/ont00001752"
+    )
+    assert cco_property_for_axis("currency_unit") == (
+        "https://www.commoncoreontologies.org/ont00001752"
+    )
 
 
 def test_measurement_surfaces_unit_absence():
