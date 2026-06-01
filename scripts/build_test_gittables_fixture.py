@@ -62,6 +62,12 @@ def _load_cco_modules() -> dict[str, str]:
     return {x["code"]: x["label"] for x in m["modules"]}
 
 
+def _load_cco_status() -> dict[str, str]:
+    """code -> applied_status ('covered' | 'partial' | 'pending')."""
+    m = json.loads(MANIFEST_PATH.read_text())
+    return {x["code"]: x["applied_status"] for x in m["modules"]}
+
+
 # Canonical referent modules (the grouping axis) — all 11, manifest-driven.
 CCO_MODULES = _load_cco_modules()
 
@@ -357,10 +363,15 @@ def main() -> int:
         lines.append(f"| {p['table_id']} | {p['license']} | {p['csv_url']} |")
     (OUT_DIR / "PROVENANCE.md").write_text("\n".join(lines) + "\n")
 
-    pending = sorted(set(CCO_MODULES) - set(modules_used))
+    status = _load_cco_status()
+    not_data = set(CCO_MODULES) - set(modules_used)
+    partial = sorted(c for c in not_data if status.get(c) == "partial")
+    pending = sorted(c for c in not_data if status.get(c) == "pending")
     print(f"\nwrote fixture -> {OUT_DIR}")
-    print(f"  CCO modules: {len(modules_used)}/{len(CCO_MODULES)} covered "
-          f"{sorted(modules_used)}; pending {pending} (EAV/CPA-gated)")
+    print(f"  CCO modules: {len(modules_used)}/{len(CCO_MODULES)} data-covered "
+          f"{sorted(modules_used)}")
+    print(f"    partial (annotation-grounded, no data leaves yet): {partial}")
+    print(f"    pending (EAV/CPA-gated): {pending}")
     print(f"  leaves: {len(leaves)}  train: {len(train_rows)}  "
           f"heldout: {len(heldout_rows)} (covered {cov} / weak {len(heldout_rows) - cov})")
     return 0
