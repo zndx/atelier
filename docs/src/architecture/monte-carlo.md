@@ -3,7 +3,8 @@
 At small corpus sizes (< 200 columns), every column receives direct
 LLM classification. As the corpus scales to thousands or millions
 of columns, this becomes prohibitively expensive. Monte Carlo stratified
-sampling selects a representative subset for direct LLM inference and
+sampling selects a balanced subset (balanced coverage of the semantic
+landscape, not corpus-representativeness) for direct LLM inference and
 propagates labels cheaply via embedding similarity to the remainder.
 
 This is a **zero-cost optimization**: when in passthrough, the pipeline
@@ -24,7 +25,7 @@ SAMPLING
   ├─ [existing] Extract features for all columns
   ├─ Pre-classify: cheap M0 evidence (name, pattern, cosine) — no LLM
   ├─ Stratify: group by preliminary category + uncertainty
-  └─ Select MC sample: importance-weighted within strata
+  └─ Select MC sample: balance-first within strata (uniform today; importance weighting is roadmap)
 
 LLM_SWEEP
   ├─ [existing] LLM classifies the MC sample (not all columns)
@@ -54,19 +55,21 @@ Partition columns by their preliminary category code:
 
 - **Rare strata** (< 2 x `min_per_stratum` members): fully sampled
 - **UNRESOLVED stratum** (M0 sources disagree or low confidence): fully sampled
-- **Normal strata**: proportional allocation with importance weighting
+- **Normal strata**: proportional allocation over a `min_per_stratum` floor
 
 ### Phase 3: Sample Selection
 
-Within each normal stratum, select columns via importance-weighted random
-sampling without replacement. Importance weight per column:
+Within each normal stratum, columns are selected by **uniform random sampling**
+without replacement, over the proportional allocation and the `min_per_stratum`
+floor. The rare/UNRESOLVED 100% guarantee plus the floor are what make the
+sample balance-first.
 
-```
-w = (1 - confidence) × (1 + uncertainty)
-```
-
-where `confidence` = max cosine similarity, `uncertainty` = ratio of
-2nd-best to 1st-best similarity (ambiguity measure).
+> **Roadmap — importance weighting.** The intended steering lever is to bias
+> within-stratum selection toward low-confidence / ambiguous columns by
+> `w = (1 - confidence) × (1 + uncertainty)` (where `confidence` = max cosine
+> similarity and `uncertainty` = 2nd-best/1st-best ratio). This is **not yet
+> wired**: `_importance_sample()` is a uniform placeholder because the
+> per-column confidence/ambiguity are not threaded into the selector.
 
 Total budget: `min(max_sampled_columns, total × sample_fraction)`
 
@@ -79,7 +82,9 @@ Total budget: `min(max_sampled_columns, total × sample_fraction)`
 After the LLM sweep on the sampled subset:
 
 1. For each propagation column, find the nearest directly-classified
-   column by cosine similarity (stratum-local to limit search space)
+   column by cosine similarity (global today — every directly-classified
+   column is a candidate source; stratum-local search is a planned
+   scaling optimization, not current behavior)
 2. If similarity >= `propagation_threshold`: assign same label with
    discounted confidence
 3. If similarity < threshold: column gets no LLM evidence in DST
@@ -118,16 +123,18 @@ behaviour is also what the default produces at any corpus size).
 | 15M | Active | ~500 (cap) | ~15M | >99.99% |
 | 120M | Active | ~500 (cap) | ~120M | >99.99% |
 
-At the `max_sampled_columns=500` cap, stratified importance sampling ensures
-every category stratum gets at least `min_per_stratum=3` exemplars. Uniform
-random sampling at 500/15M would miss rare categories entirely.
+At the `max_sampled_columns=500` cap, stratified sampling still guarantees
+every category stratum gets at least `min_per_stratum=3` exemplars (rare /
+UNRESOLVED strata at 100%). Naive uniform sampling at 500/15M — *without* the
+stratum floor — would miss rare categories entirely.
 
 ### Scale-Critical Design Decisions
 
 - **Embedding computation**: batch GPU encoding at ~2,768 texts/s (RTX 4090);
   15M columns takes ~90 minutes. One-time cost, GPU-parallelizable.
-- **Stratum-local propagation**: similarity search within each stratum
-  (not across the full corpus) to limit memory and compute.
+- **Propagation scope**: propagation is **global** today (every sampled column
+  is a candidate source). Restricting similarity search to within-stratum to
+  limit memory/compute at scale is a planned optimization (not yet implemented).
 - **Memory**: 15M columns × 200B = ~3GB for metadata; 15M × 1.5KB = ~22GB
   for embeddings. Requires streaming/chunked processing.
 - **Escalation budget**: ~50-100 additional direct-LLM calls from revisit.
@@ -162,6 +169,6 @@ src/atelier/classify/monte_carlo.py
 ├── MCPlan            — Sampling plan (sampled + propagation sets)
 ├── pre_classify()    — Run M0 evidence for all columns
 ├── stratify()        — Group by preliminary category + uncertainty
-├── select_sample()   — Importance-weighted selection within strata
+├── select_sample()   — Balance-first selection within strata (uniform today; importance weighting roadmap)
 └── propagate_labels() — Embedding-similarity label extension
 ```

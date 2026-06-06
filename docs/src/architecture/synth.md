@@ -28,7 +28,7 @@ through a priority-based registry:
 |----------|--------|-------------|
 | 1 (highest) | **Hand-coded** | From `GENERATORS` dict in synth_generators.py |
 | 2 | **Template** | Real sample values with mild perturbation (±10% numeric jitter, character substitution) |
-| 3 (lowest) | **Inferred** | Regex pattern matching on category metadata (description, common_names) |
+| 3 (lowest) | **Inferred** | Regex keyword-matching on category metadata (description, common_names) to *select an existing value generator* — offline synth only; not a classification detector, never enters the runtime pattern library |
 
 ```python
 registry = GeneratorRegistry.from_vocabulary(category_set)

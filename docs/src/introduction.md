@@ -90,7 +90,7 @@ Each source independently produces a **mass function**
 | Source | Feature Space | Cost Tier |
 |--------|--------------|-----------|
 | **MaxSim** | ColBERT v2 per-token multi-vectors (BERT + 768→128 projection), scored by **Qdrant native MaxSim** late-interaction over a single `colbert` multi-vector field; **fail-fast** (`MaxSimUnavailable` → FSM ERROR, no silent fallback) | M0 (local) |
-| **Pattern detection** | 16 regex detectors + post-regex validators (email, phone, SSN, IP, UUID, date, datetime, URL, credit card + Luhn, MAC, IBAN, postal code, monetary, hash, semver, currency + ISO 4217); graduated mass scaling by match fraction | M0 |
+| **Pattern detection** | 27 regex detectors + 9 post-regex validators (email, phone, SSN, IP, UUID, date, URL, credit card + Luhn, MAC, IBAN, currency + ISO 4217, …) with graduated mass scaling by match fraction. A fixed-at-import snapshot of a library that is **dynamic by design** — it must grow for objectives a static set leaves unsatisfiable in situ (rule-based admission / Rete-over-regex + Ægir; roadmap) | M0 |
 | **Name matching** | Column name vs vocabulary labels, codes, and aliases (4-tier: exact > code > alias > overlap) | M0 |
 | **LLM classification** | Frontier model reasoning (Anthropic / Bedrock / Cerebras / OpenAI-compatible) | M1 (API) |
 | **CatBoost** | 12 discrete features + 384-dim MiniLM embedding; virtual ensemble uncertainty via `posterior_sampling` | M2 (trained) |

@@ -49,7 +49,7 @@ Assignment) that distributes belief across the frame of discernment:
 | Source | Type | Discount | Configurable | Status |
 |--------|------|----------|--------------|--------|
 | MaxSim | ColBERT v2 per-token multi-vectors, Qdrant native MaxSim late-interaction | 0.20 | `classify.discounts.maxsim` | M0 |
-| Pattern detection | 16 regex detectors + post-regex validators | 0.25 | `classify.discounts.pattern_theta` | M0 |
+| Pattern detection | 27 regex detectors + 9 post-regex validators (fixed-at-import snapshot; dynamic by design — see [Pattern-library dynamism](#pattern-library-dynamism)) | 0.25 | `classify.discounts.pattern_theta` | M0 |
 | Name matching | Column name ↔ label/abbrev/common_names | varies | `classify.discounts.name_match_*` | M0 |
 | LLM | OpenAI-compatible (incl. Cerebras) / Anthropic / Bedrock | 0.15 | `classify.llm.discount` | M1 |
 | CatBoost | Gradient boosted trees (virtual ensembles) | adaptive | `classify.discounts.catboost_*` | M2 |
@@ -283,9 +283,9 @@ uncertainty representation, not pair-discrimination.)
 
 ### Pattern Validation
 
-Pattern detection uses a two-stage architecture: 16 regex patterns for
-**recall**, plus a `_VALIDATORS` registry for **precision**. A value must
-pass both the regex AND the validator (if one exists) to count.
+Pattern detection uses a two-stage architecture: 27 regex detectors for
+**recall**, plus a `_VALIDATORS` registry (9 validators) for **precision**. A
+value must pass both the regex AND the validator (if one exists) to count.
 
 | Validator | Pattern | Checks |
 |-----------|---------|--------|
@@ -299,6 +299,24 @@ digit-heavy pattern also fires (SSN, date, credit card, IP, postal code,
 monetary, IBAN), the phone match is suppressed. This prevents the phone
 regex from injecting false evidence on columns whose values happen to
 contain formatted digits.
+
+### Pattern-library dynamism
+
+The detector set above (currently 27 detectors + 9 validators) is **fixed at
+import** — nothing mutates it at runtime, per-vocabulary, or across bootstrap
+iterations. The only per-run adaptation is `resolve_pattern_map()`, which
+re-points the pattern→code *targets* onto the active vocabulary (dropping
+unresolved ones); it never adds or changes a regex.
+
+That static set is a deliberate **snapshot of a necessarily dynamic library**:
+a fixed regex set cannot satisfy every classification objective *in situ*, so
+the count is a point-in-time figure, not an architectural constant. The
+design-of-record for closing that gap is **rule-based pattern admission** —
+Rete forward-chaining layered on the regexes — together with **Ægir**-side
+synthesis of new detectors for objectives the current set leaves unsatisfiable.
+This admission path is **roadmap**, not shipped: the `evolve-generators` /
+`GeneratorRegistry` machinery that responds to taxonomy gaps today produces
+*offline value generators for synth-corpus generation*, never runtime detectors.
 
 ### 12 Discrete Features
 
@@ -355,7 +373,7 @@ src/atelier/classify/
 ├── __init__.py          # Public API: run_pipeline(), run_bootstrap(), get_fsm_status()
 ├── belief.py            # DST core: BeliefAssignment, FocalElement, dempster_combine()
 ├── mass_functions.py    # Evidence→mass converters (6 active)
-├── features.py          # 12 features + 16 pattern detectors + 5 post-regex validators
+├── features.py          # 13 features + 27 pattern detectors + 9 post-regex validators
 ├── taxonomy.py          # ReferenceCategory, HierarchicalCategorySet
 ├── embedding.py         # MiniLM single-vector encoder (CatBoost/SVM feature
 │                        #   embeddings + MC pre-classifier; cosine is the metric

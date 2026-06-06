@@ -1,10 +1,13 @@
 """Monte Carlo sampling for scalable classification.
 
 At small N (< min_corpus_size), every column gets direct LLM classification
-(identical to current pipeline behavior).  At larger N, stratified importance
-sampling selects representative columns for direct LLM classification, then
-label propagation extends coverage to the remaining corpus via embedding
-similarity.
+(identical to current pipeline behavior).  At larger N, balance-first
+stratified sampling selects a *balanced* subset of columns for direct LLM
+classification — balanced coverage of the semantic landscape, NOT
+corpus-representativeness (the directly-classified set is CatBoost's
+fit-to-LLM training set, so any unseen semantic region is an unlearnable
+class) — then label propagation extends coverage to the remaining corpus via
+embedding similarity.
 
 The MC layer is transparent: callers see the same BootstrapState with labels
 for all columns, regardless of whether labels came from direct LLM inference
@@ -289,13 +292,16 @@ def select_sample(
 ) -> MCPlan:
     """Select representative columns for direct LLM classification.
 
-    Allocation strategy:
+    Allocation strategy (balance-first):
     - UNRESOLVED + rare strata: 100% (all members)
-    - Normal strata: proportional allocation with importance weighting
+    - Normal strata: proportional allocation over a ``min_per_stratum`` floor
     - Total budget: min(max_sampled_columns, total × sample_fraction)
 
-    Importance weight per column: w = (1 - confidence) × (1 + ambiguity)
-    Selection: weighted random sampling without replacement.
+    Within-stratum selection is uniform random today (see ``_importance_sample``).
+    Importance weighting toward low-confidence / ambiguous columns —
+    ``w = (1 - confidence) × (1 + ambiguity)`` — is the intended steering lever
+    but is NOT yet wired (PreClassification confidence/ambiguity are not threaded
+    into the selector); roadmap.
     """
     rng = random.Random(seed)
 
@@ -341,7 +347,8 @@ def select_sample(
             if allocation >= stratum.size:
                 sampled.update(stratum.column_names)
             else:
-                # Importance-weighted sampling within stratum
+                # Within-stratum selection: uniform today; importance
+                # weighting is roadmap (see _importance_sample).
                 selected = _importance_sample(
                     stratum.column_names, allocation, rng,
                 )
@@ -382,9 +389,12 @@ def propagate_labels(
 ) -> dict[str, str]:
     """Propagate labels from directly-classified to unclassified columns.
 
-    Uses cosine similarity on column feature embeddings.  Propagation
-    is stratum-local: only compare within the same preliminary category
-    to reduce O(N×K) to O(stratum_size × K_sampled).
+    Uses cosine similarity on column feature embeddings.  Propagation is
+    *global* today: every directly-classified column is a candidate source
+    (one source-embedding matrix; the nearest source above
+    ``propagation_threshold`` wins).  Restricting the search to within-stratum
+    (to cut O(N×K) to O(stratum_size × K_sampled) at corpus scale) is a planned
+    optimization, not current behavior.
 
     Returns dict of {column_name: propagated_code}.
     """

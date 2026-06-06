@@ -17,6 +17,17 @@ from typing import Callable
 
 
 # ── Pattern detectors ────────────────────────────────────────────────
+#
+# This is the *runtime* detector set, fixed at import (currently 27 detectors
+# here + 9 precision validators in ``_VALIDATORS``).  Treat the count as a
+# point-in-time snapshot, not an architectural constant: a static regex set
+# cannot satisfy every classification objective in situ, so the library is
+# necessarily dynamic w.r.t. the bootstrap iteration t.  The design-of-record
+# for that dynamism is rule-based admission — Rete forward-chaining layered on
+# these regexes, plus Ægir-side synthesis of new detectors for objectives the
+# current set leaves unsatisfiable.  That admission path is roadmap: nothing
+# mutates this dict at runtime today (see
+# docs/src/architecture/classification.md, "Pattern-library dynamism").
 
 _PATTERNS: dict[str, re.Pattern] = {
     "email_pattern": re.compile(
