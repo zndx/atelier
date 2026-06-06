@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Canonical ModernBERT encoder for the NHSVM head.
 
 Single source of truth for ``encode_modernbert`` — the dense-embedding

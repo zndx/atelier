@@ -1,5 +1,3 @@
-<!-- Copyright (c) 2026 Cloudera, Inc.  All rights reserved. -->
-
 # Comprehensive CCO Coverage
 
 Atelier's classification vocabulary is grounded in the

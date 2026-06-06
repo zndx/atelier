@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Step defs for optimize_svm_critical_path.feature — the SVM/maxsim critical-
 path efficacy sequence on the test-gittables fixture (@slow / @tier-1; needs
 the devenv stack: registry DB + ModernBERT + Qdrant)."""

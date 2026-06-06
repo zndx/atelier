@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """The test-gittables fixture loader activates semantic absence.
 
 Covers the pure-Python part of the hermetic ``--fixture`` mode (no DB, no

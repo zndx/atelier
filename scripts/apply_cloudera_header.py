@@ -1,26 +1,20 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc., and is provided
-# to authorized licensees solely for use in connection with the Cloudera AI
-# (CAI) Application from which it was obtained.  It may not be copied,
-# modified, redistributed, or used in any other manner without the express
-# written consent of Cloudera, Inc.
-
 """apply_cloudera_header.py — stamp Cloudera proprietary header on source + docs.
 
 Designed to run as part of cutting a release branch.  Trunk stays unmarked
 (no headers in the developer's working tree); the release branch carries the
 notice on every shipped artifact destined for CAI.
 
-The script is **idempotent**: re-running on an already-stamped file is a no-op,
-and re-running across calendar years skips files stamped in any recognized
-prior year (extend ``LEGACY_SENTINELS`` as needed).
+The script is **idempotent across calendar years**: ``is_already_stamped``
+detects the notice by a year-agnostic pattern (:data:`STAMP_RE`), so re-running
+never stacks a second header regardless of which year originally stamped a file.
 
 Usage:
-    uv run python scripts/apply_cloudera_header.py             # stamp in place
-    uv run python scripts/apply_cloudera_header.py --dry-run   # preview, no writes
-    uv run python scripts/apply_cloudera_header.py --check     # CI gate; exit 1 if any tracked file is missing the header
-    uv run python scripts/apply_cloudera_header.py --verbose   # list every changed/eligible path
+    uv run python scripts/apply_cloudera_header.py                # stamp in place (release leaves)
+    uv run python scripts/apply_cloudera_header.py --strip        # remove headers (e.g. restore trunk)
+    uv run python scripts/apply_cloudera_header.py --dry-run      # preview, no writes (stamp/strip)
+    uv run python scripts/apply_cloudera_header.py --check        # release gate: exit 1 if any file is MISSING the header
+    uv run python scripts/apply_cloudera_header.py --check-absent # trunk gate: exit 1 if any file HAS the header
+    uv run python scripts/apply_cloudera_header.py --verbose      # list every affected path
 
 Comment styles per file extension:
     .py .sh .bash .conf .yaml .yml .toml .feature .nix .ttl .rq .rego  → ``#``
@@ -36,6 +30,7 @@ external/ submodules are excluded explicitly.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 import textwrap
@@ -46,30 +41,34 @@ from pathlib import Path
 # comment width — leaves room for the comment marker + space).
 WRAP_WIDTH = 75
 
-# ── EDIT THESE TWO BLOCKS WHEN ADJUSTING THE NOTICE ──────────────────────
+# ── EDIT THIS BLOCK WHEN ADJUSTING THE NOTICE ──────────────────────
 COPYRIGHT_YEAR = datetime.now().year
 
-HEADER_PARAGRAPHS: tuple[str, ...] = (
-    f"Copyright (c) {COPYRIGHT_YEAR} Cloudera, Inc.  All rights reserved.",
-    "",
-    (
-        "This file contains material proprietary to Cloudera, Inc., and is "
-        "provided to authorized licensees solely for use in connection with "
-        "the Cloudera AI (CAI) Application from which it was obtained.  It "
-        "may not be copied, modified, redistributed, or used in any other "
-        "manner without the express written consent of Cloudera, Inc."
-    ),
-)
 
-# Sentinel: any occurrence in the file's first 30 lines marks it as
-# already-stamped (idempotency guard).
-SENTINEL = f"Copyright (c) {COPYRIGHT_YEAR} Cloudera, Inc."
+def header_paragraphs(year: int) -> tuple[str, ...]:
+    """The notice text, parameterized by copyright ``year`` (only the first
+    line carries the year; the proprietary paragraph is year-independent)."""
+    return (
+        f"Copyright (c) {year} Cloudera, Inc.  All rights reserved.",
+        "",
+        (
+            "This file contains material proprietary to Cloudera, Inc., and is "
+            "provided to authorized licensees solely for use in connection with "
+            "the Cloudera AI (CAI) Application from which it was obtained.  It "
+            "may not be copied, modified, redistributed, or used in any other "
+            "manner without the express written consent of Cloudera, Inc."
+        ),
+    )
 
-# Older-year sentinels — add prior years here when re-stamping across years
-# so previously-stamped releases are not re-stamped a second time.
-LEGACY_SENTINELS: tuple[str, ...] = (
-    "Copyright (c) 2025 Cloudera, Inc.",
-)
+
+HEADER_PARAGRAPHS: tuple[str, ...] = header_paragraphs(COPYRIGHT_YEAR)
+
+# Year-agnostic stamp detector: matches the copyright line for ANY 4-digit
+# year, so the script is genuinely idempotent across calendar boundaries.
+# Re-running in a later year recognizes a file stamped in any prior year and
+# never stacks a second header.  (Replaces the old year-keyed SENTINEL +
+# hand-maintained LEGACY_SENTINELS scheme, which double-stamped on rollover.)
+STAMP_RE = re.compile(r"Copyright \(c\) (\d{4}) Cloudera, Inc\.")
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -193,15 +192,19 @@ def style_for(path: Path, repo_root: Path) -> str | None:
 
 def is_already_stamped(text: str) -> bool:
     head = "\n".join(text.splitlines()[:30])
-    if SENTINEL in head:
-        return True
-    return any(legacy in head for legacy in LEGACY_SENTINELS)
+    return STAMP_RE.search(head) is not None
 
 
-def _wrapped_lines() -> list[str]:
-    """Reflow ``HEADER_PARAGRAPHS`` at ``WRAP_WIDTH``; keep blank-paragraph separators."""
+def stamped_year(text: str) -> int | None:
+    """The copyright year present in the file's head, or None if unstamped."""
+    m = STAMP_RE.search("\n".join(text.splitlines()[:30]))
+    return int(m.group(1)) if m else None
+
+
+def _wrapped_lines(paragraphs: tuple[str, ...] = HEADER_PARAGRAPHS) -> list[str]:
+    """Reflow ``paragraphs`` at ``WRAP_WIDTH``; keep blank-paragraph separators."""
     out: list[str] = []
-    for paragraph in HEADER_PARAGRAPHS:
+    for paragraph in paragraphs:
         if not paragraph:
             out.append("")
             continue
@@ -209,9 +212,9 @@ def _wrapped_lines() -> list[str]:
     return out
 
 
-def render_header(style: str) -> str:
-    """Render the header block, ending with a single blank line."""
-    wrapped = _wrapped_lines()
+def render_header(style: str, year: int = COPYRIGHT_YEAR) -> str:
+    """Render the header block for ``year``, ending with a single blank line."""
+    wrapped = _wrapped_lines(header_paragraphs(year))
     if style == HASH:
         body = "\n".join(("# " + line).rstrip() if line else "#" for line in wrapped)
         return body + "\n\n"
@@ -262,22 +265,111 @@ def stamp_file(path: Path, style: str, *, dry_run: bool) -> bool:
     return True
 
 
+def _norm_notice(text: str) -> str:
+    """Strip comment delimiters/markers and collapse whitespace, so notice text
+    can be compared regardless of comment style."""
+    for tok in ("<!--", "-->", "/*", "*/", "//", "--", "#", "*"):
+        text = text.replace(tok, " ")
+    return " ".join(text.split())
+
+
+def _header_block_len(rest: str, style: str) -> int | None:
+    """Char length of the stamped header block at the very start of ``rest``
+    (including its trailing blank-line separator), or None if no recognizable
+    stamp is there.
+
+    Detects the header's ACTUAL comment style from the text rather than trusting
+    the file extension — some files were stamped in a language-correct style that
+    differs from the extension table (Markdown with ``#``, CSS with ``/* */``),
+    and we must strip exactly what is there.  Tries the byte-exact inverse of
+    :func:`render_header` (any year, any style) first; otherwise consumes the
+    leading comment block structurally (``<!-- -->``/``/* */`` block, or a
+    ``//``/``--``/``#`` line run), consuming only lines whose accumulated text
+    stays within the known notice (tolerating an ``...``-abbreviated variant), so
+    it never removes a real comment that merely sits next to the notice."""
+    year = stamped_year(rest)
+    if year is not None:
+        for st in (style, HASH, SLASH, DASH, HTML):
+            rendered = render_header(st, year)
+            if rest.startswith(rendered):
+                return len(rendered)
+
+    lines = rest.splitlines(keepends=True)
+    if not lines:
+        return None
+    known = _norm_notice(" ".join(header_paragraphs(year or COPYRIGHT_YEAR)))
+    first = lines[0].lstrip()
+    marker: str | None = None
+    block_closers = {"<!--": "-->", "/*": "*/"}
+    opener = next((o for o in block_closers if first.startswith(o)), None)
+    if opener is not None:
+        end = next((i for i, ln in enumerate(lines) if block_closers[opener] in ln), None)
+        if end is None or _norm_notice("".join(lines[: end + 1])).rstrip(". ") not in known:
+            return None
+        consumed = end + 1
+    else:
+        marker = next((m for m in ("//", "--", "#") if first.startswith(m)), None)
+        if marker is None:
+            return None
+        last, prev, i = -1, "", 0
+        while i < len(lines) and lines[i].lstrip().startswith(marker):
+            cand = _norm_notice("".join(lines[: i + 1]))
+            if cand.rstrip(". ") not in known:   # next comment line is NOT notice text
+                break
+            if cand != prev:                      # this line contributed notice text
+                last = i
+            prev, i = cand, i + 1
+        consumed = last + 1                       # drop any trailing empty-comment lines
+    if consumed == 0 or "Copyright (c)" not in _norm_notice("".join(lines[:consumed])):
+        return None
+    nxt = lines[consumed].strip() if consumed < len(lines) else None
+    if nxt == "" or (opener is None and nxt == marker):
+        consumed += 1   # blank / empty-comment line separating notice from content
+    return sum(len(ln) for ln in lines[:consumed])
+
+
+def strip_file(path: Path, style: str, *, dry_run: bool) -> bool:
+    """Remove the header from ``path`` if present.  Returns True if it was (or
+    would be) stripped.  Raises if a file is detected as stamped but the block
+    can't be located — we fail loudly rather than silently corrupt."""
+    text = path.read_text(encoding="utf-8")
+    if not is_already_stamped(text):
+        return False
+    insert_at = find_insertion_offset(text, path)
+    prefix, rest = text[:insert_at], text[insert_at:]
+    block_len = _header_block_len(rest, style)
+    if block_len is None:
+        raise ValueError("stamped but header block not found at insertion offset")
+    new_text = prefix + rest[block_len:]
+    if not dry_run:
+        path.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--strip", action="store_true",
+                      help="remove the header from every stamped file (inverse of stamping)")
+    mode.add_argument("--check", action="store_true",
+                      help="exit 1 if any tracked file is MISSING the header (release-leaf gate)")
+    mode.add_argument("--check-absent", action="store_true",
+                      help="exit 1 if any tracked file HAS the header (trunk gate — keep trunk unmarked)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="preview without writing")
-    parser.add_argument("--check", action="store_true",
-                        help="exit 1 if any tracked file is missing the header (CI gate)")
+                        help="preview without writing (stamp/strip only)")
     parser.add_argument("--verbose", "-v", action="store_true",
-                        help="list every changed or would-change path")
+                        help="list every affected path")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
     files = get_tracked_files(repo_root)
 
-    stamped: list[Path] = []
-    already: list[Path] = []
-    unhandled: list[Path] = []
+    affected: list[Path] = []   # stamped / stripped / offending (per mode)
+    inplace: list[Path] = []    # already in the desired state
+    unhandled: list[Path] = []  # no comment style / excluded / unreadable
 
     for path in files:
         if not path.is_file():
@@ -291,44 +383,53 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             unhandled.append(path)
             continue
-        if is_already_stamped(text):
-            already.append(path)
+        stamped = is_already_stamped(text)
+
+        if args.check:                       # gate: header must be PRESENT
+            (inplace if stamped else affected).append(path)
             continue
-        if args.check:
-            stamped.append(path)
+        if args.check_absent:                # gate: header must be ABSENT
+            (affected if stamped else inplace).append(path)
             continue
+
         try:
-            stamp_file(path, style, dry_run=args.dry_run)
-            stamped.append(path)
+            if args.strip:
+                (affected if strip_file(path, style, dry_run=args.dry_run)
+                 else inplace).append(path)
+            else:
+                (affected if stamp_file(path, style, dry_run=args.dry_run)
+                 else inplace).append(path)
         except Exception as exc:
             print(f"FAIL: {path.relative_to(repo_root)}: {exc}", file=sys.stderr)
             return 2
 
-    eligible = len(files) - len(unhandled)
-    print(f"Tracked files:        {len(files)}")
-    print(f"Eligible (stampable): {eligible}")
-    print(f"Already stamped:      {len(already)}")
-    verb = "Would stamp" if (args.dry_run or args.check) else "Stamped"
-    print(f"{verb}:          {len(stamped)}")
-    print(f"Skipped (no style):   {len(unhandled)}")
+    if args.strip:
+        verb, inplace_label = ("Would strip" if args.dry_run else "Stripped"), "Already unmarked"
+    elif args.check:
+        verb, inplace_label = "Missing header", "Already stamped"
+    elif args.check_absent:
+        verb, inplace_label = "Has header", "Already unmarked"
+    else:
+        verb, inplace_label = ("Would stamp" if args.dry_run else "Stamped"), "Already stamped"
 
-    if args.verbose:
-        if stamped:
-            print("\nFiles to stamp:" if args.dry_run or args.check else "\nFiles stamped:")
-            for p in stamped:
-                print(f"  + {p.relative_to(repo_root)}")
-        if unhandled and args.verbose:
-            print("\nSkipped (no comment style or excluded):")
-            for p in unhandled[:25]:
-                print(f"  - {p.relative_to(repo_root)}")
-            if len(unhandled) > 25:
-                print(f"  ... and {len(unhandled) - 25} more")
+    for label, n in (("Tracked files", len(files)),
+                     ("Eligible", len(files) - len(unhandled)),
+                     (inplace_label, len(inplace)),
+                     (verb, len(affected)),
+                     ("Skipped (no style)", len(unhandled))):
+        print(f"{label + ':':<22}{n}")
 
-    if args.check and stamped:
-        print(
-            f"\nFAIL: {len(stamped)} file(s) missing the Cloudera header.",
-            file=sys.stderr,
-        )
+    if args.verbose and affected:
+        print(f"\n{verb}:")
+        for p in affected:
+            print(f"  • {p.relative_to(repo_root)}")
+
+    if args.check and affected:
+        print(f"\nFAIL: {len(affected)} file(s) missing the Cloudera header.", file=sys.stderr)
+        return 1
+    if args.check_absent and affected:
+        print(f"\nFAIL: {len(affected)} file(s) carry the Cloudera header; "
+              f"trunk must stay unmarked.", file=sys.stderr)
         return 1
     return 0
 

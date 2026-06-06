@@ -1,12 +1,4 @@
 #!/bin/bash
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc., and is provided
-# to authorized licensees solely for use in connection with the Cloudera AI
-# (CAI) Application from which it was obtained.  It may not be copied,
-# modified, redistributed, or used in any other manner without the express
-# written consent of Cloudera, Inc.
-
 # Install Node.js via nvm for CAI deployment.
 # Follows the RAG Studio pattern: nvm into ~/.nvm, Node.js 22.
 # Idempotent — skips if node is already available.

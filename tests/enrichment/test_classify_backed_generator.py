@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Wiring tests for ClassifyBackedEnrichmentGenerator (P4 — DST pivot).
 
 Covers the wiring without spending on real LLM calls:

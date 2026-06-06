@@ -1,5 +1,3 @@
-<!-- Copyright (c) 2026 Cloudera, Inc.  All rights reserved. -->
-
 # test-gittables Fixture Provenance
 
 PUBLIC, non-target-domain fixture for the SVM/maxsim critical-path

@@ -1,11 +1,7 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
 # PROPOSED SPEC — not yet wired. Lives in docs/notes/ until the step defs,
 # the `just optimize svm --fixture --skip-agent` fast mode, and the
 # committed GitTables fixture assets exist; then it moves to
 # features/agent/optimize_svm_critical_path.feature.
-#
-# This file contains material proprietary to Cloudera, Inc. ...
 
 @agent @tier-1 @slow @optimize
 Feature: just optimize produces a trustworthy NHSVM critical path

@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc., and is provided
-# to authorized licensees solely for use in connection with the Cloudera AI
-# (CAI) Application from which it was obtained.  It may not be copied,
-# modified, redistributed, or used in any other manner without the express
-# written consent of Cloudera, Inc.
-
 """Generate a large synthetic 'synth' database with ~100 tables.
 
 Creates ~100 mixed-domain tables whose column counts follow a normal

@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Step defs for cco_coverage.feature — confirm the test-gittables taxonomy
 realizes CCO module coverage (tier-0; committed fixture + pure-Python
 epistemic machinery, no stack)."""

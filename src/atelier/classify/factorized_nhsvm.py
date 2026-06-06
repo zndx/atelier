@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Factorized NHSVM head for dense pretrained embeddings + runtime adapter.
 
 The original ``HierarchicalFeatureExpander`` materializes the Kronecker

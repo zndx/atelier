@@ -1,7 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc. ...
-
 @agent @tier-1 @slow @optimize
 Feature: just optimize svm --fixture produces a trustworthy critical path
   The operator-confidence sequence for the SVM/maxsim critical path on the

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Build the committed `test-gittables` fixture from the GitTables corpus.
 
 Reads the raw GitTables parquet corpus (NOT committed; staged at
@@ -467,8 +465,7 @@ def main() -> int:
 
     cov = sum(1 for r in heldout_rows if r["covered"])
     lines = [
-        "<!-- Copyright (c) 2026 Cloudera, Inc.  All rights reserved. -->",
-        "", "# test-gittables Fixture Provenance", "",
+        "# test-gittables Fixture Provenance", "",
         "PUBLIC, non-target-domain fixture for the SVM/maxsim critical-path",
         "test, organized for **CCO coverage** (see",
         "docs/src/architecture/cco-coverage.md). Source: the **GitTables**",

@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """CCO ExtendedRelationOntology annotation properties for taxonomy terms.
 
 Atelier's taxonomy terms are Information Content Entities, so CCO's

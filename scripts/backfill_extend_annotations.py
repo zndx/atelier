@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Backfill ``predicted_label`` + ``predicted_annotation`` on completed
 extend-classification runs.
 

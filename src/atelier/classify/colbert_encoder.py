@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """ColBERT late-interaction encoder for Qdrant multi-vector scoring.
 
 Loads a ColBERT model (BERT backbone + 768→128 linear projection) and

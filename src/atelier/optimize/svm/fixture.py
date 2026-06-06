@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Hermetic ``--fixture`` mode for ``just optimize svm``.
 
 Trains + promotes an NHSVM head from the committed, PUBLIC ``test-gittables``

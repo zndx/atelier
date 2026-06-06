@@ -1,12 +1,4 @@
 #!/usr/bin/env python
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc., and is provided
-# to authorized licensees solely for use in connection with the Cloudera AI
-# (CAI) Application from which it was obtained.  It may not be copied,
-# modified, redistributed, or used in any other manner without the express
-# written consent of Cloudera, Inc.
-
 """SOTAB Schema.org pilot — Path 1 feature-attribution dataset generator.
 
 Runs on ``/raid/datasets/sotab/CTA_training_schemaorg.zip``'s

@@ -1,9 +1,5 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
 # PROPOSED SPEC — companion guard for the test-gittables fixture.
 # Moves to features/agent/fixture_provenance.feature with step defs.
-#
-# This file contains material proprietary to Cloudera, Inc. ...
 
 @agent @tier-0
 Feature: The test-gittables fixture is strictly public, with no UAT leakage

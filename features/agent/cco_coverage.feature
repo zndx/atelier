@@ -1,7 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc. ...
-
 @agent @tier-0
 Feature: The test-gittables taxonomy realizes CCO module coverage
   An operator builds the public test-gittables fixture to exercise the

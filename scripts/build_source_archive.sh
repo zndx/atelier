@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-#
-# This file contains material proprietary to Cloudera, Inc., and is provided
-# to authorized licensees solely for use in connection with the Cloudera AI
-# (CAI) Application from which it was obtained.  It may not be copied,
-# modified, redistributed, or used in any other manner without the express
-# written consent of Cloudera, Inc.
-
 # build_source_archive.sh — self-contained source tarball for offline CAI
 # deployments (i.e. CAI workspaces that cannot reach github.com to git-clone
 # the project + submodules at install time).

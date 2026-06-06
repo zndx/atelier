@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Positively manage semantic absence.
 
 When the system lacks a semantic axis — a value's **unit**, a monetary

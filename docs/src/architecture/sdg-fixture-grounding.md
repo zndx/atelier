@@ -1,5 +1,3 @@
-<!-- Copyright (c) 2026 Cloudera, Inc.  All rights reserved. -->
-
 # Grounding the test fixture in SDG — a requirements-driven recommendation for Aegir
 
 **Status:** recommendation. Built and extended in Atelier; handed to Aegir,

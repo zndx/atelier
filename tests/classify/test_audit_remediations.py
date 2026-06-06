@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Unit tests for the audit_2026-05-06_a remediation bundle (R1-R6).
 
 Each remediation is exercised against a synthetic fixture that mirrors

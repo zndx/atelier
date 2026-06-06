@@ -1,5 +1,3 @@
-# Copyright (c) 2026 Cloudera, Inc.  All rights reserved.
-
 """Epistemic-completeness guard: semantic absence is surfaced, never silent.
 
 The standing assertion behind ``feedback_positively_manage_semantic_absence``
