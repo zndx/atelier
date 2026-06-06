@@ -76,7 +76,15 @@ loads:
   specified by `vocab_uri`. The domain vocabulary IS the classification
   target — no composition with the universal base. Hive sources always
   require an annotations table.
-- **No source**: Falls back to universal vocabulary (16 PII leaves)
+- **No source / unresolvable vocabulary**: **No silent fallback.**
+  `_load_vocabulary` (`pipeline.py`) raises a `RuntimeError` rather than
+  substituting a generic vocabulary that would silently misalign with the
+  operator's domain annotations (the anti-silent-degradation guard). The
+  29-node BFO-grounded universal fixture (16 PII leaves)
+  (`classify/fixtures/universal_vocabulary.json`) stays importable via
+  `load_universal_vocabulary` only for callers that genuinely want it —
+  the training fallback and info endpoints — never as a classification
+  target chosen behind the operator's back.
 
 ### LLM Robustness
 

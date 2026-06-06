@@ -2746,7 +2746,7 @@ def _classify_column(
     # a non-equivalent signal into DST fusion without the operator
     # knowing.  If late-interaction can't run, the pipeline raises
     # MaxSimUnavailable and the FSM fails the run loudly.
-    # See docs/src/architecture/late-interaction-cosine.md.
+    # See docs/src/architecture/maxsim-channel.md.
     maxsim_path = "unused"  # 'late_interaction' | 'explicit_disable' | 'unused'
     maxsim_attribution: dict | None = None  # per-decision SHAP surface;
                                             # populated only when
@@ -2979,7 +2979,7 @@ def _classify_column(
         # source: top-K post-fusion tags + per-role contribution
         # breakdowns.  None when maxsim_path is not 'late_interaction'
         # (legacy paths don't expose per-role attribution).  See
-        # docs/src/architecture/late-interaction-cosine.md § SHAP /
+        # docs/src/architecture/maxsim-channel.md § SHAP /
         # SAGE shift under late interaction.
         "maxsim_attribution": maxsim_attribution,
         # Explicitly-represented frame-incompleteness: interface axes the

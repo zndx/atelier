@@ -66,24 +66,55 @@ synth_*.csv + reference_labels.json
  svm.pkl  catboost.cbm
 ```
 
-### SVM Path (Signals Architecture)
+### SVM Path (factorized fully-hierarchical NHSVM)
 
-The SVM classifier uses the `Pipeline` + `FeatureUnion` composition adopted
-wholesale from the [Signals](https://github.com/zndx/signals) project:
+The SVM evidence source is a **ModernBERT mean-pool → factorized
+fully-hierarchical NHSVM** (Choi et al. 2015). It is the *shipped* SVM
+channel: `classify.svm.source = "registered"` is the default, and the
+pipeline loads a promoted head from the NHSVM head registry
+(`_ensure_registered_svm_head` → `registry/nhsvm_head.py`) or **fails loud**
+if none is current (no silent degradation).
 
-1. Build short text from column name + type + sample values via `build_svm_text()`
-2. `FeatureUnion` extracts dual TF-IDF features:
-   - Character n-grams (3-6, `char_wb` analyzer) — captures subword patterns
-   - Word n-grams (1-2) — captures multi-word patterns
-3. `CalibratedClassifierCV(LinearSVC, method="sigmoid")` — Platt scaling
-   for calibrated probability estimates
-4. `_min_class_count()` guard prevents calibration CV crash on small classes
-5. Save to `.pkl` + `.classes.json` via joblib
+1. Encode short column text (name + type + sample values) with
+   **`answerdotai/ModernBERT-base`**, mean-pooled to a 768-dim **dense**
+   embedding (`factorized_nhsvm.py`).
+2. Score with the factorized NHSVM head: one learnable weight vector
+   `W_n ∈ ℝ^d` **per hierarchy node** plus a frozen per-node `alpha_n`
+   scalar. The path score for a candidate code `y` sums node scores over
+   its root-to-leaf ancestors:
+   `γ(x, y) = Σ_{n ∈ A_y} alpha_n · (W_nᵀ x)`. Implemented as a single
+   `(n_nodes, d)` linear layer with the structural prior baked into a
+   precomputed `M_alpha` (path-indicator × diag(alpha)) matrix.
+3. **Non-leaf nodes are first-class prediction targets** — an authentic
+   fully-hierarchical classifier, not a flat leaf classifier with a
+   hierarchy post-hoc.
+4. A calibrated softmax temperature (`classify.svm.nhsvm_temperature`)
+   produces calibrated path probabilities.
+5. The head is trained **offline on the synthetic corpus** and emits the
+   **user's taxonomy codes natively** (no runtime ICE→user alignment step).
+   Heads are promoted into the registry via
+   `atelier.registry.nhsvm_head.promote_to_current` and saved as
+   `svm.pkl` + `svm.classes.json`.
 
-The SVM operates on **sparse lexical features** — architecturally independent
-from the dense sentence-transformer embedding used by cosine and CatBoost.
-See [Classification Pipeline](./classification.md#evidence-independence) for
-the full independence analysis.
+Why dense + factorized (the motivation): the *original* NHSVM formulation
+materialized the explicit Kronecker product `φ(x, y) = √alpha_y · (x ⊗ e_y)`
+and fit a LinearSVC over it. That form works on sparse TF-IDF features but
+**catastrophically fails on dense embeddings** — measured **98.93% top-1
+on TF-IDF vs 4.26% on naïve dense** ModernBERT (`factorized_nhsvm.py`
+docstring). The factorized per-node form exists precisely to make dense
+ModernBERT embeddings viable as the hierarchical SVM evidence source.
+
+> **Legacy / baseline path (`per_vocab_legacy`).** The earlier SVM —
+> sparse dual TF-IDF (char 3-6 `char_wb` + word 1-2) `FeatureUnion` →
+> `CalibratedClassifierCV(LinearSVC, method="sigmoid")` (Platt scaling) +
+> SVD, adopted from the [Signals](https://github.com/zndx/signals)
+> project (`svm_classifier.py`, `build_svm_text()`) — survives **only**
+> as a DEPRECATED emergency-rollback knob (`classify.svm.source =
+> "per_vocab_legacy"`, and the `auto` fallback). It is **not** the
+> current SVM source and is slated for removal. See
+> [Classification Pipeline](./classification.md#evidence-independence) for
+> the full independence analysis; DST source independence is enforced via
+> per-source discounts (Denoeux 2008), not feature-space orthogonality.
 
 ### CatBoost Path (GPU-accelerated)
 
@@ -103,47 +134,56 @@ class probabilities but per-class variance estimates. High variance
 translates to a higher DST discount factor — uncertain ML predictions
 carry less evidential weight in the fusion.
 
-## SVM Training (synth-only, with vocab alignment at inference)
+## SVM Training (synth-only, native user codes)
 
-The SVM is trained **once** on the synthetic corpus
-(`scripts/generate_synth_source.py` → `ml_train.train_svm`), with
-TF-IDF char-3-6gram + word-1-2gram features and labels keyed on the
-bundled-ontology ICE.* leaves from `synth_generators.GENERATORS`.
-At pipeline runtime, the ICE.* predictions are translated into the
-user's taxonomy via the cached LLM-mediated alignment in
-`atelier.classify.ontology_alignment` (one LLM call per
-(vocabulary, model) tuple; result cached on disk under
-`build/cache/alignment/`).
+The registered NHSVM head is trained **once, offline** on the synthetic
+corpus, with **ModernBERT mean-pool dense embeddings** as features and
+labels keyed directly on the **user's taxonomy nodes** (leaves *and*
+non-leaf nodes). It emits user codes natively, so there is **no runtime
+ICE→user alignment step**: at pipeline runtime the head's calibrated path
+probabilities flow straight into `nhsvm_to_mass`, which applies the
+Choi et al. (2015) tree-distance reweighting before the standard
+`svm_to_mass` conversion and produces a `BeliefAssignment` in the user's
+taxonomy frame.
 
 ```
-data/synth/*.csv  +  ICE.* reference labels
+data/synth/*.csv  +  user-taxonomy reference labels
         ↓
-   train_svm()  (sklearn LinearSVC + TfidfVectorizer)
+   train (offline) → factorized NHSVM head
+   (ModernBERT-base mean-pool → per-node W + alpha; M_alpha path prior)
         ↓
-   build/models/svm.pkl   (label space: ICE.* leaves)
+   promote_to_current()  →  nhsvm_head_registry
+        ↓
+   build/models/svm.pkl  +  svm.classes.json   (label space: user codes)
 
 ────────  pipeline runtime  ──────────────────────
 
-   svm.predict_proba(text)  →  {ICE.X: p, ICE.Y: q, ...}
+   source="registered" → _ensure_registered_svm_head() loads the head
         ↓
-   translate_proba(proba, alignment)   ← from ontology_alignment
+   head.predict_proba(text)  →  {user_code_A: p, user_code_B: q, ...}
         ↓
-   {user_code_A: p+q, user_code_B: r, ...}
+   nhsvm_to_mass(proba, alphas, temperature, distance_matrix)
         ↓
-   svm_to_mass(...)  →  BeliefAssignment in user-taxonomy frame
+   BeliefAssignment in user-taxonomy frame
 ```
+
+> **Legacy / baseline training path.** The deprecated `per_vocab_legacy`
+> mode retrains a fresh per-vocabulary **TF-IDF LinearSVC** model each run
+> from enrichment payloads (`sklearn LinearSVC + TfidfVectorizer`, ICE.*
+> labels translated through `ontology_alignment.translate_proba`). It is
+> an emergency-rollback knob only — not the shipped source — and is slated
+> for removal once the TF-IDF path is retired.
 
 > **Historical note** — earlier revisions of this design ran a
 > mid-loop `train_svm_on_frontier_labels` (historical function name)
 > that retrained the SVM on live LLM labels and hot-swapped the
 > result into the active model slot.  That path was excised on 2026-05-04 (commits 8627c2c,
 > 5199379, cc59d01) for the source-independence reasons documented
-> in `ontology_alignment.py`.  The current design preserves the
-> SVM's TF-IDF independence at the feature and label level; the
-> only LLM dependency is the per-vocabulary alignment table, which
-> is vocabulary-level rather than column-level shared error.  See
-> `ontology_alignment.py` module docstring for the full independence
-> argument and the BM25-reranker future-work plan.
+> in `ontology_alignment.py`.  Per-source independence is now enforced
+> by per-source DST discounts (Denoeux 2008): the registered NHSVM is a
+> distinct ModernBERT-embedding-fed model whose only shared dependency on
+> the LLM channel is the offline synthetic training corpus, not
+> column-level labels.
 
 ## Train-Eval Cycle
 
@@ -205,9 +245,11 @@ Set to `false` on CAI if background threads cause runtime issues.
 | `synth_generators.py` | 316+ hand-coded value generators |
 | `synth_registry.py` | Three-layer registry: hand-coded > template > inferred |
 | `synth.py` | Synthetic data generation with diverse column names |
-| `ml_train.py` | Training orchestrator: synth-only CatBoost + synth-only SVM (ICE.* labels) |
+| `ml_train.py` | Training orchestrator: synth-only CatBoost + synth-only SVM (native user codes) |
 | `catboost_classifier.py` | CatBoost with virtual ensemble uncertainty |
-| `svm_classifier.py` | Pipeline+FeatureUnion: dual TF-IDF + LinearSVC + Platt scaling (signals) |
+| `factorized_nhsvm.py` | Shipped SVM source: ModernBERT mean-pool → factorized fully-hierarchical NHSVM (per-node W + alpha, path scores, non-leaf nodes first-class) |
+| `registry/nhsvm_head.py` | NHSVM head registry (`get_current` / `promote_to_current`) backing `classify.svm.source="registered"` |
+| `svm_classifier.py` | **Legacy / baseline** (`per_vocab_legacy`): dual TF-IDF + LinearSVC + Platt scaling (signals); deprecated, slated for removal |
 | `train_eval_cycle.py` | Generate → train → classify → evaluate loop |
 | `sage.py` | Global SAGE feature importance |
 | `shap_explanations.py` | Per-item SHAP attribution |

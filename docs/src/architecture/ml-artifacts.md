@@ -1,9 +1,14 @@
 # ML Artifact Management + Extend Classification
 
-Each Atelier classify run trains a CatBoost classifier, optionally an
-SVM classifier (synth-trained, with runtime LLM-mediated alignment to
-the user vocabulary — see ``ontology_alignment.py``), and (when
-umap-learn handles the projection) a fitted UMAP reducer.  The **ML Artifact Set** feature makes those
+Each Atelier classify run trains a CatBoost classifier, an SVM
+classifier (on by default — the registered ModernBERT mean-pool
+factorized fully-hierarchical NHSVM, trained offline on the synth
+corpus, emitting user codes natively with no runtime vocabulary
+alignment), and (when umap-learn handles the projection) a fitted UMAP
+reducer.  The legacy per-vocabulary TF-IDF + LinearSVC + Platt path
+(`svm_classifier.py`) and its runtime LLM-mediated ICE→user-vocab
+alignment (`ontology_alignment.py`) are deprecated baselines, not the
+current SVM source.  The **ML Artifact Set** feature makes those
 trained models first-class entities — registered in PG, listed in the
 UI, and replayable on new data through a streamlined **Extend
 Classification** pipeline that skips the LLM sweep, DST iteration, and
@@ -80,8 +85,8 @@ Each classify run writes to `build/results/{run_id}/`:
 build/results/{run_id}/
   catboost_fit_to_llm.cbm                  # required
   catboost_fit_to_llm.classes.json         # required (classes + feature_groups sidecar)
-  svm_frontier.pkl                         # optional (skipped if fit-to-LLM didn't fire)
-  svm_frontier.classes.json                # optional
+  svm.pkl                                  # registered NHSVM (legacy runs: svm_frontier.pkl)
+  svm.classes.json                         # sidecar (legacy runs: svm_frontier.classes.json)
   umap.pkl                                 # optional (only when CPU umap-learn was used)
   atelier_embeddings.parquet               # the dataset
   classifications.json                     # full per-column results

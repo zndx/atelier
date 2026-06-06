@@ -26,7 +26,7 @@ duckdb -> viewer: SQL queries
 react -> gateway: GET parquet
 ```
 
-The viewer runs entirely in the browser. DuckDB WASM loads parquet data locally and the EmbeddingAtlas component (from Apple's [embedding-atlas](https://github.com/apple/embedding-atlas) library) renders the visualization using WebGPU with WebGL 2 fallback.
+The viewer runs entirely in the browser. DuckDB WASM loads parquet data locally and the EmbeddingAtlas component renders the visualization using WebGPU with WebGL 2 fallback. The component comes from Atelier's fork of Apple's embedding-atlas, [`rch/oss-embedding-atlas`](https://github.com/rch/oss-embedding-atlas), which carries required modifications and ships a committed pre-built `dist/` so CAI deployments don't need the full build toolchain.
 
 ## Data Flow
 
@@ -51,7 +51,7 @@ Additional columns (e.g., `source_table`, `belief`, `plausibility`) are automati
 
 ## GitTables Dataset
 
-The initial dataset is derived from the [GitTables](https://zenodo.org/records/5706316) CTA benchmark — 2,517 columns extracted from real tables, annotated with 122 DBpedia property types. These instance labels serve as the controlled vocabulary to be grounded in the SIGDG ontology.
+The initial dataset is derived from the [GitTables](https://zenodo.org/records/5706316) CTA benchmark — 2,517 columns extracted from real tables, annotated with 122 DBpedia property types. These instance labels serve as the controlled vocabulary to be grounded in the SDG ontology.
 
 To prepare the visualization parquet:
 
@@ -67,7 +67,7 @@ The preparation script computes sentence-transformer embeddings and UMAP 2D proj
 
 ## Naming: Embeddings vs Apache Atlas
 
-The Embeddings page is powered by Apple's `embedding-atlas` library. This is **unrelated to Apache Atlas**, the Cloudera metadata governance catalog used by the [signals](https://github.com/rch/signals) pipeline.
+The Embeddings page is powered by the `embedding-atlas` library (Atelier's [fork](https://github.com/rch/oss-embedding-atlas) of Apple's project). This is **unrelated to Apache Atlas**, the Cloudera metadata governance catalog used by the [signals](https://github.com/rch/signals) pipeline.
 
 - **Embeddings** (Atelier) — Interactive scatter plot of classification embeddings
 - **Apache Atlas** (Cloudera/signals) — Metadata governance catalog on port 21000

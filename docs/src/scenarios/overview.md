@@ -6,7 +6,14 @@ These aren't just tests. They're the design context that connects architectural 
 
 ## Active Domains
 
-**155 scenarios across 35 features, 4 domains.**
+**~338 scenarios across 58 features, 4 domains.**
+
+> Scenario and feature counts are generated, not hand-maintained — they
+> drift as scenarios are added. Regenerate with `find features -name
+> "*.feature" | wc -l` (features) and `grep -rcE '^\s*Scenario( Outline)?:'
+> features --include="*.feature"` (per-feature counts). The headline above
+> and the per-feature numbers in the tables below are point-in-time
+> snapshots; treat the live commands as authoritative.
 
 ### Infrastructure (infra)
 

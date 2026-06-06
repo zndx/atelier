@@ -160,7 +160,7 @@ The core of the project lives in `src/atelier/classify/` and is driven by
 Key concepts worth internalizing before editing:
 
 - **Dempster-Shafer evidence fusion** (`belief.py`, `mass_functions.py`) —
-  up to 6 evidence sources (name-match, pattern, cosine, LLM, CatBoost,
+  up to 6 evidence sources (name-match, pattern, maxsim, LLM, CatBoost,
   SVM) combined into a `HierarchicalClassification` with belief,
   plausibility, and conflict per code. Fusion strategy is configurable —
   `dempster` normalizes conflict by `(1−K)`, `yager` redirects conflict

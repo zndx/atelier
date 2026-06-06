@@ -1,16 +1,20 @@
 # Grounding the test fixture in SDG — a requirements-driven recommendation for Aegir
 
+> **Status: Atelier-side rewire shipped** (GT.* retired, SDG.* emitted,
+> `sdg_requirements.json` produced); awaiting Aegir adoption.
+
 **Status:** recommendation. Built and extended in Atelier; handed to Aegir,
 which owns SDG, to adopt or refine.
 
 ## Why
 
-The `test-gittables` fixture currently carries an invented `GT.*` namespace —
-the fifth overlapping governance vocabulary alongside `sdg:`, `SIGDG:`,
-`atelier-vocab.ttl`, and signals' `GDC.*`. Inventing a sixth dilutes the
-refinement effort; the fix is to **iterate on the one shared surface**, the
-Signals Data Governance ontology (`sdg:`, Aegir's
-`src/aegir/ontology/sdg-vocab.ttl`, BFO 2020 + CCO grounded). See
+The `test-gittables` fixture previously carried an invented `GT.*` namespace
+(retired 2026-05-31) — it would have been the fifth overlapping governance
+vocabulary alongside `sdg:`, `SIGDG:`, `atelier-vocab.ttl`, and signals'
+`GDC.*`. Inventing a sixth dilutes the refinement effort; the fix was to
+**iterate on the one shared surface**, the Signals Data Governance ontology
+(`sdg:`, Aegir's `src/aegir/ontology/sdg-vocab.ttl`, BFO 2020 + CCO grounded).
+The fixture builder now emits `SDG.*`-grounded terms instead of `GT.*`. See
 [`feedback_iterate_shared_sdg_surface`] and [cco-coverage](cco-coverage.md).
 
 ## SDG already fits — the property map
@@ -74,10 +78,12 @@ reshape:
 
 ## Plan
 
-1. Rewire the fixture builder to emit SDG-grounded terms (CCO-module referent
-   + `sdg:hasValueType` / `sdg:describesProperty` + DBpedia source), retiring
-   `GT.*`. Unmapped types are recorded as SDG-coverage gaps.
-2. Emit a machine-readable `sdg_requirements.json` from the build — the exact
-   value-type/relation terms the fixture needs — as the artifact Aegir
-   consumes.
+1. **DONE** — Rewired the fixture builder to emit SDG-grounded terms
+   (CCO-module referent + `sdg:hasValueType` / `sdg:describesProperty` +
+   DBpedia source), retiring `GT.*`. Unmapped types are recorded as
+   SDG-coverage gaps.
+2. **DONE** — Emits a machine-readable `sdg_requirements.json` from the build —
+   the exact value-type/relation terms the fixture needs — as the artifact
+   Aegir consumes.
 3. Aegir adopts/refines into `sdg-vocab.ttl` + catalogs; Atelier re-consumes.
+   *(Pending — awaiting Aegir adoption.)*

@@ -6,8 +6,13 @@ of columns, this becomes prohibitively expensive. Monte Carlo stratified
 sampling selects a representative subset for direct LLM inference and
 propagates labels cheaply via embedding similarity to the remainder.
 
-This is a **zero-cost optimization**: below the threshold, the pipeline
-behaves identically to before. The MC layer activates transparently at scale.
+This is a **zero-cost optimization**: when in passthrough, the pipeline
+behaves identically to before. The MC layer is *passthrough* (classifies
+every column) whenever `total < min_corpus_size` **or** `sample_fraction
+>= 1.0` (`monte_carlo.py`). Because the shipped default is `sample_fraction
+= 1.00`, MC is passthrough at every corpus size out of the box; sub-sampling
+engages only once an operator lowers `sample_fraction` below `1.0` on a
+corpus larger than `min_corpus_size`.
 
 ## Three-Phase MC Layer
 
@@ -65,6 +70,10 @@ where `confidence` = max cosine similarity, `uncertainty` = ratio of
 
 Total budget: `min(max_sampled_columns, total × sample_fraction)`
 
+> The fractions used in the scaling table below (e.g. `15%`) illustrate an
+> *active-MC* configuration with `sample_fraction = 0.15`; recall the shipped
+> default is `1.00` (passthrough — see the intro).
+
 ## Label Propagation
 
 After the LLM sweep on the sampled subset:
@@ -94,6 +103,10 @@ The evidence fusion framework makes MC sampling robust:
 
 GitTables corpus: **1.7M tables today, 10M+ near-term**. Average 8-12
 columns per table = **15M-120M columns** at full scale.
+
+The table below assumes an *active-MC* configuration with `sample_fraction =
+0.15` (the shipped default is `1.00` — see the note above; "Passthrough"
+behaviour is also what the default produces at any corpus size).
 
 | Corpus | MC Mode | Direct LLM Calls | Propagated | Cost Reduction |
 |--------|---------|-----------------:|-----------:|---------------:|
@@ -127,12 +140,12 @@ classify {
   monte_carlo {
     min_corpus_size = 200              # Below this, classify everything
     min_corpus_size = ${?ATELIER_MC_MIN_CORPUS_SIZE}
-    sample_fraction = 0.15             # Fraction directly classified by LLM
+    sample_fraction = 1.00             # Fraction directly classified by LLM (shipped default: classify all)
     sample_fraction = ${?ATELIER_MC_SAMPLE_FRACTION}
     min_per_stratum = 3                # Minimum samples per category stratum
     max_sampled_columns = 500          # Hard cap on directly-classified columns
     max_sampled_columns = ${?ATELIER_MC_MAX_SAMPLED}
-    propagation_threshold = 0.85       # Cosine sim for propagation
+    propagation_threshold = 0.80       # Cosine sim for propagation
     propagation_threshold = ${?ATELIER_MC_PROPAGATION_THRESHOLD}
     propagation_discount = 0.30        # LLM mass discount for propagated labels
   }

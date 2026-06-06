@@ -81,13 +81,20 @@ No global provider switch — credentials determine what's available.
 |---------|-------|--------|----------|
 | Anthropic | `AnthropicBackend` | `ANTHROPIC_API_KEY` | Agent loop + LLM sweep |
 | Bedrock | `BedrockBackend` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` + `AWS_REGION` | Production default on CAI |
-| Cerebras | `CerebrasBackend` | `CEREBRAS_API_KEY` | Fast inference via GLM-4.7 |
+| Cerebras | `OpenAICompatibleBackend` (Cerebras-specific defaults) | `CEREBRAS_API_KEY` | Fast inference via GLM-4.7 (default model `zai-glm-4.7`) |
 | OpenAI-compatible | `OpenAICompatibleBackend` | `ATELIER_LLM_BASE_URL` + `ATELIER_LLM_MODEL` | vLLM, any compatible endpoint |
+
+There is no dedicated `CerebrasBackend` class — Cerebras is served through
+`OpenAICompatibleBackend` configured with Cerebras-specific defaults
+(`https://api.cerebras.ai/v1`, default model `zai-glm-4.7`).
 
 The agent client is built via `_build_client(cfg)` which prefers Anthropic
 when `ANTHROPIC_API_KEY` is set, falling back to Bedrock when AWS credentials
 are available. The agent model resolves as:
 `classify_agent_model` → `agent_model` → `"claude-sonnet-4-5-20250929"`.
+Because `agent_model` defaults to `claude-opus-4-7` (the shipped default, never
+`None`), the trailing Sonnet literal is an unreachable last-resort guard — the
+effective default agent model is Opus.
 
 ## Configuration
 
@@ -116,7 +123,7 @@ classify {
 }
 
 agent {
-    model = "claude-sonnet-4-5-20250929"
+    model = "claude-opus-4-7"
     model = ${?ATELIER_AGENT_MODEL}
 }
 
@@ -137,6 +144,11 @@ convergence loop as well: sweep → validate → revisit uncertain → repeat.
 The agent loop is an alternative that delegates the revisit strategy to
 Claude. Both paths share the same underlying functions (`_llm_sweep`,
 `_run_ml_validation`, etc.) and produce identical DST evidence.
+
+The agent loop is **opt-in** (`classify.agent.enabled = true`, default
+`false`); the programmatic bootstrap loop is the shipped default and runs
+unless the agent path is explicitly enabled and a tool-use-capable provider
+(Anthropic or Bedrock with Claude) is available.
 
 The agent approach is preferred when:
 - The corpus has wide-belief-gap columns where independent evidence

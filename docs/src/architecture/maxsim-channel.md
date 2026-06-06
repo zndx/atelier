@@ -9,6 +9,12 @@
 > discount — is `maxsim`. The legacy single-vector `cosine` channel is
 > retired (no fallback). Historical sprint notes may still say "cosine".
 
+> **What this is *not*.** ColBERT here is **text** late-interaction
+> (BERT token embeddings over the entity/annotation text). This is
+> **not** ColPali / ColVision / ColQwen or any vision-document
+> retrieval model — there is no image or page-rendering pathway
+> anywhere in the channel.
+
 This note specifies the maxsim evidence source: a
 multi-vector late-interaction (ColBERT-style) representation per
 annotation, stored in Qdrant, with enrichment supplied by an Agent-SDK
@@ -20,11 +26,12 @@ prompting documented in [`dst-evidence-independence.md`](dst-evidence-independen
 ## Position in the architecture
 
 The existing DST treatment shapes *how per-source masses fuse*.  This
-work shapes the *cosine source's input representation*.  Both are
+work shapes the *semantic source's input representation*.  Both are
 necessary; neither is sufficient on its own.
 
-The motivating gap is structural rather than algorithmic.  Current
-cosine compresses each annotation into a single embedding from
+The motivating gap is structural rather than algorithmic.  The
+retired single-vector cosine source compressed each annotation into a
+single embedding from
 `label + mnemonic + description` and compares it to a single
 column-side embedding from `column_name + concatenated_samples`.  On
 adversarial corpora — anonymized column names (`comm_val`,
@@ -272,8 +279,9 @@ The shape:
    - Compute `parent_path` deterministically from the taxonomy
      structure (no LLM needed) and confirm the LLM's reasoning is
      consistent with it.
-3. **Compute embeddings** for each named vector using the configured
-   embedding model.
+3. **Compute embeddings** for the composed annotation text with the
+   configured ColBERT model, producing the per-token vectors for the
+   single `colbert` multi-vector field.
 4. **Write** the multi-vector point + payload to Qdrant, keyed by the
    content-addressed cache key.  Idempotent: same `(vocabulary
    content hash, augmentation_version, embedding_model, source_row
@@ -349,48 +357,56 @@ difference shapes content quality:
 
 ## Late-interaction execution
 
-### Column-side multi-vector representation
+There are **no** per-role query slots and **no** Python-side weighted
+sum.  The flow is single-text in, single multi-vector query, native
+in-engine scoring:
 
-For each column being classified, build the multi-vector query:
-
-| Query vector       | Source                                              |
-|--------------------|-----------------------------------------------------|
-| `col_name_view`    | `embed(column_name + " in " + table_name)`          |
-| `col_sample_*`     | `embed(sample_value)` per deduped sample (top-N by frequency or distinctness, configurable) |
-| `col_context_view` | `embed("table columns: " + concat(other column names in same table))` |
-| `col_pattern_view` | `embed(extracted format hints from samples)`        |
-
-`col_pattern_view` is computed from sample values via the existing
-regex/validator detection in the pattern source — this is where the
-original "regex as embedding-text enrichment" intent (referenced in
-[`dst-evidence-independence.md`](dst-evidence-independence.md) and in
-the upstream Ægir documentation) re-enters cleanly: regex outputs
-contribute *structured features into one of the multi-vector query
-slots*, not as an independent mass function competing with cosine.
-The pattern source's standalone mass-function status is preserved
-for narrow PII detection (email, IBAN, monetary, …) where its hits
-are crisp; the `col_pattern_view` augmentation is additional, not a
-replacement.
-
-### MaxSim aggregation
-
-For each candidate tag and each query vector, find the best match in
-the annotation's multi-vectors of the *corresponding role*:
+1. **One entity text.**  The column being classified is rendered to a
+   single string by `ColumnFeatures.to_embedding_text()` — the same
+   text SAGE/SHAP ablate over (column name, samples, context, pattern
+   hints already composed in).
+2. **One ColBERT multi-vector query.**  That text is encoded by the
+   ColBERT encoder into per-token 128-d vectors (an `N × 128`
+   multi-vector — *one* query object, not several role vectors).
+3. **Single `colbert` field.**  Qdrant's `query_points(using="colbert")`
+   matches the query multi-vector against each annotation point's one
+   `colbert` multi-vector field.
+4. **Native MaxSim.**  Under `MultiVectorConfig(comparator=MAX_SIM)`,
+   Qdrant computes the late-interaction score for each candidate as the
+   **sum, over query tokens, of each query token's maximum cosine
+   against the annotation's tokens**, normalized by the query-token
+   count.  No Python scoring loop; no per-role weights.
 
 ```
-positive_score(col, tag) =
-    sim(col_name_view,    label_view of tag)         * w_label
-  + sim(col_name_view,    name_hints of tag)         * w_name
-  + max(sim(col_sample_i, prototype_values of tag))  * w_proto_per_sample
-  + max(sim(col_sample_i, value_patterns of tag))    * w_pattern_per_sample
-  + sim(col_context_view, parent_path_view of tag)   * w_context
-  + ...
+maxsim(query, tag) = (1 / |Q|) · Σ_{q ∈ Q}  max_{d ∈ D_tag}  cos(q, d)
 ```
 
-Execution happens in-engine via Qdrant's multi-vector query API
-with MaxSim comparator.  HNSW indexing brings the cost down to
-logarithmic in the annotation count, which is the dominant cost
-as vocabularies scale across deployments.
+where `Q` is the entity query's token vectors and `D_tag` the
+annotation point's token vectors.  HNSW indexing keeps cost
+logarithmic in the annotation count, which dominates as vocabularies
+scale across deployments.
+
+The pattern source's regex/validator hits feed the entity text
+upstream (and the annotation text's `value_patterns`); the pattern
+source also retains its **standalone** mass-function status for narrow
+PII detection (email, IBAN, monetary, …) where its hits are crisp.
+There is no separate `col_pattern_view` query vector — the per-role
+multi-slot design below was a sketch that the single-`colbert`-field
+implementation superseded.
+
+### Deferred / not yet implemented: per-role multi-slot query
+
+> **Not built.**  An earlier design split the entity into several
+> role-tagged query vectors (`col_name_view`, `col_sample_*`,
+> `col_context_view`, `col_pattern_view`) scored against
+> correspondingly-role-tagged annotation vectors with a tunable
+> weighted sum (`w_label`, `w_name`, `w_proto_per_sample`, …).  The
+> shipped channel does **not** do this — it uses one entity text, one
+> `colbert` multi-vector field, and Qdrant-native MaxSim (above).  The
+> per-role slots, the SAGE-prioritized per-view early-exit, and the
+> copula / Ægir supplementary query vectors in
+> [Deferred work](#deferred-work) all presuppose this multi-slot query
+> and are likewise unbuilt.
 
 ## Mass function construction
 
@@ -418,6 +434,14 @@ m(Θ)             = 1 − α
 Hierarchical subtree aggregation (`_significant_subtree`) routes
 residual mass to internal-node focal elements when subtree-level
 signal dominates leaf-level signal.
+
+The per-tag allocation above is the `union_focal_k = 0` path.  With
+the shipped default `union_focal_k = 3` (see
+[Configuration](#configuration)), `maxsim_to_mass` instead bypasses
+per-tag allocation and assigns `union_focal_alpha` mass to the **union
+of the top-K candidates** as a single focal element
+(`_maxsim_union_focal_mass`) — an "the answer is in this set" shape
+that matches the channel's measured top-1/top-3 signal.
 
 ## Storage philosophy
 
@@ -464,7 +488,7 @@ CREATE INDEX idx_taxonomy_registry_current
     ON taxonomy_registry(taxonomy_id, status);
 
 -- Extends fsm_runs to record which enriched annotation collection
--- the run consumed.  NULL = legacy cosine; non-NULL = late-interaction.
+-- the run consumed.  NULL = no enriched collection; non-NULL = late-interaction.
 ALTER TABLE fsm_runs ADD COLUMN IF NOT EXISTS
     taxonomy_collection TEXT REFERENCES taxonomy_registry(qdrant_collection);
 ```
@@ -498,46 +522,43 @@ every change.  Per-customer overlays (deployment-specific
 augmentations beyond the base) follow the same shape on a separate
 edits stack.
 
-## SHAP / SAGE shift under late interaction
+## SHAP / SAGE under late interaction
 
-The structured per-segment inputs (column_name, each sample,
-context, pattern view) provide natural attribution surfaces that
-the prior single-vector representation flattened.
+**SHAP surface: a `maxsim_attribution` dict.**  When late-interaction
+runs cleanly, `maxsim_bridge` attaches a compact attribution object to
+the per-column result alongside `maxsim_path`.  Its shape is the top-K
+candidate tags by MaxSim score:
 
-**SHAP becomes per-decision interpretability infrastructure.** For a
-column predicted EMAIL, SHAP attributes the score across the
-structured inputs: "sample_3 contributed 0.42 via match against
-`EMAIL.prototype_values[7]`; column_name contributed 0.08 via
-`name_hints`; everything else < 0.05."  Operator-legible
-explanation per prediction, computable in-pipeline at moderate
-cost (one late-interaction pass per perturbation).  Wired into
-`features.FEATURE_NAMES` as new ablatable feature slots:
-`late_interaction_positive`, `late_interaction_negative`,
-`late_interaction_view_<name>`.
+```jsonc
+{
+  "ranking_basis": "qdrant_maxsim",
+  "top_k": [
+    {"code": "ICE.SENSITIVE.PID.CONTACT.EMAIL", "is_leaf": true,  "maxsim_score": 0.81},
+    {"code": "ICE.SENSITIVE.PID.CONTACT",        "is_leaf": false, "maxsim_score": 0.74},
+    {"code": "ICE.SENSITIVE.PID.CONTACT.PHONE",  "is_leaf": true,  "maxsim_score": 0.69}
+  ]
+}
+```
 
-**SAGE moves to offline-first.**  Late-interaction inputs are
-richer (more "features" — per-view contributions, per-vector
-contributions), and SAGE's permutation-based global compute scales
-with that dimensionality.  Per-pipeline-run SAGE becomes
-impractical and, more importantly, of low marginal value: SAGE's
-value proposition is *corpus-level stability* rather than per-run
-signal.  The shift:
+This is the entire surface — there is **no** per-view / per-sample
+feature breakdown, and **no negative channel** (the single-`colbert`
+field carries one positive late-interaction score per candidate).  It
+is **not** wired into `features.FEATURE_NAMES`: there are no
+`late_interaction_positive`, `late_interaction_negative`, or
+`late_interaction_view_<name>` slots — `FEATURE_NAMES` ablates the
+entity-text segments (`column_name`, `sample_values`, `pattern_signals`,
+`ontology_priors`, …), and SAGE/SHAP attribute through that surface.
 
-- SAGE runs as a separate offline pipeline, scheduled or
-  on-demand, against the current enriched annotations + corpus
-  characterization.
-- Artifact written to
-  `build/sage/<corpus_id>-<taxonomy_version>-<utc>.parquet`.
-- Downstream consumers (UI, view-prioritization, operator
-  dashboards) reference the cached artifact; the pipeline hot path
-  never recomputes inline.
-- Optional integration: SAGE importance scores prioritize which
-  annotation views the late-interaction engine computes first, with
-  early-exit when high-importance views already discriminate
-  confidently — a wall-time win on large taxonomies.
-
-CLAUDE.md already notes SAGE is optional; this makes "optional"
-precise: optional in the hot path, scheduled-only otherwise.
+**SAGE remains offline-first.**  SAGE's value proposition is
+*corpus-level stability* rather than per-run signal, so it runs as a
+separate scheduled/on-demand pipeline against the current enriched
+annotations + corpus characterization, with its artifact under
+`build/sage/`; downstream consumers (UI, operator dashboards)
+reference the cached artifact and the pipeline hot path never
+recomputes inline.  CLAUDE.md already notes SAGE is optional; this
+makes "optional" precise: optional in the hot path, scheduled-only
+otherwise.  (A SAGE-prioritized *per-view early-exit* would require the
+deferred multi-slot query above and is not implemented.)
 
 ## Integration with existing fusion mechanisms
 
@@ -546,49 +567,94 @@ composes cleanly with this work.  Specifically:
 
 | Existing mechanism                                         | Composes by                                                                   |
 |------------------------------------------------------------|-------------------------------------------------------------------------------|
-| Reliability discounting (Shafer §11.3)                     | Late-interaction cosine carries its own discount slot in `config/base.conf`; default starts at `cosine` value (0.20) and is sweep-tunable. |
-| Indep-tier consensus + revisit gate                        | Late-interaction cosine remains in the independent tier (its only LLM dependence is the enrichment, which is offline + verified). Indep-tier fusion picks it up unchanged. |
-| Cosine reliability shaping (Haenni-Hartmann 2006)          | The α-bounded + margin-aware allocation pattern is reused for the positive channel; quality indicators extend to include verifier-pass-rate. |
-| Hierarchical mass aggregation + cross-subtree visibility   | The positive-channel mass function emits hierarchical mass identically: walk up from top-1 leaf to the most-specific subtree capturing ≥ 50% of softmax probability, redirect residual to internal-node focal element. `cautious_promoted_code` walks the full hierarchy as before. |
-| Cost-sensitive classification at LLM layer (Elkan 2001)    | Unchanged — operates upstream of fusion and is orthogonal to the cosine representation. |
-| Pattern-target alias resolver                              | Unchanged for the standalone pattern source. The pattern source's hits additionally enrich the `col_pattern_view` query vector. |
-| Per-column residual trajectory                             | Unchanged — operates on the iteration history of fused belief, which still flows through `BootstrapState`. The late-interaction cosine's per-view scores can be added to the snapshot for finer-grained trajectory analysis (deferred). |
+| Reliability discounting (Shafer §11.3)                     | The maxsim source carries its own discount key `classify.discounts.maxsim` (default 0.20) and is sweep-tunable. |
+| Indep-tier consensus + revisit gate                        | The maxsim source is in the independent tier (its only LLM dependence is the enrichment, which is offline + verified). Indep-tier fusion picks it up unchanged. |
+| MaxSim reliability shaping (Haenni-Hartmann 2006)          | The α-bounded + margin-aware allocation pattern shapes the MaxSim score into mass; quality indicators extend to include verifier-pass-rate. |
+| Hierarchical mass aggregation + cross-subtree visibility   | The mass function emits hierarchical mass identically: walk up from top-1 leaf to the most-specific subtree capturing ≥ 50% of softmax probability, redirect residual to internal-node focal element. `cautious_promoted_code` walks the full hierarchy as before. |
+| Cost-sensitive classification at LLM layer (Elkan 2001)    | Unchanged — operates upstream of fusion and is orthogonal to the maxsim representation. |
+| Pattern-target alias resolver                              | Unchanged for the standalone pattern source. The pattern source's hits also feed the entity text the ColBERT encoder embeds. |
+| Per-column residual trajectory                             | Unchanged — operates on the iteration history of fused belief, which still flows through `BootstrapState`. |
 
 ## Configuration
 
-New keys under `classify.cosine.late_interaction` in `config/base.conf`:
+The channel lives under `classify.maxsim` in `config/base.conf`, with
+its reliability discount under `classify.discounts`:
 
 ```hocon
 classify {
-  cosine {
-    # Late-interaction multi-vector cosine is the production cosine
-    # source.  Default ON.  The legacy single-vector cosine path
-    # remains in the code only as a transitional emergency fallback;
-    # when the late-interaction flag is on and the path cannot run
-    # (no enriched collection, Qdrant unreachable, qdrant-client
-    # missing), the pipeline logs WARNING + marks the run degraded
-    # via `maxsim_path` in the per-column result.
-    late_interaction {
-      enabled = true
-      enabled = ${?ATELIER_CLASSIFY_COSINE_LATE_INTERACTION}
+  maxsim {
+    # Default ON.  When enabled and the path cannot run (no enriched
+    # collection registered, Qdrant unreachable, qdrant-client
+    # missing) the bridge raises MaxSimUnavailable and the run fails
+    # fast in the FSM — no silent fallback to single-vector cosine.
+    enabled = true
+    enabled = ${?ATELIER_CLASSIFY_MAXSIM_ENABLED}
 
-      model = "colbert-ir/colbertv2.0"
-      model = ${?ATELIER_COLBERT_MODEL}
+    # ColBERT model for token-level late-interaction embeddings.  Both
+    # entity and annotation sides use the same model; Qdrant's native
+    # MaxSim handles the token-level cross-alignment.
+    model = "colbert-ir/colbertv2.0"
+    model = ${?ATELIER_COLBERT_MODEL}
 
-      qdrant_url = "http://127.0.0.1:6333"
-      qdrant_url = ${?ATELIER_QDRANT_URL}
-    }
+    # Top-K union focal element — "the answer is in this candidate
+    # set" focal shape matching the channel's actual signal (top-1
+    # ~60%, top-3 ~76% on the 5ef4868c reference).  K=0 keeps the
+    # per-tag mass path; K=3 is structurally optimal (wider K dilutes
+    # the focal).  See `mass_functions._maxsim_union_focal_mass`.
+    union_focal_k = 3
+    union_focal_k = ${?ATELIER_MAXSIM_UNION_FOCAL_K}
+    union_focal_alpha = 0.45
+    union_focal_alpha = ${?ATELIER_MAXSIM_UNION_FOCAL_ALPHA}
+  }
+
+  discounts {
+    maxsim = 0.20               # Shafer §11.3 reliability discount
+    # …
   }
 }
 ```
 
-Existing `classify.cosine.*` keys are unchanged; the late-interaction
-path is the production cosine source under this design.  The flag
-exists for emergency rollback only — leaving the pipeline in legacy
-single-vector cosine is a deployment-degraded state, not a normal
-operating mode, and runs in that state are tagged with
-`maxsim_path: "legacy_degraded:<reason>"` in the per-column result
-so the degradation is visible in operator-facing artifacts.
+**`qdrant_url` is not a primary config key.** The Qdrant endpoint is
+resolved from the active `taxonomy_registry` row (set at enrichment
+time — see the [PGlite tables](#pglite-tables-p12-migration) above).
+`classify.maxsim.qdrant_url` (env `ATELIER_QDRANT_URL`) exists only as
+the fallback used when the registry row's `qdrant_url` is null.
+
+> **Rejected legacy keys.** `classify.cosine.late_interaction.*` and
+> `classify.discounts.cosine` are in `_LEGACY_MAXSIM_KEYS` and are
+> **loudly rejected** by the config loader (`config.py`) — they do not
+> configure this channel and must never be documented as live.  The
+> single-vector `cosine` channel they once named is retired.
+
+### Fail-fast contract (no silent fallback)
+
+When `classify.maxsim.enabled = true`, late-interaction is the **only**
+supported path for this evidence source.  Per the
+no-silent-DST-degradation rule, the legacy single-vector cosine
+fallback was **removed** (`pipeline.py`, with an explicit "Do NOT
+reintroduce" comment) — silently mixing a non-equivalent signal into
+DST fusion historically destroyed accuracy (measured **−13.6pp**)
+without the operator knowing.
+
+- **Enabled but cannot run** (no enriched collection registered,
+  Qdrant unreachable, qdrant-client missing, scoring error) →
+  `maxsim_bridge` raises `MaxSimUnavailable` → the pipeline re-raises
+  and the **FSM advances to ERROR**.  There is no WARNING-and-degrade
+  state and no single-vector fallback.
+- **Explicitly disabled** (`enabled = false`) → the bridge returns no
+  mass; the maxsim source is simply absent from fusion — by operator
+  choice, not silent degradation.
+
+Each per-column result records a `maxsim_path` field, one of:
+
+| `maxsim_path`      | Meaning                                                       |
+|--------------------|---------------------------------------------------------------|
+| `late_interaction` | ColBERT MaxSim ran cleanly; mass contributed to fusion.       |
+| `explicit_disable` | Operator set `enabled = false`; source absent by choice.      |
+| `unused`           | The maxsim branch was not exercised for this column.          |
+
+(There is **no** `legacy_degraded` value — the failure path raises
+rather than degrading.)
 
 ## Deferred work
 
@@ -621,9 +687,6 @@ so the degradation is visible in operator-facing artifacts.
   <https://qdrant.tech/course/multi-vector-search/module-1/late-interaction-basics/>
 - Shafer, G. (1976).  *A Mathematical Theory of Evidence.*  §11.3
   reliability discount.  (Reused per the existing DST treatment.)
-- Smets, P. (1990).  The Combination of Evidence in the Transferable
-  Belief Model.  *IEEE TPAMI* 12(5), 447–458.  Negative-channel
-  framing.
 - Haenni, R. & Hartmann, S. (2006).  Modeling Partially Reliable
   Information Sources.  *Information Fusion* 7(4), 361–379.  α-bounded
   reliability shaping reused here.

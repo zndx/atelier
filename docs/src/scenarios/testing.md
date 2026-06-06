@@ -20,21 +20,19 @@ Additional tags:
 
 Tier 0 runs everywhere: laptops, CI, CAI sessions. No services, no network calls. This is where the [runtime profile](./runtime-profile.md) lives — the scenarios that catch deployment failures before you push.
 
-Tier 1 requires `devenv up` to be running (PostgreSQL on :5533, Qdrant on :6334). These verify that services are healthy and that the application can actually connect to its data stores.
+Tier 1 requires `devenv up` to be running (PostgreSQL on :5533, Qdrant on :6333 — the HTTP health port; 6334 is gRPC). These verify that services are healthy and that the application can actually connect to its data stores.
 
 Tier CAI exists as executable documentation. The step definitions are stubs — they express *what should happen* in a live CAI session without automating it. When debugging a deployment failure, these scenarios are a checklist.
 
 ## Running Tests
 
 ```bash
-# Full BDD suite including gateway checks (preferred)
+# Canonical BDD entry point — tier-0 + tier-1, excludes @slow
+# (auto-starts devenv if the stack isn't up)
 just behave
 
-# Tier-0 only (no services needed)
-just bdd
-
-# Tier-0 + tier-1 (requires devenv up)
-just bdd-full
+# Adds @slow scenarios (pipeline convergence, ML training)
+just behave-slow
 
 # Runtime profile specifically
 just bdd-runtime
@@ -54,78 +52,23 @@ just behave --no-capture
 
 ## Feature Organization
 
+Features live under `features/`, split into four domains — `infra/`,
+`deployment/`, `gateway/`, and `agent/` — each with a `step_defs/`
+directory beside its `.feature` files. `features/environment.py` holds
+tier filtering, stack-health, and cleanup hooks; `features/steps/__init__.py`
+is behave's single discovery point (see [Step Discovery](#step-discovery)).
+
+The exact inventory drifts as scenarios are added, so it is **generated**
+rather than hand-maintained here. To list the current feature files:
+
+```bash
+find features -name "*.feature" | sort
 ```
-features/
-├── environment.py                          # Tier filtering, stack health, cleanup hooks
-├── steps/__init__.py                       # Central re-exports (behave's discovery point)
-├── infra/                                  # Domain: infrastructure & services
-│   ├── step_defs/
-│   │   ├── helpers.py
-│   │   ├── config_steps.py
-│   │   ├── health_steps.py
-│   │   └── preflight_steps.py
-│   ├── config_lifecycle.feature            # 3 scenarios
-│   ├── health_postgres.feature             # 2 scenarios
-│   ├── health_qdrant.feature               # 1 scenario
-│   ├── health_pglite.feature               # 2 scenarios
-│   └── preflight.feature                   # 3 scenarios
-├── deployment/                             # Domain: CAI deployment workflows
-│   ├── step_defs/
-│   │   ├── helpers.py
-│   │   ├── runtime_steps.py
-│   │   ├── amp_steps.py
-│   │   └── naming_steps.py
-│   ├── runtime_profile.feature             # 6 scenarios
-│   ├── amp_lifecycle.feature               # 5 scenarios
-│   ├── application.feature                 # 3 scenarios
-│   ├── studio.feature                      # 2 scenarios
-│   ├── embeddings.feature                  # 4 scenarios
-│   └── naming_audit.feature                # 2 scenarios
-├── gateway/                                # Domain: HTTP/gRPC gateway
-│   ├── step_defs/
-│   │   ├── status_steps.py
-│   │   ├── http_steps.py
-│   │   ├── endpoint_steps.py
-│   │   ├── pipeline_steps.py
-│   │   └── testclient_steps.py
-│   ├── api_endpoints.feature               # 8 scenarios
-│   ├── api_testclient.feature              # 7 scenarios
-│   ├── status_endpoint.feature             # 4 scenarios
-│   ├── pipeline_integration.feature        # 2 scenarios
-│   └── spa_routes.feature                  # placeholder
-└── agent/                                  # Domain: classification & agents
-    ├── step_defs/
-    │   ├── agent_steps.py
-    │   ├── classification_steps.py
-    │   ├── bootstrap_steps.py
-    │   ├── backend_steps.py
-    │   ├── synth_steps.py
-    │   ├── ml_steps.py
-    │   ├── ml_e2e_steps.py
-    │   ├── sage_steps.py
-    │   ├── shap_steps.py
-    │   ├── real_data_steps.py
-    │   ├── belief_path_steps.py
-    │   ├── synth_framework_steps.py
-    │   ├── meta_tagging_steps.py
-    │   ├── experimentation_steps.py
-    │   ├── agent_loop_steps.py
-    │   └── monte_carlo_steps.py
-    ├── classification.feature              # 19 scenarios (DST, pipeline, MC sampling)
-    ├── bootstrap.feature                   # 10 scenarios
-    ├── agent_loop.feature                  # 6 scenarios
-    ├── agent_smoke.feature                 # 6 scenarios
-    ├── backend.feature                     # 8 scenarios
-    ├── ml_classifiers.feature              # 4 scenarios
-    ├── ml_e2e.feature                      # 2 scenarios
-    ├── synth.feature                       # 2 scenarios
-    ├── synth_framework.feature             # 2 scenarios
-    ├── sage.feature                        # 1 scenario
-    ├── shap.feature                        # 2 scenarios
-    ├── belief_path.feature                 # 3 scenarios
-    ├── meta_tagging.feature                # 2 scenarios
-    ├── experimentation.feature             # 3 scenarios
-    └── real_data.feature                   # 3 scenarios
+
+For per-feature scenario counts:
+
+```bash
+grep -rcE '^\s*Scenario( Outline)?:' features --include="*.feature"
 ```
 
 ### Step Discovery

@@ -126,7 +126,7 @@ while they were away.
   "config": {
     "has_anthropic": true,
     "has_bedrock": false,
-    "agent_model": "claude-sonnet-4-5-20250929",
+    "agent_model": "claude-opus-4-7",
     "db_url": "postgresql://...(masked)"
   },
   "overall_status": "connected"

@@ -50,14 +50,19 @@ vs ~10 hours on CPU.
 ### CatBoost Training
 
 CatBoost automatically uses GPU when available via its `task_type`
-parameter. The virtual ensemble posterior sampling that drives uncertainty
-quantification benefits from GPU parallelism.
+parameter. One caveat: CatBoost's GPU backend does **not** support
+`posterior_sampling`, so the virtual-ensemble uncertainty quantification
+that signal drives is unavailable on GPU. When that uncertainty signal is
+required, the trainer falls back to CPU; otherwise GPU is used for the
+gradient-boosting fit.
 
 ### Preflight Reporting
 
-GPU status appears in `just preflight` output and in the `/api/status`
+GPU status appears in `just preflight` output and in the `/api/acceleration`
 gateway endpoint, giving operators immediate visibility into whether
 GPU acceleration is active.
+
+See [`gpu-acceleration.md`](gpu-acceleration.md) for full GPU design notes.
 
 ## Configuration
 

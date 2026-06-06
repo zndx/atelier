@@ -85,7 +85,7 @@ cancel" means.
 | `propose` | false | Record only. The supervisor reads the record post-run. |
 | `autonomous` | true | Flip `state.cancelled` so the pipeline exits. |
 
-The gateway's default callback ([`gateway.py:2154`](https://github.com/zndx/atelier/blob/trunk/src/atelier/gateway.py))
+The gateway's default callback ([`gateway.py:2738`](https://github.com/zndx/atelier/blob/trunk/src/atelier/gateway.py))
 always returns `{"decision": "cancelled"}` — so the autonomy gate is
 the *only* thing keeping `propose` / `monitor` runs from auto-cancelling.
 

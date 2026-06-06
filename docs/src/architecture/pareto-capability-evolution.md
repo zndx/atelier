@@ -51,7 +51,7 @@ Atelier pipeline:
 | Labeled pool (T_K) | Synth corpus + curated reference + accumulated LLM labels |
 | Unlabeled pool (T_U) | Discovered source columns awaiting classification |
 | Query strategy | Belief-gap-driven revisit selection (largest `Pl − Bel`) |
-| Query-by-committee | Disagreement between CatBoost-fit-to-LLM and the synth-trained SVM (via the ICE→user alignment) |
+| Query-by-committee | Disagreement between CatBoost-fit-to-LLM and the synth-trained NHSVM (native user codes) |
 | Pool vs. stream | Pool-based — Monte Carlo stratification picks each batch |
 | Stopping criterion | `mean_gap < gap_threshold` OR `max_iterations` reached |
 | Cold-start mitigation | Synth pre-training + pattern evidence on first sweep |
@@ -60,10 +60,12 @@ The active-learning incorporation of new oracle labels is
 concentrated in the ``catboost`` source (``fit_to_llm`` mode trains
 on the live LLM labels mid-run).  The SVM was previously also part
 of this active-learning loop via the M9 ``frontier_svm`` retrain,
-but that path was excised on 2026-05-04 (commits 8627c2c, 5199379,
-cc59d01) for the independence reasons documented in
-``ontology_alignment.py``.  The SVM now contributes a label-stable
-TF-IDF view that complements the live-LLM-aligned CatBoost view.
+but that path was excised on 2026-05-04 for the independence reasons
+documented in ``ontology_alignment.py``.  The SVM now contributes a
+label-stable, synth-trained NHSVM view (ModernBERT mean-pool →
+factorized fully-hierarchical NHSVM, emitting user codes natively)
+that complements the live-LLM-aligned CatBoost view.  (The legacy
+TF-IDF LinearSVC path survives only as a degraded baseline fallback.)
 
 ### Automatic Prompt Optimization — APO and GEPA
 
@@ -116,8 +118,9 @@ Mutation targets the configuration tuple, not just the prompt:
 - **LLM prompts**: sweep template, revisit template, classification
   subagent system prompt.
 - **Classifier hyperparameters**: CatBoost depth, learning rate, class
-  weights; SVM C and kernel; SVM-vs-LLM blend ratio in DST mass
-  construction.
+  weights; NHSVM head regularization and calibration temperature; the
+  SVM mass discount and calibration (`classify.discounts.svm`,
+  `classify.mass_calibration.svm_alpha`) in DST mass construction.
 - **Fusion strategy**: Dempster vs. Yager; gap threshold; bel-floor;
   pignistic vs. cautious decision rule; cautious depth threshold.
 - **Search budget**: sweep batch size, max bootstrap iterations, Monte
@@ -189,7 +192,7 @@ Per generation:
    findings.
 3. **Propose edits** as a structured patch (JSON) against the
    configuration tuple — e.g. `{"classify.bootstrap.gap_threshold":
-   0.05, "classify.svm.blend_ratio": 0.6}` — or a textual prompt diff
+   0.05, "classify.discounts.svm": 0.22}` — or a textual prompt diff
    when the target is a prompt template.
 4. **Evaluate** by instantiating the patched config, running it as an
    FSM run, and recording scores into the leaderboard.
@@ -208,12 +211,12 @@ happened to find an early local optimum.
 
 - **"Frontier SVM" terminology** *and the M9 retrain it described*.
   The mid-loop ``train_svm_on_frontier_labels`` retrain that gave the
-  "frontier SVM" its name was excised on 2026-05-04 (commits 8627c2c,
-  5199379, cc59d01) for the source-independence reasons documented
-  in `ontology_alignment.py`.  The SVM is now trained once on synth
-  with ICE.* labels and translated into the user vocabulary at
-  inference time via the LLM-mediated alignment.  "Frontier" the
-  word is freed for the Pareto sense used elsewhere in this doc.
+  "frontier SVM" its name was excised on 2026-05-04 for the
+  source-independence reasons documented in `ontology_alignment.py`.
+  The SVM is now a factorized fully-hierarchical NHSVM trained once
+  offline on the synth corpus and emitting user codes natively (no
+  runtime ICE→user alignment step).  "Frontier" the word is freed for
+  the Pareto sense used elsewhere in this doc.
 - **Single-config tuning by hand**.  Today operators tweak `base.conf`
   or the runtime overlay and re-run.  The capstone replaces that loop
   with population-based search; the overlay UI surfaces *frontier

@@ -4,8 +4,7 @@ This guide is for operators auditing classification runs and proposing
 algorithm-tuning remediations.  It explains the Dempster–Shafer (DST)
 measures the canvas exposes, the rationale behind the curated SQL
 Predicate panel, and a concrete walk-through of using the canvas to
-diagnose the four root causes called out in
-[`audit_2026-05-06_a.md`](../../../audit_2026-05-06_a.md) (runs
+diagnose the four root causes called out in the 2026-05-06 audit (runs
 `40f07630`, `8d67b1ed`, `e5b0ac26`).
 
 The guide assumes you have an Embeddings page open for one of those
@@ -16,8 +15,10 @@ runs and a copy of the audit alongside.
 ## 1. The DST measures, in plain English
 
 Atelier fuses up to six independent evidence sources (name match,
-pattern, cosine, LLM, CatBoost, SVM) via Dempster's rule of
-combination.  The fused result is a **mass function** over the
+pattern, maxsim, LLM, CatBoost, SVM) via Dempster's rule of
+combination.  (The `maxsim` source is ColBERT late-interaction scored
+by Qdrant native MaxSim; it replaced the legacy single-vector cosine
+source.)  The fused result is a **mass function** over the
 taxonomy's frame of discernment.  From that mass function we report
 five scalars per column:
 
@@ -136,7 +137,7 @@ when a numeric dot-code is needed for filtering.
 
 ---
 
-## 3. Walk-through against `audit_2026-05-06_a.md`
+## 3. Walk-through against the 2026-05-06 audit
 
 The audit identifies four root causes.  Below: how to reach each one
 on the canvas, what the right brushing pattern is, and what the
@@ -181,7 +182,8 @@ discarded (the evidence layer assigns 0 confidence when the code
 fails to resolve).
 
 Cross-brush with `belief` (chart 1) — affected columns will pile up
-at low Bel because they fall back to cosine alone.
+at low Bel because they fall back to the maxsim (late-interaction)
+signal alone.
 
 **SHAP signal:** chart 9 (`shap_top1_name`) on the same brush should
 show `column_name` or `sibling_context` dominating instead of
@@ -309,7 +311,7 @@ adding high-cardinality fields (`column_name`, `evidence`,
 - [Classification Pipeline](../architecture/classification.md) — how the six evidence sources are produced.
 - [DST Evidence Independence](../architecture/dst-evidence-independence.md) — why source independence matters for the rigor of these measures.
 - [Embeddings](../architecture/embeddings.md) — the data flow that produces the parquet feeding this canvas.
-- [`audit_2026-05-06_a.md`](../../../audit_2026-05-06_a.md) — the worked example this guide is structured around.
+- The 2026-05-06 audit — the worked example this guide is structured around (an uncommitted working note; not part of the rendered book).
 
 ---
 
@@ -317,7 +319,7 @@ adding high-cardinality fields (`column_name`, `evidence`,
 
 This addendum captures observations from the static validation of the
 algo-tuning playbook against `8d67b1ed`'s parquet, and the paper-trade
-of each `audit_2026-05-06_a.md` remediation against the same run.
+of each 2026-05-06 audit remediation against the same run.
 It is intended both as honest documentation of what worked vs. what
 needed adjustment, and as the calibration baseline against which the
 post-remediation validation run will be evaluated.

@@ -89,17 +89,22 @@ Each source independently produces a **mass function**
 
 | Source | Feature Space | Cost Tier |
 |--------|--------------|-----------|
-| **Cosine similarity** | Dense 384-dim sentence-transformer embedding (all-MiniLM-L6-v2) | M0 (local) |
+| **MaxSim** | ColBERT v2 per-token multi-vectors (BERT + 768→128 projection), scored by **Qdrant native MaxSim** late-interaction over a single `colbert` multi-vector field; **fail-fast** (`MaxSimUnavailable` → FSM ERROR, no silent fallback) | M0 (local) |
 | **Pattern detection** | 16 regex detectors + post-regex validators (email, phone, SSN, IP, UUID, date, datetime, URL, credit card + Luhn, MAC, IBAN, postal code, monetary, hash, semver, currency + ISO 4217); graduated mass scaling by match fraction | M0 |
 | **Name matching** | Column name vs vocabulary labels, codes, and aliases (4-tier: exact > code > alias > overlap) | M0 |
 | **LLM classification** | Frontier model reasoning (Anthropic / Bedrock / Cerebras / OpenAI-compatible) | M1 (API) |
-| **CatBoost** | 12 discrete features + 384-dim embedding; virtual ensemble uncertainty via `posterior_sampling` | M2 (trained) |
-| **SVM** | Sparse TF-IDF: character n-grams (3–6) ∪ word bigrams; Platt-scaled LinearSVC | M2 (trained) |
+| **CatBoost** | 12 discrete features + 384-dim MiniLM embedding; virtual ensemble uncertainty via `posterior_sampling` | M2 (trained) |
+| **SVM** | ModernBERT mean-pool dense embeddings → factorized fully-hierarchical NHSVM (Choi et al. 2015): one weight vector per hierarchy node, root-to-leaf path scores, **non-leaf nodes are first-class prediction targets**; registry-promoted head trained offline on the synth corpus | M2 (trained) |
 
-The SVM and CatBoost classifiers occupy deliberately **orthogonal feature
-spaces**: the SVM operates on sparse lexical features (TF-IDF) while CatBoost
-uses dense semantic embeddings. This architectural separation ensures genuine
-evidence independence for Dempster's rule.
+Both the SVM and CatBoost classifiers now operate on **dense embeddings**
+(ModernBERT mean-pool for the NHSVM; MiniLM 384-dim for CatBoost), so the old
+"sparse lexical vs dense semantic" distinction no longer separates them.
+Genuine evidence independence for Dempster's rule is therefore not asserted from
+feature-space orthogonality — it is **enforced via per-source reliability
+discounts** (Denoeux 2008): each source's mass is discounted toward ignorance in
+proportion to its calibrated unreliability and its shared-error coupling with
+other channels. The discount calibration, not the feature space, carries the
+independence guarantee.
 
 ### Fusion
 
@@ -155,17 +160,23 @@ for source-independence reasons; see
 The **programmatic** variant uses gap + coverage thresholds for
 environments where tool-use isn't available.
 
-### SVM with Vocabulary Alignment
+### Factorized Hierarchical SVM
 
-The SVM is trained **once** on the synthetic corpus with TF-IDF
-features and labels keyed on the bundled-ontology ICE.* leaves.  At
-runtime, predictions are translated into the user's taxonomy via a
-cached LLM-mediated alignment (`atelier.classify.ontology_alignment`)
-so the SVM contributes user-taxonomy evidence even when the operator's
-vocabulary is completely disjoint from ICE.*.  The alignment is
-weakly non-distinct evidence under Denoeux 2008 — vocabulary-level
-shared error with the runtime LLM rather than per-column shared
-labels — and the discount calibration carries the residual.  See
+The SVM is a **factorized fully-hierarchical NHSVM** (Choi et al. 2015) trained
+**once**, offline, on the synthetic corpus over **ModernBERT mean-pool dense
+embeddings**.  Rather than keying labels on leaves alone, it learns **one weight
+vector per hierarchy node** (plus per-node alphas): an entity is scored along the
+**root-to-leaf path** so that **non-leaf nodes are first-class prediction
+targets**, and a calibrated softmax temperature turns path scores into a mass
+function.  The registry-promoted head **emits user-taxonomy codes natively** —
+there is no runtime LLM-mediated alignment step.
+
+The factorized form exists because dense embeddings catastrophically fail the
+*old* Kronecker NHSVM (98.9% TF-IDF vs 4.3% naïve-dense); the TF-IDF +
+LinearSVC + Platt path survives only as a **legacy/baseline** classifier
+(`per_vocab_legacy`), never as the shipped SVM.  Because the SVM is now dense
+like CatBoost, its independence is **not** claimed from feature-space
+orthogonality but from per-source reliability discounts (Denoeux 2008).  See
 [DST Evidence Independence](./architecture/dst-evidence-independence.md)
 for the full design rationale and the BM25-reranker future-work plan.
 
@@ -213,7 +224,7 @@ just up               # Start gRPC + gateway + Vite dev server
 - **[Classification Pipeline](./architecture/classification.md)** — DST methodology, evidence sources, bootstrap convergence
 - **[Monte Carlo Sampling](./architecture/monte-carlo.md)** — Stratified sampling for scale
 - **[GPU Acceleration](./architecture/gpu.md)** — CUDA detection and batch encoding
-- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, ontology-aligned SVM, CatBoost fit-to-LLM
+- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, factorized hierarchical NHSVM, CatBoost fit-to-LLM
 - **[Embeddings](./architecture/embeddings.md)** — Interactive parquet visualization
 - **[Data Sources](./architecture/data-sources.md)** — Source-aware versioning, OOTB sample, Hive auto-discovery
 - **[BDD Scenarios](./scenarios/overview.md)** — 141 scenarios across 4 domains

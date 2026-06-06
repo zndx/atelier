@@ -58,7 +58,7 @@ Each pipeline state transition writes a JSON envelope to
       "vocabulary_mode": "universal",
       "sample_size": 50,
       "llm_model": "glm-4.7",
-      "discount_cosine": 0.30
+      "discount_maxsim": 0.20
     },
     "metrics": {
       "accuracy": 0.847,

@@ -27,7 +27,7 @@ the pipeline maps onto a numerical-method primitive:
 | Conflict K | Nonlinear residual diagnostic |
 | Ontology priors | **Preconditioner** — conditions first-pass output |
 | Reliability discount on derivative sources | **Damping / step-size control** |
-| Hierarchical cosine mass | **Coarse-grid correction** (multigrid) |
+| Hierarchical maxsim mass | **Coarse-grid correction** (multigrid) |
 | `cautious_promoted_code` | **Projection onto coarse grid** at level where evidence unambiguous (Smets 1993) |
 | `needs_clarification` | Residual-exceeds-tolerance flag |
 
@@ -86,18 +86,28 @@ evidence sources:
 
 1. `name_match` — lexical column-name matching against the vocabulary.
 2. `pattern` — regex/validator detection (email, IBAN, monetary, …).
-3. `cosine` — semantic similarity between the curated embedding text
-   and the user-vocabulary embedding.
+3. `maxsim` — ColBERT v2 late-interaction similarity between the
+   curated embedding text and the user-vocabulary terms, scored by
+   Qdrant native MaxSim over per-token multi-vectors (`colbert_encoder.py`,
+   `maxsim_bridge.py`). Replaced the legacy single-vector cosine source
+   (`cosine_to_mass` removed 2026-05-25); enabled-but-unavailable
+   fail-fasts via `MaxSimUnavailable` (no silent fallback to
+   single-vector cosine).
 4. `llm` — Claude Opus first-pass classification.
 5. `catboost` — CatBoost classifier.
-6. `svm` — synth-trained TF-IDF + LinearSVC classifier with an
-   LLM-mediated ICE → user-taxonomy alignment applied at inference
-   time.
+6. `svm` — ModernBERT mean-pool dense embeddings → factorized
+   fully-hierarchical NHSVM (`classify/factorized_nhsvm.py`,
+   `atelier.registry.nhsvm_head`; default `classify.svm.source = "registered"`).
+   One weight vector per hierarchy node plus per-node alphas, path
+   score over root-to-leaf ancestors, non-leaf nodes are first-class
+   prediction targets, calibrated softmax temperature, trained offline
+   on the synth corpus, emits user codes natively (no runtime
+   alignment).
 
 The first three are genuinely independent of the LLM: their evidence
-arises from the column's name, value patterns, and semantic embedding
-comparison against the vocabulary. The remaining sources have a
-mixed independence profile:
+arises from the column's name, value patterns, and semantic comparison
+against the vocabulary. The remaining sources have a mixed
+independence profile:
 
 - **`catboost`** is trained in `fit_to_llm` mode (default true) on
   `(embedding_text, llm_code)` pairs from the current run's LLM
@@ -107,43 +117,49 @@ mixed independence profile:
   not a competing classifier. **Strongly non-distinct** with the
   LLM source under Denoeux 2008 (per-column shared label
   provenance).
-- **`svm`** is trained once on the synthetic corpus
-  (`scripts/generate_synth_source.py` → `ml_train.train_svm`),
-  with TF-IDF char-3-6gram + word-1-2gram features and labels keyed
-  on the bundled-ontology ICE.* leaves from
-  `synth_generators.GENERATORS`. At pipeline runtime, predictions
-  are translated into the user taxonomy via subsumption-prediction
-  alignment in `classify.subsumption_alignment` — sentence-transformer
-  cosine similarity between ICE concept signatures and enriched
-  annotation payloads from the Qdrant taxonomy collection (one
-  alignment computation per (vocab, embedding_model) tuple, results
-  cached on disk). **Weakly non-distinct** with the cosine source
-  via shared enrichment-LLM upstream — the enriched annotations were
-  generated offline by an LLM, but the alignment computation itself
-  uses a structurally independent model (BERT embeddings), not the
-  runtime autoregressive LLM. The prior LLM-mediated approach (one
-  LLM `classify_batch` call per alignment, excised in the P7
-  subsumption-alignment intervention) was weakly non-distinct with
-  the runtime LLM through shared model weights — the new approach
-  eliminates that correlation.
-  See the `ontology_alignment.py` module docstring for the full
-  independence argument.
+- **`svm`** is trained once, offline, on the synthetic corpus:
+  ModernBERT mean-pool dense embeddings feed a factorized
+  fully-hierarchical NHSVM (Choi et al. 2015;
+  `classify/factorized_nhsvm.py`, `atelier.registry.nhsvm_head`;
+  default `classify.svm.source = "registered"`). One weight vector
+  per hierarchy node plus per-node
+  alphas; the path score sums over root-to-leaf ancestors, so non-leaf
+  nodes are first-class prediction targets; a calibrated softmax
+  temperature yields the mass. The registered head **emits user codes
+  natively** — no runtime ICE → user-taxonomy alignment step, and no
+  per-(vocab, embedding_model) alignment computation. **Weakly
+  non-distinct** with the LLM: training labels come from the
+  synthetic corpus (publicly-grounded ICE.* leaves from
+  `synth_generators.GENERATORS`), structurally independent of the
+  runtime autoregressive LLM; the only residual coupling is the
+  offline enrichment-LLM that generated the taxonomy annotation
+  payloads the head was promoted against. (The legacy TF-IDF
+  char-3-6gram + word-1-2gram + LinearSVC/Platt path in
+  `svm_classifier.py`, `per_vocab_legacy`, survives only as a
+  baseline — dense embeddings catastrophically fail the *old*
+  Kronecker NHSVM, 98.9% TF-IDF vs 4.3% naïve-dense, which is *why*
+  the factorized form exists. An earlier LLM-mediated alignment, one
+  LLM `classify_batch` call per alignment, was excised in the P7
+  subsumption-alignment intervention; the registered head removes
+  the runtime-LLM coupling entirely.)
 
 Treating LLM and CatBoost(LLM) as fully-independent sources and
 combining them via Dempster's rule double-counts the LLM atom; the
 SVM evidence sits between fully independent and fully derivative.
 The pre-2026-04-30 discount schedule made the legacy three-way
-overlap worse: `llm=0.10`, `catboost=0.10`, `svm=0.20`, vs
-`cosine=0.30`. The genuinely independent semantic source was
-*more* discounted than the two derivative ones, mathematically
-suppressing it whenever the LLM was loud.
+overlap worse: `llm=0.10`, `catboost=0.10`, `svm=0.20`, vs the
+then-`cosine` semantic source at `0.30`. The genuinely independent
+semantic source was *more* discounted than the two derivative ones,
+mathematically suppressing it whenever the LLM was loud. (That
+single-vector cosine source has since been replaced by the `maxsim`
+late-interaction channel; the calibration lesson stands.)
 
 A failure case observed during pipeline validation illustrated the
 pathology in the abstract. A column whose values match the
 ``monetary_pattern`` regex was classified as a generic catch-all
-code rather than a financial-domain code. Cosine top-1 distributed
-mass across several financial-leaning codes in the active
-vocabulary, but at softmax-spread mass on the order of a few
+code rather than a financial-domain code. The semantic source's
+top-1 distributed mass across several financial-leaning codes in the
+active vocabulary, but at softmax-spread mass on the order of a few
 thousandths per code it could not overcome LLM mass (≈ 0.83) and
 CatBoost mass (≈ 0.81), both concentrated on the catch-all. The
 fused prediction matched the LLM; the disagreement gate at
@@ -171,30 +187,31 @@ derivative source *with respect to the original* is bounded above by
 LLM output that overlap is near-total, so a substantial discount is
 the principled response under classical Dempster fusion.
 
-The current defaults (`config/base.conf:341+`) place CatBoost and
-SVM **above** the cosine discount:
+The current defaults (`config/base.conf:603+`) place CatBoost and
+SVM **above** the maxsim discount:
 
 | Source       | Discount | Rationale                                                                            |
 |--------------|----------|--------------------------------------------------------------------------------------|
-| `cosine`     | 0.20     | independent of LLM; semantic prior                                                   |
+| `maxsim`     | 0.20     | independent of LLM; semantic prior                                                   |
 | `pattern`    | 0.25     | independent; deterministic regex evidence                                            |
 | `name_match` | 0.30–0.70 | independent; lexical match against vocab                                            |
 | `llm`        | 0.15     | original; first-pass label                                                           |
 | `catboost`   | **0.55** | **strongly non-distinct** (`fit_to_llm`, per-column LLM labels)                      |
-| `svm`        | **0.22** | **weakly non-distinct** (enrichment-mediated subsumption alignment; was 0.30 under LLM-mediated, 0.55 under M9) |
+| `svm`        | **0.22** | **weakly non-distinct** (offline synth-trained registered NHSVM; was 0.30 under LLM-mediated alignment, 0.55 under M9) |
 | `catboost_max` | 0.75   | variance ceiling; maintains headroom                                                 |
 
 Operators can dial these via the Settings page when retraining
 CatBoost on labels independent of the current LLM sweep (e.g.
 synth-only training); the metadata in `config_overlay.SETTINGS_METADATA`
 exposes the full range.  The SVM discount at 0.22 (slightly above
-cosine's 0.20) reflects the subsumption-prediction alignment:
-structurally independent of the runtime LLM (uses BERT embeddings,
-not autoregressive inference), with weak non-distinctness only via
-the shared enrichment-LLM upstream (same structural dependency the
-late-interaction cosine source carries).  The 0.02 margin above
-cosine accounts for subsumption prediction being a single per-ICE-code
-decision (structurally more brittle than per-column cosine evidence).
+maxsim's 0.20) reflects the registered NHSVM's profile:
+structurally independent of the runtime LLM (ModernBERT dense
+embeddings, not autoregressive inference), with weak non-distinctness
+only via the shared offline enrichment-LLM upstream (the same
+structural dependency the `maxsim` late-interaction source carries).
+The 0.02 margin above maxsim accounts for the NHSVM emitting a single
+per-node path decision (structurally more brittle than per-column
+maxsim evidence).
 
 ### 2. Independent-tier consensus + revisit gate
 
@@ -202,7 +219,7 @@ For revisit decisions, the pipeline computes a parallel, isolated
 fusion over the LLM-independent subset only:
 
 ```
-m_indep = m_cosine ⊕ m_pattern ⊕ m_name_match    (Dempster's rule)
+m_indep = m_maxsim ⊕ m_pattern ⊕ m_name_match    (Dempster's rule)
 indep_top1 = argmax_singleton m_indep
 ```
 
@@ -238,7 +255,7 @@ a single lookup (`mass_functions.lookup_pattern_ontology`):
 
 1. **Embedding text** (`features.ColumnFeatures.to_embedding_text` —
    `ontology_priors` is a discrete `FEATURE_NAMES` entry, ablatable
-   for SAGE). Cosine similarity then operates over publicly-grounded
+   for SAGE). MaxSim late-interaction then operates over publicly-grounded
    ontology terms an embedding model recognizes from training rather
    than the regex name alone. On the failure case that motivated this
    work, the column embedding gains the literal substring "Transaction
@@ -279,32 +296,33 @@ Architectural significance: this is the substrate→tagging bridge
 the design has been pointing at. Pattern detection was always
 publicly-grounded; the resolver turns ICE.* into the user's codes
 when it can; when it can't, ontology priors carry the public
-semantic anchor straight through to cosine + LLM + SHAP without
+semantic anchor straight through to maxsim + LLM + SHAP without
 ever fabricating a code in the user's frame. Compatible with — and
 strengthens — the indep-tier consensus + reliability-discount
 mechanisms above.
 
-## Cosine reliability shaping (Haenni-Hartmann 2006)
+## MaxSim reliability shaping (Haenni-Hartmann 2006)
 
-Static `discount=0.30` allocated 0.70 of cosine mass uniformly via
-softmax across all candidate singletons. On large vocabularies (300+
-leaves) this produced softmax compression — even a sharp top-1 hit
-landed at ~0.004 mass per code. Cosine could see the right answer
-but couldn't carry it through fusion, and the indep-tier consensus
-sat permanently below the revisit threshold.
+Static `discount=0.30` allocated 0.70 of the semantic source's mass
+uniformly via softmax across all candidate singletons. On large
+vocabularies (300+ leaves) this produced softmax compression — even a
+sharp top-1 hit landed at ~0.004 mass per code. The semantic source
+could see the right answer but couldn't carry it through fusion, and
+the indep-tier consensus sat permanently below the revisit threshold.
 
-`mass_functions.cosine_to_mass` now applies dynamic source
-reliability per Haenni & Hartmann 2006, *Modeling Partially
-Reliable Information Sources: A General Approach Based on
-Dempster-Shafer Theory* (Information Fusion 7(4), 361–379, §3):
-the source-reliability factor α is an observable function of
-quality indicators, with `(1 − α)` allocated to ignorance.
+`mass_functions.maxsim_to_mass` (with the per-candidate split in
+`_maxsim_positive_mass`) now applies dynamic source reliability per
+Haenni & Hartmann 2006, *Modeling Partially Reliable Information
+Sources: A General Approach Based on Dempster-Shafer Theory*
+(Information Fusion 7(4), 361–379, §3): the source-reliability factor
+α is an observable function of quality indicators, with `(1 − α)`
+allocated to ignorance.
 
 Two quality indicators:
 
-* **α_abs** — sigmoid of top-1 absolute similarity around `τ_abs =
-  0.40` with `σ_abs = 0.10`. Encodes "is cosine matching anything
-  strongly, or just noise?"
+* **α_abs** — sigmoid of the top-1 absolute MaxSim score around
+  `τ_abs = 0.40` with `σ_abs = 0.10`. Encodes "is maxsim matching
+  anything strongly, or just noise?"
 * **α_marg** — `tanh((s₁ − s₂) / σ_marg)` with `σ_marg = 0.05`.
   Encodes "is the top-1 a decisive winner, or ambiguous among
   similar candidates?"
@@ -312,7 +330,7 @@ Two quality indicators:
 Weighted blend (`w_abs = 0.6, w_marg = 0.4`), clamped to
 `[reliability_floor, reliability_ceiling] = [0.10, 1 −
 classify_discount_maxsim]`. The ceiling preserves the legacy
-maximum-mass behavior under sharp signal; the floor keeps cosine
+maximum-mass behavior under sharp signal; the floor keeps maxsim
 contributing some mass even under noise.
 
 The α-bounded evidence mass is then split via **margin-aware
@@ -331,8 +349,10 @@ the formula reduces to classical softmax allocation across the
 full candidate set.
 
 Behavior across regimes (BDD-locked in
-`features/agent/evidence_independence.feature`, "Cosine reliability
-shaping concentrates mass on a clear top-1"):
+`features/agent/evidence_independence.feature`, the scenario
+"Cosine reliability shaping concentrates mass on a clear top-1" —
+the scenario title retains the legacy `cosine` wording; the channel
+it exercises is now `maxsim`):
 
 | Top-1 sim | Top-2 sim | α | margin_weight | Top-1 mass | Θ mass |
 |---:|---:|---:|---:|---:|---:|
@@ -345,11 +365,11 @@ Sharp signal recovers the legacy ceiling allocation but
 concentrates it on top-1 (~170× the prior compressed mass).
 Ambiguous and noise regimes correctly route most mass to Θ rather
 than fabricating false confidence. The indep-tier revisit gate
-(threshold 0.45) is now reachable on cosine alone whenever cosine
+(threshold 0.45) is now reachable on maxsim alone whenever maxsim
 has clear semantic signal.
 
 Composes cleanly with the indep-tier consensus computation: when
-cosine carries decisive mass on a code different from the LLM's
+maxsim carries decisive mass on a code different from the LLM's
 vote, that code becomes the indep-tier top-1 and the revisit gate
 fires — which is the soundness invariant the whole evidence-
 independence treatment is reaching for.
@@ -357,16 +377,16 @@ independence treatment is reaching for.
 ## Hierarchical mass aggregation + cross-subtree visibility
 
 A separate structural gap surfaced after reliability shaping
-landed: when cosine evidence localizes to a *subtree* (multiple
+landed: when maxsim evidence localizes to a *subtree* (multiple
 financial-leaning leaves under a common parent) but the LLM picks
 a confident leaf in a *different* subtree, the predicted code falls
 to the LLM's leaf and there is no surfaced signal that an
 honest-but-coarser parent would apply. Three cooperating fixes
 close that gap:
 
-### 1. Cosine emits hierarchical mass
+### 1. MaxSim emits hierarchical mass
 
-`mass_functions.cosine_to_mass` now walks up from the cosine top-1
+`mass_functions.maxsim_to_mass` now walks up from the maxsim top-1
 leaf, finds the most-specific internal node whose descendants
 capture ≥ 50% of the softmax probability mass
 (``_significant_subtree``), and redirects the in-subtree residual
@@ -400,7 +420,7 @@ returns those with ``Bel ≥ threshold``. The most-specific code
 wins, regardless of subtree.
 
 Concretely: when the LLM votes ``0.1 Internal Non-Sensitive`` but
-cosine's hierarchical aggregation puts ``Bel(Financial Data) =
+maxsim's hierarchical aggregation puts ``Bel(Financial Data) =
 0.55`` on a different subtree's parent, ``cautious_code(0.5)`` can
 now return ``Financial Data`` — not just ``0`` (the predicted
 code's parent).
@@ -410,15 +430,15 @@ code's parent).
 The result dict now carries a ``cross_subtree_belief`` field
 listing every code (leaf or internal node, any subtree) where
 ``Bel ≥ 0.5``. Operators see both the LLM's leaf vote AND the
-cosine-derived alternative subtree as legitimate signals,
+maxsim-derived alternative subtree as legitimate signals,
 instead of the predicted-leaf-only ``belief_path``. When evidence
 sources disagree on the *subtree*, both candidates appear and the
 operator can act on the disagreement directly.
 
 This composes cleanly with the prior mechanisms: reliability
-shaping ensures cosine top-1 carries enough mass to trigger
+shaping ensures maxsim top-1 carries enough mass to trigger
 hierarchical aggregation when signal is clear; the indep-tier
-gate fires when cosine's hierarchical mass disagrees with LLM at
+gate fires when maxsim's hierarchical mass disagrees with LLM at
 the leaf level; and ``cross_subtree_belief`` makes the cross-
 subtree disagreement explicit in the operator-facing result. The
 ``predicted_code`` field retains its leaf-argmax semantics for
@@ -436,10 +456,10 @@ changes close that gap:
 ### Evidence string carries per-source codes + competing summary
 
 `HierarchicalClassification.from_combined_evidence` builds the
-``evidence`` field. Previously: ``dst(cosine=0.65, llm=0.77,
+``evidence`` field. Previously: ``dst(maxsim=0.65, llm=0.77,
 catboost=0.42, svm=0.22) → Internal Non-Sensitive [Bel=0.71,
 ...]`` — masses only, not the codes each source voted. Now:
-``dst(cosine→1.4.1.1.1(0.65), llm→0.1(0.77), ...) → Internal
+``dst(maxsim→1.4.1.1.1(0.65), llm→0.1(0.77), ...) → Internal
 Non-Sensitive [Bel=0.67, ...] [competing: Sensitive (1)
 Bel=0.26]`` — leaf-level disagreement is visible at a glance,
 and a "competing" trailer surfaces non-trivial belief in any
@@ -620,7 +640,7 @@ the per-vocab summary).
 
 This composes cleanly with everything below it: reliability
 discounts on derivative sources still suppress double-counting,
-cosine reliability shaping still concentrates mass on clear
+maxsim reliability shaping still concentrates mass on clear
 top-1 hits, hierarchical aggregation still flows residual mass
 to internal-node focal elements, the indep-tier consensus gate
 still triggers revisits on cross-source disagreement, and
@@ -671,7 +691,7 @@ reliability shaping. One future refinement remains scoped out:
 - **Tiered fusion with the cautious rule (Denoeux 2008).** Combine
   the LLM-derivative cluster `{llm, catboost, svm}` via cautious
   conjunction (idempotent on identical evidence; commonality
-  formulation `q1 ∧̂ q2`), the independent cluster `{cosine, pattern,
+  formulation `q1 ∧̂ q2`), the independent cluster `{maxsim, pattern,
   name_match}` via Dempster, and combine the two cluster-level mass
   functions across-tier. This dissolves the non-distinctness problem
   at the math level rather than approximating it via discount.

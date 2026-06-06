@@ -69,8 +69,9 @@ hierarchy *as a graph*, not on ICE-specific anchors:
 
 - **Parent-aware DST frame** (`mass_functions.py`) — votes at any node;
   fold-up uses `HierarchicalCategorySet.descendants(code)`.
-- **Hierarchical cosine mass** (Shafer §3) — distributes embedding
-  similarity through the graph regardless of root identity.
+- **Hierarchical maxsim mass** (Shafer §3, `maxsim_to_mass`) —
+  distributes ColBERT late-interaction similarity through the graph
+  regardless of root identity.
 - **Cross-subtree cautious_code** (Smets §6) — least-commitment
   promotion finds the deepest common ancestor on whatever tree is
   loaded.
@@ -116,12 +117,12 @@ common synonyms.
 ### 2. Hierarchy-shape resilience
 
 Today's calibration assumes our 5-level ICE depth.  Discount defaults
-(cosine `0.20`, llm `0.15`, SVM `0.55`), gap_threshold `0.15`, and
-cautious_review bel_threshold `0.85` are all tuned against that.  A
-customer's flat 50-class taxonomy doesn't need cautious-code review
-(no parents to back off to), and an 8-deep regulatory taxonomy
-demands tighter cautious thresholds (more depth × more places to be
-wrong).
+(maxsim `0.20`, llm `0.15`, SVM `0.22`), gap_threshold `0.18`, and
+cautious_review bel_threshold `0.0` (cautious review is off by default)
+are all tuned against that.  A customer's flat 50-class taxonomy doesn't
+need cautious-code review (no parents to back off to), and an 8-deep
+regulatory taxonomy demands tighter cautious thresholds (more depth ×
+more places to be wrong).
 
 **Fix**: depth-aware defaults.  Compute hierarchy statistics at
 LOADING_VOCAB time (max depth, mean branching factor, leaf/internal
@@ -134,9 +135,11 @@ got.
 Single-root tree is assumed in `descendants` / `ancestors` traversal.
 Customer dumps can have multiple top-level concepts (a forest), or —
 rarely but consequentially — a cycle introduced by data entry error.
-Today: cycles cause infinite recursion in `descendants`; multiple
-roots silently work *because* the traversal is parent-anchored, but
-pre-classification tooling (Atlas export, vocabulary stats UI) breaks.
+Today: cycles cause an unbounded loop in `descendants` (the traversal
+uses an iterative stack with no visited-set, so a cyclic edge re-enqueues
+its children forever); multiple roots silently work *because* the
+traversal is parent-anchored, but pre-classification tooling (Atlas
+export, vocabulary stats UI) breaks.
 
 **Fix**: explicit multi-root support in
 `HierarchicalCategorySet`.  Cycle detection + clear error in
