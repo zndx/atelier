@@ -1,0 +1,22 @@
+# Keep the build context lean — everything heavy or generated is rebuilt
+# inside the image or provided by mounted volumes.
+.git
+**/node_modules
+.venv
+build/
+.app/
+**/__pycache__
+**/*.pyc
+ui/dist
+ui-next/dist
+ui/public/ghostty
+ui-next/public/ghostty
+docs/book
+*.log
+.DS_Store
+.env
+.env.cai
+docker/.env
+# The embedding-atlas fork's working tree is empty (submodule); the
+# committed tarball under external/ is what the UI build consumes.
+external/embedding-atlas

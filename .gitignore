@@ -225,6 +225,7 @@ devenv.local.yaml
 
 # Atelier — override global ignores for UI source
 !ui/src/lib/
+!ui-next/src/lib/
 
 # Atelier — runtime / build artifacts
 .app/
@@ -233,6 +234,9 @@ qdrant/
 ui/dist/
 ui/public/ghostty/
 ui/node_modules/
+ui-next/dist/
+ui-next/public/ghostty/
+ui-next/node_modules/
 scripts/node_modules/
 docs/book/
 docs/src/d2/
