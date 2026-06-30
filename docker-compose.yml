@@ -1,0 +1,70 @@
+# Atelier test stack — Postgres (pgvector) + Qdrant + the app
+# (gRPC core + FastAPI gateway serving the ui-next frontend).
+#
+#   docker compose up --build         # build + run the full stack
+#   open http://localhost:8090        # the new UI, served by the gateway
+#
+# LLM/agent features (starting a run, the agent terminal) need an API key:
+# copy docker/.env.example to docker/.env and fill it in.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: atelier
+    ports:
+      - "5532:5432" # host:container — host 5532 avoids clashing with local PG
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d atelier"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    env_file:
+      - path: docker/.env
+        required: false
+    environment:
+      # Setting ATELIER_DB_URL makes the app use this external Postgres and
+      # skip its bundled PGlite. gssencmode/sslmode disabled for plain TCP.
+      ATELIER_DB_URL: "postgresql+psycopg://postgres:postgres@postgres:5432/atelier?sslmode=disable&gssencmode=disable"
+      # gRPC servicer + gateway share this container; pin to loopback so the
+      # client connects where the server binds.
+      ATELIER_GRPC_HOST: "127.0.0.1"
+      # Qdrant lives in its own container on the compose network.
+      QDRANT_HOST: "qdrant"
+      QDRANT_PORT: "6333"
+      QDRANT_GRPC_PORT: "6334"
+      ATELIER_QDRANT_URL: "http://qdrant:6333"
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+volumes:
+  pgdata:
+  qdrant_storage:
