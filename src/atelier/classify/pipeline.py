@@ -3394,12 +3394,19 @@ def _write_register_error(
 def _write_parquet(
     classifications: list[dict],
     output_path: Path,
+    *,
+    precomputed_xy: tuple[list[float], list[float]] | None = None,
 ) -> Path | None:
     """Write classifications to parquet for embedding-atlas.
 
     Produces atlas-compatible columns: text, x, y (plus classification metadata).
     Uses UMAP on sentence-transformer embeddings when available, otherwise falls
     back to a deterministic PCA-like projection from DST numeric features.
+
+    ``precomputed_xy`` supplies the (x, y) coordinates directly, bypassing the
+    embedding/UMAP step.  Used by the structural-baseline builder (golden runs
+    have uniform belief, which would collapse the PCA fallback) and by
+    deterministic tests; no UMAP reducer is persisted in that case.
     """
     try:
         import pyarrow as pa
@@ -3430,7 +3437,11 @@ def _write_parquet(
     # UMAP suitable for pickling (None when cuml or PCA fallback fired);
     # the caller persists it to umap.pkl so Extend runs can land in the
     # same coordinate space.
-    x_vals, y_vals, umap_reducer = _compute_projection(classifications, texts)
+    if precomputed_xy is not None:
+        x_vals, y_vals = precomputed_xy
+        umap_reducer = None
+    else:
+        x_vals, y_vals, umap_reducer = _compute_projection(classifications, texts)
 
     rows = []
     for i, c in enumerate(classifications):

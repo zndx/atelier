@@ -337,6 +337,24 @@ class AtlasClient:
             return resp.json()
         return []
 
+    def get_glossary_terms(
+        self, glossary_guid: str, *, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """GET /glossary/{guid}/terms — full term objects (paginated).
+
+        Unlike :meth:`basic_search` on ``AtlasGlossaryTerm`` (which returns
+        only name + qualifiedName), this returns the rich term payload
+        (short/long description, usage, categories) used to build a
+        classification vocabulary.
+        """
+        resp = self._http.get(
+            f"glossary/{glossary_guid}/terms",
+            params={"limit": limit, "offset": offset},
+        )
+        if resp.ok:
+            return resp.json()
+        return []
+
     # -- Health / discovery ------------------------------------------------
 
     def ping(self) -> dict[str, Any]:

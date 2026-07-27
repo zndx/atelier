@@ -52,6 +52,17 @@ class ColumnSample:
     siblings: list[str] = field(default_factory=list)
     reference_code: str | None = None  # Curated reference label (for validation)
     distinct_count: int | None = None  # True COUNT(DISTINCT) bounded by column_sample_limit
+    # Ægir release v2 provenance (populated by aegir_release loader only).
+    # column_id is the opaque release id — the predictions-parquet join key
+    # (the held-back scoring key is keyed (table_id, column_id), never by
+    # name).  register/name_provenance carry the name-provenance ladder for
+    # result slicing (engine-derived / composed / semantic-passthrough /
+    # degraded-mechanical) — slice analysis by rung, never gate features on
+    # it.  fk_to_table_id is release topology by opaque id.
+    column_id: str | None = None
+    register: str | None = None
+    name_provenance: str | None = None
+    fk_to_table_id: str | None = None
 
     def __post_init__(self) -> None:
         # The invariant only triggers when ``table_name`` is set.  Many
@@ -111,6 +122,12 @@ class ColumnSample:
             d["distinct_count"] = self.distinct_count
         if self.all_values and len(self.all_values) > len(self.values):
             d["all_values"] = self.all_values
+        # v2 release provenance rides along only when present, so
+        # non-Ægir artifacts keep their existing shape.
+        for key in ("column_id", "register", "name_provenance", "fk_to_table_id"):
+            val = getattr(self, key)
+            if val is not None:
+                d[key] = val
         return d
 
 

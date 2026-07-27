@@ -4,3 +4,12 @@
 [submodule "external/hermes-agent"]
 	path = external/hermes-agent
 	url = https://github.com/zndx/oss-hermes-agent.git
+[submodule "external/sdg-corpora"]
+	path = external/sdg-corpora
+	url = git@github.com:zndx/sdg-corpora.git
+[submodule "external/signals-protocol"]
+	path = external/signals-protocol
+	url = git@github.com:zndx/signals-protocol.git
+[submodule "external/nifi-minifi-cpp"]
+	path = external/nifi-minifi-cpp
+	url = git@github.com:weathership/oss-minifi-cpp.git
