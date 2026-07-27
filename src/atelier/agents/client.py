@@ -54,7 +54,7 @@ def _build_bedrock_client(cfg: AtelierConfig, *, timeout: float = 30.0):
     )
 
 
-_ANTHROPIC_FALLBACK_MODEL = "claude-opus-4-7"
+_ANTHROPIC_FALLBACK_MODEL = "claude-opus-4-8"
 
 
 def _anthropic_test_model(cfg: AtelierConfig) -> str:

@@ -24,7 +24,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 - **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port **5533**) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) on port **5440** for CAI deployments when no external PG is available. The two ports are NOT interchangeable; the CAI pod has nothing on 5533. Code that needs the live URL reads `ATELIER_DB_URL` (exported by `bin/start-app.sh` line 278) — never hardcode the port.
 - **Qdrant** — Vector store. devenv `pkgs.qdrant` process for local dev; binary download for CAI.
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
-- **Submodules** — `external/embedding-atlas` ([fork](https://github.com/rch/oss-embedding-atlas) with important modifications, used in both dev and CAI deployment — pre-built dist/ committed to the fork), `external/hermes-agent` (fork, dev-only reference).
+- **Submodules** — `external/embedding-atlas` ([fork](https://github.com/rch/oss-embedding-atlas) with important modifications, used in both dev and CAI deployment — pre-built dist/ committed to the fork), `external/hermes-agent` (fork, dev-only reference), `external/sdg-corpora` (Ægir's pinned corpus release — the SDG classification vocabulary (`vocabulary/annotations.parquet`) + ontology + DDL footprint; the blind efficacy-gate data source, see `classify/aegir_release.py` and `classify.aegir.*` config).
 
 ## Development (devenv-first)
 
@@ -71,7 +71,7 @@ this section before touching processes or ports.
 | Service | devenv (local) | **CAI Application pod** |
 |---|---|---|
 | HTTP gateway | 8090 | `$CDSW_APP_PORT` (= 8090, but managed by the platform) |
-| gRPC servicer | 50051 | 50051 |
+| gRPC servicer | **50071** (devenv pins `ATELIER_GRPC_PORT` — Gaius engine squats 50051 on the shared host) | 50051 |
 | PostgreSQL | 5533 (devenv `services.postgres`) | **PGlite on 5440** — port 5533 is unused in CAI |
 | Qdrant HTTP | 6333 | 6333 |
 
@@ -298,7 +298,7 @@ for full design notes.
 ## Model Defaults
 
 `agents.model` in `config/base.conf` tracks the latest Opus on the
-Anthropic direct API (currently `claude-opus-4-7`).  Bedrock
+Anthropic direct API (currently `claude-opus-4-8`).  Bedrock
 deployments override via `ATELIER_AGENT_MODEL` with a Bedrock ARN —
 Bedrock lags direct-API releases, so the two are not kept in
 lockstep.

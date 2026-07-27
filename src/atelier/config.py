@@ -15,7 +15,7 @@ Usage::
     cfg = load_config()
 
     # Load with CLI overrides
-    cfg = load_config(overrides={"agent_model": "claude-opus-4-7"})
+    cfg = load_config(overrides={"agent_model": "claude-opus-4-8"})
 
     # Materialize and validate resolved config
     materialize_config(cfg, "build/config/atelier.env")
@@ -112,6 +112,10 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.reference_uri": ("classify_reference_uri", str),
     "classify.reference_database": ("classify_reference_database", str),
     "classify.taxonomy_id": ("classify_taxonomy_id", str),
+    # Ægir sdg-corpora bridge
+    "classify.aegir.corpora_dir": ("aegir_corpora_dir", str),
+    "classify.aegir.release_dir": ("aegir_release_dir", str),
+    "classify.aegir.cluster_name": ("aegir_cluster_name", str),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm.hierarchical": ("classify_svm_hierarchical", bool),
@@ -326,7 +330,7 @@ class AtelierConfig:
 
     # Claude Agent SDK
     anthropic_api_key: str | None = None
-    agent_model: str = "claude-opus-4-7"
+    agent_model: str = "claude-opus-4-8"
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     aws_region: str | None = None
@@ -407,6 +411,18 @@ class AtelierConfig:
     # cannot collide with production. Read by both _ensure_registered_svm_head
     # and the enrichment/maxsim path so the two stay consistent.
     classify_taxonomy_id: str = "default"
+
+    # Ægir sdg-corpora bridge — the pinned git data source for the blind
+    # efficacy gate. corpora_dir is the sdg-corpora submodule (vocabulary +
+    # ontology + DDL footprint); relative paths resolve against the repo
+    # root. release_dir points at one release emission (blind columns +
+    # held-back key + generation manifest); empty = no release configured,
+    # the aegir path fails fast when invoked. cluster_name scopes Atlas
+    # qualified names for this integration ("...@aegir") without touching
+    # governance_cluster_name.
+    aegir_corpora_dir: str = "external/sdg-corpora"
+    aegir_release_dir: str = ""
+    aegir_cluster_name: str = "aegir"
 
     # ML classifier model paths
     classify_catboost_model_path: str = "build/models/catboost.cbm"

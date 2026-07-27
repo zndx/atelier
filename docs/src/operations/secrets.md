@@ -137,7 +137,7 @@ already treats all configuration as environment-overridable via the
 
 ```hocon
 agents {
-  model = "claude-opus-4-7"
+  model = "claude-opus-4-8"
   model = ${?ATELIER_AGENT_MODEL}     # env wins when set
 }
 ```

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # constant).  Bedrock is absent by design; openai_compatible/cerebras
 # fall through to the operator's classify_llm_model selection.
 _APEX_BY_BACKEND: dict[str, str] = {
-    "anthropic": "claude-opus-4-7",
+    "anthropic": "claude-opus-4-8",
 }
 
 

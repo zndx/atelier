@@ -40,7 +40,7 @@ def test_resolver_anthropic_apex():
     cfg.classify_llm_backend = "anthropic"
     backend, model = resolve_enrichment_model(cfg)
     assert backend == "anthropic"
-    assert model == "claude-opus-4-7"
+    assert model == "claude-opus-4-8"
 
 
 def test_resolver_bedrock_without_override_raises():
@@ -163,7 +163,7 @@ def test_generator_assembles_prompts_and_parses_response():
     assert mock_generate.call_count == 1
     call_kwargs = mock_generate.call_args.kwargs
     assert call_kwargs["backend"] == "anthropic"
-    assert call_kwargs["model"] == "claude-opus-4-7"
+    assert call_kwargs["model"] == "claude-opus-4-8"
     assert call_kwargs["reasoning_budget"] == 16384
     assert "LEAF tag" in call_kwargs["system_prompt"]
     assert "ISBN-13" in call_kwargs["user_prompt"]
@@ -176,7 +176,7 @@ def test_generator_assembles_prompts_and_parses_response():
     ]
     assert result.attempts == 1
     # Generator records provenance as {backend}:{model}
-    assert gen.name == "anthropic:claude-opus-4-7"
+    assert gen.name == "anthropic:claude-opus-4-8"
 
 
 def test_generator_parent_framing_for_internal_nodes():

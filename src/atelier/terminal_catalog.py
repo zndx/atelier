@@ -93,6 +93,16 @@ _CATALOG: tuple[_CatalogEntry, ...] = (
         notes="Current ATELIER_AGENT_MODEL default.",
     ),
     _CatalogEntry(
+        id="anthropic-opus-4-8",
+        label="Opus 4.8",
+        provider="anthropic",
+        model_ref_source="claude-opus-4-8",
+        context_window=1_000_000,
+        max_output_tokens=64_000,
+        thinking="adaptive",
+        notes="Latest Opus on the direct API; 1M context window.",
+    ),
+    _CatalogEntry(
         id="anthropic-opus-4-7",
         label="Opus 4.7",
         provider="anthropic",
@@ -100,7 +110,7 @@ _CATALOG: tuple[_CatalogEntry, ...] = (
         context_window=1_000_000,
         max_output_tokens=64_000,
         thinking="adaptive",
-        notes="Latest Opus on the direct API; 1M context window.",
+        notes="Previous-generation Opus on the direct API (still active; pinnable).",
     ),
 )
 
@@ -175,6 +185,13 @@ def derive_from_agent_model(cfg) -> ModelEntry | None:
     if not target:
         return None
     for m in available_models(cfg):
+        # Unavailable entries can't be launched, so they can't be "what
+        # the deploy is wired to". Without this, the Bedrock entry's
+        # @attr:agent_model ref — equal to cfg.agent_model by
+        # construction — claims 'active' on direct-API deploys that
+        # have no Bedrock credentials at all.
+        if not m.available:
+            continue
         if m.model_ref == target:
             return m
     return None

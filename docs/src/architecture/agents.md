@@ -92,7 +92,7 @@ The agent client is built via `_build_client(cfg)` which prefers Anthropic
 when `ANTHROPIC_API_KEY` is set, falling back to Bedrock when AWS credentials
 are available. The agent model resolves as:
 `classify_agent_model` → `agent_model` → `"claude-sonnet-4-5-20250929"`.
-Because `agent_model` defaults to `claude-opus-4-7` (the shipped default, never
+Because `agent_model` defaults to `claude-opus-4-8` (the shipped default, never
 `None`), the trailing Sonnet literal is an unreachable last-resort guard — the
 effective default agent model is Opus.
 
@@ -123,7 +123,7 @@ classify {
 }
 
 agent {
-    model = "claude-opus-4-7"
+    model = "claude-opus-4-8"
     model = ${?ATELIER_AGENT_MODEL}
 }
 

@@ -13,7 +13,7 @@ The function :func:`generate_text` is the single entry point:
 
     text = generate_text(
         backend="anthropic",
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
         cfg=cfg,
         system_prompt="...",
         user_prompt="...",
