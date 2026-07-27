@@ -16,7 +16,7 @@ export default function EmbeddingsIndex() {
 
       {datasets.length === 0 ? (
         <Empty
-          image={<DotChartOutlined style={{ fontSize: 64, color: "#d9d9d9" }} />}
+          image={<DotChartOutlined style={{ fontSize: 64, color: "var(--text-color-kumo-inactive)" }} />}
           description={
             <div>
               <Paragraph type="secondary">No datasets available yet.</Paragraph>

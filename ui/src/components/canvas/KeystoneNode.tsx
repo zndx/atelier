@@ -21,13 +21,13 @@ interface RoleTheme {
 const ROLE_THEME: Record<string, RoleTheme> = {
   classifier: {
     icon: <ExperimentOutlined />,
-    color: "#1890ff",
-    bg: "#e6f7ff",
+    color: "var(--color-kumo-brand)",
+    bg: "var(--color-kumo-info-tint)",
   },
   evidence_fuser: {
     icon: <MergeCellsOutlined />,
-    color: "#52c41a",
-    bg: "#f6ffed",
+    color: "var(--color-kumo-success)",
+    bg: "var(--color-kumo-success-tint)",
   },
   visualization_director: {
     icon: <DotChartOutlined />,
@@ -37,10 +37,10 @@ const ROLE_THEME: Record<string, RoleTheme> = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  idle: "#d9d9d9",
-  active: "#1890ff",
-  completed: "#52c41a",
-  error: "#ff4d4f",
+  idle: "var(--color-kumo-line)",
+  active: "var(--color-kumo-brand)",
+  completed: "var(--color-kumo-success)",
+  error: "var(--color-kumo-danger)",
 };
 
 export default function KeystoneNode({ data }: NodeProps<KeystoneNodeType>) {
@@ -51,8 +51,8 @@ export default function KeystoneNode({ data }: NodeProps<KeystoneNodeType>) {
       <NodeToolbar position={Position.Top}>
         <div
           style={{
-            background: "#fff",
-            border: "1px solid #d9d9d9",
+            background: "var(--color-kumo-elevated)",
+            border: "1px solid var(--color-kumo-line)",
             borderRadius: 6,
             padding: "8px 12px",
             maxWidth: 240,
@@ -82,7 +82,7 @@ export default function KeystoneNode({ data }: NodeProps<KeystoneNodeType>) {
               width: 36,
               height: 36,
               borderRadius: "50%",
-              background: "#fff",
+              background: "var(--color-kumo-elevated)",
               border: `2px solid ${theme.color}`,
               display: "flex",
               alignItems: "center",
@@ -104,12 +104,12 @@ export default function KeystoneNode({ data }: NodeProps<KeystoneNodeType>) {
             width: 8,
             height: 8,
             borderRadius: "50%",
-            background: STATUS_COLOR[data.status] || "#d9d9d9",
+            background: STATUS_COLOR[data.status] || "var(--color-kumo-line)",
             animation: data.status === "active" ? "pulse-keystone 1.5s ease-in-out infinite" : undefined,
           }}
         />
 
-        <div style={{ marginLeft: 20, fontWeight: 600, fontSize: 13, color: "#262626" }}>
+        <div style={{ marginLeft: 20, fontWeight: 600, fontSize: 13, color: "var(--text-color-kumo-strong)" }}>
           {data.name}
         </div>
         <div style={{ marginTop: 6 }}>
@@ -126,8 +126,8 @@ export default function KeystoneNode({ data }: NodeProps<KeystoneNodeType>) {
         </div>
       </div>
 
-      <Handle type="target" position={Position.Top} id="top" style={{ background: "#555" }} />
-      <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: "#555" }} />
+      <Handle type="target" position={Position.Top} id="top" style={{ background: "var(--color-kumo-line)" }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: "var(--color-kumo-line)" }} />
       <Handle type="source" position={Position.Right} id="right" style={{ background: theme.color, top: "50%" }} />
       <Handle type="target" position={Position.Left} id="left" style={{ background: theme.color, top: "50%" }} />
       <Handle type="target" position={Position.Right} id="right-target" style={{ background: theme.color, top: "50%" }} />

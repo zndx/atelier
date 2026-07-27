@@ -1,8 +1,9 @@
 import { Layout as AntLayout, Tooltip, Typography } from "antd";
-import { SettingOutlined } from "@ant-design/icons";
+import { MoonOutlined, SettingOutlined, SunOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import clouderaLogo from "../assets/Cloudera.svg";
+import { toggleColorMode, useColorMode } from "../theme/colorMode";
 
 const { Header, Content, Footer } = AntLayout;
 const { Text } = Typography;
@@ -15,6 +16,14 @@ const NAV_ITEMS = [
   { path: "/status", label: "Status" },
 ];
 
+// Header chrome stays on the DARK ramp in both modes (see base.css note:
+// raster logo asset). These are the k-ramp dark chrome colors, fixed.
+const CHROME = {
+  text: "#e5e8ec",
+  dim: "#9fa5ac",
+  fill: "#21272d",
+};
+
 interface LayoutProps {
   children: ReactNode;
   /** Lock to viewport height, hide footer — for full-bleed pages like Embeddings. */
@@ -23,6 +32,17 @@ interface LayoutProps {
 
 function Layout({ children, fullHeight }: LayoutProps) {
   const { pathname } = useLocation();
+  const mode = useColorMode();
+
+  const chromeLink = (active: boolean): React.CSSProperties => ({
+    color: active ? CHROME.text : CHROME.dim,
+    padding: "4px 12px",
+    borderRadius: 4,
+    fontSize: 14,
+    textDecoration: "none",
+    background: active ? CHROME.fill : "transparent",
+    transition: "all 0.2s",
+  });
 
   return (
     <AntLayout
@@ -32,11 +52,12 @@ function Layout({ children, fullHeight }: LayoutProps) {
       }
     >
       <Header
+        className="atelier-chrome"
         style={{
           display: "flex",
           alignItems: "center",
           gap: 16,
-          background: "#001529",
+          background: "transparent", // surface comes from .atelier-chrome
           padding: "0 clamp(12px, 2vw, 24px)",
         }}
       >
@@ -44,7 +65,7 @@ function Layout({ children, fullHeight }: LayoutProps) {
           <img src={clouderaLogo} alt="Cloudera" style={{ height: 28 }} />
           <Text
             strong
-            style={{ color: "#fff", fontSize: 18, letterSpacing: 0.5 }}
+            style={{ color: CHROME.text, fontSize: 18, letterSpacing: 0.5 }}
           >
             Atelier
           </Text>
@@ -53,33 +74,41 @@ function Layout({ children, fullHeight }: LayoutProps) {
           {NAV_ITEMS.map(({ path, label }) => {
             const active = pathname === path || pathname.startsWith(path + "/");
             return (
-              <Link
-                key={path}
-                to={path}
-                style={{
-                  color: active ? "#fff" : "rgba(255,255,255,0.65)",
-                  padding: "4px 12px",
-                  borderRadius: 4,
-                  fontSize: 14,
-                  textDecoration: "none",
-                  background: active ? "rgba(255,255,255,0.1)" : "transparent",
-                  transition: "all 0.2s",
-                }}
-              >
+              <Link key={path} to={path} style={chromeLink(active)}>
                 {label}
               </Link>
             );
           })}
         </nav>
+        <Tooltip
+          title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          placement="bottomRight"
+        >
+          <a
+            aria-label="Toggle color mode"
+            onClick={() => toggleColorMode(mode)}
+            style={{
+              marginLeft: "auto",
+              color: CHROME.dim,
+              padding: "6px 10px",
+              borderRadius: 4,
+              fontSize: 18,
+              lineHeight: 1,
+              display: "inline-flex",
+              alignItems: "center",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
+          </a>
+        </Tooltip>
         <Tooltip title="Settings — tune the DST pipeline" placement="bottomRight">
           <Link
             to="/settings"
             aria-label="Settings"
             style={{
-              marginLeft: "auto",
-              color: pathname.startsWith("/settings")
-                ? "#fff"
-                : "rgba(255,255,255,0.65)",
+              color: pathname.startsWith("/settings") ? CHROME.text : CHROME.dim,
               padding: "6px 10px",
               borderRadius: 4,
               fontSize: 18,
@@ -87,7 +116,7 @@ function Layout({ children, fullHeight }: LayoutProps) {
               display: "inline-flex",
               alignItems: "center",
               background: pathname.startsWith("/settings")
-                ? "rgba(255,255,255,0.1)"
+                ? CHROME.fill
                 : "transparent",
               transition: "all 0.2s",
             }}
@@ -105,7 +134,7 @@ function Layout({ children, fullHeight }: LayoutProps) {
         {children}
       </Content>
       {!fullHeight && (
-        <Footer style={{ textAlign: "center" }}>
+        <Footer style={{ textAlign: "center", background: "transparent" }}>
           <Text type="secondary">
             Atelier v0.5.1 &mdash; Agentic Classification Workbench
           </Text>

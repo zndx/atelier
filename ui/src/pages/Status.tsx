@@ -1465,7 +1465,7 @@ function DataSourceCard() {
           onRow={(record) => ({
             style: {
               cursor: "pointer",
-              background: record.id === activeDatasetId ? "#e6f4ff" : undefined,
+              background: record.id === activeDatasetId ? "var(--color-kumo-info-tint)" : undefined,
             },
             onClick: () => activateVersion(record.id),
           })}
@@ -2629,7 +2629,7 @@ export default function Status() {
               return (
                 <>
                   {refreshResult.latency_ms != null && (
-                    <div style={{ marginBottom: 8, fontSize: 12, color: "#8c8c8c" }}>
+                    <div style={{ marginBottom: 8, fontSize: 12, color: "var(--text-color-kumo-subtle)" }}>
                       {dbs.length} databases discovered in {refreshResult.latency_ms}ms
                     </div>
                   )}

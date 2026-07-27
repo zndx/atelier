@@ -8,10 +8,10 @@ const { Text } = Typography;
 type DynamicAgentNodeType = Node<DynamicAgentNodeData, "dynamicAgent">;
 
 const STATUS_COLOR: Record<string, string> = {
-  spawning: "#faad14",
-  active: "#1890ff",
-  completed: "#52c41a",
-  dismissed: "#8c8c8c",
+  spawning: "var(--color-kumo-warning)",
+  active: "var(--color-kumo-brand)",
+  completed: "var(--color-kumo-success)",
+  dismissed: "var(--text-color-kumo-subtle)",
 };
 
 export default function DynamicAgentNode({ data }: NodeProps<DynamicAgentNodeType>) {
@@ -21,9 +21,9 @@ export default function DynamicAgentNode({ data }: NodeProps<DynamicAgentNodeTyp
     <>
       <div
         style={{
-          background: "#fafafa",
+          background: "var(--color-kumo-recessed)",
           borderRadius: 8,
-          border: "2px dashed #bfbfbf",
+          border: "2px dashed var(--color-kumo-line)",
           padding: "12px 16px",
           minWidth: 180,
           opacity: isDismissed ? 0.5 : 0.9,
@@ -37,20 +37,20 @@ export default function DynamicAgentNode({ data }: NodeProps<DynamicAgentNodeTyp
               width: 32,
               height: 32,
               borderRadius: "50%",
-              background: "#fff",
-              border: `2px dashed ${STATUS_COLOR[data.status] || "#bfbfbf"}`,
+              background: "var(--color-kumo-elevated)",
+              border: `2px dashed ${STATUS_COLOR[data.status] || "var(--color-kumo-line)"}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontSize: 14,
-              color: STATUS_COLOR[data.status] || "#bfbfbf",
+              color: STATUS_COLOR[data.status] || "var(--text-color-kumo-inactive)",
             }}
           >
             <ThunderboltOutlined />
           </div>
         </div>
 
-        <div style={{ marginLeft: 18, fontWeight: 600, fontSize: 12, color: "#434343" }}>
+        <div style={{ marginLeft: 18, fontWeight: 600, fontSize: 12, color: "var(--text-color-kumo-default)" }}>
           {data.name}
         </div>
         <div style={{ marginTop: 4, marginLeft: 18 }}>
@@ -68,8 +68,8 @@ export default function DynamicAgentNode({ data }: NodeProps<DynamicAgentNodeTyp
         </div>
       </div>
 
-      <Handle type="target" position={Position.Top} style={{ background: "#bfbfbf" }} />
-      <Handle type="source" position={Position.Bottom} style={{ background: "#bfbfbf" }} />
+      <Handle type="target" position={Position.Top} style={{ background: "var(--text-color-kumo-inactive)" }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: "var(--text-color-kumo-inactive)" }} />
 
       <style>{`
         @keyframes fade-in-agent {

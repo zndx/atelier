@@ -27,41 +27,41 @@ interface StatusTheme {
 
 const STATUS_THEME: Record<FsmPhaseStatus, StatusTheme> = {
   idle: {
-    border: "#d9d9d9",
-    bg: "#fafafa",
-    textColor: "#8c8c8c",
+    border: "var(--color-kumo-line)",
+    bg: "var(--color-kumo-recessed)",
+    textColor: "var(--text-color-kumo-subtle)",
   },
   upcoming: {
-    border: "#d9d9d9",
-    bg: "#fff",
-    textColor: "#595959",
+    border: "var(--color-kumo-line)",
+    bg: "var(--color-kumo-elevated)",
+    textColor: "var(--text-color-kumo-default)",
   },
   current: {
-    border: "#1677ff",
-    bg: "#e6f4ff",
-    textColor: "#0958d9",
-    glow: "0 0 0 4px rgba(22, 119, 255, 0.15)",
-    iconNode: <LoadingOutlined style={{ color: "#1677ff" }} />,
+    border: "var(--color-kumo-brand)",
+    bg: "var(--color-kumo-info-tint)",
+    textColor: "var(--text-color-kumo-link)",
+    glow: "0 0 0 4px rgba(150, 162, 252, 0.15)",
+    iconNode: <LoadingOutlined style={{ color: "var(--text-color-kumo-link)" }} />,
   },
   completed: {
     border: "#b7eb8f",
-    bg: "#f6ffed",
-    textColor: "#389e0d",
-    iconNode: <CheckCircleFilled style={{ color: "#52c41a" }} />,
+    bg: "var(--color-kumo-success-tint)",
+    textColor: "var(--color-kumo-success)",
+    iconNode: <CheckCircleFilled style={{ color: "var(--color-kumo-success)" }} />,
   },
   converged: {
-    border: "#52c41a",
-    bg: "#f6ffed",
-    textColor: "#237804",
-    glow: "0 0 0 4px rgba(82, 196, 26, 0.18)",
-    iconNode: <CheckCircleFilled style={{ color: "#52c41a" }} />,
+    border: "var(--color-kumo-success)",
+    bg: "var(--color-kumo-success-tint)",
+    textColor: "var(--text-color-kumo-success)",
+    glow: "0 0 0 4px rgba(78, 196, 145, 0.18)",
+    iconNode: <CheckCircleFilled style={{ color: "var(--color-kumo-success)" }} />,
   },
   error: {
-    border: "#ff4d4f",
-    bg: "#fff1f0",
-    textColor: "#cf1322",
-    glow: "0 0 0 4px rgba(255, 77, 79, 0.18)",
-    iconNode: <CloseCircleFilled style={{ color: "#ff4d4f" }} />,
+    border: "var(--color-kumo-danger)",
+    bg: "var(--color-kumo-danger-tint)",
+    textColor: "var(--text-color-kumo-danger)",
+    glow: "0 0 0 4px rgba(242, 136, 129, 0.18)",
+    iconNode: <CloseCircleFilled style={{ color: "var(--color-kumo-danger)" }} />,
   },
 };
 
@@ -73,8 +73,8 @@ export default function FsmPhaseNode({ data }: NodeProps<FsmPhaseNodeType>) {
       <NodeToolbar position={Position.Top}>
         <div
           style={{
-            background: "#fff",
-            border: "1px solid #d9d9d9",
+            background: "var(--color-kumo-elevated)",
+            border: "1px solid var(--color-kumo-line)",
             borderRadius: 6,
             padding: "8px 12px",
             maxWidth: 260,

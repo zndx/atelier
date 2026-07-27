@@ -1,9 +1,11 @@
-import { ConfigProvider, Spin, theme } from "antd";
+import { ConfigProvider, Spin } from "antd";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import Layout from "./components/Layout";
 import { DatasetProvider } from "./contexts/DatasetContext";
 import Landing from "./pages/Landing";
+import { useColorMode } from "./theme/colorMode";
+import { kumoAntdTheme } from "./theme/kumo";
 
 const Agents = lazy(() => import("./pages/Agents"));
 const Embeddings = lazy(() => import("./pages/Embeddings"));
@@ -15,16 +17,10 @@ const OverwatchReport = lazy(() => import("./pages/OverwatchReport"));
 const Settings = lazy(() => import("./pages/Settings"));
 
 function App() {
+  // Kumo/keiretsu bridge: AntD algorithm + tokens follow data-mode.
+  const mode = useColorMode();
   return (
-    <ConfigProvider
-      theme={{
-        algorithm: theme.defaultAlgorithm,
-        token: {
-          colorPrimary: "#1890ff",
-          borderRadius: 6,
-        },
-      }}
-    >
+    <ConfigProvider theme={kumoAntdTheme(mode)}>
       <DatasetProvider>
       <BrowserRouter>
         <Routes>

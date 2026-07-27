@@ -34,14 +34,14 @@ interface RoleTheme {
 const ROLE_THEME: Record<string, RoleTheme> = {
   classifier: {
     icon: <ExperimentOutlined />,
-    color: "#1890ff",
-    bg: "#e6f7ff",
+    color: "var(--color-kumo-brand)",
+    bg: "var(--color-kumo-info-tint)",
     label: "Classifier",
   },
   evidence_fuser: {
     icon: <MergeCellsOutlined />,
-    color: "#52c41a",
-    bg: "#f6ffed",
+    color: "var(--color-kumo-success)",
+    bg: "var(--color-kumo-success-tint)",
     label: "Evidence Fuser",
   },
   visualization_director: {
@@ -52,8 +52,8 @@ const ROLE_THEME: Record<string, RoleTheme> = {
   },
   sampler: {
     icon: <FunnelPlotOutlined />,
-    color: "#fa8c16",
-    bg: "#fff7e6",
+    color: "var(--color-kumo-warning)",
+    bg: "var(--color-kumo-warning-tint)",
     label: "Sampler",
   },
   synth_generator: {
@@ -131,7 +131,7 @@ export default function Agents() {
       key: "skill",
       render: (_text: string, record: SkillRow) => (
         <span>
-          <ToolOutlined style={{ marginRight: 6, color: "#8c8c8c" }} />
+          <ToolOutlined style={{ marginRight: 6, color: "var(--text-color-kumo-subtle)" }} />
           <Text strong>{record.title}</Text>
         </span>
       ),
@@ -220,7 +220,7 @@ export default function Agents() {
                 <div style={{ marginBottom: 16 }}>
                   <Text
                     strong
-                    style={{ fontSize: 12, color: "#8c8c8c" }}
+                    style={{ fontSize: 12, color: "var(--text-color-kumo-subtle)" }}
                   >
                     <ToolOutlined style={{ marginRight: 4 }} />
                     SKILLS
@@ -245,7 +245,7 @@ export default function Agents() {
 
                 <div
                   style={{
-                    borderTop: "1px dashed #f0f0f0",
+                    borderTop: "1px dashed var(--color-kumo-line)",
                     paddingTop: 12,
                     marginTop: 8,
                   }}
@@ -282,7 +282,7 @@ export default function Agents() {
               style={{
                 margin: 0,
                 padding: 16,
-                background: "#fafafa",
+                background: "var(--color-kumo-recessed)",
                 borderRadius: 4,
                 fontSize: 13,
                 lineHeight: 1.6,

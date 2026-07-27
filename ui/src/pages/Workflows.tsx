@@ -21,14 +21,14 @@ import {
 const { Title, Text } = Typography;
 
 const MINIMAP_COLORS: Record<string, string> = {
-  fsmPhase: "#1677ff",
-  skill: "#fa8c16",
+  fsmPhase: "#96a2fc",
+  skill: "#d99d54",
   // Legacy node types — preserved so the keystone-topology view (or
   // a future Agent Studio overlay) can light them up if it lands.
-  orchestrator: "#001529",
-  keystone: "#1890ff",
-  dynamicAgent: "#faad14",
-  artifact: "#d9d9d9",
+  orchestrator: "#101418",
+  keystone: "#96a2fc",
+  dynamicAgent: "#d99d54",
+  artifact: "#30363c",
 };
 
 const FSM_POLL_INTERVAL_MS = 5000;
@@ -125,8 +125,8 @@ function WorkflowsInner() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          borderBottom: "1px solid #f0f0f0",
-          background: "#fff",
+          borderBottom: "1px solid var(--color-kumo-line)",
+          background: "var(--color-kumo-elevated)",
           flexShrink: 0,
         }}
       >
@@ -167,15 +167,17 @@ function WorkflowsInner() {
           elementsSelectable={false}
           proOptions={{ hideAttribution: false }}
         >
+          {/* SVG pattern fill — attribute context, so a kumo literal (k4 slate+):
+              subtle on the dark canvas, faint-but-visible on light. */}
           <Background
             variant={BackgroundVariant.Dots}
             gap={16}
             size={1}
-            color="#e8e8e8"
+            color="#30363c"
           />
           <Controls showInteractive={false} />
           <MiniMap
-            nodeColor={(node) => MINIMAP_COLORS[node.type || ""] || "#d9d9d9"}
+            nodeColor={(node) => MINIMAP_COLORS[node.type || ""] || "#30363c"}
             maskColor="rgba(0, 0, 0, 0.08)"
             style={{ borderRadius: 6 }}
           />

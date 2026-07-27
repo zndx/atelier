@@ -28,16 +28,18 @@ function formatElapsed(s: number | undefined): string {
 function statusIcon(status: TaskStatus): React.ReactNode {
   switch (status) {
     case "done":
-      return <CheckCircleTwoTone twoToneColor="#52c41a" />;
+      // twoToneColor feeds @ant-design/colors' generate() (SVG fill calc);
+      // var() is unparseable there — kumo dark-ramp literals instead.
+      return <CheckCircleTwoTone twoToneColor="#4ec491" />;
     case "error":
-      return <CloseCircleTwoTone twoToneColor="#ff4d4f" />;
+      return <CloseCircleTwoTone twoToneColor="#f28881" />;
     case "active":
       return <Spin size="small" />;
     case "skipped":
-      return <MinusCircleOutlined style={{ color: "#bfbfbf" }} />;
+      return <MinusCircleOutlined style={{ color: "var(--text-color-kumo-inactive)" }} />;
     case "pending":
     default:
-      return <ClockCircleOutlined style={{ color: "#bfbfbf" }} />;
+      return <ClockCircleOutlined style={{ color: "var(--text-color-kumo-inactive)" }} />;
   }
 }
 
@@ -56,7 +58,7 @@ export function PhaseProgress({ task }: PhaseProgressProps) {
   const muted = task.status === "pending" || task.status === "skipped";
   const nameStyle: React.CSSProperties = {
     fontWeight: task.status === "active" ? 600 : 500,
-    color: muted ? "rgba(0,0,0,0.45)" : undefined,
+    color: muted ? "var(--text-color-kumo-subtle)" : undefined,
   };
 
   const elapsed = formatElapsed(task.elapsedS);

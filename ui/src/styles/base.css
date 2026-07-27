@@ -1,0 +1,23 @@
+/* Atelier base surface — sits under the AntD layer; kumo tokens come from
+ * theme-keiretsu.css (canonical upstream copy). */
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--color-kumo-canvas);
+  color: var(--text-color-kumo-default);
+}
+
+/* Header chrome stays on the DARK ramp in both modes — deliberate exception
+ * to the mode mirror: the Cloudera logo asset is an embedded raster designed
+ * for dark chrome (no CSS recolor possible). Revisit when a light-mode logo
+ * asset lands; until then this matches Cloudera product nav convention. */
+.atelier-chrome {
+  background: #101418; /* k1 dark, both modes */
+  border-bottom: 1px solid #30363c; /* k4 dark hairline */
+}

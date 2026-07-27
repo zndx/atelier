@@ -10,11 +10,11 @@ import type { ReactNode } from "react";
 type ArtifactNodeType = Node<ArtifactNodeData, "artifact">;
 
 const TYPE_CONFIG: Record<string, { icon: ReactNode; color: string }> = {
-  dataset: { icon: <TableOutlined />, color: "#1890ff" },
+  dataset: { icon: <TableOutlined />, color: "var(--color-kumo-brand)" },
   parquet: { icon: <TableOutlined />, color: "#722ed1" },
-  classification_result: { icon: <BarChartOutlined />, color: "#52c41a" },
-  evidence_vector: { icon: <BarChartOutlined />, color: "#faad14" },
-  embedding: { icon: <DotIcon />, color: "#13c2c2" },
+  classification_result: { icon: <BarChartOutlined />, color: "var(--color-kumo-success)" },
+  evidence_vector: { icon: <BarChartOutlined />, color: "var(--color-kumo-warning)" },
+  embedding: { icon: <DotIcon />, color: "var(--color-kumo-info)" },
 };
 
 function DotIcon() {
@@ -26,9 +26,9 @@ function DotIcon() {
 }
 
 const STATUS_BG: Record<string, string> = {
-  pending: "#fafafa",
-  ready: "#f6ffed",
-  consumed: "#f0f0f0",
+  pending: "var(--color-kumo-recessed)",
+  ready: "var(--color-kumo-success-tint)",
+  consumed: "var(--color-kumo-fill)",
 };
 
 export default function ArtifactNode({ data }: NodeProps<ArtifactNodeType>) {
@@ -38,7 +38,7 @@ export default function ArtifactNode({ data }: NodeProps<ArtifactNodeType>) {
     <>
       <div
         style={{
-          background: STATUS_BG[data.status] || "#fafafa",
+          background: STATUS_BG[data.status] || "var(--color-kumo-recessed)",
           borderRadius: 6,
           borderLeft: `3px solid ${config.color}`,
           padding: "8px 12px",
@@ -49,7 +49,7 @@ export default function ArtifactNode({ data }: NodeProps<ArtifactNodeType>) {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ color: config.color, fontSize: 13 }}>{config.icon}</span>
-          <span style={{ fontWeight: 500, fontSize: 11, color: "#434343" }}>
+          <span style={{ fontWeight: 500, fontSize: 11, color: "var(--text-color-kumo-default)" }}>
             {data.name}
           </span>
         </div>

@@ -233,12 +233,15 @@ function Terminal({ style, sessionId: explicitSessionId }: TerminalProps) {
     };
   }, [explicitSessionId]);
 
+  // Status pill overlays the fixed-dark terminal surface (#0d1117 in both
+  // modes), so kumo dark-ramp literals — theme vars would flip dark-on-dark
+  // in light mode.
   const statusColor =
     connStatus === "connected"
-      ? "#3fb950"
+      ? "#4ec491"
       : connStatus === "connecting"
-        ? "#d29922"
-        : "#f85149";
+        ? "#d99d54"
+        : "#f28881";
 
   const statusLabel =
     connStatus === "connected"

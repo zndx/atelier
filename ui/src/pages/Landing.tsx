@@ -153,27 +153,27 @@ function Landing() {
   > = {
     connecting: {
       label: "Connecting",
-      color: "#faad14",
+      color: "var(--text-color-kumo-warning)",
       icon: <SyncOutlined spin />,
     },
     connected: {
       label: "Connected",
-      color: "#52c41a",
+      color: "var(--text-color-kumo-success)",
       icon: <CheckCircleOutlined />,
     },
     classifying: {
       label: "Classifying",
-      color: "#52c41a",
+      color: "var(--text-color-kumo-success)",
       icon: <SyncOutlined spin />,
     },
     degraded: {
       label: "Degraded",
-      color: "#faad14",
+      color: "var(--text-color-kumo-warning)",
       icon: <WarningOutlined />,
     },
     disconnected: {
       label: "Disconnected",
-      color: "#ff4d4f",
+      color: "var(--text-color-kumo-danger)",
       icon: <CloseCircleOutlined />,
     },
   };
@@ -232,7 +232,7 @@ function Landing() {
                 </Tag>
               )}
               {status?.degraded && (
-                <div style={{ marginTop: 4, fontSize: 11, color: "#8c8c8c" }}>
+                <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-color-kumo-subtle)" }}>
                   {[
                     status.postgres?.ok ? null : "postgres",
                     status.qdrant?.ok ? null : "qdrant",
@@ -271,7 +271,7 @@ function Landing() {
               prefix={<BookOutlined />}
               suffix={
                 sources.length > 1 ? (
-                  <span style={{ fontSize: 12, color: "#8c8c8c" }}>
+                  <span style={{ fontSize: 12, color: "var(--text-color-kumo-subtle)" }}>
                     {sources.length} sources
                   </span>
                 ) : null

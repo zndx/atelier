@@ -168,9 +168,9 @@ function driftTone(defaultV: number, current: number, step: number): "default" |
 }
 
 const toneColor: Record<"default" | "up" | "down", string> = {
-  default: "#389e0d",   // green  — at HOCON default
-  up: "#d48806",        // amber  — looser / higher
-  down: "#1677ff",      // blue   — stricter / lower
+  default: "var(--text-color-kumo-success)",   // green  — at HOCON default
+  up: "var(--text-color-kumo-warning)",        // amber  — looser / higher
+  down: "var(--text-color-kumo-link)",         // blue   — stricter / lower
 };
 
 /** Format a setting's value in a way that respects its metadata type. */
@@ -230,7 +230,7 @@ function ControlCard({
       <Text code style={{ fontSize: 11 }}>
         {meta.hocon_path}
       </Text>
-      {inflight && <LoadingOutlined style={{ color: "#1677ff" }} />}
+      {inflight && <LoadingOutlined style={{ color: "var(--text-color-kumo-link)" }} />}
       {!inflight && session && <Tag color="geekblue">session</Tag>}
       {modified && (
         <Button
@@ -300,7 +300,7 @@ function ControlCard({
           onChangeComplete={(val) => onCommit(paramKey, Number(val))}
           marks={{
             [meta.min]: String(meta.min),
-            [meta.default]: { label: "default", style: { color: "#389e0d" } },
+            [meta.default]: { label: "default", style: { color: "var(--text-color-kumo-success)" } },
             [meta.max]: String(meta.max),
           }}
         />
@@ -343,7 +343,7 @@ function ControlCard({
           onChangeComplete={(val) => onCommit(paramKey, Number(val))}
           marks={{
             [meta.min]: String(meta.min),
-            [meta.default]: { label: "default", style: { color: "#389e0d" } },
+            [meta.default]: { label: "default", style: { color: "var(--text-color-kumo-success)" } },
             [meta.max]: String(meta.max),
           }}
         />
@@ -642,9 +642,9 @@ export default function Settings() {
             title={
               <Space>
                 {accel.available ? (
-                  <ThunderboltOutlined style={{ color: "#faad14" }} />
+                  <ThunderboltOutlined style={{ color: "var(--text-color-kumo-warning)" }} />
                 ) : (
-                  <RocketOutlined style={{ color: "#8c8c8c" }} />
+                  <RocketOutlined style={{ color: "var(--text-color-kumo-subtle)" }} />
                 )}
                 <Text strong>Acceleration</Text>
                 <Tag color={accel.available ? "gold" : "default"}>
@@ -704,7 +704,7 @@ export default function Settings() {
             size="small"
             title={
               <Space>
-                <CompassOutlined style={{ color: "#1677ff" }} />
+                <CompassOutlined style={{ color: "var(--text-color-kumo-link)" }} />
                 <Text strong>Focus</Text>
                 <Tag color={FOCUS_SOURCE_COLOR[focus.source]}>
                   {FOCUS_SOURCE_LABEL[focus.source]}
@@ -737,7 +737,7 @@ export default function Settings() {
                   <div
                     key={`focus-${key}`}
                     style={{
-                      borderLeft: "3px solid #1677ff",
+                      borderLeft: "3px solid var(--color-kumo-brand)",
                       paddingLeft: 12,
                     }}
                   >

@@ -24,25 +24,25 @@ interface StatusTheme {
 const STATUS_THEME: Record<SkillStatus, StatusTheme> = {
   available: {
     border: "#ffd591",
-    bg: "#fff7e6",
-    textColor: "#ad6800",
-    iconNode: <ThunderboltOutlined style={{ color: "#fa8c16" }} />,
+    bg: "var(--color-kumo-warning-tint)",
+    textColor: "var(--text-color-kumo-warning)",
+    iconNode: <ThunderboltOutlined style={{ color: "var(--color-kumo-warning)" }} />,
   },
   active: {
-    border: "#fa8c16",
-    bg: "#fff7e6",
-    textColor: "#ad4e00",
-    glow: "0 0 0 4px rgba(250, 140, 22, 0.20)",
-    iconNode: <LoadingOutlined style={{ color: "#fa8c16" }} />,
+    border: "var(--color-kumo-warning)",
+    bg: "var(--color-kumo-warning-tint)",
+    textColor: "var(--color-kumo-warning)",
+    glow: "0 0 0 4px rgba(217, 157, 84, 0.20)",
+    iconNode: <LoadingOutlined style={{ color: "var(--color-kumo-warning)" }} />,
   },
   unconfigured: {
     // Layout omits unconfigured skills entirely; theme retained as a
     // safety net so a misconfigured render path doesn't crash on
     // missing dictionary key.
-    border: "#f0f0f0",
-    bg: "#fafafa",
-    textColor: "#bfbfbf",
-    iconNode: <ThunderboltOutlined style={{ color: "#bfbfbf" }} />,
+    border: "var(--color-kumo-line)",
+    bg: "var(--color-kumo-recessed)",
+    textColor: "var(--text-color-kumo-inactive)",
+    iconNode: <ThunderboltOutlined style={{ color: "var(--text-color-kumo-inactive)" }} />,
   },
 };
 
@@ -54,8 +54,8 @@ export default function SkillNode({ data }: NodeProps<SkillNodeType>) {
       <NodeToolbar position={Position.Top}>
         <div
           style={{
-            background: "#fff",
-            border: "1px solid #d9d9d9",
+            background: "var(--color-kumo-elevated)",
+            border: "1px solid var(--color-kumo-line)",
             borderRadius: 6,
             padding: "8px 12px",
             maxWidth: 280,

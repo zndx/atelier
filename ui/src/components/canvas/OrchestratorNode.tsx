@@ -6,9 +6,9 @@ import type { OrchestratorNodeData } from "../../types/canvas";
 type OrchestratorNodeType = Node<OrchestratorNodeData, "orchestrator">;
 
 const statusColor: Record<string, string> = {
-  idle: "#52c41a",
-  orchestrating: "#1890ff",
-  completed: "#8c8c8c",
+  idle: "var(--color-kumo-success)",
+  orchestrating: "var(--color-kumo-brand)",
+  completed: "var(--text-color-kumo-subtle)",
 };
 
 export default function OrchestratorNode({ data }: NodeProps<OrchestratorNodeType>) {
@@ -33,14 +33,14 @@ export default function OrchestratorNode({ data }: NodeProps<OrchestratorNodeTyp
               width: 40,
               height: 40,
               borderRadius: "50%",
-              background: "#1890ff",
+              background: "var(--color-kumo-brand)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
             }}
           >
-            <RobotOutlined style={{ fontSize: 20, color: "#fff" }} />
+            <RobotOutlined style={{ fontSize: 20, color: "var(--text-color-kumo-inverse)" }} />
           </div>
         </div>
 
@@ -52,7 +52,7 @@ export default function OrchestratorNode({ data }: NodeProps<OrchestratorNodeTyp
             width: 8,
             height: 8,
             borderRadius: "50%",
-            background: statusColor[data.status] || "#52c41a",
+            background: statusColor[data.status] || "var(--color-kumo-success)",
             animation: isActive ? "pulse-status 1.5s ease-in-out infinite" : undefined,
           }}
         />
@@ -69,7 +69,7 @@ export default function OrchestratorNode({ data }: NodeProps<OrchestratorNodeTyp
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ background: "#1890ff" }}
+        style={{ background: "var(--color-kumo-brand)" }}
       />
 
       <style>{`
