@@ -39,7 +39,16 @@ def serve(blocking: bool = True) -> grpc.Server:
     atelier_pb2_grpc.add_AtelierServicer_to_server(
         AtelierServicer(), server,
     )
-    server.add_insecure_port(f"[::]:{cfg.grpc_port}")
+    bound = server.add_insecure_port(f"[::]:{cfg.grpc_port}")
+    if bound == 0:
+        # grpc returns 0 on bind failure and start() would proceed portless —
+        # a co-tenant (e.g. the Gaius engine on 50051) squatting our port
+        # must be a loud crash, not a silent no-op the readiness probe
+        # false-positives against.
+        raise RuntimeError(
+            f"gRPC bind failed on port {cfg.grpc_port} — already in use? "
+            f"Set ATELIER_GRPC_PORT to a free port (local devenv pins 50071)."
+        )
     server.start()
     print(f"Atelier gRPC server listening on port {cfg.grpc_port}")
 

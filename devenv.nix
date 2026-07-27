@@ -6,6 +6,13 @@
 
   env.GREET = "atelier";
 
+  # Local co-tenancy pin: the Gaius engine squats gRPC 50051 on this host
+  # (engine lattice: Gaius 50051 · Ægir 50151 · Atelier engine 50251), so
+  # the Atelier SERVICER moves off the default. CAI pods keep 50051
+  # (config/base.conf default; bin/start-app.sh) — this is devenv-only.
+  # The grpc-server readiness probe below must match this port.
+  env.ATELIER_GRPC_PORT = "50071";
+
   # psycopg needs libpq; CUDA toolkit provides libcudart.
   # NVIDIA driver libs (libcuda, libnvidia-ml, libnvidia-ptxjitcompiler) are
   # symlinked into .devenv/nvidia-driver-libs/ by enterShell to avoid pulling
@@ -29,6 +36,10 @@
     jq
     just
     ripgrep
+    # vim from the same nixpkgs pin as the LD_LIBRARY_PATH libs above —
+    # a profile-installed vim on an older glibc generation crashes in-shell
+    # (GLIBC_ABI_DT_X86_64_PLT mismatch via glib/libX11 preemption).
+    vim
 
     # Kerberos / Security
     krb5
@@ -118,7 +129,9 @@
       process-compose = {
         depends_on.postgres.condition = "process_healthy";
         readiness_probe = {
-          exec.command = "bash -c '</dev/tcp/localhost/50051'";
+          # Port must track env.ATELIER_GRPC_PORT above — probing the default
+          # 50051 would false-positive against the Gaius engine's socket.
+          exec.command = "bash -c '</dev/tcp/localhost/50071'";
           initial_delay_seconds = 5;
           period_seconds = 2;
           failure_threshold = 15;
