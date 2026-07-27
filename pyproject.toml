@@ -75,7 +75,10 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/atelier"]
+# zndx: the shared signals-federation proto surface (zndx.engine.v1),
+# generated from external/signals-protocol — every signals engine registers
+# it beside its native service.
+packages = ["src/atelier", "src/zndx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

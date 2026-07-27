@@ -61,6 +61,26 @@ gateway:
     env -i $(cat build/config/atelier.env 2>/dev/null | xargs) PATH="$$PATH" \
         uv run uvicorn atelier.gateway:app --reload --host 0.0.0.0 --port ${CDSW_APP_PORT:-8090}
 
+# ── Engine (local inference capability) ──────────────────────────
+
+# Capability/gRPC engine serving local models via vLLM (mirror of the Ægir
+# engine recipes). gRPC :50251; vLLM children on :8200+ in a foreign cu129
+# venv (LD isolation happens inside VllmManager, so no prefix needed here).
+#   just engine-serve            # run the engine in the foreground
+#   just engine-ping             # 1-token Complete on "instruct" (warms the model)
+#   just engine-ping referee     # same against the referee capability
+#   just engine-status           # endpoint table without triggering loads
+engine-serve:
+    uv run python -m atelier.engine.server
+
+engine-ping capability="instruct":
+    uv run python -c "from atelier.engine.client import complete_detailed; \
+        r = complete_detailed('Reply with the single word: ready', capability='{{capability}}', max_tokens=512); \
+        print(r['model'], '->', r['text'][:200])"
+
+engine-status:
+    uv run python -c "from atelier.engine.client import engine_status; print(engine_status())"
+
 # ── Optimize (in-situ domain adaptation) ─────────────────────────
 
 # Unified in-situ domain-adaptation orchestrator.  Initial-steps scaffold;
