@@ -5,6 +5,7 @@ import { useParams } from "react-router-dom";
 import { Alert, Spin, Typography, Tag } from "antd";
 import { SyncOutlined } from "@ant-design/icons";
 import type { DatasetInfo } from "../contexts/DatasetContext";
+import { useColorMode } from "../theme/colorMode";
 
 const { Title, Paragraph } = Typography;
 
@@ -23,6 +24,10 @@ const FSM_LABELS: Record<string, string> = {
 
 export default function Embeddings() {
   const { datasetId } = useParams<{ datasetId: string }>();
+  // Atlas follows the site color mode live: the fork's React wrapper
+  // calls component.update(props) on prop change, so flipping mode
+  // re-themes in place — no remount, no DuckDB table reload.
+  const mode = useColorMode();
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [coordinator] = useState(() => new Coordinator());
   const [ready, setReady] = useState(false);
@@ -243,7 +248,7 @@ export default function Embeddings() {
             ],
           }}
           embeddingViewConfig={{ autoLabelEnabled: true }}
-          colorScheme="light"
+          colorScheme={mode}
         />
       </div>
     </div>
