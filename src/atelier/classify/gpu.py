@@ -23,6 +23,10 @@ class GpuInfo:
     vram_total_mib: list[int] = field(default_factory=list)
     vram_free_mib: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Foreign compute processes hold the cards (co-tenant engine serving).
+    # When True, VRAM numbers came from nvidia-smi and no CUDA context was
+    # created by this probe (zero-share policy).
+    occupied: bool = False
 
     @property
     def resolved_device(self) -> str:
@@ -71,6 +75,7 @@ class GpuInfo:
             "resolved_device": self.resolved_device,
             "resolved_devices": self.resolved_devices,
             "warnings": list(self.warnings),
+            "occupied": self.occupied,
             "summary": self.summary(),
         }
 
@@ -97,6 +102,7 @@ def preflight_gpu() -> GpuInfo:
     if _gpu_info_cache is not None:
         return _gpu_info_cache
 
+    import os
     import re
     import shutil
     import subprocess
@@ -108,6 +114,9 @@ def preflight_gpu() -> GpuInfo:
     pytorch_cuda = ""
     device_names: list[str] = []
     cuda_available = False
+    smi_total: list[int] = []
+    smi_free: list[int] = []
+    foreign_pids: set[int] = set()
 
     # ── Step 1: Probe nvidia-smi for hardware ────────────────────
     if shutil.which("nvidia-smi"):
@@ -115,20 +124,41 @@ def preflight_gpu() -> GpuInfo:
             result = subprocess.run(
                 [
                     "nvidia-smi",
-                    "--query-gpu=name,memory.total",
-                    "--format=csv,noheader",
+                    "--query-gpu=name,memory.total,memory.free",
+                    "--format=csv,noheader,nounits",
                 ],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
             if result.returncode == 0:
-                # Store just the device name — VRAM is reported
-                # separately via torch.cuda.mem_get_info below.
                 for line in result.stdout.strip().splitlines():
                     parts = [p.strip() for p in line.split(",")]
                     device_names.append(parts[0])
+                    try:
+                        smi_total.append(int(parts[1]))
+                        smi_free.append(int(parts[2]))
+                    except (IndexError, ValueError):
+                        pass
                 device_count = len(device_names)
+
+            # Compute-apps occupancy (context-free). Any foreign process
+            # holding a card means the zero-share window is not ours —
+            # the torch VRAM loop below must be skipped.
+            apps = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-compute-apps=pid",
+                    "--format=csv,noheader",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if apps.returncode == 0:
+                foreign_pids = {
+                    int(p) for p in apps.stdout.split() if p.strip().isdigit()
+                } - {os.getpid()}
 
             # Get driver version
             result2 = subprocess.run(
@@ -170,7 +200,20 @@ def preflight_gpu() -> GpuInfo:
         pytorch_cuda = torch.version.cuda or ""
         cuda_available = torch.cuda.is_available()
 
-        if cuda_available:
+        if cuda_available and foreign_pids:
+            # Zero-share policy: foreign compute processes hold the cards
+            # (co-tenant engine serving). torch.cuda.mem_get_info would pin
+            # a bare CUDA context per device on THIS process for its whole
+            # life — report nvidia-smi's numbers instead and create no
+            # context at all. is_available()/version above are context-free.
+            vram_total = list(smi_total)
+            vram_free = list(smi_free)
+            warnings.append(
+                f"{len(foreign_pids)} compute process(es) hold the GPUs — "
+                f"VRAM reported via nvidia-smi; no CUDA context created "
+                f"(zero-share policy)"
+            )
+        elif cuda_available:
             # Probe per-device VRAM via the runtime (more accurate than
             # nvidia-smi which doesn't reflect the current process's
             # point-in-time visibility under CUDA_VISIBLE_DEVICES).
@@ -219,5 +262,51 @@ def preflight_gpu() -> GpuInfo:
         vram_total_mib=vram_total,
         vram_free_mib=vram_free,
         warnings=warnings,
+        occupied=bool(foreign_pids),
     )
     return _gpu_info_cache
+
+
+_gpu_info_isolated_cache: GpuInfo | None = None
+
+_GPU_INFO_FIELDS = (
+    "available", "device_count", "driver_version", "driver_cuda_version",
+    "pytorch_cuda_version", "devices", "vram_total_mib", "vram_free_mib",
+    "warnings", "occupied",
+)
+
+
+def preflight_gpu_isolated(timeout: float = 60.0) -> GpuInfo:
+    """``preflight_gpu()`` in a child process — the caller never touches CUDA.
+
+    ``torch.cuda.mem_get_info`` pins a bare CUDA context (~384 MiB) on every
+    device for the life of the calling process. Under the zero-share GPU
+    policy an idle context counts as occupancy, so long-lived processes (the
+    gateway) must probe through a child that exits. Probe failures are NOT
+    cached, so a transient failure recovers on the next call.
+    """
+    global _gpu_info_isolated_cache
+    if _gpu_info_isolated_cache is not None:
+        return _gpu_info_isolated_cache
+
+    import json
+    import subprocess
+    import sys
+
+    try:
+        out = subprocess.run(
+            [sys.executable, "-m", "atelier.classify.gpu"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        # Last stdout line — import-time log noise must not break the parse.
+        data = json.loads(out.stdout.strip().splitlines()[-1])
+        info = GpuInfo(**{k: data[k] for k in _GPU_INFO_FIELDS})
+    except Exception as exc:
+        return GpuInfo(available=False, warnings=[f"isolated GPU probe failed: {exc}"])
+    _gpu_info_isolated_cache = info
+    return info
+
+
+if __name__ == "__main__":
+    import json
+    print(json.dumps(preflight_gpu().to_dict()))

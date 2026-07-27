@@ -2254,12 +2254,15 @@ def get_acceleration():
 
     Read-only probe — drives the "Acceleration" card in Settings.  Never
     blocks or fails; a CPU-only host simply reports ``available: false``.
+    Uses the subprocess-isolated probe: the in-process one would pin a
+    CUDA context per device on the gateway for its whole life, which the
+    zero-share GPU policy counts as occupancy against co-tenant engines.
     """
     try:
-        from atelier.classify.gpu import preflight_gpu
+        from atelier.classify.gpu import preflight_gpu_isolated
         from atelier.config import load_config
         cfg = load_config()
-        info = preflight_gpu().to_dict()
+        info = preflight_gpu_isolated().to_dict()
         gpu_on = info["available"] and cfg.classify_gpu_enabled != "false"
         info["methods"] = {
             # sage_enabled = explicit flag OR auto-enabled on GPU
