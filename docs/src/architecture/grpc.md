@@ -36,6 +36,18 @@ just proto    # runs bin/generate-proto.sh
 This invokes `grpc_tools.protoc` to produce `_pb2.py`, `_pb2_grpc.py`,
 and `.pyi` type stubs.
 
+## Two gRPC ports (lattice vs product)
+
+The product servicer and the Signals lattice engine are **different
+processes**. Do not treat `just up` / `:50071` as lattice accept.
+
+| Port | Process | Role |
+|------|---------|------|
+| **:50251** | `python -m atelier.engine.server` | Lattice / `atelier.service` — `zndx.engine.v1.Engine/Status` |
+| **:50071** | `atelier.server` (devenv) | Product workbench (CAI default is `:50051`) |
+
+Unit SoR: [Signals Peer Unit](../operations/peer-unit.md).
+
 ## Architecture Layers
 
 ```

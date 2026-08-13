@@ -18,7 +18,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 
 ## Architecture
 
-- **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules.
+- **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules. Product servicer is devenv **`:50071`** / CAI `:50051`. Lattice capability engine is **`:50251`** (`python -m atelier.engine.server`) — `atelier.service` accept path; not `just up`.
 - **HTTP Gateway** (`src/atelier/gateway.py`) — FastAPI bridging REST→gRPC, serves compiled React in production.
 - **React Frontend** (`ui/`) — Vite + React 19 + Ant Design + @xyflow/react. Dev server on :3000 proxies /api to :8090.
 - **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port **5533**) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) on port **5440** for CAI deployments when no external PG is available. The two ports are NOT interchangeable; the CAI pod has nothing on 5533. Code that needs the live URL reads `ATELIER_DB_URL` (exported by `bin/start-app.sh` line 278) — never hardcode the port.
@@ -71,7 +71,8 @@ this section before touching processes or ports.
 | Service | devenv (local) | **CAI Application pod** |
 |---|---|---|
 | HTTP gateway | 8090 | `$CDSW_APP_PORT` (= 8090, but managed by the platform) |
-| gRPC servicer | **50071** (devenv pins `ATELIER_GRPC_PORT` — Gaius engine squats 50051 on the shared host) | 50051 |
+| gRPC servicer (product) | **50071** (devenv pins `ATELIER_GRPC_PORT` — Gaius engine squats 50051 on the shared host) | 50051 |
+| Capability engine (lattice) | **50251** (`python -m atelier.engine.server`; `atelier.service`) | not started by the AMP app path |
 | PostgreSQL | 5533 (devenv `services.postgres`) | **PGlite on 5440** — port 5533 is unused in CAI |
 | Qdrant HTTP | 6333 | 6333 |
 

@@ -54,6 +54,14 @@ def test_engine_config_parses_capabilities(tmp_path):
     assert "--enable-auto-tool-choice" not in ref.extra_args
 
 
+def test_engine_port_env_overrides_hocon(tmp_path, monkeypatch):
+    conf = tmp_path / "base.conf"
+    conf.write_text(_CONF)
+    monkeypatch.setenv("ATELIER_ENGINE_PORT", "50251")
+    cfg = load_engine_config(conf)
+    assert cfg.grpc_port == 50251
+
+
 def test_engine_config_defaults_without_block(tmp_path):
     conf = tmp_path / "empty.conf"
     conf.write_text("app { name = x }")
@@ -200,6 +208,7 @@ def test_zndx_service_registered_beside_native(tmp_path):
 
     native = AtelierEngineServicer.__new__(AtelierEngineServicer)
     native.mgr = _FakeMgr()
+    native.cfg = EngineConfig()
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
     pbg.add_AtelierEngineServicer_to_server(native, server)
@@ -218,6 +227,7 @@ def test_zndx_service_registered_beside_native(tmp_path):
             assert rz.text == "echo:referee:hi"
             st = zpbg.EngineStub(ch).Status(zpb.StatusRequest(), timeout=5)
             assert st.project == "atelier"
+            assert any(ep.capability == "referee" for ep in st.endpoints)
     finally:
         server.stop(grace=None)
 

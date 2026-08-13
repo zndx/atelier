@@ -32,6 +32,7 @@
 - [Encrypted Deployment Defaults](./operations/secrets.md)
 - [Embeddings Canvas — Reviewer's Guide](./operations/embeddings-reviewer-guide.md)
 - [Extend Classification Workflow](./operations/extend-classification-workflow.md)
+- [Signals Peer Unit](./operations/peer-unit.md)
 
 # Scenarios
 

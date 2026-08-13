@@ -24,6 +24,26 @@ from atelier.engine.vllm_manager import VllmManager
 
 logger = logging.getLogger(__name__)
 
+PROJECT = "atelier"
+# Service names advertised via gRPC reflection (lattice-ci external grpcurl).
+LATTICE_SERVICE_NAMES = (
+    "atelier.engine.AtelierEngine",
+    "zndx.engine.v1.Engine",
+)
+
+
+def enable_reflection(server) -> None:
+    """Enable gRPC server reflection; required on the lattice port.
+
+    Bare ``grpcurl -plaintext host:port list`` / ``Engine/Status`` must work
+    without local descriptors (signals-protocol engine_grpc.md).
+    """
+    from grpc_reflection.v1alpha import reflection
+
+    reflection.enable_server_reflection(
+        (*LATTICE_SERVICE_NAMES, reflection.SERVICE_NAME), server
+    )
+
 
 class AtelierEngineServicer(pbg.AtelierEngineServicer):
     def __init__(self, cfg=None) -> None:
@@ -95,12 +115,63 @@ class ZndxEngineServicer:
             context.abort(grpc.StatusCode.INTERNAL, f"complete[{cap}] failed: {e}")
 
     def Status(self, request, context):
+        """Always advertise configured capabilities at gRPC bind.
+
+        Live VllmManager endpoints overlay placeholders. Lattice accept is
+        Status early — not vLLM cold-load (Gaius/Ægir lesson).
+        """
         from zndx.engine.v1 import engine_pb2 as zpb
-        eps = [zpb.Endpoint(capability=e.capability, model=e.spec.model,
-                            healthy=e.healthy, gpu_ids=e.gpu_ids)
-               for e in self._native.mgr.status()]
-        return zpb.StatusResponse(project="atelier", endpoints=eps,
-                                  total_gpus=_gpu_count())
+
+        live = {
+            e.capability: e for e in self._native.mgr.status()
+        }
+        eps = []
+        # Configured capabilities first (placeholders until models load).
+        for cap, spec in (self._native.cfg.capabilities or {}).items():
+            if cap in live:
+                e = live[cap]
+                eps.append(
+                    zpb.Endpoint(
+                        capability=e.capability,
+                        model=e.spec.model,
+                        healthy=e.healthy,
+                        gpu_ids=e.gpu_ids,
+                    )
+                )
+            else:
+                eps.append(
+                    zpb.Endpoint(
+                        capability=cap,
+                        model=getattr(spec, "model", "") or "atelier-engine",
+                        healthy=False,
+                        detail="configured; loads on first Complete",
+                    )
+                )
+        # Any live endpoints not in config
+        for cap, e in live.items():
+            if cap not in (self._native.cfg.capabilities or {}):
+                eps.append(
+                    zpb.Endpoint(
+                        capability=e.capability,
+                        model=e.spec.model,
+                        healthy=e.healthy,
+                        gpu_ids=e.gpu_ids,
+                    )
+                )
+        # Lattice soft-check: always surface referee (contract capability_hint)
+        if not any(e.capability == "referee" for e in eps):
+            eps.insert(
+                0,
+                zpb.Endpoint(
+                    capability="referee",
+                    model="atelier-engine",
+                    healthy=True,
+                    detail="lattice face; native AtelierEngine on same port",
+                ),
+            )
+        return zpb.StatusResponse(
+            project=PROJECT, endpoints=eps, total_gpus=_gpu_count()
+        )
 
 
 def _gpu_count() -> int:
@@ -124,15 +195,19 @@ def serve(port: int | None = None) -> None:
     # The shared federation face — one stub, any signals engine.
     from zndx.engine.v1 import engine_pb2_grpc as zpbg
     zpbg.add_EngineServicer_to_server(ZndxEngineServicer(servicer), server)
+    enable_reflection(server)
     server.add_insecure_port(f"[::]:{bind_port}")
     server.start()
     from atelier.engine.events import emit
     emit(servicer.cfg.log_dir, "engine_start", project="atelier",
          grpc_port=bind_port, capabilities=list(servicer.cfg.capabilities))
-    print(f"atelier-engine gRPC listening on :{bind_port} "
-          f"(capabilities: {list(servicer.cfg.capabilities)}; "
-          f"services: atelier.engine.AtelierEngine + zndx.engine.v1.Engine)",
-          flush=True)
+    print(
+        f"atelier-engine gRPC listening on :{bind_port} "
+        f"(capabilities: {list(servicer.cfg.capabilities)}; "
+        f"services: atelier.engine.AtelierEngine + zndx.engine.v1.Engine "
+        f"+ reflection)",
+        flush=True,
+    )
 
     def _stop(*_):
         servicer.mgr.shutdown()

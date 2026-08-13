@@ -115,5 +115,8 @@ def load_engine_config(conf_path: str | Path | None = None) -> EngineConfig:
         caps = tree.get("capabilities", None)
         if caps:
             cfg.capabilities = {name: _spec_from_tree(sub) for name, sub in caps.items()}
+    # Lattice / unit override (signals peer unit)
+    if os.environ.get("ATELIER_ENGINE_PORT"):
+        cfg.grpc_port = int(os.environ["ATELIER_ENGINE_PORT"])
     cfg.resolve_paths()
     return cfg
