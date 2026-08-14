@@ -173,7 +173,18 @@ def _load_collections(corpora: Path) -> list[Collection]:
             logger.warning("Skipping %s: unreadable manifest (%s)", d.name, exc)
             continue
         coll = Collection(slug=d.name, path=d, manifest=manifest)
-        for term in manifest.get("terms", []):
+        terms = manifest.get("terms", [])
+        if terms and isinstance(terms[0], str):
+            raise SdgSampleError(
+                f"Collection {d.name} uses the DDL-only manifest schema "
+                f"(terms as template-id strings, no populated tables) — "
+                f"this corpus pin ships no instantiated rows, so a "
+                f"relationally-sound sample cannot be built from it.  "
+                f"Pin sdg-corpora to a release with populated "
+                f"collections (e.g. b24ef9f6) or adapt the sampler to "
+                f"the blind-release emission format."
+            )
+        for term in terms:
             genus = term.get("genus", "")
             anchor = _GENUS_TO_ANCHOR.get(genus)
             if anchor is None:
