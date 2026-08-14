@@ -70,15 +70,98 @@ The `.env` file is loaded automatically via `dotenv.enable = true`. Copy `.env.e
 The `external/` directory contains forked submodules:
 
 - **[embedding-atlas](https://github.com/rch/oss-embedding-atlas)** — Fork of Apple's embedding-atlas with important modifications for Atelier's Embeddings page. Pre-built dist/ is committed to the fork so CAI deployment doesn't need the full build toolchain (Emscripten, Rust, uv). Required for both dev and deployment.
-- **hermes-agent** — Reference fork, dev-only.
+- **sdg-corpora** — Ontology-grounded SDG corpora (ontology → SKOS vocabulary → DDL footprint → generated corpus). The source of classification research work; each commit is a reproducible convergence snapshot.
 
 ```bash
 git submodule update --init --recursive   # Required: embedding-atlas fork (pre-built dist/)
 ```
 
+### macOS + Gateway configuration
+
+devenv fully supports macOS (Apple silicon) — Linux-only pieces are
+gated behind `pkgs.stdenv.isLinux` in `devenv.nix`, so `devenv up`
+brings up the same five-service stack. Platform differences to know:
+
+| Capability | Linux | macOS |
+|------------|-------|-------|
+| Full stack (`devenv up`) | ✓ | ✓ |
+| GPU acceleration (CUDA: SAGE/SHAP kernels, CatBoost, cuML UMAP) | ✓ (NVIDIA host) | — CPU fallbacks |
+| d2 diagram rendering in docs (`mdbook-d2`) | ✓ | — (d2's renderer needs linux-only mesa; `mdbook serve` otherwise works) |
+| libpq for psycopg | devenv `LD_LIBRARY_PATH` | bundled `psycopg[binary]` wheel (automatic, darwin-only dependency marker) |
+
+For deployments that reach Anthropic through an internal gateway
+(e.g. on a VPN) instead of `api.anthropic.com`, configure token auth
+in `.env` — either `ANTHROPIC_API_KEY` *or* the token pair below
+satisfies credential gating everywhere (Web Terminal Agent catalog,
+Overwatch, classify LLM sweep, enrichment):
+
+```bash
+ANTHROPIC_AUTH_TOKEN=...                                  # sent as Authorization: Bearer
+ANTHROPIC_BASE_URL=https://ai-gateway.example.com         # redirects all direct-API clients + the claude CLI
+
+# Gateways host their own model catalog (often Bedrock-style IDs) —
+# pin the agent model and the CLI's internal sub-models to IDs the
+# gateway actually serves:
+ATELIER_AGENT_MODEL=anthropic.claude-sonnet-4-6
+ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic.claude-sonnet-4-6
+ANTHROPIC_DEFAULT_HAIKU_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0
+CLAUDE_CODE_SUBAGENT_MODEL=anthropic.claude-sonnet-4-6
+CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+ENABLE_TOOL_SEARCH=false
+```
+
+With a base URL configured, the Web Terminal Agent picker gains a
+**Gateway** entry that routes `ATELIER_AGENT_MODEL` through the
+gateway. Bedrock-style model IDs route over the Anthropic protocol
+when no AWS credentials are present — the gateway proxies them.
+
+To demo the classification pipeline without activating the Agent SDK
+surfaces, add `ATELIER_OVERWATCH_ENABLED=false` — otherwise Overwatch
+auto-activates as soon as any Anthropic credential appears.
+
+### Local LLM (llama.cpp) — turn-key classification
+
+devenv ships [llama.cpp](https://github.com/ggml-org/llama.cpp) on
+both platforms — Metal acceleration on Apple silicon, CPU BLAS on
+Linux (for CUDA offload, override `llama-cpp` with `cudaSupport` in
+`devenv.nix`). `llama-server` is OpenAI-compatible, so it plugs into
+the classify backend with no credentials.
+
+The fully self-contained flow (no external LLM provider, no API key):
+
+```bash
+# .env — three lines:
+ATELIER_LLAMA_AUTOSTART=1
+ATELIER_LLM_BASE_URL=http://localhost:8080/v1
+ATELIER_LLM_MODEL=local
+
+devenv up -d
+```
+
+That starts the usual five services **plus** a llama.cpp process
+serving NVIDIA Nemotron 3 Nano 30B-A3B (MoE, ~3B active parameters —
+fast on Metal) via [Unsloth's GGUF quant](https://huggingface.co/unsloth/Nemotron-3-Nano-30B-A3B-GGUF)
+— auto-downloaded and cached on first start (~18 GB). NVIDIA doesn't
+publish first-party GGUFs; override the quant with `ATELIER_LLAMA_HF`
+or serve any local file with `ATELIER_LLAMA_MODEL`.
+
+With the `sdg-corpora` submodule initialized, startup also registers
+an **SDG** data source — one relational collection
+(`ATELIER_SDG_COLLECTION`, default `research-project`) classified
+blind against the SKOS annotations vocabulary. Pick it in the UI's
+Data Source selector and start a classification run.
+
+To browse the same sample relationally (with BFO/template provenance
+as table comments):
+
+```bash
+just sdg-load     # loads schema → data → views into devenv PG (database `sdg`)
+psql postgresql://localhost:5533/sdg
+```
+
 ## Deploying to Cloudera AI
 
-There are two ways to deploy Atelier on Cloudera AI (CML): as an **AMP** (automated) or as a manual **Application**. devenv is not used in CML — the deployment scripts handle all infrastructure (PGlite for embedded PostgreSQL, Qdrant binary download). The embedding-atlas submodule is cloned during install (pre-built dist/ committed to the fork); hermes-agent is not needed.
+There are two ways to deploy Atelier on Cloudera AI (CML): as an **AMP** (automated) or as a manual **Application**. devenv is not used in CML — the deployment scripts handle all infrastructure (PGlite for embedded PostgreSQL, Qdrant binary download). The embedding-atlas submodule is cloned during install (pre-built dist/ committed to the fork).
 
 ### Option 1: AMP Deployment (Recommended)
 
@@ -147,7 +230,7 @@ locally).
 | Qdrant | `pkgs.qdrant` (devenv process) | Binary download from GitHub releases |
 | Migrations | `just migrate` (dbmate CLI) | Auto-applied on startup via SQLAlchemy |
 | Node.js | pnpm (via devenv) | npm (CML base image) |
-| Git submodules | Available for development | embedding-atlas cloned (pre-built dist/); hermes-agent not needed |
+| Git submodules | Available for development | embedding-atlas cloned (pre-built dist/) |
 
 ## Architecture
 

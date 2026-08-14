@@ -390,7 +390,6 @@ src/atelier/classify/
 ├── gpu.py               # GPU detection + NVIDIA driver symlink (nix+CUDA)
 ├── sampler.py           # Hive metadata sampling + fixture data loading
 ├── synth.py             # Synthetic data generation
-├── synth_generators.py  # 316+ hand-coded value generators (shared module)
 ├── synth_registry.py    # Three-layer generator registry (hand-coded > template > inferred)
 ├── meta_tagging_overlay.py # 130+ META_TO_ICE mappings for meta-tagging alignment
 ├── factorized_nhsvm.py  # SVM source (default): ModernBERT mean-pool → dense

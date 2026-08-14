@@ -34,7 +34,7 @@ benchmark labels to BFO/CCO concepts.
   reference labels.  Inheriting `atelier-vocab.ttl` + synth generators
   is part of the M2 roadmap.
 - **Synthetic data pipeline**: currently in atelier
-  (`synth_generators.py`, 316+ generators).  Migration target: Ægir,
+  (the since-retired `synth_generators.py`).  Migration target: Ægir (completed 2026-08-13),
   since the generators feed pre-training corpora directly.  Atelier's
   classification pipeline can consume generator output via a thin
   client during transition.
@@ -151,7 +151,7 @@ schema:Temperature    rdfs:subClassOf cco:ont00000853 .
 Plus property-level: `unitCode`, `unitText`, `weight`.
 
 Implementation: ~10 lines in `atelier-vocab.ttl`, ~5 generators in
-`synth_generators.py` (already have NUMERIC.* generators that can be
+the since-retired `synth_generators.py` (had NUMERIC.* generators that could be
 re-keyed to schema URIs).
 
 **SOTAB labels covered**: 10 (Distance, Duration, Energy, Mass, weight,
@@ -179,7 +179,7 @@ schema:SportsEvent    rdfs:subClassOf schema:Event .
 ```
 
 Implementation: ~14 lines in `atelier-vocab.ttl`, ~14 SSSOM annotation
-blocks, ~14 generators in `synth_generators.py`.
+blocks, ~14 generators in the since-retired `synth_generators.py`.
 
 **SOTAB labels covered**: ~20 (entity-property pairs cascade through
 parent's `name`/`description` mappings).
@@ -268,7 +268,7 @@ ceiling once representations are healthy.
 
 ## Synthetic data pipeline implications
 
-The synth framework (`synth_generators.py`, 316+ hand-coded generators
+The synth framework (the since-retired `synth_generators.py`, 316+ hand-coded generators
 plus the three-layer registry) **migrates to Ægir** with the rest of the
 ontology work.  Ægir-resident synth gives pre-training direct access to
 generator output without crossing repo boundaries.  After Tier-A/B/C

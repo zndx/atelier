@@ -224,7 +224,6 @@ just up               # Start gRPC + gateway + Vite dev server
 - **[Classification Pipeline](./architecture/classification.md)** — DST methodology, evidence sources, bootstrap convergence
 - **[Monte Carlo Sampling](./architecture/monte-carlo.md)** — Stratified sampling for scale
 - **[GPU Acceleration](./architecture/gpu.md)** — CUDA detection and batch encoding
-- **[Synthetic Data & Training](./architecture/synth.md)** — 316+ generators, factorized hierarchical NHSVM, CatBoost fit-to-LLM
 - **[Embeddings](./architecture/embeddings.md)** — Interactive parquet visualization
 - **[Data Sources](./architecture/data-sources.md)** — Source-aware versioning, OOTB sample, Hive auto-discovery
 - **[BDD Scenarios](./scenarios/overview.md)** — 141 scenarios across 4 domains

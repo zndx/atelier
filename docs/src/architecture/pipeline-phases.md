@@ -57,7 +57,9 @@ below.
 
 The FSM defines two states that the standard inference run does not
 visit — `GENERATING_SYNTH` and `TRAINING`.  These belong to the
-offline [synth-corpus generation + SVM-training flow](./synth.md) that
+offline synth-corpus generation + SVM-training flow (retired legacy
+stack; superseded by the sdg-corpora corpus and the pre-conditioning
+NHSVM lane) that
 produces the bundled SVM artifact (``svm.pkl``; the legacy filename
 ``svm_frontier.pkl`` is the excised-M9 name, still read from disk for
 backward compatibility with older run directories), and are reachable

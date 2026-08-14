@@ -273,8 +273,8 @@ happened to find an early local optimum.
 
 - [Classification Pipeline](./classification.md) — the AL loop being
   generalized.
-- [Synthetic Data & Training](./synth.md) — synth provides the
-  labeled-pool floor.
+- Synthetic data & training (retired legacy stack — sdg-corpora is
+  the corpus source now) — synth provided the labeled-pool floor.
 - [ML Artifacts & Extend Classification](./ml-artifacts.md) — winning
   configurations produce artifact sets that flow through the existing
   Extend pipeline.

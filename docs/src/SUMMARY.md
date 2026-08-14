@@ -19,8 +19,6 @@
 - [Nautilus Mid-Run Watcher](./architecture/nautilus.md)
 - [Monte Carlo Sampling](./architecture/monte-carlo.md)
 - [GPU Acceleration](./architecture/gpu.md)
-- [GPU Acceleration (Design Notes)](./architecture/gpu-acceleration.md)
-- [Synthetic Data & Training](./architecture/synth.md)
 - [Embeddings](./architecture/embeddings.md)
 - [Data Sources & Versioning](./architecture/data-sources.md)
 - [ML Artifacts & Extend Classification](./architecture/ml-artifacts.md)
