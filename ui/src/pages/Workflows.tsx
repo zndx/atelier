@@ -54,6 +54,7 @@ function WorkflowsInner() {
     cautious_review_enabled: false,
     overwatch_enabled: false,
     classify_agent_enabled: false,
+    precondition_enabled: false,
   });
 
   const fetchCapabilities = () => {
@@ -65,6 +66,7 @@ function WorkflowsInner() {
           cautious_review_enabled: Boolean(cfg.cautious_review_enabled),
           overwatch_enabled: Boolean(cfg.overwatch_enabled),
           classify_agent_enabled: Boolean(cfg.classify_agent_enabled),
+          precondition_enabled: Boolean(cfg.precondition_enabled),
         });
       })
       .catch(() => {

@@ -285,10 +285,8 @@ class FrameOfDiscernment:
     def __init__(
         self,
         category_set,  # HierarchicalCategorySet
-        confusable_pairs: list[tuple[str, str]] | None = None,
     ) -> None:
         self._category_set = category_set
-        self._confusable_pairs = confusable_pairs or []
         self._build_focal_elements()
 
     def _build_focal_elements(self) -> None:
@@ -331,18 +329,6 @@ class FrameOfDiscernment:
                 continue
             self._internal[cat.code] = FocalElement(subtree, label=cat.label)
 
-        # Confusable pairs
-        self._confusables: list[FocalElement] = []
-        for code_a, code_b in self._confusable_pairs:
-            pair = frozenset({code_a, code_b})
-            cat_a = cs.by_code.get(code_a) or cs.all_by_code.get(code_a)
-            cat_b = cs.by_code.get(code_b) or cs.all_by_code.get(code_b)
-            label_a = cat_a.label if cat_a else code_a
-            label_b = cat_b.label if cat_b else code_b
-            self._confusables.append(
-                FocalElement(pair, label=f"{label_a}|{label_b}")
-            )
-
     @property
     def singletons(self) -> dict[str, FocalElement]:
         return self._singletons
@@ -351,24 +337,10 @@ class FrameOfDiscernment:
     def internal_nodes(self) -> dict[str, FocalElement]:
         return self._internal
 
-    @property
-    def confusables(self) -> list[FocalElement]:
-        return self._confusables
-
-    @cached_property
-    def confusable_map(self) -> dict[str, list[FocalElement]]:
-        """Map singleton code -> confusable pair FocalElements containing it."""
-        result: dict[str, list[FocalElement]] = {}
-        for fe in self._confusables:
-            for code in fe.codes:
-                result.setdefault(code, []).append(fe)
-        return result
-
     @cached_property
     def all_focal_elements(self) -> list[FocalElement]:
         elements = list(self._singletons.values())
         elements.extend(self._internal.values())
-        elements.extend(self._confusables)
         elements.append(self.theta)
         return elements
 
@@ -1050,17 +1022,10 @@ class HierarchicalClassification:
         bel = combined.belief(best_fe)
         pl = combined.plausibility(best_fe)
 
-        confusable_parts: list[str] = []
-        for fe, m in combined.masses.items():
-            if len(fe.codes) == 2 and m > 0.05 and fe.label:
-                confusable_parts.append(f"{fe.label}={m:.2f}")
-
         evidence = (
             f"dst({', '.join(source_parts)}) → {cat.label} "
             f"[Bel={bel:.2f}, Pl={pl:.2f}, K={conflict:.2f}]"
         )
-        if confusable_parts:
-            evidence += f" [confusable: {', '.join(confusable_parts)}]"
 
         # Cross-subtree alternative summary — when a non-predicted
         # subtree's internal node carries non-trivial belief,

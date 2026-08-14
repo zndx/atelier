@@ -28,7 +28,6 @@ Feature: Runtime overlay — full parameter surface
       | classify_discount_pattern_theta          | 0.30       |
       | classify_discount_name_match_exact       | 0.55       |
       | classify_discount_catboost_variance_scale| 2.0        |
-      | classify_discount_confusable_ratio_threshold | 2.5    |
 
     # Sampling tab
     Examples: Sampling

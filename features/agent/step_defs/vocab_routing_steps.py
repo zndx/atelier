@@ -80,12 +80,18 @@ def _make_stub_cs(name="stub", n=3):
 
 
 def _install_universal_stub(context):
-    """Spy on load_universal_vocabulary so scenarios can assert no fallback."""
+    """Spy on load_universal_vocabulary so scenarios can assert no fallback.
+
+    The pipeline no longer imports the universal loader at module level —
+    the silent-fallback path was excised (fail-loud vocabulary resolution),
+    and remaining callers import from ``atelier.classify.taxonomy`` at call
+    time.  Patch the taxonomy module so the spy still observes any caller.
+    """
     if getattr(context, "universal_stub", None) is not None:
         return
-    import atelier.classify.pipeline as pipeline_mod
+    import atelier.classify.taxonomy as taxonomy_mod
     stub = _UniversalStub()
-    _patch(context, pipeline_mod, "load_universal_vocabulary", stub)
+    _patch(context, taxonomy_mod, "load_universal_vocabulary", stub)
     context.universal_stub = stub
 
 
@@ -116,8 +122,12 @@ def step_vocab_has_n_categories(context, count):
 
 @then('all codes start with "ICE."')
 def step_all_codes_start_ice(context):
+    # The unified tagging vocabulary includes the bare root "ICE" —
+    # parents (root included) are taggable alongside leaves.
     for cat in context.vocab.categories:
-        assert cat.code.startswith("ICE."), f"Code {cat.code} doesn't start with ICE."
+        assert cat.code == "ICE" or cat.code.startswith("ICE."), (
+            f"Code {cat.code} doesn't start with ICE."
+        )
 
 
 # ── Hive source setup ─────────────────────────────────────────────

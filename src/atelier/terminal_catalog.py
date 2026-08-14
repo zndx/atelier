@@ -37,6 +37,9 @@ class _CatalogEntry:
     max_output_tokens: int
     thinking: str  # "adaptive" | "extended" | "none"
     notes: str = ""
+    # True → additionally requires cfg.anthropic_base_url (corporate
+    # gateway entries make no sense against api.anthropic.com).
+    requires_base_url: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,20 @@ _CATALOG: tuple[_CatalogEntry, ...] = (
         thinking="adaptive",
         notes="Previous-generation Opus on the direct API (still active; pinnable).",
     ),
+    _CatalogEntry(
+        id="gateway-agent-model",
+        label="Gateway",
+        provider="anthropic",
+        model_ref_source="@attr:agent_model",
+        context_window=200_000,
+        max_output_tokens=64_000,
+        thinking="extended",
+        notes=(
+            "Routes ATELIER_AGENT_MODEL through the configured gateway "
+            "(ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)."
+        ),
+        requires_base_url=True,
+    ),
 )
 
 
@@ -134,7 +151,9 @@ def _availability(entry: _CatalogEntry, resolved_ref: str, cfg) -> tuple[bool, s
         return True, ""
     if entry.provider == "anthropic":
         if not cfg.has_anthropic:
-            return False, "ANTHROPIC_API_KEY not set"
+            return False, "ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN not set"
+        if entry.requires_base_url and not getattr(cfg, "anthropic_base_url", None):
+            return False, "ANTHROPIC_BASE_URL not set"
         return True, ""
     return False, f"unknown provider: {entry.provider}"
 

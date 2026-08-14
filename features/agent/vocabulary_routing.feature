@@ -1,14 +1,15 @@
 @agent @tier-0
 Feature: Vocabulary routing per source type
   The pipeline loads different vocabularies depending on the data source.
-  OOTB sample uses the 316-leaf ICE ontology; hive/synth sources use the
+  OOTB sample uses the 395-term unified ICE ontology (leaves and
+  parents are both taggable); hive/synth sources use the
   customer's domain annotations directly.  Domain codes are the
   classification targets — the LLM reads labels and descriptions and
   classifies into hierarchical dot-codes.
 
-  Scenario: OOTB sample uses 316-category ICE vocabulary
+  Scenario: OOTB sample uses 395-category ICE vocabulary
     When I resolve vocabulary for source "ootb-sample"
-    Then the vocabulary has 316 categories
+    Then the vocabulary has 395 categories
     And all codes start with "ICE."
 
   Scenario: Domain annotations are used directly as classification target

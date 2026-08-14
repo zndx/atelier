@@ -214,6 +214,9 @@ class LLMBackendConfig:
 
     backend: str = "openai_compatible"  # "anthropic" | "openai_compatible" | "cerebras" | "bedrock"
     api_key: str | None = None
+    # Bearer-token alternative to api_key for anthropic backends behind
+    # a corporate gateway (sends ``Authorization: Bearer …``).
+    auth_token: str | None = None
     model: str = "glm-4.7"
     base_url: str | None = None  # e.g. "http://localhost:8000/v1"
     max_tokens: int = 65536
@@ -272,13 +275,35 @@ def bedrock_max_output_tokens(model_id: str) -> int:
     return 4096
 
 
+def _anthropic_ctor_kwargs(config: "LLMBackendConfig") -> dict:
+    """``anthropic.Anthropic`` constructor kwargs honoring both auth
+    styles: ``api_key`` (X-Api-Key) and ``auth_token`` (Bearer, for
+    corporate gateways).  ``base_url`` redirects off api.anthropic.com.
+    Unset values are omitted so the SDK defaults apply."""
+    kwargs: dict = {}
+    if config.api_key:
+        kwargs["api_key"] = config.api_key
+    if config.auth_token:
+        kwargs["auth_token"] = config.auth_token
+    if config.base_url:
+        kwargs["base_url"] = config.base_url
+    return kwargs
+
+
 def config_from_atelier(cfg) -> LLMBackendConfig:
     """Build LLMBackendConfig from an AtelierConfig."""
+    is_anthropic = (cfg.classify_llm_backend or "").startswith("anthropic")
     return LLMBackendConfig(
         backend=cfg.classify_llm_backend,
         api_key=cfg.classify_llm_api_key,
+        # Gateway bearer token backstops anthropic backends when no
+        # explicit classify key is set (single corporate-VPN knob).
+        auth_token=(
+            None if cfg.classify_llm_api_key else cfg.anthropic_auth_token
+        ),
         model=cfg.classify_llm_model,
-        base_url=cfg.classify_llm_base_url,
+        base_url=cfg.classify_llm_base_url
+        or (cfg.anthropic_base_url if is_anthropic else None),
         max_tokens=cfg.classify_llm_max_tokens,
         temperature=cfg.classify_llm_temperature,
         batch_size=cfg.classify_llm_columns_per_call,
@@ -1192,11 +1217,14 @@ class AnthropicBackend(LLMBackend):
                 "anthropic package required. Install with: uv add anthropic"
             )
 
-        if not self._config.api_key:
-            raise ValueError("Anthropic API key required. Set ATELIER_LLM_API_KEY.")
+        if not self._config.api_key and not self._config.auth_token:
+            raise ValueError(
+                "Anthropic credentials required. Set ATELIER_LLM_API_KEY "
+                "(or ANTHROPIC_AUTH_TOKEN for gateway deployments)."
+            )
 
         self._client = anthropic.Anthropic(
-            api_key=self._config.api_key,
+            **_anthropic_ctor_kwargs(self._config),
             timeout=httpx.Timeout(connect=15.0, read=180.0, write=10.0, pool=5.0),
         )
         return self._client
@@ -1296,11 +1324,11 @@ class AnthropicStructuredBackend(LLMBackend):
                 "anthropic package required. Install with: uv add anthropic"
             )
 
-        if not self._config.api_key:
-            raise ValueError("Anthropic API key required.")
+        if not self._config.api_key and not self._config.auth_token:
+            raise ValueError("Anthropic credentials required (api_key or auth_token).")
 
         self._client = anthropic.Anthropic(
-            api_key=self._config.api_key,
+            **_anthropic_ctor_kwargs(self._config),
             timeout=httpx.Timeout(connect=15.0, read=180.0, write=10.0, pool=5.0),
         )
         return self._client
@@ -2090,20 +2118,28 @@ def create_backend_from_cfg(cfg) -> LLMBackend:
 
     model = cfg.classify_subagent_model
     if is_bedrock_model(model):
-        return _build_bedrock_backend(cfg, model)
+        # Bedrock-style IDs normally route to Bedrock — but corporate
+        # gateways host the same IDs over the anthropic protocol.
+        # Prefer Bedrock when credentialed; otherwise fall through to
+        # the gateway when one is configured.
+        if cfg.has_bedrock or not (cfg.anthropic_base_url and cfg.has_anthropic):
+            return _build_bedrock_backend(cfg, model)
     return _build_anthropic_backend(cfg, model)
 
 
 def _build_anthropic_backend(cfg, model: str) -> LLMBackend:
     """Build an AnthropicStructuredBackend from config + model."""
-    if not cfg.anthropic_api_key:
+    if not cfg.has_anthropic:
         raise ValueError(
-            f"Model {model!r} requires ANTHROPIC_API_KEY (direct API)."
+            f"Model {model!r} requires ANTHROPIC_API_KEY or "
+            f"ANTHROPIC_AUTH_TOKEN (direct API / gateway)."
         )
     logger.info("Classification LLM: AnthropicStructured %s", model)
     return create_backend(LLMBackendConfig(
         backend="anthropic_structured",
         api_key=cfg.anthropic_api_key,
+        auth_token=cfg.anthropic_auth_token,
+        base_url=cfg.anthropic_base_url,
         model=model,
         max_tokens=cfg.classify_llm_max_tokens,
         temperature=0.0,

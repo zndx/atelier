@@ -581,8 +581,25 @@ def load_annotations_from_filesystem(
         reader = csv.DictReader(f)
         for row in reader:
             row = _normalize_annotations_row(row)
-            # Tolerate the leading-apostrophe quirk from Excel exports
-            # ("'ID") as well as plain "ID"/"id".
+
+            # Universal / ReferenceCategory format (mnemonic codes with
+            # explicit parent_code — e.g. sdg-corpora's
+            # ``vocabulary/annotations.csv``).  Pass rows through
+            # unchanged: ``_build_category_set_from_records`` handles
+            # code/label/parent_code natively.  The file's own
+            # ``taxonomy`` column wins as namespace discriminator when
+            # present; otherwise stamp the caller's.
+            code_uni = str(row.get("code") or "").strip()
+            if code_uni:
+                rec = {k: v for k, v in row.items() if k}
+                rec["code"] = code_uni
+                if not str(rec.get("taxonomy") or "").strip():
+                    rec["taxonomy"] = taxonomy
+                records.append(rec)
+                continue
+
+            # UAT/Hive export format — tolerate the leading-apostrophe
+            # quirk from Excel exports ("'ID") as well as plain "ID"/"id".
             code = (row.get("'ID") or row.get("ID") or row.get("id") or "").strip()
             if not code:
                 continue

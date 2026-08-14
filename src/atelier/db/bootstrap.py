@@ -199,14 +199,6 @@ KEYSTONE_AGENTS: list[tuple[str, str, str, str, str]] = [
         '["build-mass-functions", "apply-dempster-rule", "diagnose-conflicts"]',
     ),
     (
-        "synth-generator",
-        "Synthetic Generator",
-        "Creates deterministic synthetic training tables with representative "
-        "column data for classifier training",
-        "synth_generator",
-        '["generate-synth-tables", "load-annotations"]',
-    ),
-    (
         "viz-director",
         "Visualization Director",
         "Computes SAGE/SHAP feature explanations and prepares Atlas-compatible "
@@ -229,6 +221,23 @@ def seed_keystone_agents() -> None:
     for aid, name, desc, role, tools in KEYSTONE_AGENTS:
         dao.upsert_agent(aid, name, desc, role, tools)
     log.info("Upserted %d keystone agents", len(KEYSTONE_AGENTS))
+
+    # Converge away retired keystones on existing databases.  The
+    # synth-generator keystone retired with the ICE generator library
+    # (2026-08-13) — synthetic corpus generation is Aegir's domain now.
+    _RETIRED_KEYSTONE_IDS = ("synth-generator",)
+    try:
+        from atelier.db.model import Agent
+        with dao.get_session() as session:
+            removed = (
+                session.query(Agent)
+                .filter(Agent.id.in_(_RETIRED_KEYSTONE_IDS))
+                .delete(synchronize_session=False)
+            )
+        if removed:
+            log.info("Removed %d retired keystone agent(s)", removed)
+    except Exception as exc:
+        log.warning("Retired-keystone cleanup skipped: %s", exc)
 
 
 def sync_orphaned_runs(cfg=None) -> None:

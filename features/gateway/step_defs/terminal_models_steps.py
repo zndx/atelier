@@ -120,6 +120,11 @@ def step_stats_present(context):
 @then("every catalog entry is an Opus-class model")
 def step_opus_only(context):
     for m in context.tc_json["models"]:
+        if m.get("id") == "gateway-agent-model":
+            # The Gateway row's ref is operator-pinned (ATELIER_AGENT_MODEL)
+            # — gateways host their own catalogs, so Opus-class is not a
+            # meaningful constraint there.
+            continue
         label = (m.get("label") or "").lower()
         ref = (m.get("model_ref") or "").lower()
         assert "opus" in label or "opus" in ref, (

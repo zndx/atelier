@@ -7,7 +7,7 @@ across 287 nodes) for training the factorized NHSVM head.  Per column:
   - 5 sample values from a generator (v1 → hand-coded ICE → template
     → inferred, in priority order)
   - A column name from per-code NAME_VARIANTS_BY_CODE (v1) merged
-    with the 8-style rotation from generate_synth_source.py
+    with the historical 8-style naming rotation
   - 4 sibling column names from per-code TABLE_CONTEXT_BY_CODE (v1,
     70% of the time) or cross-domain mixing (30%)
   - A synthetic table name from the same template (or

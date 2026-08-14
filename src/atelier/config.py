@@ -49,6 +49,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "gateway.host": ("gateway_host", str),
     "gateway.port": ("gateway_port", int),
     "agents.api_key": ("anthropic_api_key", str),
+    "agents.auth_token": ("anthropic_auth_token", str),
+    "agents.base_url": ("anthropic_base_url", str),
     "agents.model": ("agent_model", str),
     "agents.aws_access_key_id": ("aws_access_key_id", str),
     "agents.aws_secret_access_key": ("aws_secret_access_key", str),
@@ -65,6 +67,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "qdrant.http_port": ("qdrant_http_port", int),
     "qdrant.grpc_port": ("qdrant_grpc_port", int),
     "data.parquet_dir": ("parquet_dir", str),
+    "data.artifact_root": ("artifact_root", str),
+    "data.sdg_collection": ("sdg_collection", str),
     "cml.project_id": ("cml_project_id", str),
     "cml.domain": ("cml_domain", str),
     "cml.engine_id": ("cml_engine_id", str),
@@ -116,6 +120,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.aegir.corpora_dir": ("aegir_corpora_dir", str),
     "classify.aegir.release_dir": ("aegir_release_dir", str),
     "classify.aegir.cluster_name": ("aegir_cluster_name", str),
+    "classify.precondition.enabled": ("classify_precondition_enabled", bool),
     # ML classifier model paths
     "classify.catboost_model_path": ("classify_catboost_model_path", str),
     "classify.svm.hierarchical": ("classify_svm_hierarchical", bool),
@@ -140,6 +145,8 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     # Bootstrap convergence
     "app.display_name": ("app_display_name", str),
     "classify.bootstrap.max_iterations": ("classify_bootstrap_max_iterations", int),
+    "classify.bootstrap.small_sample_columns": ("classify_bootstrap_small_sample_columns", int),
+    "classify.bootstrap.small_sample_max_iterations": ("classify_bootstrap_small_sample_max_iterations", int),
     "classify.bootstrap.min_iterations": ("classify_bootstrap_min_iterations", int),
     "classify.cautious_review.enabled": ("classify_cautious_review_enabled", bool),
     "classify.cautious_review.bel_threshold": ("classify_cautious_review_bel_threshold", float),
@@ -175,7 +182,6 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.maxsim.enabled": ("classify_maxsim_enabled", bool),
     "classify.maxsim.model": ("classify_colbert_model", str),
     "classify.discounts.svm": ("classify_discount_svm", float),
-    "classify.subsumption_alignment.score_threshold": ("classify_subsumption_score_threshold", float),
     "classify.discounts.pattern_theta": ("classify_discount_pattern_theta", float),
     "classify.discounts.name_match_exact": ("classify_discount_name_match_exact", float),
     "classify.discounts.name_match_code": ("classify_discount_name_match_code", float),
@@ -185,7 +191,6 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.discounts.catboost_variance_scale": ("classify_discount_catboost_variance_scale", float),
     "classify.discounts.catboost_max": ("classify_discount_catboost_max", float),
     "classify.discounts.catboost_fallback": ("classify_discount_catboost_fallback", float),
-    "classify.discounts.confusable_ratio_threshold": ("classify_discount_confusable_ratio_threshold", float),
     # Mass-magnitude calibration (post-discount α scaling per channel).
     # Defaults α=1.0 preserve historical behavior; tuning operating
     # point identified in build/runs/calibration/findings_5ef4868c.md.
@@ -257,6 +262,10 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
     # Special cases: preserve standard env var names
     if _field == "anthropic_api_key":
         _env = "ANTHROPIC_API_KEY"
+    elif _field == "anthropic_auth_token":
+        _env = "ANTHROPIC_AUTH_TOKEN"
+    elif _field == "anthropic_base_url":
+        _env = "ANTHROPIC_BASE_URL"
     elif _field == "aws_access_key_id":
         _env = "AWS_ACCESS_KEY_ID"
     elif _field == "aws_secret_access_key":
@@ -282,6 +291,10 @@ for _hocon_path, (_field, _) in _HOCON_MAP.items():
         _env = "ATELIER_DATA_CONNECTIONS"
     elif _field.startswith("cml_"):
         _env = "CDSW_" + _field[4:].upper()
+    elif _field == "sdg_collection":
+        _env = "ATELIER_SDG_COLLECTION"
+    elif _field == "artifact_root":
+        _env = "ATELIER_ARTIFACT_ROOT"
     elif _field == "gateway_port":
         _env = "ATELIER_GATEWAY_PORT"
     elif _field == "qdrant_host":
@@ -330,6 +343,10 @@ class AtelierConfig:
 
     # Claude Agent SDK
     anthropic_api_key: str | None = None
+    # Corporate-gateway alternative to api_key: bearer token + proxied
+    # endpoint (e.g. an internal AI gateway on a corporate VPN).
+    anthropic_auth_token: str | None = None
+    anthropic_base_url: str | None = None
     agent_model: str = "claude-opus-4-8"
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
@@ -349,8 +366,23 @@ class AtelierConfig:
 
     @property
     def has_anthropic(self) -> bool:
-        """True when a direct Anthropic API key is configured."""
-        return bool(self.anthropic_api_key)
+        """True when direct Anthropic API auth is configured — either a
+        standard API key or a corporate-gateway bearer token."""
+        return bool(self.anthropic_api_key or self.anthropic_auth_token)
+
+    def anthropic_client_kwargs(self) -> dict:
+        """Constructor kwargs for ``anthropic.Anthropic`` honoring both
+        auth styles.  ``auth_token`` sends ``Authorization: Bearer …``
+        (corporate gateway); ``base_url`` redirects off api.anthropic.com.
+        Unset values are omitted so the SDK's own defaults apply."""
+        kwargs: dict = {}
+        if self.anthropic_api_key:
+            kwargs["api_key"] = self.anthropic_api_key
+        if self.anthropic_auth_token:
+            kwargs["auth_token"] = self.anthropic_auth_token
+        if self.anthropic_base_url:
+            kwargs["base_url"] = self.anthropic_base_url
+        return kwargs
 
     @property
     def has_bedrock(self) -> bool:
@@ -367,6 +399,11 @@ class AtelierConfig:
 
     # Data
     parquet_dir: str = "build/data"
+    # Root for locally-derived artifacts (samples, caches, heads).
+    artifact_root: str = "build"
+    # SDG corpora demo collection (name or prefix of a
+    # corpus/collections/<name> bundle in external/sdg-corpora)
+    sdg_collection: str = "research-project"
 
     # Classification pipeline
     classify_connection_name: str = ""
@@ -411,6 +448,10 @@ class AtelierConfig:
     # cannot collide with production. Read by both _ensure_registered_svm_head
     # and the enrichment/maxsim path so the two stay consistent.
     classify_taxonomy_id: str = "default"
+    # In-situ artifact finalization before a run (enriched semantic
+    # collection + registered NHSVM head) — skipped when artifacts are
+    # already signature-final for the run's taxonomy.
+    classify_precondition_enabled: bool = True
 
     # Ægir sdg-corpora bridge — the pinned git data source for the blind
     # efficacy gate. corpora_dir is the sdg-corpora submodule (vocabulary +
@@ -454,6 +495,9 @@ class AtelierConfig:
 
     # Bootstrap convergence
     classify_bootstrap_max_iterations: int = 5
+    # Scale-aware convergence cap (see base.conf bootstrap block).
+    classify_bootstrap_small_sample_columns: int = 200
+    classify_bootstrap_small_sample_max_iterations: int = 2
     classify_bootstrap_min_iterations: int = 2
     # Cautious-code review — PROVEN HARMFUL.  Empirically destroys
     # accuracy (ce4f3777: 76% reroute miss rate, −13.6pp vs LLM-only).
@@ -519,7 +563,7 @@ class AtelierConfig:
     # fully-independent and CatBoost: features are independent (TF-IDF)
     # and labels come from the synth generators, but the prediction-
     # to-frame-element mapping passes through the LLM-mediated
-    # alignment in classify.ontology_alignment.  Per Shafer 1976
+    # alignment (the retired classify.ontology_alignment layer).  Per Shafer 1976
     # §11.3 + Denoeux 2008, non-distinct evidence requires a
     # discount to avoid double-counting under Dempster's rule; the
     # current SVM default reflects the weakly-non-distinct regime.
@@ -537,7 +581,6 @@ class AtelierConfig:
     classify_maxsim_enabled: bool = True
     classify_colbert_model: str = "colbert-ir/colbertv2.0"
     classify_discount_svm: float = 0.22
-    classify_subsumption_score_threshold: float = 0.35
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
     classify_discount_name_match_code: float = 0.50
@@ -547,7 +590,6 @@ class AtelierConfig:
     classify_discount_catboost_variance_scale: float = 1.6
     classify_discount_catboost_max: float = 0.75
     classify_discount_catboost_fallback: float = 0.55
-    classify_discount_confusable_ratio_threshold: float = 3.0
     # Mass-magnitude calibration (post-discount α multipliers).
     # Defaults are no-op; Phase 1 calibration sweep on 5ef4868c
     # identified the operating point α_maxsim=0.5, α_svm=15,
@@ -987,6 +1029,7 @@ def materialize_config(
 
 _SECRET_FIELDS = frozenset({
     "anthropic_api_key",
+    "anthropic_auth_token",
     "aws_access_key_id",
     "aws_secret_access_key",
     "aws_session_token",

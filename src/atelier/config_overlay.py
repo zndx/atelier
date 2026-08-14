@@ -465,18 +465,6 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": 0.55,
         "caption_template": "When CatBoost variance is unavailable, discount at {value_pct}% — keeps the fallback aligned with the non-distinct-evidence base; the GPU-training path (where posterior_sampling is disabled) routes through this floor.",
     },
-    "classify_discount_confusable_ratio_threshold": {
-        "hocon_path": "classify.discounts.confusable_ratio_threshold",
-        "label": "Confusable Ratio Threshold",
-        "description": "Ratio of top-1 to top-2 belief below which predictions are flagged confusable",
-        "group": "evidence",
-        "type": "float",
-        "min": 1.5,
-        "max": 5.0,
-        "step": 0.1,
-        "default": 3.0,
-        "caption_template": "Flag as confusable when top-1 / top-2 belief < {value}×.",
-    },
     # ── Mass-magnitude calibration (Phase 1 operating point) ─────
     "classify_mass_calibration_maxsim_alpha": {
         "hocon_path": "classify.mass_calibration.maxsim_alpha",

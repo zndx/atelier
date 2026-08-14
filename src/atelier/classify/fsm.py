@@ -20,6 +20,11 @@ class FSMState(str, Enum):
 
     IDLE = "IDLE"
     LOADING_VOCAB = "LOADING_VOCAB"
+    # In-situ artifact finalization (enriched semantic collection +
+    # registered NHSVM head) — entered only when the probe finds the
+    # artifacts missing or signature-stale; warm runs skip straight to
+    # DISCOVERING.
+    PRECONDITIONING = "PRECONDITIONING"
     DISCOVERING = "DISCOVERING"
     SAMPLING = "SAMPLING"
     GENERATING_SYNTH = "GENERATING_SYNTH"
@@ -36,7 +41,10 @@ class FSMState(str, Enum):
 # Valid state transitions
 _TRANSITIONS: dict[FSMState, set[FSMState]] = {
     FSMState.IDLE: {FSMState.LOADING_VOCAB},
-    FSMState.LOADING_VOCAB: {FSMState.DISCOVERING, FSMState.ERROR},
+    FSMState.LOADING_VOCAB: {
+        FSMState.PRECONDITIONING, FSMState.DISCOVERING, FSMState.ERROR,
+    },
+    FSMState.PRECONDITIONING: {FSMState.DISCOVERING, FSMState.ERROR},
     FSMState.DISCOVERING: {FSMState.SAMPLING, FSMState.ERROR},
     FSMState.SAMPLING: {FSMState.CLASSIFYING, FSMState.GENERATING_SYNTH, FSMState.LLM_SWEEP, FSMState.ERROR},
     FSMState.GENERATING_SYNTH: {FSMState.TRAINING, FSMState.ERROR},

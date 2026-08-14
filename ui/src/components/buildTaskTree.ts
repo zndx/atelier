@@ -46,6 +46,7 @@ interface FSMStatusLike {
 // if the FSM ever passed through them; today's pipeline doesn't).
 const PIPELINE_ORDER: string[] = [
   "LOADING_VOCAB",
+  "PRECONDITIONING",
   "DISCOVERING",
   "SAMPLING",
   "LLM_SWEEP",
@@ -59,6 +60,7 @@ const PIPELINE_ORDER: string[] = [
 // Human-readable phase labels for display.
 const PHASE_LABEL: Record<string, string> = {
   LOADING_VOCAB: "Loading vocabulary",
+  PRECONDITIONING: "Pre-conditioning artifacts",
   DISCOVERING: "Discovering tables",
   SAMPLING: "Sampling",
   LLM_SWEEP: "LLM sweep",

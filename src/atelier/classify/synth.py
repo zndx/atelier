@@ -6,8 +6,10 @@ category gets both semantic column names (human-readable variants) and
 opaque names (coded/random) to force classifiers to learn from VALUE
 PATTERNS, not just names.
 
-Value generators are sourced from synth_generators.py (shared with
-generate_sample_source.py). The GeneratorRegistry from synth_registry.py
+Value generators come from real sample values (operator-supplied
+``value_templates`` or enrichment prototypes) — the hand-coded ICE
+generator library was retired 2026-08-13; offline corpora are Aegir's
+domain (external/sdg-corpora). The GeneratorRegistry from synth_registry.py
 provides extensible coverage tracking and vocabulary-driven generation.
 """
 
@@ -22,8 +24,6 @@ import string
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-from atelier.classify.synth_generators import GENERATORS
 
 logger = logging.getLogger(__name__)
 
@@ -239,18 +239,17 @@ def generate_synth_tables(
             if spec:
                 generators[cat.code] = spec.generator
     else:
-        # Fall back to GENERATORS dict + template fallbacks
-        generators = dict(GENERATORS)
-        template_count = 0
+        # Template generators from real sample values only.  (The
+        # hand-coded ICE generator library was retired 2026-08-13 —
+        # offline corpora come from Aegir via external/sdg-corpora.)
         if value_templates:
             for code, values in value_templates.items():
-                if code not in generators and len(values) >= 3:
+                if len(values) >= 3:
                     generators[code] = _make_template_generator(values)
-                    template_count += 1
-            if template_count:
+            if generators:
                 logger.info(
-                    "Added %d template generators (%d hand-coded + %d template = %d total)",
-                    template_count, len(GENERATORS), template_count, len(generators),
+                    "Built %d template generators from real sample values",
+                    len(generators),
                 )
 
     # Collect all categories (leaf + internal) that have generators

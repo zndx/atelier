@@ -10,7 +10,8 @@
 #     dist/ is committed to the fork, so no Node toolchain needed in CAI)
 #
 # Intentionally NOT bundled:
-#   - external/hermes-agent — dev-only reference, never installed in CAI
+#   - external/sdg-corpora — classification research corpora; the SDG
+#     data-source seeder is a silent no-op when it's absent
 #
 # Output: build/release/atelier-{version}.tar.gz
 
@@ -46,9 +47,10 @@ fi
   git archive --format=tar --prefix="${PREFIX}/external/embedding-atlas/" HEAD ) \
   | tar -xf - -C "$WORK"
 
-# Drop hermes-agent placeholder if present (git archive emits an empty dir
-# from .gitmodules; we want it gone so the archive doesn't imply it ships).
-rm -rf "$WORK/${PREFIX}/external/hermes-agent" 2>/dev/null || true
+# Drop unbundled-submodule placeholders if present (git archive emits an
+# empty dir from .gitmodules; we want it gone so the archive doesn't imply
+# it ships).
+rm -rf "$WORK/${PREFIX}/external/sdg-corpora" 2>/dev/null || true
 
 echo "→ writing ${TARBALL}"
 ( cd "$WORK" && tar -czf - "${PREFIX}" ) > "$TARBALL"

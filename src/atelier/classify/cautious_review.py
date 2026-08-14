@@ -440,31 +440,39 @@ def _resolve_client(cfg, backend_choice: str):
     timeout = httpx.Timeout(connect=15.0, read=180.0, write=10.0, pool=5.0)
 
     if backend_choice == "anthropic_direct":
-        if not cfg.anthropic_api_key:
+        if not cfg.has_anthropic:
             raise ValueError(
-                "cautious_review backend=anthropic_direct requires ANTHROPIC_API_KEY"
+                "cautious_review backend=anthropic_direct requires "
+                "ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN"
             )
-        client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=timeout)
+        client = anthropic.Anthropic(**cfg.anthropic_client_kwargs(), timeout=timeout)
         # Direct Anthropic prefers cfg.agent_model (Opus 4.7 family)
         model = cfg.agent_model
         return client, model
 
-    # default or bedrock — figure out which is configured
+    # default or bedrock — figure out which is configured.  A corporate
+    # gateway (base_url + token, no AWS creds) hosts Bedrock-style model
+    # IDs over the anthropic protocol, so those route direct in that case.
     classify_model = cfg.classify_subagent_model or cfg.agent_model
+    gateway_hosts_bedrock_ids = bool(
+        cfg.anthropic_base_url and cfg.has_anthropic and not cfg.has_bedrock
+    )
     if backend_choice == "bedrock" or (
-        backend_choice == "default" and is_bedrock_model(classify_model)
+        backend_choice == "default"
+        and is_bedrock_model(classify_model)
+        and not gateway_hosts_bedrock_ids
     ):
         from atelier.agents.client import _build_bedrock_client
         client = _build_bedrock_client(cfg, timeout=180.0)
         return client, classify_model
 
     # Default with non-Bedrock model → Anthropic direct
-    if not cfg.anthropic_api_key:
+    if not cfg.has_anthropic:
         raise ValueError(
             "cautious_review default backend chose Anthropic but "
-            "ANTHROPIC_API_KEY is not set"
+            "neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set"
         )
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=timeout)
+    client = anthropic.Anthropic(**cfg.anthropic_client_kwargs(), timeout=timeout)
     return client, classify_model
 
 

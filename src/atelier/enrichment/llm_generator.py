@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re as _re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -194,18 +195,50 @@ class ClassifyBackedEnrichmentGenerator(EnrichmentGenerator):
             verifier_feedback=verifier_feedback,
         )
 
-        text = generate_text(
-            backend=self._backend,
-            model=self._model,
-            cfg=self._cfg,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            max_tokens=self._max_tokens,
-            reasoning_budget=self._reasoning_budget,
-            temperature=self._temperature,
-        )
-
-        enrichment, parse_notes = _parse_enrichment_json(text)
+        # Parse failures are sampling noise (truncated reasoning,
+        # malformed JSON), not configuration errors — resample up to
+        # twice before surfacing.  Backend/transport errors propagate
+        # immediately; only extraction retries here.
+        # Retry temperature escalation: at the default temperature of
+        # 0.0 a resample is byte-identical, so a deterministic failure
+        # (e.g. a local model exhausting its budget mid-reasoning)
+        # repeats forever.  Escalate with both the loop-level attempt
+        # count (verifier feedback rounds) and the local parse
+        # attempts so every retry explores.
+        prior_attempts = prior_attempt.attempts if prior_attempt else 0
+        parse_error: ValueError | None = None
+        enrichment: dict = {}
+        parse_notes = ""
+        for _parse_attempt in range(3):
+            temperature = min(
+                self._temperature
+                + 0.25 * prior_attempts
+                + 0.35 * _parse_attempt,
+                0.9,
+            )
+            text = generate_text(
+                backend=self._backend,
+                model=self._model,
+                cfg=self._cfg,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=self._max_tokens,
+                reasoning_budget=self._reasoning_budget,
+                temperature=temperature,
+            )
+            try:
+                enrichment, parse_notes = _parse_enrichment_json(text)
+                parse_error = None
+                break
+            except ValueError as exc:
+                parse_error = exc
+                logger.warning(
+                    "Enrichment JSON extraction failed for %s (attempt "
+                    "%d/3): %s — resampling",
+                    source_row.get("code", "?"), _parse_attempt + 1, exc,
+                )
+        if parse_error is not None:
+            raise parse_error
         attempts = 1 + (prior_attempt.attempts if prior_attempt else 0)
         notes = parse_notes if parse_notes else ""
         return GenerationResult(
@@ -264,6 +297,17 @@ def _parse_enrichment_json(text: str) -> tuple[dict, str]:
     import json as _json
 
     s = text.strip()
+    # Strip reasoning blocks first — local reasoning models (Nemotron,
+    # DeepSeek-style) may emit <think>…</think> ahead of the answer,
+    # and think-content often contains braces that would poison the
+    # balanced-brace fallback below.  An unterminated think block
+    # (output truncated mid-reasoning) leaves no JSON by definition.
+    s = _re.sub(r"<think>.*?</think>", "", s, flags=_re.DOTALL).strip()
+    if s.startswith("<think>"):
+        raise ValueError(
+            "Enrichment response was an unterminated reasoning block "
+            "(output truncated before the JSON answer)."
+        )
     # Strip common fence patterns
     if s.startswith("```"):
         s = s.split("```", 2)[1] if "```" in s else s

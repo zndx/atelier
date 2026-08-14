@@ -186,6 +186,34 @@ migrate-down:
 migrate-status:
     dbmate --url "{{_db_url}}" --migrations-dir db/migrations status
 
+# Show the pinned sdg-corpora commit — the corpus iteration every SDG
+# run classifies/trains against.  Each upstream commit is a
+# reproducible convergence snapshot; pin bumps are deliberate acts
+# (git submodule update --remote external/sdg-corpora + commit).
+sdg-pin:
+    @git submodule status external/sdg-corpora
+    @git -C external/sdg-corpora log -1 --format="  pinned: %h %s (%ci)"
+
+# Build the RI-verified, taxonomy-sound SDG sample (the first-run
+# classification substrate) from the pinned submodule's collection
+# bundles → <artifact_root>/sdg_sample/<pin>_<profile>/.
+#   just sdg-sample                 # svelte macbook defaults
+#   just sdg-sample workstation     # wider profile
+sdg-sample profile="macbook":
+    uv run python -m atelier.sdg.sample --profile {{profile}}
+
+# Load the SDG corpora relational sample into devenv PostgreSQL
+# (database `sdg` on the devenv instance).  Delegates to the
+# submodule's own load-postgres recipe (schema → data → views, with
+# BFO/template provenance as table comments).
+sdg-load:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="postgresql://localhost:5533"
+    psql "$base/postgres" -tAc "SELECT 1 FROM pg_database WHERE datname='sdg'" | grep -q 1 \
+        || psql "$base/postgres" -c "CREATE DATABASE sdg"
+    cd external/sdg-corpora && just load-postgres "$base/sdg"
+
 # Seed database with sample datasets
 seed:
     uv run python -c "from atelier.db.dao import AtelierDao; dao = AtelierDao(); dao.upsert_dataset('gittables-sample', 'GitTables CTA Benchmark', 'data/gittables_sample.parquet', '2517 columns from GitTables with 122 DBpedia instance labels as controlled vocabulary', 2517); print('Seeded gittables-sample dataset')"
@@ -321,7 +349,8 @@ stamp-headers-check:
 
 # Build a self-contained source archive (atelier-{version}.tar.gz) for
 # offline CAI deployments — main repo + embedding-atlas submodule, no
-# hermes-agent.  Run on a release branch so the archive carries the
-# stamped headers and the bumped version.
+# sdg-corpora (research data; the SDG seeder no-ops without it).  Run
+# on a release branch so the archive carries the stamped headers and
+# the bumped version.
 build-archive:
     bash scripts/build_source_archive.sh

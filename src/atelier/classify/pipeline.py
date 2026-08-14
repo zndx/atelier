@@ -54,7 +54,6 @@ from atelier.classify.sampler import (
     TableSample,
     discover_tables,
     load_sample_source,
-    load_synth_source,
     sample_table_metadata,
 )
 from atelier.classify.taxonomy import (
@@ -508,6 +507,7 @@ def run_classification_pipeline(
     category_set: HierarchicalCategorySet | None = None,
     llm_backend=None,
     vocab_uri: str | None = None,
+    taxonomy_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the classification pipeline with LLM-driven convergence.
 
@@ -544,6 +544,22 @@ def run_classification_pipeline(
     # is a no-op when empty, so production runs behave normally.
     from atelier.config_overlay import apply_to_config
     cfg = apply_to_config(cfg)
+
+    # ── Source-scoped taxonomy id ─────────────────────────────
+    # Data-source identifiers are the alignment key for every
+    # artifact (heads, collections, samples, results).  Resolve once
+    # and stamp it into cfg so all downstream readers — the SVM head
+    # selector, the enrichment loader, and the maxsim bridge (each
+    # reads ``cfg.classify_taxonomy_id``) — see the same identity
+    # without further threading.
+    import dataclasses as _dc
+    _tax_id = (
+        taxonomy_id
+        or source_id
+        or getattr(cfg, "classify_taxonomy_id", None)
+        or "default"
+    )
+    cfg = _dc.replace(cfg, classify_taxonomy_id=_tax_id)
 
     # ── Design invariants (non-negotiable) ────────────────────
     # These floors exist because the values below them produce output
@@ -607,16 +623,11 @@ def run_classification_pipeline(
 
     # ── Source-based auto-resolution ──────────────────────────
     # When source_id is provided, auto-load samples and vocabulary.
-    # The OOTB sample and the local Synthetic corpus both pair with
-    # the expanded 316-leaf ICE ontology — their reference codes
-    # share that vocabulary, so the LLM prompts and fusion frame are
-    # identical.  Synthetic is local-dev only and never shipped OOTB.
+    # The OOTB sample pairs with the expanded ICE ontology — its
+    # reference codes share that vocabulary, so the LLM prompts and
+    # fusion frame are aligned.
     if source_id == "ootb-sample" and samples is None:
         samples = load_sample_source()
-        if category_set is None:
-            category_set = load_sample_vocabulary(hierarchical=True)
-    elif source_id == "synthetic" and samples is None:
-        samples = load_synth_source()
         if category_set is None:
             category_set = load_sample_vocabulary(hierarchical=True)
     elif source_id == "meta-tagging" and samples is None:
@@ -636,7 +647,7 @@ def run_classification_pipeline(
         samples = load_meta_tagging_source(mount)
         if category_set is None:
             category_set = load_meta_tagging_vocabulary(mount)
-    elif source_id and source_id not in ("ootb-sample", "synthetic"):
+    elif source_id and source_id != "ootb-sample":
         # Generic Hive/external source — look up the data_sources row in
         # the DAO and unpack source_uri ("{connection}/{database}") +
         # vocab_uri.  Mirrors what the gateway's /api/fsm/start handler
@@ -662,7 +673,25 @@ def run_classification_pipeline(
             if vocab_uri is None:
                 vocab_uri = src.get("vocab_uri") or vocab_uri
             uri = src.get("source_uri", "")
-            if "/" in uri:
+            if uri.startswith("file://"):
+                # Filesystem mount (SDG sample, CSV snapshots) — load
+                # samples directly; this source has no Hive side.  The
+                # gateway's legacy URI split may have handed us the
+                # nonsensical connection "file:"; discard it so the
+                # Hive probe and cml.data_v1 discovery stay dormant.
+                if connection_name in ("", "file:"):
+                    connection_name = None
+                if samples is None:
+                    from atelier.classify.filesystem_source import (
+                        load_filesystem_source,
+                    )
+                    samples = load_filesystem_source(
+                        uri[len("file://"):],
+                        sample_size=sample_size
+                        or int(getattr(cfg, "classify_sample_size", 50)),
+                        database=source_id or "",
+                    )
+            elif "/" in uri:
                 src_conn, src_db = uri.split("/", 1)
                 if not connection_name:
                     connection_name = src_conn
@@ -809,10 +838,7 @@ def run_classification_pipeline(
         # Build the frame BEFORE validation so the validator can run
         # the R8 ``abbrev_unreachable_in_frame`` check against the
         # active frame's ``_singletons`` / ``_internal`` sets.
-        frame = FrameOfDiscernment(
-            category_set,
-            confusable_pairs=_build_confusable_pairs(category_set),
-        )
+        frame = FrameOfDiscernment(category_set)
 
         # ── Incremental scoring context ─────────────────────────
         # Built here (after vocab load, before LLM_SWEEP) so the
@@ -918,6 +944,53 @@ def run_classification_pipeline(
                 # pipeline assumes.
                 raise RuntimeError(
                     f"Taxonomy has {len(errors)} structural error(s); first: {errors[0].detail}"
+                )
+
+        # ── PRECONDITIONING ──────────────────────────────────────
+        # In-situ artifact finalization: probe whether the taxonomy's
+        # semantic collection and NHSVM head are signature-final;
+        # execute only the missing stages.  Warm runs skip the phase
+        # entirely (LOADING_VOCAB → DISCOVERING direct edge).  Any
+        # stage failure raises and lands in FSM ERROR — a run must
+        # not proceed on half-finalized artifacts.
+        if getattr(cfg, "classify_precondition_enabled", True):
+            from atelier.optimize.precondition import (
+                ensure_preconditioned,
+                probe as precondition_probe,
+            )
+            _pre_status = precondition_probe(
+                cfg, category_set, taxonomy_id=cfg.classify_taxonomy_id,
+            )
+            if not _pre_status.final:
+                fsm.advance(
+                    run_id, FSMState.PRECONDITIONING,
+                    progress={"step": "precondition",
+                              "reasons": _pre_status.reasons},
+                )
+
+                def _pre_heartbeat(p: dict) -> None:
+                    try:
+                        fsm.advance(
+                            run_id, FSMState.PRECONDITIONING, progress=p,
+                        )
+                    except Exception:
+                        pass
+
+                precondition_summary = ensure_preconditioned(
+                    cfg, category_set,
+                    taxonomy_id=cfg.classify_taxonomy_id,
+                    heartbeat=_pre_heartbeat,
+                )
+                try:
+                    (results_dir / "precondition.json").write_text(
+                        json.dumps(precondition_summary, indent=2))
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to write precondition.json: %s", exc)
+            else:
+                logger.info(
+                    "Pre-conditioning: artifacts final for %r — skipping "
+                    "phase", cfg.classify_taxonomy_id,
                 )
 
         fsm.advance(run_id, FSMState.DISCOVERING, progress={
@@ -1149,6 +1222,24 @@ def run_classification_pipeline(
         )
 
         boot_cfg = bootstrap_config_from_cfg(cfg)
+
+        # Scale-aware convergence: on small corpora the ML channels
+        # lack the sample mass to sharpen belief between passes, so
+        # belief-gap chasing past two iterations is spend without
+        # signal.  Cap, loudly.
+        _small_cols = int(getattr(
+            cfg, "classify_bootstrap_small_sample_columns", 200))
+        if _small_cols and total_columns <= _small_cols:
+            _small_max = max(2, int(getattr(
+                cfg, "classify_bootstrap_small_sample_max_iterations", 2)))
+            if boot_cfg.max_iterations > _small_max:
+                logger.info(
+                    "Small-sample convergence: capping bootstrap at %d "
+                    "iterations (%d columns ≤ %d threshold)",
+                    _small_max, total_columns, _small_cols,
+                )
+                boot_cfg = _dc.replace(boot_cfg, max_iterations=_small_max)
+
         category_table = build_category_tree(category_set)
         system_prompt = build_system_prompt(category_table, category_set=category_set)
 
@@ -2609,25 +2700,6 @@ def _load_domain_annotations(
 # redistributed to a compound focal element instead of forcing a
 # singleton decision — allowing honest representation of ambiguity.
 
-_CONFUSABLE_PAIR_CODES: list[tuple[str, str]] = [
-    ("ICE.METADATA.RECID", "ICE.SENSITIVE.TECHNICAL.DEVID"),
-    ("ICE.METADATA.TIMESTAMP", "ICE.SENSITIVE.PID.IDENTITY.DOB"),
-    ("ICE.SENSITIVE.PID.FINANCIAL.PAYMENT.TXNAMT", "ICE.SENSITIVE.PID.FINANCIAL.ACCOUNT.BAN"),
-    ("ICE.SENSITIVE.TECHNICAL.IPADDR", "ICE.SENSITIVE.TECHNICAL.DEVID"),
-]
-
-
-def _build_confusable_pairs(
-    category_set: HierarchicalCategorySet,
-) -> list[tuple[str, str]]:
-    """Filter confusable pairs to those present in the loaded vocabulary."""
-    all_codes = frozenset(c.code for c in category_set.all_categories)
-    return [
-        (a, b) for a, b in _CONFUSABLE_PAIR_CODES
-        if a in all_codes and b in all_codes
-    ]
-
-
 # Sources whose evidence is genuinely independent of the LLM sweep.
 # Used to compute a separate "independent-tier consensus" alongside
 # the full fusion so the bootstrap revisit gate can detect when the
@@ -2641,7 +2713,7 @@ def _build_confusable_pairs(
 #
 # SVM is excluded as a conservative call: its features and training
 # labels are independent of the LLM, but the per-vocabulary ICE→user-
-# code alignment in ``classify.ontology_alignment`` does pass through
+# code alignment (in the since-retired ``ontology_alignment`` layer) passed through
 # the LLM at vocab-load time.  A contradicting SVM vote could in
 # principle be confounded by an alignment error that the LLM would
 # also commit on the live sweep.  Membership in this tier is meant
@@ -2649,7 +2721,7 @@ def _build_confusable_pairs(
 # set; SVM's weak vocab-level dependency keeps it out for now.
 # Future work to admit SVM here cleanly: switch the alignment to a
 # BM25 + transformer-reranker path that doesn't share an LLM with
-# the runtime sweep — see ``ontology_alignment.py`` module docstring.
+# the runtime sweep (that alignment layer has since been retired).
 INDEPENDENT_TIER: frozenset[str] = frozenset({"maxsim", "pattern", "name_match"})
 
 

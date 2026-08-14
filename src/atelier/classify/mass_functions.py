@@ -44,8 +44,8 @@ class DiscountConfig:
     independent (TF-IDF), training labels are independent (synth-
     generator-keyed ICE.* leaves), and only the prediction-to-frame-
     element mapping passes through the LLM-mediated alignment in
-    ``classify.ontology_alignment``.  Its default sits between the
-    fully-independent sources and CatBoost; see ``ontology_alignment.py``
+    the retired ``ontology_alignment`` layer.  Its default sits between
+    the fully-independent sources and CatBoost; see that module's git history
     module docstring + ``dst-evidence-independence.md`` for the full
     rationale and the BM25-reranker future-work plan that would
     eliminate the residual LLM dependency.
@@ -62,7 +62,6 @@ class DiscountConfig:
     catboost_variance_scale: float = 1.6
     catboost_max: float = 0.75
     catboost_fallback: float = 0.55
-    confusable_ratio_threshold: float = 3.0
 
     @classmethod
     def from_cfg(cls, cfg) -> DiscountConfig:
@@ -79,7 +78,6 @@ class DiscountConfig:
             catboost_variance_scale=cfg.classify_discount_catboost_variance_scale,
             catboost_max=cfg.classify_discount_catboost_max,
             catboost_fallback=cfg.classify_discount_catboost_fallback,
-            confusable_ratio_threshold=cfg.classify_discount_confusable_ratio_threshold,
         )
 
 
@@ -131,57 +129,6 @@ def _resolve_code_to_fe(
         if resolved_code in frame.internal_nodes:
             return frame.internal_nodes[resolved_code]
     return fe
-
-
-def _redistribute_confusable_mass(
-    masses: dict[FocalElement, float],
-    frame: FrameOfDiscernment,
-    ratio_threshold: float = 3.0,
-) -> dict[FocalElement, float]:
-    """Redistribute singleton mass to confusable pair focal elements.
-
-    When the top-2 singleton masses both belong to a known confusable pair
-    and their ratio is below *ratio_threshold*, half of the 2nd-place mass
-    is moved to the pair focal element.
-    """
-    if not frame.confusable_map:
-        return masses
-
-    singleton_masses: list[tuple[str, FocalElement, float]] = []
-    for fe, m in masses.items():
-        if len(fe.codes) == 1:
-            code = next(iter(fe.codes))
-            singleton_masses.append((code, fe, m))
-
-    singleton_masses.sort(key=lambda x: -x[2])
-    if len(singleton_masses) < 2:
-        return masses
-
-    code1, _, m1 = singleton_masses[0]
-    code2, fe2, m2 = singleton_masses[1]
-
-    if m2 <= 1e-15:
-        return masses
-
-    ratio = m1 / m2
-    if ratio >= ratio_threshold:
-        return masses
-
-    pairs1 = frame.confusable_map.get(code1, [])
-    target_pair: FocalElement | None = None
-    for pair_fe in pairs1:
-        if code2 in pair_fe.codes:
-            target_pair = pair_fe
-            break
-
-    if target_pair is None:
-        return masses
-
-    transfer = m2 / 2.0
-    result = dict(masses)
-    result[fe2] = m2 - transfer
-    result[target_pair] = result.get(target_pair, 0.0) + transfer
-    return {fe: m for fe, m in result.items() if m > 1e-15}
 
 
 # ── Cosine similarity ────────────────────────────────────────────────
@@ -600,7 +547,6 @@ def _maxsim_positive_mass(
         masses[subtree_fe] = masses.get(subtree_fe, 0.0) + lca_share
 
     masses[frame.theta] = max(0.0, 1.0 - alpha)
-    masses = _redistribute_confusable_mass(masses, frame)
 
     # Channel conflict K: measures contradiction between positive and
     # negative evidence for the same codes.  Negative score for code C
@@ -1262,7 +1208,6 @@ def llm_to_mass(
     # Theta gets discount + any unallocated evidence
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
-    masses = _redistribute_confusable_mass(masses, frame)
     result = BeliefAssignment(masses=masses)
     if alpha != 1.0:
         result = _apply_alpha_scaling(result, alpha, frame)
@@ -1529,7 +1474,6 @@ def catboost_to_mass(
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
-    masses = _redistribute_confusable_mass(masses, frame)
     result = BeliefAssignment(masses=masses)
     if alpha != 1.0:
         result = _apply_alpha_scaling(result, alpha, frame)
@@ -1556,14 +1500,10 @@ def svm_to_mass(
     default in ``DiscountConfig.svm`` (currently 0.30) is slightly
     higher to carry the residual vocabulary-level dependency
     introduced by the LLM-mediated ICE → user-taxonomy alignment in
-    ``classify.ontology_alignment``.  Returning to this signature's
+    the retired ``ontology_alignment`` layer.  Returning to this signature's
     0.20 default would require switching the alignment to a path
     that doesn't share an LLM with the runtime sweep — see
-    ``ontology_alignment.py`` for the BM25-reranker future-work plan.
-
-    When the frame has confusable pairs and the top-2 singletons form
-    a known pair with a close mass ratio, mass is redistributed to
-    the pair focal element.
+    git history of ``ontology_alignment.py`` for the BM25-reranker plan.
 
     Args:
         proba: {category_code: probability} from SVM predict_proba().
@@ -1589,7 +1529,6 @@ def svm_to_mass(
 
     assigned = sum(masses.values())
     masses[frame.theta] = discount + max(0.0, evidence_mass - assigned)
-    masses = _redistribute_confusable_mass(masses, frame)
     result = BeliefAssignment(masses=masses)
     if alpha != 1.0:
         result = _apply_alpha_scaling(result, alpha, frame)

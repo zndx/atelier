@@ -132,15 +132,21 @@ def _generate_anthropic(
             cause=exc,
         )
 
-    api_key = cfg.classify_llm_api_key
-    if not api_key:
+    # Explicit classify key wins; otherwise fall back to the shared
+    # Anthropic auth (api key or corporate-gateway bearer token).
+    if cfg.classify_llm_api_key:
+        client_kwargs: dict = {"api_key": cfg.classify_llm_api_key}
+    elif cfg.has_anthropic:
+        client_kwargs = cfg.anthropic_client_kwargs()
+    else:
         raise EnrichmentCallError(
-            "Anthropic API key required for enrichment.  Set "
-            "ATELIER_LLM_API_KEY (shared with classify path)."
+            "Anthropic credentials required for enrichment.  Set "
+            "ATELIER_LLM_API_KEY (shared with classify path) or "
+            "ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN."
         )
 
     client = anthropic.Anthropic(
-        api_key=api_key,
+        **client_kwargs,
         timeout=httpx.Timeout(connect=15.0, read=180.0, write=10.0, pool=5.0),
     )
 

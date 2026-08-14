@@ -27,7 +27,7 @@ def _build_anthropic_client(cfg: AtelierConfig, *, timeout: float = 30.0):
     that legitimate cross-region API calls under load would false-fail.
     """
     import anthropic
-    return anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=timeout)
+    return anthropic.Anthropic(**cfg.anthropic_client_kwargs(), timeout=timeout)
 
 
 def _build_bedrock_client(cfg: AtelierConfig, *, timeout: float = 30.0):
@@ -226,6 +226,12 @@ def _build_sdk_env(
     env: dict[str, str] = {}
     if cfg.anthropic_api_key:
         env["ANTHROPIC_API_KEY"] = cfg.anthropic_api_key
+    # Corporate gateway: bearer-token auth + proxied endpoint.  The
+    # claude CLI honors both env vars natively.
+    if cfg.anthropic_auth_token:
+        env["ANTHROPIC_AUTH_TOKEN"] = cfg.anthropic_auth_token
+    if cfg.anthropic_base_url:
+        env["ANTHROPIC_BASE_URL"] = cfg.anthropic_base_url
     if cfg.aws_access_key_id:
         env["AWS_ACCESS_KEY_ID"] = cfg.aws_access_key_id
     if cfg.aws_secret_access_key:
@@ -269,6 +275,19 @@ def _build_sdk_env(
         env["CLAUDE_CODE_SUBAGENT_MODEL"] = (
             cfg.agent_subagent_model or cfg.agent_model
         )
+    elif cfg.anthropic_base_url:
+        # ── Gateway sub-model pins ───────────────────────────────
+        # Proxied endpoints host their own model catalog (often
+        # Bedrock-style IDs); the CLI's direct-API sub-model defaults
+        # may not resolve there.  Export only explicit pins — when
+        # unset, leave the CLI's own defaults so transparent proxies
+        # of api.anthropic.com keep working.
+        if cfg.agent_default_sonnet_model:
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = cfg.agent_default_sonnet_model
+        if cfg.agent_default_haiku_model:
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = cfg.agent_default_haiku_model
+        if cfg.agent_subagent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = cfg.agent_subagent_model
 
     # ── CLI feature flags ────────────────────────────────────────
     # Precedence: explicit cfg value > provider-specific default.

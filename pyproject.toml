@@ -16,6 +16,11 @@ dependencies = [
     "pyhocon>=0.3.61",
     "sqlalchemy>=2.0.0",
     "psycopg>=3.2.0",
+    # macOS: bundle libpq via the binary wheel.  Linux gets libpq from
+    # devenv's LD_LIBRARY_PATH (postgresql_16.lib); on darwin DYLD_* is
+    # stripped by SIP across /bin/sh hops, so env-based injection is
+    # unreliable — the self-contained wheel sidesteps it entirely.
+    "psycopg[binary]>=3.2.0; sys_platform == 'darwin'",
     "uvicorn[standard]>=0.30.0",
     "fastapi>=0.115.0",
     "dspy>=3.1.3",

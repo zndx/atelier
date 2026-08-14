@@ -30,6 +30,12 @@ const PHASES: PhaseDef[] = [
       "Load the user-supplied taxonomy and validate it for label collisions, duplicate codes, and orphaned aliases.",
   },
   {
+    state: "PRECONDITIONING",
+    label: "Pre-conditioning",
+    description:
+      "In-situ artifact finalization: probe whether the taxonomy's semantic collection and NHSVM head are signature-final; enrich, embed, train, and promote only what's missing.  Warm runs skip this phase entirely.",
+  },
+  {
     state: "DISCOVERING",
     label: "Discovering",
     description:
@@ -45,7 +51,7 @@ const PHASES: PhaseDef[] = [
     state: "LLM_SWEEP",
     label: "LLM Sweep",
     description:
-      "Claude classifies each frontier-tier column into the user vocabulary; iteration 1 sweeps every column, later iterations revisit only disagreements.",
+      "Claude classifies each sampled column into the user vocabulary; iteration 1 sweeps every column, later iterations revisit only disagreements.",
   },
   {
     state: "VALIDATING",
@@ -112,6 +118,28 @@ interface SkillDef {
 
 const SKILLS: SkillDef[] = [
   {
+    id: "semantic_collection",
+    label: "Semantic Collection",
+    description:
+      "LLM-enriched, ColBERT-encoded Qdrant collection for the run vocabulary — the maxsim channel's substrate.  Built only when missing or signature-stale.",
+    hostPhase: "PRECONDITIONING",
+    position: "above",
+    model: "Classify LLM + ColBERT",
+    activeStates: ["PRECONDITIONING"],
+    capabilityKey: "precondition_enabled",
+  },
+  {
+    id: "nhsvm_head",
+    label: "NHSVM Head",
+    description:
+      "Factorized NHSVM head trained from enrichment-payload corpus (real prototype values first), promoted to the head registry for the run taxonomy.",
+    hostPhase: "PRECONDITIONING",
+    position: "below",
+    model: "ModernBERT + NHSVM",
+    activeStates: ["PRECONDITIONING"],
+    capabilityKey: "precondition_enabled",
+  },
+  {
     id: "agent_convergence",
     label: "Agent Convergence",
     description:
@@ -152,6 +180,7 @@ export interface RuntimeCapabilities {
   cautious_review_enabled: boolean;
   overwatch_enabled: boolean;
   classify_agent_enabled: boolean;
+  precondition_enabled: boolean;
 }
 
 const PHASE_INDEX: Record<string, number> = Object.fromEntries(

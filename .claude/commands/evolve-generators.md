@@ -85,11 +85,12 @@ shapes) over quantity.
   you the taxonomy curator's INTENT; the `reference_value_samples`
   above tell you what's ACTUALLY in hive-poc.  When the two diverge,
   trust the actual values.
-- `src/atelier/classify/synth_generators.py` — ~70 upstream
-  ICE (Information Content Entity, BFO/CCO ontology surface managed
-  in Aegir) reference generators.  Read these for STYLE reference
-  (single-family diversified strings via `rng.choice` /
-  `rng.randint` / format mixing) — do NOT import or extend them
+- Aegir's generator surface (ICE = Information Content Entity,
+  BFO/CCO ontology surface managed upstream in Aegir; the local
+  `synth_generators.py` library was retired 2026-08-13).  For STYLE
+  reference (single-family diversified strings via `rng.choice` /
+  `rng.randint` / format mixing) see the existing v1 generators at
+  `build/lib/generated/generators_v1.py` — do NOT import or extend them
   directly; v1 generators must be authored exclusively for the SVM
   channel so the metrology + refinement loop can steer them.  ICE
   continues to exist as a first-class upstream surface, parallel to
@@ -398,9 +399,10 @@ that you skipped (with reasons).
 
 ## Stylistic guidance from existing generators
 
-Skim `src/atelier/classify/synth_generators.py` for examples:
+Skim existing v1 generators (`build/lib/generated/generators_v1.py`)
+for examples:
 
-- `gen_email` (lines 218-241) — combines first/last names, separators,
+- email-style generators — combine first/last names, separators,
   digit suffixes, domain pools; multi-format output via `rng.choice`
   branches.
 - `gen_phone` (lines 244-269) — multiple format families (US, EU,

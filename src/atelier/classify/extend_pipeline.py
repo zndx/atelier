@@ -12,7 +12,7 @@ machinery of :func:`run_classification_pipeline`:
 
 What it keeps:
 
-- Source-based sample auto-resolution (OOTB sample, synthetic, hive,
+- Source-based sample auto-resolution (OOTB sample, hive,
   meta-tagging) — same code paths as the full pipeline.
 - ColumnFeatures extraction → embedding → CatBoost predict_proba.
 - Optional SVM second-look (when the artifact bundle includes an SVM).
@@ -42,7 +42,6 @@ from atelier.classify.sampler import (
     TableSample,
     discover_tables,
     load_sample_source,
-    load_synth_source,
     sample_table_metadata,
 )
 
@@ -71,7 +70,7 @@ def run_extend_classification(
 
     - ``source_id``: data source whose columns to classify.  Same
       dispatch logic as :func:`run_classification_pipeline` (OOTB
-      sample, synthetic, meta-tagging, hive).
+      sample, meta-tagging, hive).
     - ``artifact_set_id``: which :class:`MLArtifactSet` row to consume.
       Loaded via :func:`atelier.classify.artifact_set.load_for_extend`.
     - ``parent_dataset_id``: dataset row this run is "extending" against
@@ -169,9 +168,6 @@ def run_extend_classification(
     if samples is None:
         if source_id == "ootb-sample":
             samples = load_sample_source()
-            _absorb_categories(load_sample_vocabulary(hierarchical=True))
-        elif source_id == "synthetic":
-            samples = load_synth_source()
             _absorb_categories(load_sample_vocabulary(hierarchical=True))
         elif source_id == "meta-tagging":
             from atelier.classify.meta_tagging_source import (

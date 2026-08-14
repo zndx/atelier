@@ -45,13 +45,13 @@ async def _lifespan(app: FastAPI):
                 else:
                     _log.warning("Sample source seeding skipped after 5 attempts: %s", exc)
         try:
-            await asyncio.to_thread(_seed_synth_source)
-        except Exception as exc:
-            _log.warning("Synth source seeding skipped: %s", exc)
-        try:
             await asyncio.to_thread(_seed_meta_tagging_source)
         except Exception as exc:
             _log.warning("Meta-tagging source seeding skipped: %s", exc)
+        try:
+            await asyncio.to_thread(_seed_sdg_source)
+        except Exception as exc:
+            _log.warning("SDG corpora source seeding skipped: %s", exc)
         try:
             await asyncio.to_thread(_discover_and_register_hive_sources)
         except Exception as exc:
@@ -236,9 +236,20 @@ def _seed_sample_source() -> None:
         existing_v1 = next((v for v in versions if v.get("id") == stable_v1_id), None)
         user_versions = [v for v in versions if v.get("id") != stable_v1_id]
 
+        # Refresh source metadata unconditionally — stats are live mount
+        # state and must converge even when the v1 dataset row is already
+        # correct (a stale-metadata row otherwise persists forever behind
+        # the short-circuit below).
+        dao.update_data_source_metadata("ootb-sample", json.dumps({
+            "table_count": stats["table_count"],
+            "column_count": stats["column_count"],
+            "bundled_parquet": bool(bundled_path_str),
+        }))
+
         if (
             existing_v1
             and existing_v1.get("parquet_path") == bundled_path_str
+            and existing_v1.get("row_count") == stats["column_count"]
         ):
             return  # Already correctly seeded; nothing to do
 
@@ -265,14 +276,6 @@ def _seed_sample_source() -> None:
             summary=f"{stats['table_count']} tables, {stats['column_count']} columns",
         )
 
-        # Update source metadata
-        source = dao.get_data_source("ootb-sample")
-        if source:
-            dao.update_data_source_metadata("ootb-sample", json.dumps({
-                "table_count": stats["table_count"],
-                "column_count": stats["column_count"],
-                "bundled_parquet": bool(bundled_path_str),
-            }))
 
         _log.info(
             "Seeded OOTB sample v1: %d tables, %d columns, bundled_parquet=%s",
@@ -280,79 +283,6 @@ def _seed_sample_source() -> None:
         )
     except Exception as exc:
         _log.warning("Sample source seeding failed: %s", exc)
-
-
-def _seed_synth_source() -> None:
-    """Register the local Synthetic source when an artifact is present.
-
-    Looks for either an uncompressed build/data/synth/ directory or the
-    build/atelier-synth-db.zip archive (resolved by
-    :func:`atelier.classify.sampler.resolve_synth_mount`).  When found,
-    upserts a 'synthetic' data source and seeds a version-1 dataset so
-    the UI source selector can offer it.  Silent no-op when no artifact
-    is present — we don't want a dangling entry in the selector.
-
-    Synthetic is deliberately **local-dev only** — the artifact lives
-    under build/ (gitignored) and is never shipped as an OOTB bundle.
-    """
-    try:
-        from atelier.db.dao import AtelierDao
-        from atelier.classify.sampler import (
-            resolve_synth_mount,
-            synth_source_stats,
-        )
-    except Exception:
-        return
-
-    try:
-        mount = resolve_synth_mount()
-        if mount is None:
-            return
-
-        dao = AtelierDao()
-        stats = synth_source_stats()
-        if not stats["has_data"]:
-            return
-
-        dao.force_upsert_data_source(
-            source_id="synthetic",
-            source_type="filesystem",
-            display_name="Synthetic",
-            source_uri=f"file://{Path(mount).resolve()}",
-            vocabulary_mode="universal",
-        )
-        dao.update_data_source_metadata("synthetic", json.dumps({
-            "table_count": stats["table_count"],
-            "column_count": stats["column_count"],
-            "mount": stats["mount"],
-            "mount_kind": stats["mount_kind"],
-        }))
-
-        versions = dao.list_dataset_versions("synthetic")
-        if not versions:
-            import uuid
-            dataset_id = str(uuid.uuid4())[:8]
-            dao.upsert_dataset(
-                dataset_id=dataset_id,
-                name="Synthetic v1",
-                parquet_path="",
-                description=(
-                    f"{stats['table_count']} tables, {stats['column_count']} "
-                    f"columns (mounted {stats['mount_kind']})"
-                ),
-                row_count=stats["column_count"],
-                source_id="synthetic",
-                version_number=1,
-                is_active=True,
-                summary=f"{stats['table_count']} tables, {stats['column_count']} columns",
-            )
-
-        _log.info(
-            "Seeded Synthetic source: %d tables, %d columns (mount=%s)",
-            stats["table_count"], stats["column_count"], stats["mount_kind"],
-        )
-    except Exception as exc:
-        _log.warning("Synthetic source seeding failed: %s", exc)
 
 
 def _seed_meta_tagging_source() -> None:
@@ -433,6 +363,223 @@ def _seed_meta_tagging_source() -> None:
         )
     except Exception as exc:
         _log.warning("Meta-tagging source seeding failed: %s", exc)
+
+
+def _seed_sdg_source() -> None:
+    """Register the SDG corpora sample when the submodule is present.
+
+    ``external/sdg-corpora`` ships per-collection relational CSV bundles
+    (``corpus/collections/<name>/tables/*.csv``) plus the SKOS-derived
+    annotations vocabulary (``vocabulary/annotations.csv``).  Seeding
+    one collection as a filesystem source gives a turn-key
+    classification target: the pipeline classifies the collection's
+    columns blind against the SKOS vocabulary — the per-column
+    reference codes are withheld upstream as the scoring key (see the
+    submodule README).
+
+    Collection selection: ``cfg.sdg_collection`` is a name or prefix;
+    the first sorted match with a ``tables/`` directory wins.  Silent
+    no-op when the submodule isn't initialized — the source stays
+    hidden on checkouts without it.
+    """
+    try:
+        from atelier.config import load_config
+        from atelier.db.dao import AtelierDao
+    except Exception:
+        return
+
+    try:
+        cfg = load_config()
+        root = Path(__file__).resolve().parent.parent.parent
+        corpora = root / "external" / "sdg-corpora"
+
+        # Preferred substrate: the RI-verified, taxonomy-sound sample
+        # built by `just sdg-sample` (atelier.sdg.sample).  Its manifest
+        # carries the corpus pin, profile, and vocab signature — the
+        # alignment record for every downstream artifact.
+        pointer = root / cfg.artifact_root / "sdg_sample" / "current.json"
+        if not pointer.exists() and (
+            corpora / "corpus" / "collections"
+        ).is_dir():
+            # First boot on a fresh clone: derive the sample in-line.
+            # Pure-python (manifest reads + CSV copies), a few seconds
+            # — this is what makes `devenv up` → "start classification"
+            # sufficient with no manual `just sdg-sample` step.
+            try:
+                from atelier.sdg.sample import PROFILES, build_sample
+                build_sample(PROFILES["macbook"])
+                _log.info("Built SDG sample (macbook profile) on first boot")
+            except Exception as exc:
+                _log.error(
+                    "SDG sample auto-build FAILED (%s) — falling back to "
+                    "the raw collection bundle.  NOTE: the raw fallback "
+                    "carries the full vocabulary; first-run "
+                    "pre-conditioning will be much heavier than the "
+                    "sampled path.  Fix with `just sdg-sample`.", exc,
+                )
+        if pointer.exists():
+            try:
+                ptr = json.loads(pointer.read_text())
+                sample_dir = Path(ptr["path"])
+                manifest = json.loads(
+                    (sample_dir / "manifest.json").read_text())
+                tables_dir = (sample_dir / "tables").resolve()
+                vocab_csv_s = (sample_dir / "annotations.csv").resolve()
+                if not tables_dir.is_dir() or not vocab_csv_s.is_file():
+                    raise FileNotFoundError(
+                        f"sample artifacts missing under {sample_dir}")
+            except Exception as exc:
+                _log.error(
+                    "SDG sample pointer %s is broken (%s) — refusing to "
+                    "seed a half-valid source; rebuild with `just "
+                    "sdg-sample` or remove the pointer.", pointer, exc,
+                )
+                return
+            dao = AtelierDao()
+            entity_count = (
+                manifest["table_count"] + manifest["column_count"])
+            dao.force_upsert_data_source(
+                source_id="sdg-corpora",
+                source_type="filesystem",
+                display_name=f"SDG sample ({entity_count} entities)",
+                source_uri=f"file://{tables_dir}",
+                vocabulary_mode="universal",
+                vocab_uri=f"file://{vocab_csv_s}",
+            )
+            dao.update_data_source_metadata("sdg-corpora", json.dumps({
+                "table_count": manifest["table_count"],
+                "column_count": manifest["column_count"],
+                "mount": str(tables_dir),
+                "corpus_commit": manifest["corpus_commit"],
+                "profile": manifest["profile"]["name"],
+                "vocab_sig": manifest["vocab_sig"],
+                "term_count": manifest["taxonomy"]["term_count"],
+                "ri_verified": manifest["referential_integrity"]["verified"],
+            }))
+            versions = dao.list_dataset_versions("sdg-corpora")
+            if not versions:
+                import uuid
+                dao.upsert_dataset(
+                    dataset_id=str(uuid.uuid4())[:8],
+                    name="SDG sample v1",
+                    parquet_path="",
+                    description=(
+                        f"{manifest['table_count']} tables, "
+                        f"{manifest['column_count']} columns, "
+                        f"{manifest['taxonomy']['term_count']}-term SKOS "
+                        f"subset (RI-verified, pin "
+                        f"{manifest['corpus_commit'][:12]})"
+                    ),
+                    row_count=manifest["column_count"],
+                    source_id="sdg-corpora",
+                    version_number=1,
+                    is_active=True,
+                    summary=(
+                        f"{manifest['table_count']} tables, "
+                        f"{manifest['column_count']} columns"
+                    ),
+                )
+            _log.info(
+                "Seeded SDG sample source: %d tables, %d columns, %d "
+                "terms (pin %s, profile %s)",
+                manifest["table_count"], manifest["column_count"],
+                manifest["taxonomy"]["term_count"],
+                manifest["corpus_commit"][:12],
+                manifest["profile"]["name"],
+            )
+            return
+
+        # Fallback: raw collection bundle (no derived sample yet).
+        vocab_csv = corpora / "vocabulary" / "annotations.csv"
+        collections_dir = corpora / "corpus" / "collections"
+        if not vocab_csv.exists() or not collections_dir.is_dir():
+            return
+
+        want = cfg.sdg_collection
+        match = None
+        for d in sorted(collections_dir.iterdir()):
+            if d.is_dir() and (d.name == want or d.name.startswith(want)):
+                if (d / "tables").is_dir():
+                    match = d
+                    break
+        if match is None:
+            _log.info(
+                "SDG corpora present but no collection matches %r", want,
+            )
+            return
+
+        tables_dir = (match / "tables").resolve()
+        csvs = sorted(tables_dir.glob("*.csv"))
+        if not csvs:
+            return
+        column_count = 0
+        for f in csvs:
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    header = fh.readline().rstrip("\n")
+                column_count += len(header.split(",")) if header else 0
+            except Exception:
+                pass
+
+        dao = AtelierDao()
+        dao.force_upsert_data_source(
+            source_id="sdg-corpora",
+            source_type="filesystem",
+            display_name=f"SDG: {match.name}",
+            source_uri=f"file://{tables_dir}",
+            vocabulary_mode="universal",
+            # vocab_uri pins the SKOS annotations.csv so
+            # pipeline._load_vocabulary's file:// branch activates —
+            # classification targets the SDG vocabulary, not the
+            # universal fixture.
+            vocab_uri=f"file://{vocab_csv.resolve()}",
+        )
+        # The pinned submodule commit IS the corpus version — each
+        # upstream commit is a reproducible convergence snapshot, and
+        # upstream iterates rapidly.  Stamp it so every run's artifacts
+        # trace to the exact corpus iteration they saw.
+        corpus_commit = ""
+        try:
+            import subprocess
+            corpus_commit = subprocess.run(
+                ["git", "-C", str(corpora), "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+        except Exception:
+            pass
+
+        dao.update_data_source_metadata("sdg-corpora", json.dumps({
+            "table_count": len(csvs),
+            "column_count": column_count,
+            "mount": str(tables_dir),
+            "collection": match.name,
+            "corpus_commit": corpus_commit,
+        }))
+
+        versions = dao.list_dataset_versions("sdg-corpora")
+        if not versions:
+            import uuid
+            dao.upsert_dataset(
+                dataset_id=str(uuid.uuid4())[:8],
+                name="SDG v1",
+                parquet_path="",
+                description=(
+                    f"{len(csvs)} tables, {column_count} columns "
+                    f"({match.name}, SKOS annotations vocabulary)"
+                ),
+                row_count=column_count,
+                source_id="sdg-corpora",
+                version_number=1,
+                is_active=True,
+                summary=f"{len(csvs)} tables, {column_count} columns",
+            )
+
+        _log.info(
+            "Seeded SDG corpora source: %s (%d tables, %d columns)",
+            match.name, len(csvs), column_count,
+        )
+    except Exception as exc:
+        _log.warning("SDG corpora source seeding failed: %s", exc)
 
 
 def _classify_source_id(connection: str, database: str) -> str:
@@ -705,8 +852,23 @@ def _maybe_auto_start_classify() -> None:
     connection = (getattr(cfg, "classify_connection_name", "") or "").strip()
     database = (getattr(cfg, "classify_database", "") or "").strip()
     if not connection or not database:
+        # Fresh environment with no Hive config: the seeded SDG sample
+        # is the canonical first-run substrate — auto-start against it
+        # when present so a zero-config boot converges unattended.
+        try:
+            from atelier.db.dao import AtelierDao
+            if AtelierDao().get_data_source("sdg-corpora"):
+                result = fsm_start(source_id="sdg-corpora")
+                _log.info(
+                    "Classify auto-start dispatched (fresh env → SDG "
+                    "sample): %s", result,
+                )
+                return
+        except Exception as exc:
+            _log.warning("SDG auto-start probe failed: %s", exc)
         _log.warning(
-            "classify_auto_start=true but CONNECTION/DATABASE unset; skipping"
+            "classify_auto_start=true but CONNECTION/DATABASE unset and "
+            "no SDG sample source; skipping"
         )
         return
 
@@ -1175,7 +1337,7 @@ def artifact_set_compatibility(artifact_set_id: str, source_id: str):
         # registered loader (hive — vocab is loaded at run start) we
         # report ok against the artifact's own signature so the UI
         # doesn't surface a spurious warning.
-        if source_id in ("ootb-sample", "synthetic"):
+        if source_id == "ootb-sample":
             cs = load_sample_vocabulary(hierarchical=True)
             source_classes = [c.code for c in cs.categories]
         else:
@@ -1295,7 +1457,7 @@ def artifact_set_extend_scope(artifact_set_id: str, source_id: str):
         # Vocab compatibility — same logic as the dedicated endpoint, kept
         # here so the panel only needs one fetch.
         artifact_classes = _json.loads(artifact["classes"])
-        if source_id in ("ootb-sample", "synthetic"):
+        if source_id == "ootb-sample":
             cs = load_sample_vocabulary(hierarchical=True)
             source_classes = [c.code for c in cs.categories]
         else:
@@ -1566,6 +1728,9 @@ def status():
             cfg, "classify_cautious_review_enabled", False,
         ),
         "overwatch_enabled": getattr(cfg, "has_overwatch", False),
+        "precondition_enabled": getattr(
+            cfg, "classify_precondition_enabled", True,
+        ),
         "classify_agent_enabled": getattr(
             cfg, "classify_agent_enabled", False,
         ),
@@ -2160,7 +2325,7 @@ def vocabulary_stats(source_id: str | None = None):
         # OOTB sample and local Synthetic both use the expanded
         # ontology — their reference codes share the 316-category
         # ICE vocabulary.
-        if source_id in ("ootb-sample", "synthetic"):
+        if source_id == "ootb-sample":
             try:
                 sample_vocab = load_sample_vocabulary(hierarchical=True)
                 return {"terms": len(sample_vocab.categories), "source": source_id}
@@ -2635,7 +2800,7 @@ def fsm_start(source_id: str | None = None):
         database = getattr(cfg, "classify_database", "") or "default"
         # OOTB sample and local Synthetic skip the DAO lookup — the
         # pipeline handles their auto-resolution internally.
-        if source_id and source_id not in ("ootb-sample", "synthetic"):
+        if source_id and source_id != "ootb-sample":
             try:
                 from atelier.db.dao import AtelierDao
                 src = AtelierDao().get_data_source(source_id)
@@ -2650,7 +2815,12 @@ def fsm_start(source_id: str | None = None):
                 vocab_uri = src.get("vocab_uri") or vocab_uri
                 # source_uri format: "{connection}/{database}"
                 uri = src.get("source_uri", "")
-                if "/" in uri:
+                if uri.startswith("file://"):
+                    # Filesystem mount — the pipeline loads it via
+                    # load_filesystem_source; no Hive connection to
+                    # derive here.
+                    pass
+                elif "/" in uri:
                     connection_name, database = uri.split("/", 1)
                 elif uri:
                     connection_name = uri
@@ -2828,11 +2998,16 @@ def fsm_extend(body: dict):
         # malformed ``SHOW TABLES IN None`` query.
         connection_name = getattr(cfg, "classify_connection_name", "") or None
         database = getattr(cfg, "classify_database", "") or "default"
-        if source_id not in ("ootb-sample", "synthetic", "meta-tagging"):
+        if source_id not in ("ootb-sample", "meta-tagging"):
             src = dao.get_data_source(source_id)
             if src:
                 uri = src.get("source_uri", "")
-                if "/" in uri:
+                if uri.startswith("file://"):
+                    # Filesystem mount — the pipeline loads it via
+                    # load_filesystem_source; no Hive connection to
+                    # derive here.
+                    pass
+                elif "/" in uri:
                     connection_name, database = uri.split("/", 1)
                 elif uri:
                     connection_name = uri

@@ -20,7 +20,7 @@ Everything emitted is PUBLIC (DBpedia IRIs + GitTables, per the committed
 PROVENANCE.md) — no customer/UAT data, by construction.
 
 Output (committed) under src/atelier/classify/fixtures/test-gittables/:
-  taxonomy.json          GT root -> CCO-module nodes -> leaves (+IRI, +ice)
+  taxonomy.json          SDG root -> CCO-module nodes -> leaves (+IRI, +ice)
   train_rows.jsonl       Row dicts for head training
   heldout_rows.jsonl     Row dicts for evaluation (+covered, +dbpedia_iri)
   enrichment_payloads.json  per-leaf label/description/prototypes/name_hints

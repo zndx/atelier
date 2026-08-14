@@ -4,7 +4,8 @@ Exercises the critical phase transition: orienting → experimentation.
 Uses the committed mock customer taxonomy fixture — earlier versions
 of this file branched on a local meta-tagging UAT mount, but that
 corpus's hand-curated ICE-mapping overlay was excised when the
-LLM-mediated alignment landed in ``ontology_alignment.py``.  Refer
+LLM-mediated alignment landed in the since-retired ``ontology_alignment``
+layer.  Refer
 to that module's docstring for the new vocabulary-translation path.
 """
 

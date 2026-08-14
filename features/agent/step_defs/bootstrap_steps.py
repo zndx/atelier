@@ -255,8 +255,10 @@ def step_should_not_stop(context):
 # Denoeux 2008 source-independence reasons.  The BDD steps that tested
 # that retrain were removed in P6 (delete-excised-scenarios), since no
 # producer of the asserted result-dict keys remains.  Going-forward,
-# SVM is trained via the procedural-ML stack (``scripts/train_svm_on_synth.py``);
-# tests for that path land under ``features/agent/svm_on_synth.feature``.
+# SVM is trained offline via ``just optimize svm`` (the procedural-ML
+# stack: ``atelier.optimize.svm`` + corpus expansion); the critical-path
+# tests live in ``features/agent/step_defs/optimize_svm_critical_path_steps.py``
+# and the @slow SVM/maxsim efficacy feature.
 
 
 # ── Indep-tier disagreement gate ────────────────────────────────

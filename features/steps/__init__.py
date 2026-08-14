@@ -16,16 +16,12 @@ from features.agent.step_defs.agent_steps import *  # noqa: F401,F403
 from features.agent.step_defs.classification_steps import *  # noqa: F401,F403
 from features.agent.step_defs.bootstrap_steps import *  # noqa: F401,F403
 from features.agent.step_defs.backend_steps import *  # noqa: F401,F403
-from features.agent.step_defs.synth_steps import *  # noqa: F401,F403
 from features.agent.step_defs.ml_steps import *  # noqa: F401,F403
-from features.agent.step_defs.ml_e2e_steps import *  # noqa: F401,F403
 from features.agent.step_defs.sage_steps import *  # noqa: F401,F403
-from features.agent.step_defs.shap_steps import *  # noqa: F401,F403
 from features.agent.step_defs.real_data_steps import *  # noqa: F401,F403
 from features.agent.step_defs.belief_path_steps import *  # noqa: F401,F403
 from features.agent.step_defs.hierarchical_anti_subtree_steps import *  # noqa: F401,F403
 from features.agent.step_defs.dst_boundary_conditions_steps import *  # noqa: F401,F403
-from features.agent.step_defs.synth_framework_steps import *  # noqa: F401,F403
 from features.agent.step_defs.experimentation_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.status_steps import *  # noqa: F401,F403
 from features.gateway.step_defs.http_steps import *  # noqa: F401,F403
@@ -43,7 +39,6 @@ from features.agent.step_defs.fusion_strategy_steps import *  # noqa: F401,F403
 from features.agent.step_defs.settings_steps import *  # noqa: F401,F403
 from features.agent.step_defs.focus_steps import *  # noqa: F401,F403
 from features.agent.step_defs.platforms_steps import *  # noqa: F401,F403
-from features.agent.step_defs.synth_source_steps import *  # noqa: F401,F403
 from features.agent.step_defs.gpu_acceleration_steps import *  # noqa: F401,F403
 from features.agent.step_defs.gpu_sage_parity_steps import *  # noqa: F401,F403
 from features.agent.step_defs.supervisor_steps import *  # noqa: F401,F403

@@ -9,15 +9,15 @@ from behave import given, when, then
 
 @given("the gateway has seeded local filesystem sources")
 def step_seed_filesystem_sources(context):
-    """Run the gateway's seeders so the DB has the three filesystem rows."""
+    """Run the gateway's seeders so the DB has the filesystem rows."""
     from atelier.gateway import (
         _seed_sample_source,
-        _seed_synth_source,
         _seed_meta_tagging_source,
+        _seed_sdg_source,
     )
     _seed_sample_source()
-    _seed_synth_source()
     _seed_meta_tagging_source()
+    _seed_sdg_source()
 
 
 @given("a local filesystem mount with an annotations.csv")
