@@ -23,10 +23,11 @@ That's it. Visit http://localhost:3000.
 | FastAPI gateway | 8090 | REST-to-gRPC bridge |
 | Vite dev server | 3000 | React UI with hot reload |
 | llama.cpp | 8080 | Turn-key classify LLM (skipped if the port is already bound) |
+| capability-engine | 50251 | Lattice `zndx.engine.v1.Engine` (Status at bind; no vLLM wait) |
 
-The Signals lattice capability engine (`python -m atelier.engine.server` on
-**:50251**) is **not** started by `devenv up`. That is `atelier.service` on
-GPU lab hosts — see [Signals Peer Unit](docs/src/operations/peer-unit.md).
+`atelier.service` is a Gaius-style wrap: it runs `devenv up -d` so
+process-compose owns the same graph on a laptop or a GPU lab host.
+See [Signals Peer Unit](docs/src/operations/peer-unit.md).
 
 ### First-time setup
 

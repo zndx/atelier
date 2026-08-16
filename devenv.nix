@@ -173,6 +173,25 @@
       };
     };
     vite-dev.exec = "cd ui && pnpm dev";
+
+    # Lattice / capability engine (:50251). Same process on Linux and
+    # macOS — Status at gRPC bind, models load later. systemd
+    # atelier.service is only the signals.target hook: it runs
+    # `devenv up -d` so process-compose can status/restart/stop this.
+    capability-engine = {
+      exec = ''
+        exec ${config.devenv.root}/scripts/processes/capability-engine.sh
+      '';
+      process-compose = {
+        readiness_probe = {
+          exec.command = "bash -c '</dev/tcp/127.0.0.1/50251'";
+          initial_delay_seconds = 2;
+          period_seconds = 2;
+          failure_threshold = 30;
+        };
+      };
+    };
+
     # Local LLM: `devenv up` serves a GGUF via llama.cpp by DEFAULT on
     # fresh clones — the turn-key classify backend needs no credentials.
     # Skipped automatically when a hosted/external classify LLM is

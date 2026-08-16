@@ -18,7 +18,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 
 ## Architecture
 
-- **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules. Product servicer is devenv **`:50071`** / CAI `:50051`. Lattice capability engine is **`:50251`** (`python -m atelier.engine.server`) — `atelier.service` accept path; not `just up`.
+- **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules. Product servicer is devenv **`:50071`** / CAI `:50051`. Lattice capability engine is devenv **`capability-engine`** on **`:50251`**; `atelier.service` runs `devenv up -d` (Gaius-style wrap).
 - **HTTP Gateway** (`src/atelier/gateway.py`) — FastAPI bridging REST→gRPC, serves compiled React in production.
 - **React Frontend** (`ui/`) — Vite + React 19 + Ant Design + @xyflow/react. Dev server on :3000 proxies /api to :8090.
 - **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port **5533**) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) on port **5440** for CAI deployments when no external PG is available. The two ports are NOT interchangeable; the CAI pod has nothing on 5533. Code that needs the live URL reads `ATELIER_DB_URL` (exported by `bin/start-app.sh` line 278) — never hardcode the port.
@@ -26,19 +26,24 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
 - **Submodules** — `external/embedding-atlas` ([fork](https://github.com/rch/oss-embedding-atlas) with important modifications, used in both dev and CAI deployment — pre-built dist/ committed to the fork), `external/sdg-corpora` (Ægir's pinned corpus release — the SDG classification vocabulary (`vocabulary/annotations.csv` + parquet) + ontology + DDL footprint + topic-domain collections; the first-run substrate (see `atelier.sdg.sample`) and the blind efficacy-gate data source, see `classify/aegir_release.py` and `classify.aegir.*` config).
 
-## Two complementary runtimes (do not collapse)
+## One devenv graph (Linux and macOS)
 
-Laptop cold-start and the Linux GPU lattice engine are **both** first-class.
-Do not make `devenv up` start `atelier.engine.server`, and do not require
-vLLM / `:50251` for a first classification run.
+`devenv up` starts the product stack **and** the lattice engine
+(`capability-engine` on `:50251`). There is no laptop-vs-server gate —
+devenv already distinguishes linux vs darwin (CUDA libs, d2, `LD_LIBRARY_PATH`).
+`atelier.service` is only the `signals.target` hook: `devenv up -d`, then wait
+for `Engine/Status`. process-compose can `status` / `restart` / `stop`
+`capability-engine`.
 
-| Runtime | Start | Classify LLM | Lattice `:50251` |
-|---------|-------|--------------|------------------|
-| Laptop / cold start | `devenv up` | llama.cpp `:8080` (Nemotron GGUF) + `just sdg-sample` | not started |
-| Linux GPU lab | `atelier.service` (+ optional product `just up`) | capability engine / hosted LLM | required (`Engine/Status` at bind) |
+| Start | What happens |
+|-------|----------------|
+| `devenv up` / `devenv up -d` | postgres, qdrant, product `:50071`, gateway, vite, llama.cpp (if `:8080` free), **capability-engine `:50251`** |
+| `systemctl start atelier` | same graph, detached |
+| Classify on a laptop | llama.cpp `:8080` + `just sdg-sample` — engine Status is enough; no vLLM |
+| Classify on a GPU lab | hosted LLM or vLLM on first `Complete` |
 
-`devenv up` never owns `:50251` (avoids dual-bind with `atelier.service`).
-llama.cpp skips when `:8080` is already taken (Gaius vLLM 8080–8095 on GPU hosts).
+llama.cpp still skips when `:8080` is already taken (Gaius vLLM 8080–8095).
+Do not wait for vLLM SERVING to call the unit active.
 
 ## Development (devenv-first)
 
@@ -57,7 +62,9 @@ just proto                # Generate proto stubs from atelier.proto
 just resolve-config       # Materialize HOCON → build/config/atelier.env
 just preflight            # Validate materialized config
 just migrate              # Run dbmate migrations
-just up                   # devenv up
+just up                   # devenv up (foreground)
+just up-d                 # devenv up -d (what the systemd unit runs)
+just down                 # devenv processes down
 just start                # Production-like startup (no devenv)
 just build-ui             # Build React → ui/dist/
 just test                 # pytest

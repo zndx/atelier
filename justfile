@@ -43,6 +43,14 @@ show-config:
 up:
     devenv up
 
+# Detached start — what atelier.service runs (do not use `just up` there)
+up-d:
+    devenv up -d
+
+# Stop the devenv process-compose graph (capability-engine included)
+down:
+    devenv processes down
+
 # Start like CAI does (gRPC + gateway, no devenv required)
 start port="8090":
     bash bin/start-app.sh {{port}}

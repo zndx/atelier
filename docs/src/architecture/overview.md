@@ -33,6 +33,6 @@ grpc -> db
 ```
 
 On the shared lab host the product servicer is **:50071** (Gaius holds
-**:50051**). The Signals lattice engine is a separate process on **:50251**
-(`python -m atelier.engine.server`). See [gRPC & Gateway](./grpc.md) and
+**:50051**). The Signals lattice engine is a separate devenv process on
+**:50251** (`capability-engine`). See [gRPC & Gateway](./grpc.md) and
 [Signals Peer Unit](../operations/peer-unit.md).

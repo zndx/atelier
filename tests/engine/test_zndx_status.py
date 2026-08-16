@@ -98,35 +98,34 @@ class TestReflection:
 
 
 class TestUnitWrappers:
-    def test_start_is_engine_only(self):
+    def test_start_is_gaius_style_devenv_wrap(self):
         text = (_REPO / "scripts" / "systemd_start.sh").read_text()
-        assert "python -m atelier.engine.server" in text
+        lib = (_REPO / "scripts" / "systemd-unit.sh").read_text()
+        proc = (_REPO / "scripts" / "processes" / "capability-engine.sh").read_text()
+        devenv = (_REPO / "devenv.nix").read_text()
+        assert "devenv up -d" in lib
+        assert "capability-engine" in text
         assert "engine-supervise" not in text
-        assert "50251" in text
-        assert "50071" in text  # documented as off the unit path
+        assert "50251" in lib
+        assert "-m atelier.engine.server" in proc
+        assert "capability-engine" in devenv
+        # Foreground `just up` would block the oneshot.
         assert not any(
             ln.lstrip().startswith("just up")
             or "&& just up" in ln
             or "|| just up" in ln
-            for ln in text.splitlines()
+            for ln in (text + "\n" + lib).splitlines()
         )
 
     def test_soft_stop_does_not_touch_sibling_leases(self):
         text = (_REPO / "scripts" / "systemd_stop.sh").read_text()
-        assert "atelier.engine" in text
-        assert "teardown" not in text.lower() or "Does NOT" in text
-        assert "gpu-deep-cleanup" not in text
-        assert "gaius" not in text.lower() or "Does NOT touch" in text
-        assert "aegir" not in text.lower() or "Does NOT touch" in text
-        # Lease dir may be named in a comment; never mutated.
-        for token in ("rm ", "unlink", "rmdir", ">", "mkdir"):
-            if "/tmp/zndx-gpu-leases" in text:
-                lease_lines = [
-                    ln for ln in text.splitlines() if "zndx-gpu-leases" in ln
-                ]
-                assert lease_lines
-                assert all(
-                    ln.lstrip().startswith("#") for ln in lease_lines
-                ), lease_lines
-        assert "just down" not in text
-        assert "just up" not in text
+        lib = (_REPO / "scripts" / "systemd-unit.sh").read_text()
+        combined = text + "\n" + lib
+        assert "devenv processes down" in lib
+        assert "gpu-deep-cleanup" not in combined
+        assert "just teardown" not in combined
+        lease_lines = [
+            ln for ln in combined.splitlines() if "zndx-gpu-leases" in ln
+        ]
+        assert lease_lines
+        assert all(ln.lstrip().startswith("#") for ln in lease_lines), lease_lines

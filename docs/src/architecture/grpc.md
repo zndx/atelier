@@ -39,14 +39,16 @@ and `.pyi` type stubs.
 ## Two gRPC ports (lattice vs product)
 
 The product servicer and the Signals lattice engine are **different
-processes**. Do not treat `just up` / `:50071` as lattice accept.
+processes** in the **same** devenv graph. Lattice accept is
+`Engine/Status` on `:50251`, not product `:50071` health and not
+vLLM SERVING.
 
 | Port | Process | Role |
 |------|---------|------|
-| **:50251** | `python -m atelier.engine.server` | Lattice / `atelier.service` — `zndx.engine.v1.Engine/Status` |
-| **:50071** | `atelier.server` (devenv) | Product workbench (CAI default is `:50051`) |
+| **:50251** | `capability-engine` (`atelier.engine.server`) | Lattice — `zndx.engine.v1.Engine/Status` |
+| **:50071** | `grpc-server` (`atelier.server`) | Product workbench (CAI default is `:50051`) |
 
-Unit SoR: [Signals Peer Unit](../operations/peer-unit.md).
+`atelier.service` runs `devenv up -d`. Unit SoR: [Signals Peer Unit](../operations/peer-unit.md).
 
 ## Architecture Layers
 
