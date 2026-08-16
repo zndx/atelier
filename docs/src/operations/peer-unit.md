@@ -27,9 +27,16 @@ bind, not product readiness and not vLLM cold-load.
 | **:50251** | `python -m atelier.engine.server` | Lattice / `atelier.service` accept |
 | **:50071** | `atelier.server` (devenv product servicer) | Workbench UX only |
 
-`just up` starts `:50071` (+ gateway / vite). The unit never starts it.
+`just up` / `devenv up` starts `:50071` (+ gateway / vite, and on a
+laptop the llama.cpp classify backend on `:8080`). The unit never
+starts that product stack, and `devenv up` never starts this engine
+(dual-bind on `:50251` is a Gaius lesson).
+
 Product `:50071` may be down while `just lattice-ci --require atelier` is green.
 Do not wait for vLLM SERVING — Status at bind is enough.
+
+Laptop cold-start (`just sdg-sample`, llama.cpp) is a **different**
+runtime — it must keep working without this unit.
 
 ## Wrappers
 

@@ -26,6 +26,20 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
 - **Submodules** — `external/embedding-atlas` ([fork](https://github.com/rch/oss-embedding-atlas) with important modifications, used in both dev and CAI deployment — pre-built dist/ committed to the fork), `external/sdg-corpora` (Ægir's pinned corpus release — the SDG classification vocabulary (`vocabulary/annotations.csv` + parquet) + ontology + DDL footprint + topic-domain collections; the first-run substrate (see `atelier.sdg.sample`) and the blind efficacy-gate data source, see `classify/aegir_release.py` and `classify.aegir.*` config).
 
+## Two complementary runtimes (do not collapse)
+
+Laptop cold-start and the Linux GPU lattice engine are **both** first-class.
+Do not make `devenv up` start `atelier.engine.server`, and do not require
+vLLM / `:50251` for a first classification run.
+
+| Runtime | Start | Classify LLM | Lattice `:50251` |
+|---------|-------|--------------|------------------|
+| Laptop / cold start | `devenv up` | llama.cpp `:8080` (Nemotron GGUF) + `just sdg-sample` | not started |
+| Linux GPU lab | `atelier.service` (+ optional product `just up`) | capability engine / hosted LLM | required (`Engine/Status` at bind) |
+
+`devenv up` never owns `:50251` (avoids dual-bind with `atelier.service`).
+llama.cpp skips when `:8080` is already taken (Gaius vLLM 8080–8095 on GPU hosts).
+
 ## Development (devenv-first)
 
 The project uses devenv as the primary development environment. `devenv up` starts the full stack (PostgreSQL, Qdrant, gRPC, gateway, Vite).
@@ -48,6 +62,8 @@ just start                # Production-like startup (no devenv)
 just build-ui             # Build React → ui/dist/
 just test                 # pytest
 just docs-serve           # mdbook serve docs/
+just sdg-sample           # first-run SDG substrate (macbook profile)
+just sdg-load             # load sdg-corpora sample into devenv PG
 ```
 
 ## Three-tier compatibility
@@ -72,6 +88,7 @@ this section before touching processes or ports.
 |---|---|---|
 | HTTP gateway | 8090 | `$CDSW_APP_PORT` (= 8090, but managed by the platform) |
 | gRPC servicer (product) | **50071** (devenv pins `ATELIER_GRPC_PORT` — Gaius engine squats 50051 on the shared host) | 50051 |
+| llama.cpp (laptop classify) | **8080** (skipped if the port is already bound) | not started |
 | Capability engine (lattice) | **50251** (`python -m atelier.engine.server`; `atelier.service`) | not started by the AMP app path |
 | PostgreSQL | 5533 (devenv `services.postgres`) | **PGlite on 5440** — port 5533 is unused in CAI |
 | Qdrant HTTP | 6333 | 6333 |

@@ -194,6 +194,14 @@
           exit 0
         fi
       fi
+      # Laptop default is :8080. On GPU lab hosts Gaius vLLM already
+      # owns 8080–8095 — do not dual-bind. Force with a free
+      # ATELIER_LLAMA_PORT if you really want llama.cpp beside Gaius.
+      lport="''${ATELIER_LLAMA_PORT:-8080}"
+      if bash -c "echo >/dev/tcp/127.0.0.1/''${lport}" 2>/dev/null; then
+        echo "llama: skipped (:''${lport} already listening — not claiming a live socket)"
+        exit 0
+      fi
       exec llama-serve
     '';
     qdrant = {

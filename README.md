@@ -19,9 +19,14 @@ That's it. Visit http://localhost:3000.
 |---------|------|-------------|
 | PostgreSQL 16 | 5533 | State database (with pgvector) |
 | Qdrant | 6333 / 6334 | Vector store (HTTP / gRPC) |
-| gRPC server | 50051 | Core service |
+| gRPC server | 50071 | Product servicer (`ATELIER_GRPC_PORT`; CAI default is 50051) |
 | FastAPI gateway | 8090 | REST-to-gRPC bridge |
 | Vite dev server | 3000 | React UI with hot reload |
+| llama.cpp | 8080 | Turn-key classify LLM (skipped if the port is already bound) |
+
+The Signals lattice capability engine (`python -m atelier.engine.server` on
+**:50251**) is **not** started by `devenv up`. That is `atelier.service` on
+GPU lab hosts — see [Signals Peer Unit](docs/src/operations/peer-unit.md).
 
 ### First-time setup
 
