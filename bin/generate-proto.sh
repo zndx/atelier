@@ -18,4 +18,12 @@ if [ -f "$GRPC_FILE" ]; then
     sed -i 's/src_dot_atelier_dot_proto_dot_/atelier_dot_proto_dot_/g' "$GRPC_FILE"
 fi
 
+# Shared federation face (signals-protocol). Stubs live under src/zndx/.
+uv run python -m grpc_tools.protoc \
+    -I=external/signals-protocol/proto \
+    --python_out=src \
+    --grpc_python_out=src \
+    --pyi_out=src \
+    zndx/engine/v1/engine.proto
+
 echo "Proto stubs generated."

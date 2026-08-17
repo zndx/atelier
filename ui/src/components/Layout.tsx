@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import clouderaLogo from "../assets/Cloudera.svg";
 import { toggleColorMode, useColorMode } from "../theme/colorMode";
+import WaffleMenu from "./WaffleMenu";
 
 const { Header, Content, Footer } = AntLayout;
 const { Text } = Typography;
@@ -80,50 +81,59 @@ function Layout({ children, fullHeight }: LayoutProps) {
             );
           })}
         </nav>
-        <Tooltip
-          title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          placement="bottomRight"
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
         >
-          <a
-            aria-label="Toggle color mode"
-            onClick={() => toggleColorMode(mode)}
-            style={{
-              marginLeft: "auto",
-              color: CHROME.dim,
-              padding: "6px 10px",
-              borderRadius: 4,
-              fontSize: 18,
-              lineHeight: 1,
-              display: "inline-flex",
-              alignItems: "center",
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
+          <WaffleMenu />
+          <Tooltip
+            title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            placement="bottomRight"
           >
-            {mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
-          </a>
-        </Tooltip>
-        <Tooltip title="Settings — tune the DST pipeline" placement="bottomRight">
-          <Link
-            to="/settings"
-            aria-label="Settings"
-            style={{
-              color: pathname.startsWith("/settings") ? CHROME.text : CHROME.dim,
-              padding: "6px 10px",
-              borderRadius: 4,
-              fontSize: 18,
-              lineHeight: 1,
-              display: "inline-flex",
-              alignItems: "center",
-              background: pathname.startsWith("/settings")
-                ? CHROME.fill
-                : "transparent",
-              transition: "all 0.2s",
-            }}
-          >
-            <SettingOutlined />
-          </Link>
-        </Tooltip>
+            <a
+              aria-label="Toggle color mode"
+              onClick={() => toggleColorMode(mode)}
+              style={{
+                color: CHROME.dim,
+                padding: "6px 10px",
+                borderRadius: 4,
+                fontSize: 18,
+                lineHeight: 1,
+                display: "inline-flex",
+                alignItems: "center",
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              {mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
+            </a>
+          </Tooltip>
+          <Tooltip title="Settings — tune the DST pipeline" placement="bottomRight">
+            <Link
+              to="/settings"
+              aria-label="Settings"
+              style={{
+                color: pathname.startsWith("/settings") ? CHROME.text : CHROME.dim,
+                padding: "6px 10px",
+                borderRadius: 4,
+                fontSize: 18,
+                lineHeight: 1,
+                display: "inline-flex",
+                alignItems: "center",
+                background: pathname.startsWith("/settings")
+                  ? CHROME.fill
+                  : "transparent",
+                transition: "all 0.2s",
+              }}
+            >
+              <SettingOutlined />
+            </Link>
+          </Tooltip>
+        </div>
       </Header>
       <Content
         style={fullHeight

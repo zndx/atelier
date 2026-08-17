@@ -169,9 +169,32 @@ class ZndxEngineServicer:
                     detail="lattice face; native AtelierEngine on same port",
                 ),
             )
+        from atelier.engine.s2s import local_surfaces
+
         return zpb.StatusResponse(
-            project=PROJECT, endpoints=eps, total_gpus=_gpu_count()
+            project=PROJECT,
+            endpoints=eps,
+            total_gpus=_gpu_count(),
+            surfaces=local_surfaces(),
         )
+
+    def Yield(self, request, context):
+        from zndx.engine.v1 import engine_pb2 as zpb
+
+        return zpb.YieldResponse(
+            ok=True,
+            process_ended=False,
+            restore_started=False,
+            message="atelier has no sentinel workloads",
+        )
+
+    def ServerQuery(self, request, context):
+        from atelier.engine.s2s import local_response
+
+        return local_response(int(request.kind))
+
+    def Remediate(self, request, context):
+        context.abort(grpc.StatusCode.UNIMPLEMENTED, "atelier Remediate is not on this face")
 
 
 def _gpu_count() -> int:

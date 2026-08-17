@@ -978,6 +978,20 @@ def _discover_and_register_hive_sources() -> None:
 # and hang the gateway if any one call stalls.
 
 
+@app.get("/api/atelier/v1/federation/surfaces")
+def federation_surfaces():
+    """Waffle roster: this engine plus peers that advertise a primary UI.
+
+    Discovery is S2S (Status + ServerQuery PEERS). Do not invent peer URLs.
+    """
+    from atelier.engine.s2s import collect_peer_surfaces
+
+    try:
+        return {"items": collect_peer_surfaces()}
+    except Exception as exc:  # noqa: BLE001 — waffle degrades to empty
+        return {"items": [], "error": str(exc)}
+
+
 @app.get("/api/health")
 def health():
     try:

@@ -11,7 +11,9 @@ Linux and macOS — devenv already gates linux-vs-darwin (CUDA libs, d2);
 there is no laptop-vs-server switch.
 
 Lattice accept is Engine/Status at gRPC bind, not vLLM cold-load and
-not product HTTP.
+not product HTTP. Status also advertises `surfaces` (`kind=primary`,
+devenv Vite `:3000`) and answers `ServerQuery` (REMOTES / PEERS /
+SURFACES) for the chrome waffle.
 
 | Fact | Value |
 |------|--------|

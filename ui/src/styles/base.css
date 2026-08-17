@@ -21,3 +21,73 @@ body {
   background: #101418; /* k1 dark, both modes */
   border-bottom: 1px solid #30363c; /* k4 dark hairline */
 }
+
+/* Federation waffle — matches Signals/Gaius/Ægir chrome (9-dot, FEDERATION). */
+.waffle-toggle,
+.waffle-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid #30363c;
+  color: #9fa5ac;
+}
+.waffle-toggle.active,
+.waffle-toggle:hover,
+.waffle-close:hover {
+  color: #e5e8ec;
+  background: #21272d;
+}
+.waffle-toggle .icon-waffle { display: block; }
+.waffle-rail {
+  position: fixed;
+  top: 64px;
+  right: 0;
+  z-index: 45;
+  width: min(280px, 92vw);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background: #101418;
+  color: #e5e8ec;
+  border-left: 1px solid #30363c;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
+}
+.waffle-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9fa5ac;
+  border-bottom: 1px solid #30363c;
+}
+.waffle-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0;
+}
+.waffle-list a {
+  display: block;
+  padding: 0.55rem 0.85rem;
+  color: inherit;
+  text-decoration: none;
+}
+.waffle-list a:hover {
+  background: #21272d;
+  text-decoration: none;
+}
+.waffle-list .waffle-project {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.waffle-empty {
+  padding: 0.85rem;
+  font-size: 0.82rem;
+  color: #9fa5ac;
+}
