@@ -11,6 +11,7 @@ from atelier.engine.s2s import (
     configured_peers,
     is_loopback_host,
     list_named_remotes,
+    live_vite_port,
     local_primary_ui,
     local_response,
     local_surfaces,
@@ -78,6 +79,7 @@ def test_primary_ui_from_env(monkeypatch) -> None:
     assert local_primary_ui() == "http://tinybox.dev.vista.zndx.org:3000"
     monkeypatch.delenv("ATELIER_PRIMARY_UI")
     monkeypatch.setenv("ATELIER_UI_BIND", "0.0.0.0:13000")
+    monkeypatch.setattr("atelier.engine.s2s.live_vite_port", lambda: "")
     assert local_primary_ui() == "http://tinybox.dev.vista.zndx.org:13000"
     assert "127.0.0.1" not in local_primary_ui()
     assert "localhost" not in local_primary_ui()
@@ -93,11 +95,22 @@ def test_status_advertises_primary_surface(monkeypatch) -> None:
     monkeypatch.delenv("ATELIER_PRIMARY_UI", raising=False)
     monkeypatch.delenv("ATELIER_UI_URL", raising=False)
     monkeypatch.delenv("ATELIER_UI_BIND", raising=False)
+    monkeypatch.delenv("ATELIER_VITE_PORT", raising=False)
+    monkeypatch.setattr("atelier.engine.s2s.live_vite_port", lambda: "")
     resp = ZndxEngineServicer(_native()).Status(zpb.StatusRequest(), None)
     assert resp.project == "atelier"
     assert [(s.kind, s.url) for s in resp.surfaces] == [
-        ("primary", "http://tinybox.dev.vista.zndx.org:3000"),
+        ("primary", "http://tinybox.dev.vista.zndx.org:3300"),
     ]
+
+
+def test_primary_ui_follows_live_vite_not_metaflow(monkeypatch) -> None:
+    monkeypatch.setenv("ATELIER_ADVERTISE_HOST", "tinybox.dev.vista.zndx.org")
+    monkeypatch.delenv("ATELIER_PRIMARY_UI", raising=False)
+    monkeypatch.delenv("ATELIER_UI_URL", raising=False)
+    monkeypatch.delenv("ATELIER_UI_BIND", raising=False)
+    monkeypatch.setattr("atelier.engine.s2s.live_vite_port", lambda: "3001")
+    assert local_primary_ui() == "http://tinybox.dev.vista.zndx.org:3001"
 
 
 def test_server_query_remotes_and_head(tmp_path: Path) -> None:
@@ -121,6 +134,7 @@ def test_server_query_remotes_and_head(tmp_path: Path) -> None:
 
 def test_server_query_surfaces_matches_status(monkeypatch) -> None:
     monkeypatch.setenv("ATELIER_ADVERTISE_HOST", "tinybox.dev.vista.zndx.org")
+    monkeypatch.setattr("atelier.engine.s2s.live_vite_port", lambda: "")
     q = local_response(zpb.SERVER_QUERY_KIND_SURFACES)
     assert [(s.kind, s.url) for s in q.surfaces] == [
         (s.kind, s.url) for s in local_surfaces()

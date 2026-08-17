@@ -11,7 +11,7 @@ devenv shell              # Enter the dev environment (loads .env automatically)
 devenv up                 # Start everything: PostgreSQL, Qdrant, gRPC, gateway, Vite
 ```
 
-That's it. Visit http://localhost:3000.
+That's it. Visit http://localhost:3300 (Vite; :3000 is Metaflow on lab hosts).
 
 ### What `devenv up` starts
 
@@ -21,7 +21,7 @@ That's it. Visit http://localhost:3000.
 | Qdrant | 6333 / 6334 | Vector store (HTTP / gRPC) |
 | gRPC server | 50071 | Product servicer (`ATELIER_GRPC_PORT`; CAI default is 50051) |
 | FastAPI gateway | 8090 | REST-to-gRPC bridge |
-| Vite dev server | 3000 | React UI with hot reload |
+| Vite dev server | 3300 | React UI with hot reload (`ATELIER_VITE_PORT`; not :3000) |
 | llama.cpp | 8080 | Darwin only (Metal). Linux uses capability-engine / vLLM |
 | capability-engine | 50251 | Lattice `zndx.engine.v1.Engine` (Status at bind; no vLLM wait) |
 

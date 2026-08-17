@@ -24,6 +24,8 @@ _LOOPBACK = frozenset(
     {"", "localhost", "127.0.0.1", "0.0.0.0", "::1", "::", "[::1]", "[::]"}
 )
 _LAB_CONTRACT = Path.home() / "local/src/wxs/signals/config/platform/peer-contract.json"
+# Vite default — not :3000 (Gaius Tilt / Metaflow kubectl forward).
+DEFAULT_VITE_PORT = "3300"
 
 
 def is_loopback_host(host: str) -> bool:
@@ -142,12 +144,63 @@ def advertised_head(root: Path | None = None) -> str:
     return (proc.stdout or "").strip()
 
 
+def _listener_pids(port: int) -> list[int]:
+    try:
+        proc = subprocess.run(
+            ["ss", "-ltnpH"], check=False, capture_output=True, text=True, timeout=2,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    pids: list[int] = []
+    needle = f":{port}"
+    for line in proc.stdout.splitlines():
+        if needle not in line:
+            continue
+        for token in line.replace(",", " ").split():
+            if token.startswith("pid="):
+                try:
+                    pids.append(int(token.split("=", 1)[1]))
+                except ValueError:
+                    continue
+    return pids
+
+
+def live_vite_port() -> str:
+    """Port of this checkout's Vite, if listening. Empty if none.
+
+    Never treats kubectl/tilt (Metaflow on :3000) as Atelier.
+    """
+    root = str(repo_root().resolve())
+    configured = (os.environ.get("ATELIER_VITE_PORT") or DEFAULT_VITE_PORT).strip()
+    candidates: list[int] = []
+    for raw in (configured, "3300", "3001", "3000"):
+        if raw.isdigit():
+            n = int(raw)
+            if n not in candidates:
+                candidates.append(n)
+    for port in candidates:
+        for pid in _listener_pids(port):
+            try:
+                cmd = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode()
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+            except OSError:
+                continue
+            if "kubectl" in cmd or "tilt" in cmd:
+                continue
+            if "vite" not in cmd and "node" not in cmd:
+                continue
+            if cwd.startswith(root):
+                return str(port)
+    return ""
+
+
 def local_primary_ui() -> str:
     """This engine's product UI as a hostname URL. Never loopback.
 
-    Default port is devenv Vite (:3000). Override with ATELIER_PRIMARY_UI
-    or ATELIER_UI_BIND. The waffle rebases this-host URLs onto the browser
-    Host when the client arrived on a LAN IP.
+    Prefer the live Vite listener (this checkout). Default pin is :3300 —
+    :3000 is Gaius Tilt / Metaflow on the lab host. Override with
+    ATELIER_PRIMARY_UI or ATELIER_UI_BIND. The waffle rebases this-host
+    URLs onto the browser Host when the client arrived on a LAN IP.
     """
     raw = (os.environ.get("ATELIER_PRIMARY_UI") or os.environ.get("ATELIER_UI_URL") or "").strip()
     if raw:
@@ -158,12 +211,15 @@ def local_primary_ui() -> str:
     host = advertise_host()
     if not host:
         return ""
-    port = "3000"
-    bind = (os.environ.get("ATELIER_UI_BIND") or "").strip()
-    if bind:
-        maybe = bind.rsplit(":", 1)[-1]
-        if maybe.isdigit():
-            port = maybe
+    port = live_vite_port()
+    if not port:
+        bind = (os.environ.get("ATELIER_UI_BIND") or "").strip()
+        if bind:
+            maybe = bind.rsplit(":", 1)[-1]
+            if maybe.isdigit():
+                port = maybe
+        else:
+            port = (os.environ.get("ATELIER_VITE_PORT") or DEFAULT_VITE_PORT).strip()
     return f"http://{host}:{port}"
 
 

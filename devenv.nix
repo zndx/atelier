@@ -31,6 +31,8 @@ in
   env = {
     GREET = "atelier";
     ATELIER_GRPC_PORT = "50071";
+    # Not :3000 — Gaius Tilt forwards Metaflow there on the lab host.
+    ATELIER_VITE_PORT = "3300";
   } // lib.optionalAttrs pkgs.stdenv.isLinux {
     LD_LIBRARY_PATH = builtins.concatStringsSep ":" [
       (lib.makeLibraryPath [

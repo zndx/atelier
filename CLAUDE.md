@@ -20,7 +20,7 @@ When writing new code or docs, prefer "CAI". When referencing env vars, use the 
 
 - **gRPC Core** (`src/atelier/`) — Proto-first API (Fine Tuning Studio pattern). Servicer is a thin router; logic in separate modules. Product servicer is devenv **`:50071`** / CAI `:50051`. Lattice capability engine is devenv **`capability-engine`** on **`:50251`**; `atelier.service` runs `devenv up -d` (Gaius-style wrap).
 - **HTTP Gateway** (`src/atelier/gateway.py`) — FastAPI bridging REST→gRPC, serves compiled React in production.
-- **React Frontend** (`ui/`) — Vite + React 19 + Ant Design + @xyflow/react. Dev server on :3000 proxies /api to :8090.
+- **React Frontend** (`ui/`) — Vite + React 19 + Ant Design + @xyflow/react. Dev server on **:3300** (not :3000 — Metaflow/Tilt) proxies /api to :8090.
 - **PostgreSQL** — State persistence. devenv `services.postgres` (PG 16 + pgvector, port **5533**) for local dev; PGlite (Node.js process, `scripts/pglite-server.mjs`) on port **5440** for CAI deployments when no external PG is available. The two ports are NOT interchangeable; the CAI pod has nothing on 5533. Code that needs the live URL reads `ATELIER_DB_URL` (exported by `bin/start-app.sh` line 278) — never hardcode the port.
 - **Qdrant** — Vector store. devenv `pkgs.qdrant` process for local dev; binary download for CAI.
 - **HOCON Config** (`config/base.conf`) — Single source of truth. Materializes to `build/config/atelier.env` for `env -i` consumption.
