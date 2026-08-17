@@ -98,6 +98,14 @@ class TestReflection:
 
 
 class TestUnitWrappers:
+    def test_devenv_scopes_llama_cpp_to_darwin(self):
+        text = (_REPO / "devenv.nix").read_text()
+        assert "isDarwin" in text
+        # Package identifier only in the darwin optional list (not Linux eval).
+        unscoped, _, rest = text.partition("++ lib.optionals isDarwin")
+        assert "    llama-cpp\n" not in unscoped
+        assert "    llama-cpp\n" in rest
+
     def test_start_is_gaius_style_devenv_wrap(self):
         text = (_REPO / "scripts" / "systemd_start.sh").read_text()
         lib = (_REPO / "scripts" / "systemd-unit.sh").read_text()

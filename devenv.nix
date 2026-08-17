@@ -1,5 +1,16 @@
 { pkgs, lib, config, inputs, ... }:
 
+let
+  inherit (pkgs.stdenv) isDarwin isLinux;
+  # Laptop-only: default classify at devenv llama.cpp. Linux uses the
+  # capability engine / shared vLLM (or a hosted LLM via env).
+  llamaDefaultEnv = lib.optionalString isDarwin ''
+    if [ -z "''${ATELIER_LLM_BASE_URL:-}" ]; then
+      export ATELIER_LLM_BASE_URL=http://127.0.0.1:8080/v1
+      export ATELIER_LLM_MODEL="''${ATELIER_LLM_MODEL:-local}"
+    fi
+  '';
+in
 {
   # Load .env automatically when entering shell
   dotenv.enable = true;
@@ -79,13 +90,6 @@
     wasm-bindgen-cli
     binaryen
 
-    # Local LLM serving — llama.cpp (llama-server is OpenAI-compatible,
-    # so it plugs straight into classify.llm.backend=openai_compatible
-    # via ATELIER_LLM_BASE_URL).  Metal acceleration on Apple silicon,
-    # CPU BLAS on Linux.  For CUDA offload on Linux GPU hosts, swap to:
-    #   (llama-cpp.override { cudaSupport = true; })
-    llama-cpp
-
     # Database
     dbmate
     qdrant
@@ -108,9 +112,15 @@
   # Linux-only: d2 pulls libdrm/mesa-libgbm (headless chromium renderer),
   # which don't build on darwin.  Docs with d2 diagrams need a Linux host
   # (or a system-installed d2); mdbook itself still works everywhere.
-  ++ lib.optionals pkgs.stdenv.isLinux (with pkgs; [
+  ++ lib.optionals isLinux (with pkgs; [
     d2
     mdbook-d2
+  ])
+  # Darwin-only: llama.cpp Metal for laptop classify. Linux GPU hosts
+  # use capability-engine → shared vLLM — do not pull llama-cpp (and
+  # its CUDA compat) into the Linux devenv closure (`devenv up -d`).
+  ++ lib.optionals isDarwin (with pkgs; [
+    llama-cpp
   ]);
 
   # Python 3.12 with uv
@@ -148,10 +158,9 @@
     # process-compose — folding bootstrap into the server startup
     # eliminates the sequencing issue.
     grpc-server = {
-      # Turn-key classify LLM: when no endpoint is configured, default
-      # to the devenv llama.cpp process (which starts by default under
-      # the same condition) — a fresh clone classifies with zero .env.
-      exec = "if [ -z \"\${ATELIER_LLM_BASE_URL:-}\" ]; then export ATELIER_LLM_BASE_URL=http://127.0.0.1:8080/v1 ATELIER_LLM_MODEL=\"\${ATELIER_LLM_MODEL:-local}\"; fi; uv run python -m atelier.db.bootstrap && exec uv run python -m atelier.server";
+      # Darwin: default classify at llama.cpp. Linux: hosted LLM or
+      # capability-engine / vLLM via ATELIER_LLM_*.
+      exec = llamaDefaultEnv + "uv run python -m atelier.db.bootstrap && exec uv run python -m atelier.server";
       process-compose = {
         depends_on.postgres.condition = "process_healthy";
         readiness_probe = {
@@ -165,9 +174,7 @@
       };
     };
     gateway = {
-      # Same turn-key LLM defaulting as grpc-server (the pipeline
-      # thread runs inside the gateway process).
-      exec = "if [ -z \"\${ATELIER_LLM_BASE_URL:-}\" ]; then export ATELIER_LLM_BASE_URL=http://127.0.0.1:8080/v1 ATELIER_LLM_MODEL=\"\${ATELIER_LLM_MODEL:-local}\"; fi; exec uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port \${CDSW_APP_PORT:-8090}";
+      exec = llamaDefaultEnv + "exec uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port \${CDSW_APP_PORT:-8090}";
       process-compose = {
         depends_on.grpc-server.condition = "process_healthy";
       };
@@ -191,38 +198,6 @@
         };
       };
     };
-
-    # Local LLM: `devenv up` serves a GGUF via llama.cpp by DEFAULT on
-    # fresh clones — the turn-key classify backend needs no credentials.
-    # Skipped automatically when a hosted/external classify LLM is
-    # configured; force with ATELIER_LLAMA_AUTOSTART=1 or disable with
-    # =0.  First start downloads the default Nemotron quant (cached).
-    llama.exec = ''
-      auto="''${ATELIER_LLAMA_AUTOSTART:-}"
-      if [ "$auto" = "0" ]; then
-        echo "llama: disabled (ATELIER_LLAMA_AUTOSTART=0)"
-        exit 0
-      fi
-      if [ "$auto" != "1" ]; then
-        case "''${ATELIER_LLM_BASE_URL:-}" in
-          ""|*127.0.0.1*|*localhost*) : ;;
-          *) echo "llama: skipped (external ATELIER_LLM_BASE_URL configured)"; exit 0 ;;
-        esac
-        if [ -n "''${ANTHROPIC_SUBAGENT_MODEL:-}''${CLAUDE_CODE_SUBAGENT_MODEL:-}''${ATELIER_LLM_API_KEY:-}" ]; then
-          echo "llama: skipped (hosted classify LLM configured)"
-          exit 0
-        fi
-      fi
-      # Laptop default is :8080. On GPU lab hosts Gaius vLLM already
-      # owns 8080–8095 — do not dual-bind. Force with a free
-      # ATELIER_LLAMA_PORT if you really want llama.cpp beside Gaius.
-      lport="''${ATELIER_LLAMA_PORT:-8080}"
-      if bash -c "echo >/dev/tcp/127.0.0.1/''${lport}" 2>/dev/null; then
-        echo "llama: skipped (:''${lport} already listening — not claiming a live socket)"
-        exit 0
-      fi
-      exec llama-serve
-    '';
     qdrant = {
       exec = ''
         mkdir -p $DEVENV_STATE/qdrant
@@ -242,35 +217,48 @@
         failure_threshold = 15;
       };
     };
+  } // lib.optionalAttrs isDarwin {
+    # Laptop Metal classify. Not present on Linux (shared vLLM).
+    llama.exec = ''
+      auto="''${ATELIER_LLAMA_AUTOSTART:-}"
+      if [ "$auto" = "0" ]; then
+        echo "llama: disabled (ATELIER_LLAMA_AUTOSTART=0)"
+        exit 0
+      fi
+      if [ "$auto" != "1" ]; then
+        case "''${ATELIER_LLM_BASE_URL:-}" in
+          ""|*127.0.0.1*|*localhost*) : ;;
+          *) echo "llama: skipped (external ATELIER_LLM_BASE_URL configured)"; exit 0 ;;
+        esac
+        if [ -n "''${ANTHROPIC_SUBAGENT_MODEL:-}''${CLAUDE_CODE_SUBAGENT_MODEL:-}''${ATELIER_LLM_API_KEY:-}" ]; then
+          echo "llama: skipped (hosted classify LLM configured)"
+          exit 0
+        fi
+      fi
+      exec llama-serve
+    '';
   };
 
-  scripts.hello.exec = ''
-    echo hello from $GREET
-  '';
-
-  # Serve a local GGUF model with an OpenAI-compatible API.  With
-  # ATELIER_LLAMA_MODEL set, serves that file; otherwise auto-downloads
-  # the default quant from Hugging Face (cached under ~/.cache/llama.cpp,
-  # ~18 GB first time).  Point the classify backend at it with:
-  #   ATELIER_LLM_BASE_URL=http://localhost:8080/v1
-  #   ATELIER_LLM_MODEL=local
-  scripts.llama-serve.exec = ''
-    common=(
-      --alias "''${ATELIER_LLM_MODEL:-local}"
-      --host 127.0.0.1
-      --port "''${ATELIER_LLAMA_PORT:-8080}"
-      --ctx-size "''${ATELIER_LLAMA_CTX:-32768}"
-    )
-    if [ -n "''${ATELIER_LLAMA_MODEL:-}" ]; then
-      exec llama-server --model "$ATELIER_LLAMA_MODEL" "''${common[@]}" "$@"
-    fi
-    # Default: Unsloth's quant of NVIDIA Nemotron 3 Nano 30B-A3B (MoE,
-    # ~3B active params — fast on Apple silicon Metal and modest CPUs).
-    # NVIDIA publishes no first-party GGUF; Unsloth is the closest.
-    hf_ref="''${ATELIER_LLAMA_HF:-unsloth/Nemotron-3-Nano-30B-A3B-GGUF:Q4_K_M}"
-    echo "llama-serve: no ATELIER_LLAMA_MODEL set — serving $hf_ref (downloads + caches on first run)"
-    exec llama-server -hf "$hf_ref" "''${common[@]}" "$@"
-  '';
+  scripts = {
+    hello.exec = ''
+      echo hello from $GREET
+    '';
+  } // lib.optionalAttrs isDarwin {
+    llama-serve.exec = ''
+      common=(
+        --alias "''${ATELIER_LLM_MODEL:-local}"
+        --host 127.0.0.1
+        --port "''${ATELIER_LLAMA_PORT:-8080}"
+        --ctx-size "''${ATELIER_LLAMA_CTX:-32768}"
+      )
+      if [ -n "''${ATELIER_LLAMA_MODEL:-}" ]; then
+        exec llama-server --model "$ATELIER_LLAMA_MODEL" "''${common[@]}" "$@"
+      fi
+      hf_ref="''${ATELIER_LLAMA_HF:-unsloth/Nemotron-3-Nano-30B-A3B-GGUF:Q4_K_M}"
+      echo "llama-serve: no ATELIER_LLAMA_MODEL set — serving $hf_ref (downloads + caches on first run)"
+      exec llama-server -hf "$hf_ref" "''${common[@]}" "$@"
+    '';
+  };
 
   enterShell = ''
     hello

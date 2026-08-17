@@ -37,13 +37,12 @@ for `Engine/Status`. process-compose can `status` / `restart` / `stop`
 
 | Start | What happens |
 |-------|----------------|
-| `devenv up` / `devenv up -d` | postgres, qdrant, product `:50071`, gateway, vite, llama.cpp (if `:8080` free), **capability-engine `:50251`** |
+| `devenv up` / `devenv up -d` | postgres, qdrant, product `:50071`, gateway, vite, **capability-engine `:50251`**; llama.cpp **darwin only** |
 | `systemctl start atelier` | same graph, detached |
-| Classify on a laptop | llama.cpp `:8080` + `just sdg-sample` — engine Status is enough; no vLLM |
-| Classify on a GPU lab | hosted LLM or vLLM on first `Complete` |
+| Classify on a laptop (darwin) | llama.cpp `:8080` + `just sdg-sample` |
+| Classify on a GPU lab (linux) | capability-engine / shared vLLM on first `Complete` |
 
-llama.cpp still skips when `:8080` is already taken (Gaius vLLM 8080–8095).
-Do not wait for vLLM SERVING to call the unit active.
+`llama-cpp` is not in the Linux devenv closure (nixpkgs `isDarwin`). Do not wait for vLLM SERVING to call the unit active.
 
 ## Development (devenv-first)
 
@@ -95,7 +94,7 @@ this section before touching processes or ports.
 |---|---|---|
 | HTTP gateway | 8090 | `$CDSW_APP_PORT` (= 8090, but managed by the platform) |
 | gRPC servicer (product) | **50071** (devenv pins `ATELIER_GRPC_PORT` — Gaius engine squats 50051 on the shared host) | 50051 |
-| llama.cpp (laptop classify) | **8080** (skipped if the port is already bound) | not started |
+| llama.cpp (darwin classify) | **8080** | not started (linux uses engine vLLM) |
 | Capability engine (lattice) | **50251** (`python -m atelier.engine.server`; `atelier.service`) | not started by the AMP app path |
 | PostgreSQL | 5533 (devenv `services.postgres`) | **PGlite on 5440** — port 5533 is unused in CAI |
 | Qdrant HTTP | 6333 | 6333 |

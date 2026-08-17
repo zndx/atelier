@@ -22,7 +22,7 @@ That's it. Visit http://localhost:3000.
 | gRPC server | 50071 | Product servicer (`ATELIER_GRPC_PORT`; CAI default is 50051) |
 | FastAPI gateway | 8090 | REST-to-gRPC bridge |
 | Vite dev server | 3000 | React UI with hot reload |
-| llama.cpp | 8080 | Turn-key classify LLM (skipped if the port is already bound) |
+| llama.cpp | 8080 | Darwin only (Metal). Linux uses capability-engine / vLLM |
 | capability-engine | 50251 | Lattice `zndx.engine.v1.Engine` (Status at bind; no vLLM wait) |
 
 `atelier.service` is a Gaius-style wrap: it runs `devenv up -d` so
@@ -125,15 +125,14 @@ To demo the classification pipeline without activating the Agent SDK
 surfaces, add `ATELIER_OVERWATCH_ENABLED=false` — otherwise Overwatch
 auto-activates as soon as any Anthropic credential appears.
 
-### Local LLM (llama.cpp) — turn-key classification
+### Local LLM (llama.cpp) — macOS laptop only
 
-devenv ships [llama.cpp](https://github.com/ggml-org/llama.cpp) on
-both platforms — Metal acceleration on Apple silicon, CPU BLAS on
-Linux (for CUDA offload, override `llama-cpp` with `cudaSupport` in
-`devenv.nix`). `llama-server` is OpenAI-compatible, so it plugs into
-the classify backend with no credentials.
+devenv ships [llama.cpp](https://github.com/ggml-org/llama.cpp) **only
+on darwin** (Metal). Linux GPU hosts do **not** evaluate `llama-cpp`
+(that CUDA compat closure broke `devenv up -d` / `atelier.service`).
+Linux classify uses the lattice **capability-engine** and shared vLLM.
 
-The fully self-contained flow (no external LLM provider, no API key):
+On a Mac, the self-contained flow (no API key):
 
 ```bash
 # .env — three lines:
@@ -144,12 +143,10 @@ ATELIER_LLM_MODEL=local
 devenv up -d
 ```
 
-That starts the usual five services **plus** a llama.cpp process
-serving NVIDIA Nemotron 3 Nano 30B-A3B (MoE, ~3B active parameters —
-fast on Metal) via [Unsloth's GGUF quant](https://huggingface.co/unsloth/Nemotron-3-Nano-30B-A3B-GGUF)
-— auto-downloaded and cached on first start (~18 GB). NVIDIA doesn't
-publish first-party GGUFs; override the quant with `ATELIER_LLAMA_HF`
-or serve any local file with `ATELIER_LLAMA_MODEL`.
+That starts the usual services **plus** llama.cpp serving NVIDIA
+Nemotron 3 Nano 30B-A3B via [Unsloth's GGUF](https://huggingface.co/unsloth/Nemotron-3-Nano-30B-A3B-GGUF)
+(~18 GB first download). Override with `ATELIER_LLAMA_HF` or
+`ATELIER_LLAMA_MODEL`.
 
 With the `sdg-corpora` submodule initialized, startup also registers
 an **SDG** data source — one relational collection
