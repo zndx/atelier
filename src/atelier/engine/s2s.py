@@ -10,7 +10,6 @@ import os
 import re
 import socket
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
@@ -374,7 +373,7 @@ def rebase_items_for_request(items: list[dict[str, str]], request_host: str) -> 
     return out
 
 
-def status_peer(target: str, timeout: float = 1.5) -> zpb.StatusResponse | None:
+def status_peer(target: str, timeout: float = 4.0) -> zpb.StatusResponse | None:
     import grpc
     from zndx.engine.v1 import engine_pb2_grpc as zpb_grpc
 
@@ -394,7 +393,7 @@ def query_peer(
     target: str,
     *,
     kind: int = zpb.SERVER_QUERY_KIND_REMOTES,
-    timeout: float = 1.5,
+    timeout: float = 10.0,
 ) -> zpb.ServerQueryResponse | None:
     """Ask a lattice peer ServerQuery. UNIMPLEMENTED → None."""
     import grpc
@@ -418,60 +417,59 @@ def query_peer(
         channel.close()
 
 
-def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]]:
-    """S2S waffle roster: self + contract PEERS' Status.surfaces.
+def _url_is_loopback(url: str) -> bool:
+    return is_loopback_host(urlparse(url).hostname or "")
 
-    Parallel, short timeouts — dead lattice members (synth/metabase) must
-    not stall the waffle into its empty-state copy.
+
+def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]]:
+    """S2S waffle roster — same walk as Ægir/Gaius.
+
+    Seed from peer-contract + SIGNALS_ENGINE_TARGET. Status each target;
+    list only advertised primary UIs. One-hop ServerQuery PEERS so a
+    service that joins (synth, metabase, or a new engine) is discovered
+    without a canned URL. Offline this round → skip, try again next load.
     """
-    found: list[dict[str, str]] = []
+    queue: list[tuple[str, str]] = list(configured_peers())
+    queue.extend(directory_seeds())
+    seen_addr: set[str] = set()
+    by_project: dict[str, dict[str, str]] = {}
     self_ui = local_primary_ui()
     if self_ui:
         host = advertise_host() or "localhost"
-        found.append({
+        by_project[PROJECT] = {
             "project": PROJECT,
             "title": surface_title(PROJECT),
             "engine_target": f"{host}:50251",
             "primary_ui": self_ui,
-        })
-    seeds = list(configured_peers()) + directory_seeds()
-    seen: set[str] = set()
-    targets: list[tuple[str, str]] = []
-    for hint_project, target in seeds:
+        }
+    while queue:
+        hint_project, target = queue.pop(0)
         addr = target.replace("grpc://", "").strip()
-        if not addr or addr in seen:
+        if not addr or addr in seen_addr:
             continue
-        seen.add(addr)
-        targets.append((hint_project, addr))
-
-    def _probe(hint_project: str, addr: str) -> dict[str, str] | None:
+        seen_addr.add(addr)
         status = status_peer(addr)
         if status is None:
-            return None
+            continue
         project = (status.project or hint_project or "").strip()
         if project and project == skip_project:
-            return None
+            continue
         ui = primary_ui_of(status)
-        if not ui:
-            return None
-        return {
-            "project": project or addr,
-            "title": surface_title(project or ""),
-            "engine_target": addr,
-            "primary_ui": ui,
-        }
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futs = [pool.submit(_probe, hp, addr) for hp, addr in targets]
-        for fut in as_completed(futs):
-            try:
-                row = fut.result()
-            except Exception:  # noqa: BLE001
-                continue
-            if not row:
-                continue
-            if any(existing["project"] == row["project"] for existing in found):
-                continue
-            found.append(row)
-    found.sort(key=lambda row: row["project"])
-    return found
+        key = (project or addr).lower()
+        if ui:
+            prev = by_project.get(key)
+            if prev is None or _url_is_loopback(prev.get("primary_ui") or ""):
+                by_project[key] = {
+                    "project": project or addr,
+                    "title": surface_title(project or ""),
+                    "engine_target": addr,
+                    "primary_ui": ui,
+                }
+        peers = query_peer(addr, kind=zpb.SERVER_QUERY_KIND_PEERS)
+        if peers is None:
+            continue
+        for peer in peers.peers:
+            tgt = (peer.target or "").strip()
+            if tgt:
+                queue.append((peer.project or "", tgt))
+    return sorted(by_project.values(), key=lambda row: row["project"])

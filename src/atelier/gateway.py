@@ -982,8 +982,9 @@ def _discover_and_register_hive_sources() -> None:
 def federation_surfaces(request: Request):
     """Waffle roster: this engine plus peers that advertise a primary UI.
 
-    Discovery is S2S (Status). Do not invent peer URLs. LAN IP Host
-    rebases this-host links so the ZT name need not resolve.
+    Discovery is the Ægir/Gaius walk (Status + one-hop ServerQuery PEERS).
+    Offline members are skipped this request; they appear when they join.
+    LAN IP Host rebases this-host links so the ZT name need not resolve.
     """
     from atelier.engine.s2s import collect_peer_surfaces, rebase_items_for_request
 

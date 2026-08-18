@@ -67,7 +67,12 @@ export default function WaffleMenu() {
   }, []);
 
   useEffect(() => {
-    if (open) void load();
+    if (!open) return;
+    void load();
+    // Re-walk the lattice while the rail is open so a peer that comes
+    // online (synth, metabase, or a new engine) appears without a reload.
+    const id = window.setInterval(() => void load(), 8000);
+    return () => window.clearInterval(id);
   }, [open, load]);
 
   return (
