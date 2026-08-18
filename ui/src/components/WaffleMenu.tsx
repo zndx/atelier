@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface SurfaceItem {
   project: string;
@@ -37,18 +38,27 @@ function itemTitle(it: SurfaceItem): string {
 export default function WaffleMenu() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<SurfaceItem[]>([]);
-  const [emptyMsg, setEmptyMsg] = useState("No peers advertising a primary UI.");
+  const [emptyMsg, setEmptyMsg] = useState("Looking for peers…");
 
   const load = useCallback(async () => {
+    setEmptyMsg("Looking for peers…");
     try {
-      const r = await fetch("/api/atelier/v1/federation/surfaces");
+      const r = await fetch("/api/atelier/v1/federation/surfaces", {
+        headers: { Accept: "application/json" },
+      });
+      const ctype = r.headers.get("content-type") || "";
+      if (!ctype.includes("application/json")) {
+        setItems([]);
+        setEmptyMsg("Federation surfaces unreachable");
+        return;
+      }
       const data = await r.json();
       if (!r.ok || data.error) {
         setItems([]);
         setEmptyMsg(data.error || "Federation surfaces unreachable");
         return;
       }
-      setItems(data.items || []);
+      setItems(Array.isArray(data.items) ? data.items : []);
       setEmptyMsg("No peers advertising a primary UI.");
     } catch {
       setItems([]);
@@ -83,29 +93,33 @@ export default function WaffleMenu() {
           <circle cx="19" cy="19" r="1.7" fill="currentColor" />
         </svg>
       </button>
-      <aside id="waffle-rail" className="waffle-rail" hidden={!open}>
-        <div className="waffle-rail-head">
-          <span>Federation</span>
-          <button type="button" className="waffle-close" aria-label="Close" onClick={() => setOpen(false)}>
-            ×
-          </button>
-        </div>
-        <ul className="waffle-list">
-          {items.map((it) => (
-            <li key={`${it.project}:${it.primary_ui}`}>
-              <a
-                href={hrefForBrowser(it.primary_ui)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="waffle-project"
-              >
-                {itemTitle(it)}
-              </a>
-            </li>
-          ))}
-        </ul>
-        {items.length === 0 && <p className="waffle-empty">{emptyMsg}</p>}
-      </aside>
+      {open &&
+        createPortal(
+          <aside id="waffle-rail" className="waffle-rail">
+            <div className="waffle-rail-head">
+              <span>Federation</span>
+              <button type="button" className="waffle-close" aria-label="Close" onClick={() => setOpen(false)}>
+                ×
+              </button>
+            </div>
+            <ul className="waffle-list">
+              {items.map((it) => (
+                <li key={`${it.project}:${it.primary_ui}`}>
+                  <a
+                    href={hrefForBrowser(it.primary_ui)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="waffle-project"
+                  >
+                    {itemTitle(it)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+            {items.length === 0 && <p className="waffle-empty">{emptyMsg}</p>}
+          </aside>,
+          document.body,
+        )}
     </>
   );
 }

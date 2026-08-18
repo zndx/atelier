@@ -12,7 +12,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -979,17 +979,20 @@ def _discover_and_register_hive_sources() -> None:
 
 
 @app.get("/api/atelier/v1/federation/surfaces")
-def federation_surfaces():
+def federation_surfaces(request: Request):
     """Waffle roster: this engine plus peers that advertise a primary UI.
 
-    Discovery is S2S (Status + ServerQuery PEERS). Do not invent peer URLs.
+    Discovery is S2S (Status). Do not invent peer URLs. LAN IP Host
+    rebases this-host links so the ZT name need not resolve.
     """
-    from atelier.engine.s2s import collect_peer_surfaces
+    from atelier.engine.s2s import collect_peer_surfaces, rebase_items_for_request
 
     try:
-        return {"items": collect_peer_surfaces()}
+        items = collect_peer_surfaces()
     except Exception as exc:  # noqa: BLE001 — waffle degrades to empty
         return {"items": [], "error": str(exc)}
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    return {"items": rebase_items_for_request(items, host)}
 
 
 @app.get("/api/health")

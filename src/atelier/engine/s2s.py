@@ -7,8 +7,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
@@ -331,7 +333,48 @@ def primary_ui_of(status: zpb.StatusResponse) -> str:
     return ""
 
 
-def status_peer(target: str, timeout: float = 4.0) -> zpb.StatusResponse | None:
+_IP4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def is_ip_host(host: str) -> bool:
+    h = (host or "").strip().strip("[]")
+    if not h:
+        return False
+    if ":" in h:
+        return True
+    return bool(_IP4.match(h))
+
+
+def rebase_items_for_request(items: list[dict[str, str]], request_host: str) -> list[dict[str, str]]:
+    """LAN IP Host → rewrite this-host primary_ui to that IP. Foreign peers unchanged."""
+    host = (request_host or "").split(",")[0].strip()
+    if ":" in host and not host.startswith("["):
+        # host:port — keep IPv4 host
+        name, _, maybe_port = host.rpartition(":")
+        if name and maybe_port.isdigit():
+            host = name
+    host = host.strip("[]")
+    if not is_ip_host(host):
+        return items
+    mine = advertise_host()
+    out: list[dict[str, str]] = []
+    for it in items:
+        row = dict(it)
+        url = (row.get("primary_ui") or "").strip()
+        parsed = urlparse(url)
+        if parsed.hostname and (
+            parsed.hostname == mine or is_loopback_host(parsed.hostname)
+        ):
+            netloc = f"{host}:{parsed.port}" if parsed.port else host
+            row["primary_ui"] = urlunparse((
+                parsed.scheme or "http", netloc, parsed.path,
+                parsed.params, parsed.query, parsed.fragment,
+            ))
+        out.append(row)
+    return out
+
+
+def status_peer(target: str, timeout: float = 1.5) -> zpb.StatusResponse | None:
     import grpc
     from zndx.engine.v1 import engine_pb2_grpc as zpb_grpc
 
@@ -351,7 +394,7 @@ def query_peer(
     target: str,
     *,
     kind: int = zpb.SERVER_QUERY_KIND_REMOTES,
-    timeout: float = 10.0,
+    timeout: float = 1.5,
 ) -> zpb.ServerQueryResponse | None:
     """Ask a lattice peer ServerQuery. UNIMPLEMENTED → None."""
     import grpc
@@ -376,10 +419,11 @@ def query_peer(
 
 
 def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]]:
-    """S2S waffle roster: self + PEERS + Status.surfaces. Only advertised primary UIs."""
-    queue: list[tuple[str, str]] = list(configured_peers())
-    queue.extend(directory_seeds())
-    seen: set[str] = set()
+    """S2S waffle roster: self + contract PEERS' Status.surfaces.
+
+    Parallel, short timeouts — dead lattice members (synth/metabase) must
+    not stall the waffle into its empty-state copy.
+    """
     found: list[dict[str, str]] = []
     self_ui = local_primary_ui()
     if self_ui:
@@ -390,34 +434,44 @@ def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]
             "engine_target": f"{host}:50251",
             "primary_ui": self_ui,
         })
-    while queue:
-        hint_project, target = queue.pop(0)
+    seeds = list(configured_peers()) + directory_seeds()
+    seen: set[str] = set()
+    targets: list[tuple[str, str]] = []
+    for hint_project, target in seeds:
         addr = target.replace("grpc://", "").strip()
         if not addr or addr in seen:
             continue
         seen.add(addr)
+        targets.append((hint_project, addr))
+
+    def _probe(hint_project: str, addr: str) -> dict[str, str] | None:
         status = status_peer(addr)
         if status is None:
-            continue
+            return None
         project = (status.project or hint_project or "").strip()
         if project and project == skip_project:
-            continue
+            return None
         ui = primary_ui_of(status)
-        if ui:
-            if any(row["project"] == (project or addr) for row in found):
+        if not ui:
+            return None
+        return {
+            "project": project or addr,
+            "title": surface_title(project or ""),
+            "engine_target": addr,
+            "primary_ui": ui,
+        }
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futs = [pool.submit(_probe, hp, addr) for hp, addr in targets]
+        for fut in as_completed(futs):
+            try:
+                row = fut.result()
+            except Exception:  # noqa: BLE001
                 continue
-            found.append({
-                "project": project or addr,
-                "title": surface_title(project or ""),
-                "engine_target": addr,
-                "primary_ui": ui,
-            })
-        peers = query_peer(addr, kind=zpb.SERVER_QUERY_KIND_PEERS)
-        if peers is None:
-            continue
-        for peer in peers.peers:
-            tgt = (peer.target or "").strip()
-            if tgt:
-                queue.append((peer.project or "", tgt))
+            if not row:
+                continue
+            if any(existing["project"] == row["project"] for existing in found):
+                continue
+            found.append(row)
     found.sort(key=lambda row: row["project"])
     return found

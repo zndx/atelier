@@ -15,6 +15,7 @@ from atelier.engine.s2s import (
     local_primary_ui,
     local_response,
     local_surfaces,
+    rebase_items_for_request,
     rewrite_public_url,
 )
 from atelier.engine.server import ZndxEngineServicer
@@ -83,6 +84,21 @@ def test_primary_ui_from_env(monkeypatch) -> None:
     assert local_primary_ui() == "http://tinybox.dev.vista.zndx.org:13000"
     assert "127.0.0.1" not in local_primary_ui()
     assert "localhost" not in local_primary_ui()
+
+
+def test_rebase_items_lan_host_rewrites_this_host_only(monkeypatch) -> None:
+    monkeypatch.setenv("ATELIER_ADVERTISE_HOST", "tinybox.dev.vista.zndx.org")
+    items = [
+        {"project": "atelier", "primary_ui": "http://tinybox.dev.vista.zndx.org:3300"},
+        {"project": "gaius", "primary_ui": "http://tinybox.dev.vista.zndx.org:9890"},
+        {"project": "other", "primary_ui": "http://other.lan:80/"},
+    ]
+    out = rebase_items_for_request(items, "192.168.1.55:3300")
+    assert out[0]["primary_ui"] == "http://192.168.1.55:3300"
+    assert out[1]["primary_ui"] == "http://192.168.1.55:9890"
+    assert out[2]["primary_ui"] == "http://other.lan:80/"
+    same = rebase_items_for_request(items, "tinybox.dev.vista.zndx.org:3300")
+    assert same[0]["primary_ui"] == items[0]["primary_ui"]
 
 
 def test_rewrite_public_url_leaves_lan_alone(monkeypatch) -> None:

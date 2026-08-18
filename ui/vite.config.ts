@@ -28,7 +28,13 @@ export default defineConfig({
       "/api": {
         target: `http://localhost:${gatewayPort}`,
         changeOrigin: true,
-        configure: (proxy) => { proxy.on("error", silenceProxyError); },
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            const host = req.headers.host;
+            if (host) proxyReq.setHeader("X-Forwarded-Host", String(host));
+          });
+          proxy.on("error", silenceProxyError);
+        },
       },
       "/ws": {
         target: `ws://localhost:${gatewayPort}`,
