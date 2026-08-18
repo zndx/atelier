@@ -35,42 +35,57 @@ function itemTitle(it: SurfaceItem): string {
   return p.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Survives Layout remounts so a failed refresh cannot flash empty. */
+const lastGood: { items: SurfaceItem[] } = { items: [] };
+
 export default function WaffleMenu() {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<SurfaceItem[]>([]);
-  const [emptyMsg, setEmptyMsg] = useState("Looking for peers…");
+  const [items, setItems] = useState<SurfaceItem[]>(() => lastGood.items);
+  const [emptyMsg, setEmptyMsg] = useState("No peers advertising a primary UI.");
+  const [loaded, setLoaded] = useState(lastGood.items.length > 0);
 
   const load = useCallback(async () => {
-    setEmptyMsg("Looking for peers…");
     try {
       const r = await fetch("/api/atelier/v1/federation/surfaces", {
         headers: { Accept: "application/json" },
       });
       const ctype = r.headers.get("content-type") || "";
       if (!ctype.includes("application/json")) {
-        setItems([]);
-        setEmptyMsg("Federation surfaces unreachable");
+        setLoaded(true);
+        if (lastGood.items.length === 0) setEmptyMsg("Federation surfaces unreachable");
         return;
       }
       const data = await r.json();
       if (!r.ok || data.error) {
-        setItems([]);
-        setEmptyMsg(data.error || "Federation surfaces unreachable");
+        setLoaded(true);
+        if (lastGood.items.length === 0) {
+          setEmptyMsg(data.error || "Federation surfaces unreachable");
+        }
         return;
       }
-      setItems(Array.isArray(data.items) ? data.items : []);
-      setEmptyMsg("No peers advertising a primary UI.");
+      const next = Array.isArray(data.items) ? (data.items as SurfaceItem[]) : [];
+      if (next.length > 0) {
+        lastGood.items = next;
+        setItems(next);
+        setEmptyMsg("No peers advertising a primary UI.");
+      } else if (lastGood.items.length === 0) {
+        setItems([]);
+        setEmptyMsg("No peers advertising a primary UI.");
+      }
+      setLoaded(true);
     } catch {
-      setItems([]);
-      setEmptyMsg("Federation surfaces unreachable");
+      setLoaded(true);
+      if (lastGood.items.length === 0) setEmptyMsg("Federation surfaces unreachable");
     }
   }, []);
 
   useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
     if (!open) return;
     void load();
-    // Re-walk the lattice while the rail is open so a peer that comes
-    // online (synth, metabase, or a new engine) appears without a reload.
     const id = window.setInterval(() => void load(), 8000);
     return () => window.clearInterval(id);
   }, [open, load]);
@@ -98,33 +113,32 @@ export default function WaffleMenu() {
           <circle cx="19" cy="19" r="1.7" fill="currentColor" />
         </svg>
       </button>
-      {open &&
-        createPortal(
-          <aside id="waffle-rail" className="waffle-rail">
-            <div className="waffle-rail-head">
-              <span>Federation</span>
-              <button type="button" className="waffle-close" aria-label="Close" onClick={() => setOpen(false)}>
-                ×
-              </button>
-            </div>
-            <ul className="waffle-list">
-              {items.map((it) => (
-                <li key={`${it.project}:${it.primary_ui}`}>
-                  <a
-                    href={hrefForBrowser(it.primary_ui)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="waffle-project"
-                  >
-                    {itemTitle(it)}
-                  </a>
-                </li>
-              ))}
-            </ul>
-            {items.length === 0 && <p className="waffle-empty">{emptyMsg}</p>}
-          </aside>,
-          document.body,
-        )}
+      {createPortal(
+        <aside id="waffle-rail" className="waffle-rail" hidden={!open}>
+          <div className="waffle-rail-head">
+            <span>Federation</span>
+            <button type="button" className="waffle-close" aria-label="Close" onClick={() => setOpen(false)}>
+              ×
+            </button>
+          </div>
+          <ul className="waffle-list">
+            {items.map((it) => (
+              <li key={`${it.project}:${it.primary_ui}`}>
+                <a
+                  href={hrefForBrowser(it.primary_ui)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="waffle-project"
+                >
+                  {itemTitle(it)}
+                </a>
+              </li>
+            ))}
+          </ul>
+          {loaded && items.length === 0 && <p className="waffle-empty">{emptyMsg}</p>}
+        </aside>,
+        document.body,
+      )}
     </>
   );
 }

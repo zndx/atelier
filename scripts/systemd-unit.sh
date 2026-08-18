@@ -9,6 +9,87 @@ GRPC_PORT="${ATELIER_ENGINE_PORT:-50251}"
 
 info() { echo "atelier.service: $*"; }
 
+# Optional: only if the unit still exports ATELIER_DEVENV_RUNTIME (legacy).
+# Default is devenv's own runtime so systemd and a login-shell `devenv up`
+# share one process-compose graph. A dedicated runtime makes
+# `devenv processes restart gateway` miss the unit's stack.
+export_unit_runtime() {
+  if [[ -n "${ATELIER_DEVENV_RUNTIME:-}" ]]; then
+    mkdir -p "$ATELIER_DEVENV_RUNTIME"
+    export DEVENV_RUNTIME="$ATELIER_DEVENV_RUNTIME"
+  fi
+  if [[ -d "/run/user/$(id -u)" ]]; then
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  fi
+}
+
+_devenv_lc() {
+  export_unit_runtime
+  /bin/bash -lc "cd \"$ROOT\" && export PATH=\"/usr/local/bin:\$PATH\" && \
+    export NIXPKGS_ALLOW_INSECURE=\"\${NIXPKGS_ALLOW_INSECURE:-1}\" && \
+    export XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-}\" && \
+    ${DEVENV_RUNTIME:+export DEVENV_RUNTIME=\"$DEVENV_RUNTIME\" &&} \
+    $*"
+}
+
+# Same graph as a laptop `devenv up -d`. Do not use `just up` — that is
+# foreground `devenv up` and would block the oneshot forever.
+lattice_up() {
+  _devenv_lc "devenv up -d"
+}
+
+lattice_down() {
+  _devenv_lc "just down 2>/dev/null || devenv processes down || true" || true
+}
+
+# Login-shell `devenv processes` can see this checkout's compose.
+compose_visible() {
+  _devenv_lc "devenv processes list" >/dev/null 2>&1
+}
+
+# PIDs of devenv process-compose daemons whose cwd is this checkout
+# (any runtime — leftover /tmp/devenv-* from a unit that lacked
+# XDG_RUNTIME_DIR, or a stale session stack).
+atelier_compose_pids() {
+  local pid cwd args
+  while read -r pid args; do
+    [[ "$args" == *devenv-wrapped*daemon-processes* ]] || continue
+    cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)
+    [[ "$cwd" == "$ROOT" ]] || continue
+    printf '%s\n' "$pid"
+  done < <(ps -eo pid=,args=)
+}
+
+term_pid() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null || return 0
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+}
+
+kill_pid() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null || return 0
+  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+}
+
+# Reap leftover compose daemons for THIS checkout only (cwd match).
+reap_atelier_compose() {
+  local pid still i
+  for pid in $(atelier_compose_pids); do
+    info "TERM devenv compose pid=$pid (cwd=$ROOT)"
+    term_pid "$pid"
+  done
+  for i in $(seq 1 20); do
+    still=$(atelier_compose_pids || true)
+    [[ -z "${still}" ]] && break
+    sleep 1
+  done
+  for pid in $(atelier_compose_pids); do
+    info "KILL devenv compose pid=$pid after grace"
+    kill_pid "$pid"
+  done
+}
+
 status_ok() {
   local py="${ROOT}/.devenv/state/venv/bin/python"
   [[ -x "$py" ]] || py="${ROOT}/.venv/bin/python"
@@ -82,15 +163,4 @@ reap_foreign_engines() {
   done
 }
 
-# Same graph as a laptop `devenv up -d`. Do not use `just up` — that is
-# foreground `devenv up` and would block the oneshot forever.
-lattice_up() {
-  /bin/bash -lc "cd \"$ROOT\" && export PATH=\"/usr/local/bin:\$PATH\" && \
-    export NIXPKGS_ALLOW_INSECURE=\"\${NIXPKGS_ALLOW_INSECURE:-1}\" && \
-    devenv up -d"
-}
 
-lattice_down() {
-  /bin/bash -lc "cd \"$ROOT\" && export PATH=\"/usr/local/bin:\$PATH\" && \
-    (just down 2>/dev/null || devenv processes down || true)" || true
-}

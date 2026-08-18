@@ -40,8 +40,13 @@ Do not wait for vLLM SERVING — Status at bind is enough.
 ## Wrappers
 
 `systemd_start.sh` is idempotent: if a **process-compose-owned** listener
-already answers `Engine/Status`, it exits 0. Foreign/old `setsid` engines
-are reaped, then `devenv up -d` (never foreground `just up`).
+already answers `Engine/Status` **and** a login-shell `devenv processes`
+sees that compose, it exits 0. The wrappers pin `XDG_RUNTIME_DIR` to
+`/run/user/<uid>` so `systemctl restart atelier` and `devenv processes
+restart gateway` share one graph. Foreign/old `setsid` engines and leftover
+`/tmp/devenv-*` daemons for this checkout are reaped, then `devenv up -d`
+(never foreground `just up`). Do not pin a dedicated `DEVENV_RUNTIME` in
+the unit — that splits systemd from the login-shell devenv.
 
 `systemd_stop.sh` runs `just down` / `devenv processes down` for this
 checkout and reaps leftover `atelier.engine` PIDs. It does **not**:

@@ -10,6 +10,8 @@ import os
 import re
 import socket
 import subprocess
+import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
@@ -373,17 +375,39 @@ def rebase_items_for_request(items: list[dict[str, str]], request_host: str) -> 
     return out
 
 
-def status_peer(target: str, timeout: float = 4.0) -> zpb.StatusResponse | None:
+# Waffle probes must fail fast — a down contract port (synth/metabase)
+# is skip-this-round, not a reason to hold the HTTP handler. Signals'
+# tonic connect() returns on RST; grpc-python needs a short deadline
+# and no retries to feel the same.
+_STATUS_TIMEOUT = 1.0
+_QUERY_TIMEOUT = 2.0
+_GRPC_OPTIONS = (
+    ("grpc.enable_retries", 0),
+    ("grpc.keepalive_timeout_ms", 1000),
+    ("grpc.max_reconnect_backoff_ms", 200),
+    ("grpc.initial_reconnect_backoff_ms", 50),
+)
+
+
+def _grpc_channel(addr: str):
     import grpc
+
+    return grpc.insecure_channel(addr, options=_GRPC_OPTIONS)
+
+
+def status_peer(target: str, timeout: float = _STATUS_TIMEOUT) -> zpb.StatusResponse | None:
     from zndx.engine.v1 import engine_pb2_grpc as zpb_grpc
 
     addr = target.replace("grpc://", "").strip()
-    channel = grpc.insecure_channel(addr)
+    channel = _grpc_channel(addr)
     try:
         stub = zpb_grpc.EngineStub(channel)
         return stub.Status(zpb.StatusRequest(), timeout=timeout)
-    except grpc.RpcError as e:
-        logger.info("Status failed at %s: %s", addr, e.code())
+    except Exception as e:  # noqa: BLE001 — offline this round
+        import grpc
+
+        code = e.code() if isinstance(e, grpc.RpcError) else type(e).__name__
+        logger.info("Status failed at %s: %s", addr, code)
         return None
     finally:
         channel.close()
@@ -393,14 +417,14 @@ def query_peer(
     target: str,
     *,
     kind: int = zpb.SERVER_QUERY_KIND_REMOTES,
-    timeout: float = 10.0,
+    timeout: float = _QUERY_TIMEOUT,
 ) -> zpb.ServerQueryResponse | None:
     """Ask a lattice peer ServerQuery. UNIMPLEMENTED → None."""
     import grpc
     from zndx.engine.v1 import engine_pb2_grpc as zpb_grpc
 
     addr = target.replace("grpc://", "").strip()
-    channel = grpc.insecure_channel(addr)
+    channel = _grpc_channel(addr)
     try:
         stub = zpb_grpc.EngineStub(channel)
         return stub.ServerQuery(
@@ -413,6 +437,9 @@ def query_peer(
             return None
         logger.warning("ServerQuery failed at %s: %s %s", addr, e.code(), e.details())
         return None
+    except Exception as e:  # noqa: BLE001 — treat as down this round
+        logger.info("ServerQuery failed at %s: %s", addr, type(e).__name__)
+        return None
     finally:
         channel.close()
 
@@ -421,16 +448,39 @@ def _url_is_loopback(url: str) -> bool:
     return is_loopback_host(urlparse(url).hostname or "")
 
 
-def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]]:
-    """S2S waffle roster — same walk as Ægir/Gaius.
+def _record_surface(
+    by_project: dict[str, dict[str, str]],
+    *,
+    project: str,
+    addr: str,
+    ui: str,
+) -> None:
+    key = (project or addr).lower()
+    prev = by_project.get(key)
+    if prev is None or _url_is_loopback(prev.get("primary_ui") or ""):
+        by_project[key] = {
+            "project": project or addr,
+            "title": surface_title(project or ""),
+            "engine_target": addr,
+            "primary_ui": ui,
+        }
 
-    Seed from peer-contract + SIGNALS_ENGINE_TARGET. Status each target;
-    list only advertised primary UIs. One-hop ServerQuery PEERS so a
-    service that joins (synth, metabase, or a new engine) is discovered
-    without a canned URL. Offline this round → skip, try again next load.
+
+def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]]:
+    """Signals-style waffle roster.
+
+    Directory is this engine's PEERS list (peer-contract + optional
+    SIGNALS_ENGINE_TARGET) — the same payload ServerQuery PEERS would
+    return locally. Status every hint in parallel; a down target is
+    skipped this round (Signals `continue`s on Status fail). One-hop
+    ServerQuery PEERS runs only against engines that just answered
+    Status, so a joiner appears without blocking on offline synth /
+    metabase. Do not invent URLs.
     """
-    queue: list[tuple[str, str]] = list(configured_peers())
-    queue.extend(directory_seeds())
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    seeds: list[tuple[str, str]] = list(configured_peers())
+    seeds.extend(directory_seeds())
     seen_addr: set[str] = set()
     by_project: dict[str, dict[str, str]] = {}
     self_ui = local_primary_ui()
@@ -442,34 +492,117 @@ def collect_peer_surfaces(*, skip_project: str = PROJECT) -> list[dict[str, str]
             "engine_target": f"{host}:50251",
             "primary_ui": self_ui,
         }
-    while queue:
-        hint_project, target = queue.pop(0)
-        addr = target.replace("grpc://", "").strip()
-        if not addr or addr in seen_addr:
-            continue
-        seen_addr.add(addr)
-        status = status_peer(addr)
+
+    def take_unique(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for hint, target in pairs:
+            addr = target.replace("grpc://", "").strip()
+            if not addr or addr in seen_addr:
+                continue
+            seen_addr.add(addr)
+            out.append((hint, addr))
+        return out
+
+    def status_one(item: tuple[str, str]) -> tuple[str, str, zpb.StatusResponse | None]:
+        hint, addr = item
+        return hint, addr, status_peer(addr, timeout=_STATUS_TIMEOUT)
+
+    def apply_status(
+        hint: str, addr: str, status: zpb.StatusResponse | None
+    ) -> str | None:
         if status is None:
-            continue
-        project = (status.project or hint_project or "").strip()
+            return None
+        project = (status.project or hint or "").strip()
         if project and project == skip_project:
-            continue
+            return None
         ui = primary_ui_of(status)
-        key = (project or addr).lower()
         if ui:
-            prev = by_project.get(key)
-            if prev is None or _url_is_loopback(prev.get("primary_ui") or ""):
-                by_project[key] = {
-                    "project": project or addr,
-                    "title": surface_title(project or ""),
-                    "engine_target": addr,
-                    "primary_ui": ui,
-                }
-        peers = query_peer(addr, kind=zpb.SERVER_QUERY_KIND_PEERS)
-        if peers is None:
-            continue
-        for peer in peers.peers:
-            tgt = (peer.target or "").strip()
-            if tgt:
-                queue.append((peer.project or "", tgt))
+            _record_surface(by_project, project=project or addr, addr=addr, ui=ui)
+        return addr
+
+    wave = take_unique(seeds)
+    live: list[str] = []
+    if wave:
+        workers = min(8, len(wave))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [pool.submit(status_one, item) for item in wave]
+            for fut in as_completed(futs):
+                hint, addr, status = fut.result()
+                live_addr = apply_status(hint, addr, status)
+                if live_addr:
+                    live.append(live_addr)
+
+    new_hints: list[tuple[str, str]] = []
+    if live:
+        workers = min(8, len(live))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [
+                pool.submit(
+                    query_peer, addr, kind=zpb.SERVER_QUERY_KIND_PEERS, timeout=_QUERY_TIMEOUT
+                )
+                for addr in live
+            ]
+            for fut in as_completed(futs):
+                peers = fut.result()
+                if peers is None:
+                    continue
+                for peer in peers.peers:
+                    tgt = (peer.target or "").strip()
+                    if tgt:
+                        new_hints.append((peer.project or "", tgt))
+
+    wave2 = take_unique(new_hints)
+    if wave2:
+        workers = min(8, len(wave2))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [pool.submit(status_one, item) for item in wave2]
+            for fut in as_completed(futs):
+                hint, addr, status = fut.result()
+                apply_status(hint, addr, status)
+
     return sorted(by_project.values(), key=lambda row: row["project"])
+
+
+# Last good waffle roster. Ghostty WASM / engine connect storms make a
+# fresh walk miss or hang; the HTTP handler must not return empty while
+# a previous probe already found peers.
+_ROSTER_TTL_S = 8.0
+_roster_lock = threading.Lock()
+_roster_at = 0.0
+_roster_items: list[dict[str, str]] = []
+
+
+def reset_roster_cache() -> None:
+    """Tests only."""
+    global _roster_at, _roster_items
+    with _roster_lock:
+        _roster_at = 0.0
+        _roster_items = []
+
+
+def collect_peer_surfaces_cached(*, ttl: float = _ROSTER_TTL_S) -> list[dict[str, str]]:
+    """Return a fresh walk, a TTL hit, or the last non-empty roster.
+
+    A failed or empty walk during engine connect must not wipe peers the
+    operator already saw.
+    """
+    global _roster_at, _roster_items
+    now = time.monotonic()
+    with _roster_lock:
+        if _roster_items and (now - _roster_at) < ttl:
+            return [dict(row) for row in _roster_items]
+    try:
+        items = collect_peer_surfaces()
+    except Exception:
+        logger.info("collect_peer_surfaces failed; serving last roster", exc_info=True)
+        with _roster_lock:
+            return [dict(row) for row in _roster_items]
+    if items:
+        with _roster_lock:
+            _roster_items = [dict(row) for row in items]
+            _roster_at = time.monotonic()
+        return items
+    with _roster_lock:
+        if _roster_items:
+            return [dict(row) for row in _roster_items]
+    return items

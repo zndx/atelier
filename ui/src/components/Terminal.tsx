@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ensureGhostty, type GhosttyTerminal } from "../lib/ghostty";
 
 interface TerminalProps {
   style?: CSSProperties;
@@ -6,32 +7,6 @@ interface TerminalProps {
 }
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
-
-/** ghostty-web WASM types (loaded dynamically) */
-interface GhosttyGlobal {
-  Ghostty: { load: (wasmUrl: string) => Promise<unknown> };
-  Terminal: new (opts: Record<string, unknown>) => GhosttyTerminal;
-  FitAddon: new () => { fit: () => void; dispose: () => void };
-  instance: unknown;
-}
-
-interface GhosttyTerminal {
-  cols: number;
-  rows: number;
-  open: (el: HTMLElement) => void;
-  write: (data: string) => void;
-  loadAddon: (addon: unknown) => void;
-  onData: (cb: (data: string) => void) => void;
-  dispose: () => void;
-}
-
-declare global {
-  interface Window {
-    __ghostty?: GhosttyGlobal;
-    __ghosttyLoading?: boolean;
-    __ghosttyError?: Error;
-  }
-}
 
 const STORAGE_KEY = "atelier-terminal-session";
 
@@ -46,26 +21,6 @@ function getOrCreateSessionId(explicitId?: string): string {
     });
   localStorage.setItem(STORAGE_KEY, id);
   return id;
-}
-
-function loadGhosttyScript() {
-  if (window.__ghostty || window.__ghosttyLoading) return;
-  window.__ghosttyLoading = true;
-
-  const s = document.createElement("script");
-  s.type = "module";
-  s.textContent = [
-    "import { Ghostty, Terminal, FitAddon } from '/ghostty/ghostty-web.js';",
-    "try {",
-    "  const instance = await Ghostty.load('/ghostty/ghostty-vt.wasm');",
-    "  window.__ghostty = { Ghostty, Terminal, FitAddon, instance };",
-    "} catch(e) {",
-    "  console.error('ghostty-web init failed:', e);",
-    "  window.__ghosttyError = e;",
-    "}",
-    "window.dispatchEvent(new CustomEvent('ghostty-ready'));",
-  ].join("\n");
-  document.head.appendChild(s);
 }
 
 function Terminal({ style, sessionId: explicitSessionId }: TerminalProps) {
@@ -102,7 +57,7 @@ function Terminal({ style, sessionId: explicitSessionId }: TerminalProps) {
     const sessionId = getOrCreateSessionId(explicitSessionId);
 
     function initTerminal() {
-      if (state.disposed || !el) return;
+      if (state.disposed || !el || state.term) return;
       const g = window.__ghostty;
       if (!g) {
         if (window.__ghosttyError) {
@@ -198,38 +153,47 @@ function Terminal({ style, sessionId: explicitSessionId }: TerminalProps) {
       };
     }
 
-    // Initialize ghostty-web
-    loadGhosttyScript();
-    if (window.__ghostty) {
-      initTerminal();
-    } else {
-      const handler = () => initTerminal();
-      window.addEventListener("ghostty-ready", handler, { once: true });
-      // Timeout: if WASM doesn't load in 15s, show error
-      const timeout = setTimeout(() => {
-        if (!window.__ghostty && el) {
-          el.style.color = "#c9d1d9";
-          el.style.padding = "16px";
-          el.style.fontFamily = "monospace";
-          el.textContent = "ghostty-web loading timed out.";
-        }
-      }, 15000);
-      return () => {
-        window.removeEventListener("ghostty-ready", handler);
-        clearTimeout(timeout);
-      };
+    el.style.color = "#c9d1d9";
+    el.style.fontFamily = "monospace";
+    if (!window.__ghostty) {
+      el.style.padding = "16px";
+      el.textContent = "Loading terminal…";
     }
+
+    void ensureGhostty()
+      .then(() => {
+        if (state.disposed) return;
+        el.textContent = "";
+        el.style.padding = "4px 0 0 4px";
+        initTerminal();
+      })
+      .catch(() => {
+        if (state.disposed || !el) return;
+        el.style.padding = "16px";
+        el.textContent = "Failed to load ghostty-web terminal.";
+      });
 
     return () => {
       state.disposed = true;
       if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
       if (state.ws) {
         state.ws.onclose = null;
         state.ws.close();
+        state.ws = null;
       }
-      if (state.ro) state.ro.disconnect();
-      if (state.fitAddon) state.fitAddon.dispose();
-      if (state.term) state.term.dispose();
+      if (state.ro) {
+        state.ro.disconnect();
+        state.ro = null;
+      }
+      if (state.fitAddon) {
+        state.fitAddon.dispose();
+        state.fitAddon = null;
+      }
+      if (state.term) {
+        state.term.dispose();
+        state.term = null;
+      }
     };
   }, [explicitSessionId]);
 

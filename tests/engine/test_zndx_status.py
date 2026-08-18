@@ -112,6 +112,10 @@ class TestUnitWrappers:
         proc = (_REPO / "scripts" / "processes" / "capability-engine.sh").read_text()
         devenv = (_REPO / "devenv.nix").read_text()
         assert "devenv up -d" in lib
+        assert "export_unit_runtime" in lib
+        assert "XDG_RUNTIME_DIR" in lib
+        assert "compose_visible" in lib
+        assert "reap_atelier_compose" in lib
         assert "capability-engine" in text
         assert "engine-supervise" not in text
         assert "50251" in lib
@@ -130,6 +134,7 @@ class TestUnitWrappers:
         lib = (_REPO / "scripts" / "systemd-unit.sh").read_text()
         combined = text + "\n" + lib
         assert "devenv processes down" in lib
+        assert "reap_atelier_compose" in text + "\n" + lib
         assert "gpu-deep-cleanup" not in combined
         assert "just teardown" not in combined
         lease_lines = [

@@ -982,14 +982,18 @@ def _discover_and_register_hive_sources() -> None:
 def federation_surfaces(request: Request):
     """Waffle roster: this engine plus peers that advertise a primary UI.
 
-    Discovery is the Ægir/Gaius walk (Status + one-hop ServerQuery PEERS).
-    Offline members are skipped this request; they appear when they join.
-    LAN IP Host rebases this-host links so the ZT name need not resolve.
+    Discovery matches Signals: Status the local PEERS directory in
+    parallel, skip a target that is down this round, one-hop PEERS only
+    from live engines. LAN IP Host rebases this-host links so the ZT
+    name need not resolve.
     """
-    from atelier.engine.s2s import collect_peer_surfaces, rebase_items_for_request
+    from atelier.engine.s2s import (
+        collect_peer_surfaces_cached,
+        rebase_items_for_request,
+    )
 
     try:
-        items = collect_peer_surfaces()
+        items = collect_peer_surfaces_cached()
     except Exception as exc:  # noqa: BLE001 — waffle degrades to empty
         return {"items": [], "error": str(exc)}
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""

@@ -16,9 +16,18 @@ source "$ROOT/scripts/systemd-unit.sh"
 POLL_ITERS="${ATELIER_SYSTEMD_POLL_ITERS:-180}"
 POLL_SLEEP="${ATELIER_SYSTEMD_POLL_SLEEP:-5}"
 
-if unit_already_ready; then
-  info "already READY (compose-owned Engine/Status :${GRPC_PORT}) — skip up"
+export_unit_runtime
+
+# Skip only when Engine/Status is up AND a login-shell `devenv processes`
+# sees the same compose. A /tmp leftover from an old unit is not enough.
+if unit_already_ready && compose_visible; then
+  info "already READY (login-visible compose, Engine/Status :${GRPC_PORT}) — skip up"
   exit 0
+fi
+
+if ! compose_visible; then
+  info "login-shell devenv cannot see this checkout's compose — reaping leftover daemons"
+  reap_atelier_compose
 fi
 
 if [[ "$(listener_count)" -gt 0 ]]; then

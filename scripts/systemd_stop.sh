@@ -13,8 +13,11 @@ export PATH="/usr/local/bin:/usr/bin:/bin:${HOME}/.nix-profile/bin:${PATH:-}"
 # shellcheck source=systemd-unit.sh
 source "$ROOT/scripts/systemd-unit.sh"
 
+export_unit_runtime
 info "peer-scoped devenv down (capability-engine :${GRPC_PORT})"
 lattice_down
+# Catch a leftover /tmp compose from before XDG_RUNTIME_DIR was pinned.
+reap_atelier_compose
 reap_foreign_engines
 
 if [[ "$(listener_count)" -gt 0 ]]; then

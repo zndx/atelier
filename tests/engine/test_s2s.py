@@ -9,7 +9,9 @@ from atelier.engine.s2s import (
     advertise_host,
     advertised_head,
     collect_peer_surfaces,
+    collect_peer_surfaces_cached,
     configured_peers,
+    reset_roster_cache,
     is_loopback_host,
     list_named_remotes,
     live_vite_port,
@@ -198,7 +200,7 @@ def test_collect_discovers_one_hop_joiner(monkeypatch) -> None:
     )
     monkeypatch.setattr("atelier.engine.s2s.advertise_host", lambda: "tinybox.dev.vista.zndx.org")
 
-    def fake_status(addr, timeout=4.0):
+    def fake_status(addr, timeout=1.0):
         if addr.endswith(":50051"):
             return zpb.StatusResponse(
                 project="gaius",
@@ -211,7 +213,7 @@ def test_collect_discovers_one_hop_joiner(monkeypatch) -> None:
             )
         return None
 
-    def fake_query(addr, *, kind=0, timeout=10.0):
+    def fake_query(addr, *, kind=0, timeout=2.0):
         if addr.endswith(":50051") and kind == zpb.SERVER_QUERY_KIND_PEERS:
             return zpb.ServerQueryResponse(
                 project="gaius",
@@ -223,6 +225,109 @@ def test_collect_discovers_one_hop_joiner(monkeypatch) -> None:
     monkeypatch.setattr("atelier.engine.s2s.query_peer", fake_query)
     projects = {r["project"] for r in collect_peer_surfaces()}
     assert projects == {"atelier", "gaius", "synth"}
+
+
+def test_collect_does_not_query_offline_seeds(monkeypatch) -> None:
+    """Signals skip: Status fail → continue. Never ServerQuery a down port."""
+    monkeypatch.setattr(
+        "atelier.engine.s2s.configured_peers",
+        lambda contract=None: [
+            ("gaius", "tinybox:50051"),
+            ("synth", "tinybox:50351"),
+            ("metabase", "tinybox:50451"),
+        ],
+    )
+    monkeypatch.setattr("atelier.engine.s2s.directory_seeds", lambda: [])
+    monkeypatch.setattr(
+        "atelier.engine.s2s.local_primary_ui",
+        lambda: "http://tinybox.dev.vista.zndx.org:3300",
+    )
+    monkeypatch.setattr("atelier.engine.s2s.advertise_host", lambda: "tinybox.dev.vista.zndx.org")
+    queried: list[str] = []
+
+    def fake_status(addr, timeout=1.0):
+        if addr.endswith(":50051"):
+            return zpb.StatusResponse(
+                project="gaius",
+                surfaces=[zpb.Surface(kind="primary", url="http://tinybox.dev.vista.zndx.org:9890", healthy=True)],
+            )
+        return None
+
+    def fake_query(addr, *, kind=0, timeout=2.0):
+        queried.append(addr)
+        return zpb.ServerQueryResponse(project="gaius")
+
+    monkeypatch.setattr("atelier.engine.s2s.status_peer", fake_status)
+    monkeypatch.setattr("atelier.engine.s2s.query_peer", fake_query)
+    projects = {r["project"] for r in collect_peer_surfaces()}
+    assert projects == {"atelier", "gaius"}
+    assert queried == ["tinybox:50051"]
+
+
+def test_cached_collect_keeps_last_good_when_walk_empty(monkeypatch) -> None:
+    reset_roster_cache()
+    monkeypatch.setattr("atelier.engine.s2s.directory_seeds", lambda: [])
+    monkeypatch.setattr("atelier.engine.s2s.advertise_host", lambda: "tinybox.dev.vista.zndx.org")
+    monkeypatch.setattr(
+        "atelier.engine.s2s.configured_peers",
+        lambda contract=None: [("gaius", "tinybox:50051")],
+    )
+    monkeypatch.setattr(
+        "atelier.engine.s2s.local_primary_ui",
+        lambda: "http://tinybox.dev.vista.zndx.org:3300",
+    )
+    monkeypatch.setattr(
+        "atelier.engine.s2s.status_peer",
+        lambda addr, timeout=1.0: zpb.StatusResponse(
+            project="gaius",
+            surfaces=[zpb.Surface(kind="primary", url="http://tinybox.dev.vista.zndx.org:9890", healthy=True)],
+        ) if addr.endswith(":50051") else None,
+    )
+    monkeypatch.setattr(
+        "atelier.engine.s2s.query_peer",
+        lambda addr, *, kind=0, timeout=2.0: zpb.ServerQueryResponse(project="gaius"),
+    )
+    first = collect_peer_surfaces_cached(ttl=0)
+    assert {r["project"] for r in first} == {"atelier", "gaius"}
+
+    monkeypatch.setattr("atelier.engine.s2s.local_primary_ui", lambda: "")
+    monkeypatch.setattr("atelier.engine.s2s.status_peer", lambda addr, timeout=1.0: None)
+    second = collect_peer_surfaces_cached(ttl=0)
+    assert {r["project"] for r in second} == {"atelier", "gaius"}
+    reset_roster_cache()
+
+
+def test_cached_collect_ttl_skips_second_walk(monkeypatch) -> None:
+    reset_roster_cache()
+    probes = {"n": 0}
+    monkeypatch.setattr("atelier.engine.s2s.directory_seeds", lambda: [])
+    monkeypatch.setattr("atelier.engine.s2s.advertise_host", lambda: "tinybox.dev.vista.zndx.org")
+    monkeypatch.setattr(
+        "atelier.engine.s2s.configured_peers",
+        lambda contract=None: [("gaius", "tinybox:50051")],
+    )
+    monkeypatch.setattr(
+        "atelier.engine.s2s.local_primary_ui",
+        lambda: "http://tinybox.dev.vista.zndx.org:3300",
+    )
+
+    def fake_status(addr, timeout=1.0):
+        probes["n"] += 1
+        return zpb.StatusResponse(
+            project="gaius",
+            surfaces=[zpb.Surface(kind="primary", url="http://tinybox.dev.vista.zndx.org:9890", healthy=True)],
+        )
+
+    monkeypatch.setattr("atelier.engine.s2s.status_peer", fake_status)
+    monkeypatch.setattr(
+        "atelier.engine.s2s.query_peer",
+        lambda addr, *, kind=0, timeout=2.0: zpb.ServerQueryResponse(project="gaius"),
+    )
+    a = collect_peer_surfaces_cached(ttl=30)
+    b = collect_peer_surfaces_cached(ttl=30)
+    assert a == b
+    assert probes["n"] == 1
+    reset_roster_cache()
 
 
 def test_servicer_server_query_and_yield() -> None:
