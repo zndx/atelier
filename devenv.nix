@@ -129,7 +129,13 @@ in
   languages.python = {
     enable = true;
     version = "3.12";
-    uv.enable = true;
+    uv = {
+      enable = true;
+      # Sync the venv on shell entry, before processes start — otherwise
+      # capability-engine (and friends) crash-loop on missing modules
+      # until the first ad-hoc `uv run` happens to sync.
+      sync.enable = true;
+    };
   };
 
   # Node.js 22 with pnpm
