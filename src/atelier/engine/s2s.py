@@ -324,7 +324,26 @@ def local_response(
         )
     if kind == zpb.SERVER_QUERY_KIND_SURFACES:
         resp.surfaces.extend(local_surfaces())
+    if kind == zpb.SERVER_QUERY_KIND_QUEUES:
+        resp.queues.extend(declared_queues())
     return resp
+
+
+def declared_queues() -> list[zpb.QueueHint]:
+    """Declared leaf shape. Occupancy over time is RequestQueueShare."""
+    from atelier.engine.queue_share import INSTRUCT
+
+    return [
+        zpb.QueueHint(
+            path=INSTRUCT.queue,
+            resource_class=INSTRUCT.name,
+            gpu_guarantee=0,
+            gpu_max=INSTRUCT.gpu_tokens,
+            max_applications=INSTRUCT.max_applications,
+            role="instruct",
+            examples="atelier.instruct;atelier.referee",
+        ),
+    ]
 
 
 def primary_ui_of(status: zpb.StatusResponse) -> str:

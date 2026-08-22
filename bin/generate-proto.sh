@@ -26,4 +26,20 @@ uv run python -m grpc_tools.protoc \
     --pyi_out=src \
     zndx/engine/v1/engine.proto
 
+if [[ -f external/signals-protocol/proto/zndx/scheduler/v1/scheduler.proto ]]; then
+    uv run python -m grpc_tools.protoc \
+        -I=external/signals-protocol/proto \
+        --python_out=src \
+        --grpc_python_out=src \
+        --pyi_out=src \
+        zndx/scheduler/v1/scheduler.proto
+    mkdir -p src/zndx/scheduler/v1
+    printf '%s\n' \
+        '"""Generated bindings for zndx.scheduler.v1 (signals-protocol)."""' \
+        'from . import scheduler_pb2, scheduler_pb2_grpc' \
+        '__all__ = ["scheduler_pb2", "scheduler_pb2_grpc"]' \
+        > src/zndx/scheduler/v1/__init__.py
+    touch src/zndx/scheduler/__init__.py
+fi
+
 echo "Proto stubs generated."

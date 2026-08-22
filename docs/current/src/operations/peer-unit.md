@@ -12,8 +12,12 @@ there is no laptop-vs-server switch.
 
 Lattice accept is Engine/Status at gRPC bind, not vLLM cold-load and
 not product HTTP. Status also advertises `surfaces` (`kind=primary`,
-devenv Vite `:3300`, never Metaflow `:3000`) and answers `ServerQuery` (REMOTES / PEERS /
-SURFACES) for the chrome waffle.
+devenv Vite `:3300`, never Metaflow `:3000`) and answers `ServerQuery`
+(REMOTES / PEERS / SURFACES / QUEUES). `QueueHint` is declared leaf
+shape. WRK occupancy over time is
+`zndx.scheduler.v1.Scheduler/RequestQueueShare` (UNIMPLEMENTED =
+Signals-not-yet; other errors `#YK.00000007.SHAREFAIL`). Atelier never
+writes queues.yaml.
 
 | Fact | Value |
 |------|--------|

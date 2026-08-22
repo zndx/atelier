@@ -103,6 +103,11 @@ class VllmManager:
             ep = self._ep.get(capability)
             if ep and ep.proc and ep.proc.poll() is None and ep.healthy:
                 return ep
+            # Occupancy intent before GPU launch. UNIMPLEMENTED = Signals
+            # not-yet; SHAREFAIL fails admit. Never write queues.yaml.
+            from atelier.engine.queue_share import notify_admit
+
+            notify_admit(capability)
             if ep is None or (ep.proc and ep.proc.poll() is not None):
                 ep = self._launch(capability)
                 self._ep[capability] = ep
