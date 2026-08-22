@@ -196,6 +196,15 @@ class ZndxEngineServicer:
     def Remediate(self, request, context):
         context.abort(grpc.StatusCode.UNIMPLEMENTED, "atelier Remediate is not on this face")
 
+    def RecordLineage(self, request, context):
+        # Required on the Engine servicer as of signals-protocol RecordLineage
+        # (70fed51) — add_EngineServicer_to_server looks the method up at
+        # register time. SoR is Signals Atlas, not Atelier.
+        context.abort(
+            grpc.StatusCode.UNIMPLEMENTED,
+            "RecordLineage is Signals Atlas SoR (POST /api/v1/lineage).",
+        )
+
 
 def _gpu_count() -> int:
     """nvidia-smi-based count — the engine venv has no torch (vLLM is foreign)."""

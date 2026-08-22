@@ -40,6 +40,7 @@ class ServerQueryKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SERVER_QUERY_KIND_NOTE: _ClassVar[ServerQueryKind]
     SERVER_QUERY_KIND_SURFACES: _ClassVar[ServerQueryKind]
     SERVER_QUERY_KIND_QUEUES: _ClassVar[ServerQueryKind]
+    SERVER_QUERY_KIND_WORKLOADS: _ClassVar[ServerQueryKind]
 SIGNAL_KIND_UNSPECIFIED: SignalKind
 EXTERNAL_NAMESPACE_VIOLATION: SignalKind
 UNSATISFIABLE: SignalKind
@@ -62,6 +63,7 @@ SERVER_QUERY_KIND_PEERS: ServerQueryKind
 SERVER_QUERY_KIND_NOTE: ServerQueryKind
 SERVER_QUERY_KIND_SURFACES: ServerQueryKind
 SERVER_QUERY_KIND_QUEUES: ServerQueryKind
+SERVER_QUERY_KIND_WORKLOADS: ServerQueryKind
 
 class Candidate(_message.Message):
     __slots__ = ("iri", "label", "kind", "score")
@@ -294,7 +296,7 @@ class ServerQueryRequest(_message.Message):
     def __init__(self, kind: _Optional[_Union[ServerQueryKind, str]] = ..., ttl: _Optional[int] = ..., nonce: _Optional[str] = ..., origin_project: _Optional[str] = ..., note_id: _Optional[str] = ...) -> None: ...
 
 class ServerQueryResponse(_message.Message):
-    __slots__ = ("project", "remotes", "head", "peers", "schedules", "note", "surfaces", "queues")
+    __slots__ = ("project", "remotes", "head", "peers", "schedules", "note", "surfaces", "queues", "workloads")
     PROJECT_FIELD_NUMBER: _ClassVar[int]
     REMOTES_FIELD_NUMBER: _ClassVar[int]
     HEAD_FIELD_NUMBER: _ClassVar[int]
@@ -303,6 +305,7 @@ class ServerQueryResponse(_message.Message):
     NOTE_FIELD_NUMBER: _ClassVar[int]
     SURFACES_FIELD_NUMBER: _ClassVar[int]
     QUEUES_FIELD_NUMBER: _ClassVar[int]
+    WORKLOADS_FIELD_NUMBER: _ClassVar[int]
     project: str
     remotes: _containers.RepeatedCompositeFieldContainer[GitRemote]
     head: str
@@ -311,7 +314,24 @@ class ServerQueryResponse(_message.Message):
     note: WikiNote
     surfaces: _containers.RepeatedCompositeFieldContainer[Surface]
     queues: _containers.RepeatedCompositeFieldContainer[QueueHint]
-    def __init__(self, project: _Optional[str] = ..., remotes: _Optional[_Iterable[_Union[GitRemote, _Mapping]]] = ..., head: _Optional[str] = ..., peers: _Optional[_Iterable[_Union[PeerHint, _Mapping]]] = ..., schedules: _Optional[_Iterable[_Union[ScheduleHint, _Mapping]]] = ..., note: _Optional[_Union[WikiNote, _Mapping]] = ..., surfaces: _Optional[_Iterable[_Union[Surface, _Mapping]]] = ..., queues: _Optional[_Iterable[_Union[QueueHint, _Mapping]]] = ...) -> None: ...
+    workloads: _containers.RepeatedCompositeFieldContainer[WorkloadHint]
+    def __init__(self, project: _Optional[str] = ..., remotes: _Optional[_Iterable[_Union[GitRemote, _Mapping]]] = ..., head: _Optional[str] = ..., peers: _Optional[_Iterable[_Union[PeerHint, _Mapping]]] = ..., schedules: _Optional[_Iterable[_Union[ScheduleHint, _Mapping]]] = ..., note: _Optional[_Union[WikiNote, _Mapping]] = ..., surfaces: _Optional[_Iterable[_Union[Surface, _Mapping]]] = ..., queues: _Optional[_Iterable[_Union[QueueHint, _Mapping]]] = ..., workloads: _Optional[_Iterable[_Union[WorkloadHint, _Mapping]]] = ...) -> None: ...
+
+class WorkloadHint(_message.Message):
+    __slots__ = ("wrk", "model", "capabilities", "tensor_parallel", "pipeline_parallel", "gpu_tokens")
+    WRK_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    TENSOR_PARALLEL_FIELD_NUMBER: _ClassVar[int]
+    PIPELINE_PARALLEL_FIELD_NUMBER: _ClassVar[int]
+    GPU_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    wrk: str
+    model: str
+    capabilities: _containers.RepeatedScalarFieldContainer[str]
+    tensor_parallel: int
+    pipeline_parallel: int
+    gpu_tokens: int
+    def __init__(self, wrk: _Optional[str] = ..., model: _Optional[str] = ..., capabilities: _Optional[_Iterable[str]] = ..., tensor_parallel: _Optional[int] = ..., pipeline_parallel: _Optional[int] = ..., gpu_tokens: _Optional[int] = ...) -> None: ...
 
 class QueueHint(_message.Message):
     __slots__ = ("path", "resource_class", "gpu_guarantee", "gpu_max", "max_applications", "preemption_policy", "preemption_delay", "role", "examples")
@@ -334,3 +354,19 @@ class QueueHint(_message.Message):
     role: str
     examples: str
     def __init__(self, path: _Optional[str] = ..., resource_class: _Optional[str] = ..., gpu_guarantee: _Optional[int] = ..., gpu_max: _Optional[int] = ..., max_applications: _Optional[int] = ..., preemption_policy: _Optional[str] = ..., preemption_delay: _Optional[str] = ..., role: _Optional[str] = ..., examples: _Optional[str] = ...) -> None: ...
+
+class LineageRequest(_message.Message):
+    __slots__ = ("event_json", "event_type")
+    EVENT_JSON_FIELD_NUMBER: _ClassVar[int]
+    EVENT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    event_json: str
+    event_type: str
+    def __init__(self, event_json: _Optional[str] = ..., event_type: _Optional[str] = ...) -> None: ...
+
+class LineageResponse(_message.Message):
+    __slots__ = ("accepted", "error")
+    ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    accepted: bool
+    error: str
+    def __init__(self, accepted: bool = ..., error: _Optional[str] = ...) -> None: ...

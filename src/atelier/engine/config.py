@@ -41,6 +41,7 @@ _CUDA_LIBS_CANDIDATES = [
 class ModelSpec:
     model: str                      # vLLM model id (resolved from hf_hub_cache) or local path
     tensor_parallel_size: int = 4
+    pipeline_parallel_size: int = 1  # advertised on WORKLOADS; share is tp×pp
     gpu_memory_utilization: float = 0.90
     extra_args: list[str] = field(default_factory=list)
 
@@ -87,6 +88,7 @@ def _spec_from_tree(tree) -> ModelSpec:
     return ModelSpec(
         model=str(tree["model"]),
         tensor_parallel_size=int(tree.get("tp", 4)),
+        pipeline_parallel_size=int(tree.get("pp", 1) or 1),
         gpu_memory_utilization=float(tree.get("gpu_mem", 0.90)),
         extra_args=extra,
     )

@@ -326,24 +326,68 @@ def local_response(
         resp.surfaces.extend(local_surfaces())
     if kind == zpb.SERVER_QUERY_KIND_QUEUES:
         resp.queues.extend(declared_queues())
+    if kind == zpb.SERVER_QUERY_KIND_WORKLOADS:
+        resp.workloads.extend(declared_workloads())
     return resp
 
 
 def declared_queues() -> list[zpb.QueueHint]:
     """Declared leaf shape. Occupancy over time is RequestQueueShare."""
-    from atelier.engine.queue_share import INSTRUCT
+    from atelier.engine.queue_share import HEAVY, LIGHT, MEDIUM
 
     return [
         zpb.QueueHint(
-            path=INSTRUCT.queue,
-            resource_class=INSTRUCT.name,
-            gpu_guarantee=0,
-            gpu_max=INSTRUCT.gpu_tokens,
-            max_applications=INSTRUCT.max_applications,
-            role="instruct",
+            path=LIGHT.queue,
+            resource_class=LIGHT.name,
+            gpu_guarantee=1,
+            gpu_max=2,
+            max_applications=LIGHT.max_applications,
+            preemption_delay="5s",
+            role="light",
+            examples="atelier.instruct;atelier.referee",
+        ),
+        zpb.QueueHint(
+            path=MEDIUM.queue,
+            resource_class=MEDIUM.name,
+            gpu_guarantee=2,
+            gpu_max=2,
+            max_applications=MEDIUM.max_applications,
+            preemption_delay="5s",
+            role="medium",
+            examples="atelier.instruct;atelier.referee",
+        ),
+        zpb.QueueHint(
+            path=HEAVY.queue,
+            resource_class=HEAVY.name,
+            gpu_guarantee=HEAVY.gpu_tokens,
+            gpu_max=HEAVY.gpu_tokens,
+            max_applications=HEAVY.max_applications,
+            preemption_policy="fence",
+            role="heavy",
             examples="atelier.instruct;atelier.referee",
         ),
     ]
+
+
+def declared_workloads() -> list:
+    """WRK model + capabilities + tp/pp. Queue names stay resource-class FQNs."""
+    from atelier.engine.config import load_engine_config
+
+    out = []
+    for cap, spec in (load_engine_config().capabilities or {}).items():
+        tp = int(spec.tensor_parallel_size)
+        pp = int(getattr(spec, "pipeline_parallel_size", 1) or 1)
+        out.append(
+            zpb.WorkloadHint(
+                wrk=cap.replace("_", "-"),
+                model=spec.model,
+                capabilities=[cap.replace("_", "-")],
+                tensor_parallel=tp,
+                pipeline_parallel=pp,
+                gpu_tokens=tp * pp,
+            )
+        )
+    return out
 
 
 def primary_ui_of(status: zpb.StatusResponse) -> str:

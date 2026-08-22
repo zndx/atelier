@@ -13,11 +13,14 @@ there is no laptop-vs-server switch.
 Lattice accept is Engine/Status at gRPC bind, not vLLM cold-load and
 not product HTTP. Status also advertises `surfaces` (`kind=primary`,
 devenv Vite `:3300`, never Metaflow `:3000`) and answers `ServerQuery`
-(REMOTES / PEERS / SURFACES / QUEUES). `QueueHint` is declared leaf
-shape. WRK occupancy over time is
-`zndx.scheduler.v1.Scheduler/RequestQueueShare` (UNIMPLEMENTED =
-Signals-not-yet; other errors `#YK.00000007.SHAREFAIL`). Atelier never
-writes queues.yaml.
+(REMOTES / PEERS / SURFACES / QUEUES / WORKLOADS). `QueueHint` is
+declared leaf shape. `WorkloadHint` carries model + capabilities +
+tp/pp (`gpu_tokens` = tp×pp); never encode those in the queue name.
+Pick heavy/medium/light from that share. Occupancy over time is
+`zndx.scheduler.v1.Scheduler/RequestQueueShare` (RFC 9562 UUIDv7 on
+every call; UNIMPLEMENTED = Signals-not-yet; `REJECTED` / other errors
+`#YK.00000007.SHAREFAIL` — do not admit). Zero-floor + `valid_until`
+when the WRK ends. Atelier never writes queues.yaml.
 
 | Fact | Value |
 |------|--------|

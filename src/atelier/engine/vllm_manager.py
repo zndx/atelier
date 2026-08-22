@@ -107,7 +107,12 @@ class VllmManager:
             # not-yet; SHAREFAIL fails admit. Never write queues.yaml.
             from atelier.engine.queue_share import notify_admit
 
-            notify_admit(capability)
+            spec = self.cfg.capabilities[capability]
+            notify_admit(
+                capability,
+                spec.tensor_parallel_size,
+                getattr(spec, "pipeline_parallel_size", 1) or 1,
+            )
             if ep is None or (ep.proc and ep.proc.poll() is not None):
                 ep = self._launch(capability)
                 self._ep[capability] = ep
@@ -305,6 +310,12 @@ class VllmManager:
                 ep.proc.kill()
         self._release(ep)
         ep.healthy = False
+        from atelier.engine.queue_share import notify_release
+
+        spec = self.cfg.capabilities.get(capability)
+        tp = spec.tensor_parallel_size if spec else None
+        pp = getattr(spec, "pipeline_parallel_size", 1) if spec else None
+        notify_release(capability, tp, pp)
         emit(self.cfg.log_dir, "endpoint_stop", capability=capability)
 
     def shutdown(self) -> None:
