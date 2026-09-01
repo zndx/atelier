@@ -9,10 +9,11 @@ import asyncio
 import time
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -982,6 +983,11 @@ def _discover_and_register_hive_sources() -> None:
 def federation_surfaces(request: Request):
     """Waffle roster: this engine plus peers that advertise a primary UI.
 
+    Varnish loop-through (federated menu pattern): the RAW roster is
+    cached at the *_origin route (ttl+grace = instant serves, background
+    refresh); per-request Host rebasing happens HERE, after the cache, so
+    one browser's access host never leaks into another's links. Falls
+    back to the bespoke TTL/last-good roster when varnish is absent.
     Discovery matches Signals: Status the local PEERS directory in
     parallel, skip a target that is down this round, one-hop PEERS only
     from live engines. LAN IP Host rebases this-host links so the ZT
@@ -992,12 +998,40 @@ def federation_surfaces(request: Request):
         rebase_items_for_request,
     )
 
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    import httpx
+
+    vport = (os.environ.get("VARNISH_PORT") or "6094").strip()
+    url = f"http://127.0.0.1:{vport}/api/atelier/v1/federation/surfaces_origin"
+    try:
+        resp = httpx.get(url, timeout=6.0)
+        if resp.status_code == 200:
+            payload = resp.json()
+            items = payload.get("items") or []
+            return {"items": rebase_items_for_request(items, host)}
+    except Exception:  # noqa: BLE001 — varnish absent → bespoke fallback
+        pass
     try:
         items = collect_peer_surfaces_cached()
     except Exception as exc:  # noqa: BLE001 — waffle degrades to empty
         return {"items": [], "error": str(exc)}
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
     return {"items": rebase_items_for_request(items, host)}
+
+
+@app.get("/api/atelier/v1/federation/surfaces_origin")
+def federation_surfaces_origin():
+    """Raw roster for the varnish cache — the live collector, no rebasing.
+
+    Failures must be real HTTP errors (502), never 200+error, so the VCL
+    error discipline holds: a failed background refresh is abandoned and
+    the last good object keeps serving.
+    """
+    from atelier.engine.s2s import collect_peer_surfaces
+
+    try:
+        return {"items": collect_peer_surfaces()}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/health")

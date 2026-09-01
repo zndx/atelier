@@ -45,6 +45,13 @@ for i in $(seq 1 "$POLL_ITERS"); do
     info "WARN: $(listener_count) listeners on :${GRPC_PORT} (iter=$i)"
   elif unit_already_ready; then
     info "compose-owned Engine/Status ready on :${GRPC_PORT} (iter=$i)"
+    # Warm the varnish-fronted waffle roster: the malloc store is empty
+    # after a restart. Fire-and-forget; the public route primes the cache.
+    (
+      sleep 5
+      curl -sf --max-time 60 -o /dev/null \
+        "http://127.0.0.1:${CDSW_APP_PORT:-8090}/api/atelier/v1/federation/surfaces" || true
+    ) >/dev/null 2>&1 &
     exit 0
   fi
   if (( i % 6 == 0 )); then

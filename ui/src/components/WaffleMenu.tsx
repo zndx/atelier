@@ -135,6 +135,9 @@ export default function WaffleMenu() {
               </li>
             ))}
           </ul>
+          {!loaded && items.length === 0 && (
+            <p className="waffle-empty">Discovering federation peers…</p>
+          )}
           {loaded && items.length === 0 && <p className="waffle-empty">{emptyMsg}</p>}
         </aside>,
         document.body,

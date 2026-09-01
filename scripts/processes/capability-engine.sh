@@ -7,6 +7,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 export ATELIER_ENGINE_PORT="${ATELIER_ENGINE_PORT:-50251}"
+# Canonical federation identity: without this advertise_host() falls back
+# to FQDN detection, which picks up the WAN reverse-DNS name
+# (customer.*.isp.starlink.com) — unresolvable over WARP/off-LAN.
+export ATELIER_ADVERTISE_HOST="${ATELIER_ADVERTISE_HOST:-${SIGNALS_ADVERTISE_HOST:-tinybox.dev.vista.zndx.org}}"
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # CUDA unmask when present (Linux GPU lab). Harmless no-op on a laptop.

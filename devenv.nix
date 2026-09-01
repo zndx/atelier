@@ -155,6 +155,54 @@ in
     initialDatabases = [{ name = "atelier"; }];
   };
 
+  services.varnish = {
+    enable = true;
+    # 608x is Ranger territory (6080 HTTP, 6085 Tomcat shutdown socket) —
+    # the varnish lattice lives in the 609x decade: gaius 6091, signals 6092,
+    # aegir 6093, atelier 6094.
+    listen = "127.0.0.1:6094";
+    # Federated menu pattern (gaius precedent): only the *_origin route is
+    # cached — ttl+grace serves the waffle instantly while a background
+    # fetch refreshes. Backend is the gateway (:8090), which serves the
+    # raw roster; per-request Host rebasing happens in the gateway AFTER
+    # the cache. Everything else passes through untouched.
+    vcl = ''
+      vcl 4.1;
+
+      backend atelier_gateway {
+        .host = "127.0.0.1";
+        .port = "8090";
+        .connect_timeout = 2s;
+        .first_byte_timeout = 120s;
+      }
+
+      sub vcl_recv {
+        if (req.url ~ "^/api/atelier/v1/federation/surfaces_origin") {
+          return (hash);
+        }
+        return (pass);
+      }
+
+      sub vcl_backend_response {
+        if (bereq.url ~ "^/api/atelier/v1/federation/surfaces_origin") {
+          if (beresp.status >= 400) {
+            # A background refresh that fails must not displace the good
+            # stale object; a foreground error must not stick in cache.
+            if (bereq.is_bgfetch) {
+              return (abandon);
+            }
+            set beresp.ttl = 1s;
+            set beresp.grace = 0s;
+            set beresp.uncacheable = true;
+          } else {
+            set beresp.ttl = 60s;
+            set beresp.grace = 6h;
+          }
+        }
+      }
+    '';
+  };
+
   # Process management: `devenv up` starts all services.
   #
   # Python services call load_config() which reads HOCON with live env substitution.
@@ -182,7 +230,10 @@ in
       };
     };
     gateway = {
-      exec = llamaDefaultEnv + "exec uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port \${CDSW_APP_PORT:-8090}";
+      # ATELIER_ADVERTISE_HOST: the gateway builds the waffle roster
+      # in-process (self row + peers), so it needs the same advertise host
+      # as the engine or FQDN detection leaks the WAN reverse-DNS name.
+      exec = llamaDefaultEnv + "export ATELIER_ADVERTISE_HOST=\"\${ATELIER_ADVERTISE_HOST:-\${SIGNALS_ADVERTISE_HOST:-tinybox.dev.vista.zndx.org}}\"; exec uv run uvicorn atelier.gateway:app --host 0.0.0.0 --port \${CDSW_APP_PORT:-8090}";
       process-compose = {
         depends_on.grpc-server.condition = "process_healthy";
       };
