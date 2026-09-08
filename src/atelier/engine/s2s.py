@@ -344,7 +344,7 @@ def declared_queues() -> list[zpb.QueueHint]:
             max_applications=LIGHT.max_applications,
             preemption_delay="5s",
             role="light",
-            examples="atelier.instruct;atelier.referee",
+            examples="atelier.referee",
         ),
         zpb.QueueHint(
             path=MEDIUM.queue,
@@ -354,7 +354,7 @@ def declared_queues() -> list[zpb.QueueHint]:
             max_applications=MEDIUM.max_applications,
             preemption_delay="5s",
             role="medium",
-            examples="atelier.instruct;atelier.referee",
+            examples="atelier.referee",
         ),
         zpb.QueueHint(
             path=HEAVY.queue,
@@ -364,27 +364,46 @@ def declared_queues() -> list[zpb.QueueHint]:
             max_applications=HEAVY.max_applications,
             preemption_policy="fence",
             role="heavy",
-            examples="atelier.instruct;atelier.referee",
+            examples="atelier.referee",
         ),
     ]
 
 
-def declared_workloads() -> list:
-    """WRK model + capabilities + tp/pp. Queue names stay resource-class FQNs."""
+def _resource_class_enum(gpu_tokens: int) -> int:
+    if gpu_tokens <= 0:
+        return zpb.RESOURCE_CLASS_COMPUTE
+    if gpu_tokens == 1:
+        return zpb.RESOURCE_CLASS_LIGHT
+    if gpu_tokens == 2:
+        return zpb.RESOURCE_CLASS_MEDIUM
+    return zpb.RESOURCE_CLASS_HEAVY
+
+
+def declared_workloads(peer: str = PROJECT) -> list:
+    """WorkloadOffers for the capabilities this engine HOSTS (config engine.capabilities — referee).
+
+    Typed shape (protocol 7cc9ad1+): model + capabilities + WorkloadRequirements + ResourceClass;
+    queue names stay resource-class FQNs. Forwarded capabilities (instruct) are NOT offers of this
+    engine — the hosting peer advertises them (capabilities.md §Operating profiles).
+    """
     from atelier.engine.config import load_engine_config
 
     out = []
     for cap, spec in (load_engine_config().capabilities or {}).items():
         tp = int(spec.tensor_parallel_size)
         pp = int(getattr(spec, "pipeline_parallel_size", 1) or 1)
+        gpu = tp * pp
         out.append(
-            zpb.WorkloadHint(
-                wrk=cap.replace("_", "-"),
+            zpb.WorkloadOffer(
+                peer=peer,
                 model=spec.model,
                 capabilities=[cap.replace("_", "-")],
-                tensor_parallel=tp,
-                pipeline_parallel=pp,
-                gpu_tokens=tp * pp,
+                requirements=zpb.WorkloadRequirements(
+                    backend=zpb.SERVING_BACKEND_CPU_PROXY if gpu <= 0 else zpb.SERVING_BACKEND_VLLM_LOCAL,
+                    parallelism=zpb.ModelParallelism(tensor_parallel=tp, pipeline_parallel=pp, data_parallel=1),
+                    footprint=zpb.ResourceFootprint(gpu=gpu),
+                ),
+                resource_class=_resource_class_enum(gpu),
             )
         )
     return out

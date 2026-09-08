@@ -134,6 +134,41 @@ class SchedulerStub(object):
                 request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListQueueShareRequestsRequest.SerializeToString,
                 response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListQueueShareRequestsResponse.FromString,
                 _registered_method=True)
+        self.DeclareActivity = channel.unary_unary(
+                '/zndx.scheduler.v1.Scheduler/DeclareActivity',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.DeclareActivityRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.FromString,
+                _registered_method=True)
+        self.RenewActivity = channel.unary_unary(
+                '/zndx.scheduler.v1.Scheduler/RenewActivity',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.RenewActivityRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.FromString,
+                _registered_method=True)
+        self.ReleaseActivity = channel.unary_unary(
+                '/zndx.scheduler.v1.Scheduler/ReleaseActivity',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ReleaseActivityRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.FromString,
+                _registered_method=True)
+        self.ListActivities = channel.unary_unary(
+                '/zndx.scheduler.v1.Scheduler/ListActivities',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListActivitiesRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListActivitiesResponse.FromString,
+                _registered_method=True)
+        self.WatchActivities = channel.unary_stream(
+                '/zndx.scheduler.v1.Scheduler/WatchActivities',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.WatchActivitiesRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityWatchEvent.FromString,
+                _registered_method=True)
+        self.SyncWorkloads = channel.unary_unary(
+                '/zndx.scheduler.v1.Scheduler/SyncWorkloads',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.SyncWorkloadsRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.SyncWorkloadsResponse.FromString,
+                _registered_method=True)
+        self.ListWorkloads = channel.unary_unary(
+                '/zndx.scheduler.v1.Scheduler/ListWorkloads',
+                request_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListWorkloadsRequest.SerializeToString,
+                response_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListWorkloadsResponse.FromString,
+                _registered_method=True)
 
 
 class SchedulerServicer(object):
@@ -270,6 +305,64 @@ class SchedulerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DeclareActivity(self, request, context):
+        """── Coordination Activities (intent with a lifetime) ──────────────────
+        A peer ENGINE declares an Activity (zndx.engine.v1.Activity) on behalf of
+        one of its local processes; Signals materialises it as a run of its own
+        Airflow DAG and is the ONLY party that talks to Airflow. Peers renew
+        before the horizon, release when done, and Watch to learn every peer's
+        in-force activities. Local processes never call these: they ask their
+        local engine (Engine/ServerQuery kind=ACTIVITIES; supervision
+        ActivityEvent). (added 2026-09-06 — additive v1.)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RenewActivity(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReleaseActivity(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListActivities(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WatchActivities(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SyncWorkloads(self, request, context):
+        """── Workload catalogue (engines SUBMIT their scheduled workloads) ───────
+        Every project's engine submits its catalogue (zndx.engine.v1.ScheduleHint
+        entries: class, cadence or `after` ordering, claims = YK queue config,
+        postures, horizon). Signals owns the Airflow that materialises them:
+        one DAG per enabled entry whose runs are Activities, so the arbiter
+        applies each workload's configuration to YuniKorn for exactly the
+        duration of the active run — Metaflow, scheduled task or the interactive
+        agent-rtc workflow alike. (added 2026-09-07 — additive v1.)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListWorkloads(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SchedulerServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -372,6 +465,41 @@ def add_SchedulerServicer_to_server(servicer, server):
                     servicer.ListQueueShareRequests,
                     request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListQueueShareRequestsRequest.FromString,
                     response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListQueueShareRequestsResponse.SerializeToString,
+            ),
+            'DeclareActivity': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeclareActivity,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.DeclareActivityRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.SerializeToString,
+            ),
+            'RenewActivity': grpc.unary_unary_rpc_method_handler(
+                    servicer.RenewActivity,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.RenewActivityRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.SerializeToString,
+            ),
+            'ReleaseActivity': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReleaseActivity,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ReleaseActivityRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.SerializeToString,
+            ),
+            'ListActivities': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListActivities,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListActivitiesRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListActivitiesResponse.SerializeToString,
+            ),
+            'WatchActivities': grpc.unary_stream_rpc_method_handler(
+                    servicer.WatchActivities,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.WatchActivitiesRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityWatchEvent.SerializeToString,
+            ),
+            'SyncWorkloads': grpc.unary_unary_rpc_method_handler(
+                    servicer.SyncWorkloads,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.SyncWorkloadsRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.SyncWorkloadsResponse.SerializeToString,
+            ),
+            'ListWorkloads': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListWorkloads,
+                    request_deserializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListWorkloadsRequest.FromString,
+                    response_serializer=zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListWorkloadsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -914,6 +1042,195 @@ class Scheduler(object):
             '/zndx.scheduler.v1.Scheduler/ListQueueShareRequests',
             zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListQueueShareRequestsRequest.SerializeToString,
             zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListQueueShareRequestsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeclareActivity(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/DeclareActivity',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.DeclareActivityRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RenewActivity(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/RenewActivity',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.RenewActivityRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReleaseActivity(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/ReleaseActivity',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ReleaseActivityRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListActivities(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/ListActivities',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListActivitiesRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListActivitiesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WatchActivities(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/WatchActivities',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.WatchActivitiesRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ActivityWatchEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SyncWorkloads(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/SyncWorkloads',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.SyncWorkloadsRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.SyncWorkloadsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListWorkloads(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.scheduler.v1.Scheduler/ListWorkloads',
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListWorkloadsRequest.SerializeToString,
+            zndx_dot_scheduler_dot_v1_dot_scheduler__pb2.ListWorkloadsResponse.FromString,
             options,
             channel_credentials,
             insecure,

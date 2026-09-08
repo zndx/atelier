@@ -165,6 +165,7 @@ def share_for_class(
     applications: int | None = None,
 ) -> object:
     """Build a QueueShareRequest for one WRK occupying ``rc``."""
+    from zndx.engine.v1 import engine_pb2 as zpb
     from zndx.scheduler.v1 import scheduler_pb2 as spb
 
     tokens = int(rc.gpu_tokens if gpu is None else gpu)
@@ -176,11 +177,21 @@ def share_for_class(
         max=spb.ResourceMap(quantities={GPU_KEY: max_gpu}),
         max_applications=int(rc.max_applications),
     )
+    # resource_class is the zndx.engine.v1.ResourceClass ENUM since protocol 7cc9ad1 (the string
+    # field 3 is reserved); typed requirements carry the packing the arbiter sizes leaves from.
     wrk = spb.WorkloadIntent(
         wrk=kind.replace("_", "-"),
         queue=rc.queue,
-        resource_class=rc.name,
         applications=apps,
+        capabilities=[kind.replace("_", "-")],
+        requirements=zpb.WorkloadRequirements(
+            backend=zpb.SERVING_BACKEND_VLLM_LOCAL,
+            footprint=zpb.ResourceFootprint(gpu=int(rc.gpu_tokens)),
+        ),
+        resource_class=(
+            zpb.RESOURCE_CLASS_COMPUTE if rc.gpu_tokens <= 0 else
+            zpb.RESOURCE_CLASS_LIGHT if rc.gpu_tokens == 1 else
+            zpb.RESOURCE_CLASS_MEDIUM if rc.gpu_tokens == 2 else zpb.RESOURCE_CLASS_HEAVY),
     )
     return spb.QueueShareRequest(
         peer=PEER,

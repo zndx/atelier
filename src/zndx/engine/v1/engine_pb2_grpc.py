@@ -64,6 +64,16 @@ class EngineStub(object):
                 request_serializer=zndx_dot_engine_dot_v1_dot_engine__pb2.LineageRequest.SerializeToString,
                 response_deserializer=zndx_dot_engine_dot_v1_dot_engine__pb2.LineageResponse.FromString,
                 _registered_method=True)
+        self.WatchWorkload = channel.unary_stream(
+                '/zndx.engine.v1.Engine/WatchWorkload',
+                request_serializer=zndx_dot_engine_dot_v1_dot_engine__pb2.WatchWorkloadRequest.SerializeToString,
+                response_deserializer=zndx_dot_engine_dot_v1_dot_engine__pb2.WorkloadProfile.FromString,
+                _registered_method=True)
+        self.Announce = channel.unary_unary(
+                '/zndx.engine.v1.Engine/Announce',
+                request_serializer=zndx_dot_engine_dot_v1_dot_engine__pb2.PeerAnnounce.SerializeToString,
+                response_deserializer=zndx_dot_engine_dot_v1_dot_engine__pb2.AnnounceAck.FromString,
+                _registered_method=True)
 
 
 class EngineServicer(object):
@@ -127,6 +137,34 @@ class EngineServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def WatchWorkload(self, request, context):
+        """Held-open stream of this engine's INTENDED workload profile — what it MEANS to
+        be serving right now, with each intent's ACTUAL status alongside. The engine
+        emits the current SETTLED profile immediately, re-emits phase=TRANSITIONING
+        just before it changes the serving set (evict/admit/restore), then a new
+        SETTLED profile once the change lands, plus a periodic heartbeat. An out-of-band
+        watchdog compares desired-vs-actual ONLY while SETTLED (and past each intent's
+        warmup) so a changeover never reads as failure, and recycles the unit — which
+        the engine cannot do to itself — on a sustained settled mismatch. There is
+        ALWAYS a profile while the engine is alive (empty intents = intentionally
+        serving nothing). (added 2026-08-30, gaius — additive v1.)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Announce(self, request, context):
+        """Join the federation directory: the caller asks THIS engine to remember a
+        PeerHint (lattice Engine host:port) until ttl_seconds elapses. Launchers
+        stay pull-only (ServerQuery PEERS, then Status.surfaces). This is the
+        Matrix-style join — not gossip, not a peer-contract edit. Engines that
+        are not a directory answer UNIMPLEMENTED (honest).
+        (added 2026-09-04, aegir — additive v1.)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_EngineServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -159,6 +197,16 @@ def add_EngineServicer_to_server(servicer, server):
                     servicer.RecordLineage,
                     request_deserializer=zndx_dot_engine_dot_v1_dot_engine__pb2.LineageRequest.FromString,
                     response_serializer=zndx_dot_engine_dot_v1_dot_engine__pb2.LineageResponse.SerializeToString,
+            ),
+            'WatchWorkload': grpc.unary_stream_rpc_method_handler(
+                    servicer.WatchWorkload,
+                    request_deserializer=zndx_dot_engine_dot_v1_dot_engine__pb2.WatchWorkloadRequest.FromString,
+                    response_serializer=zndx_dot_engine_dot_v1_dot_engine__pb2.WorkloadProfile.SerializeToString,
+            ),
+            'Announce': grpc.unary_unary_rpc_method_handler(
+                    servicer.Announce,
+                    request_deserializer=zndx_dot_engine_dot_v1_dot_engine__pb2.PeerAnnounce.FromString,
+                    response_serializer=zndx_dot_engine_dot_v1_dot_engine__pb2.AnnounceAck.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -323,6 +371,60 @@ class Engine(object):
             '/zndx.engine.v1.Engine/RecordLineage',
             zndx_dot_engine_dot_v1_dot_engine__pb2.LineageRequest.SerializeToString,
             zndx_dot_engine_dot_v1_dot_engine__pb2.LineageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WatchWorkload(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/zndx.engine.v1.Engine/WatchWorkload',
+            zndx_dot_engine_dot_v1_dot_engine__pb2.WatchWorkloadRequest.SerializeToString,
+            zndx_dot_engine_dot_v1_dot_engine__pb2.WorkloadProfile.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Announce(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zndx.engine.v1.Engine/Announce',
+            zndx_dot_engine_dot_v1_dot_engine__pb2.PeerAnnounce.SerializeToString,
+            zndx_dot_engine_dot_v1_dot_engine__pb2.AnnounceAck.FromString,
             options,
             channel_credentials,
             insecure,

@@ -54,7 +54,10 @@ def test_tp4_occupies_heavy_not_instruct() -> None:
     assert req.peer == PEER
     assert req.workloads[0].wrk == "instruct"
     assert req.workloads[0].queue == "root.internal.inference.heavy"
-    assert req.workloads[0].resource_class == "internal.inference.heavy"
+    from zndx.engine.v1 import engine_pb2 as zpb
+    assert req.workloads[0].resource_class == zpb.RESOURCE_CLASS_HEAVY  # typed enum since protocol 7cc9ad1
+    assert req.workloads[0].requirements.footprint.gpu == 4
+    assert list(req.workloads[0].capabilities) == ["instruct"]
     assert req.shares[0].queue == HEAVY.queue
     assert req.shares[0].guaranteed.quantities[GPU_KEY] == 4
     assert req.shares[0].max.quantities[GPU_KEY] == 4
@@ -96,26 +99,29 @@ def test_queue_hint_is_declared_leaf_shape() -> None:
     assert [x.path for x in q.queues] == [LIGHT.queue, MEDIUM.queue, HEAVY.queue]
 
 
-def test_workloads_advertise_model_tp_pp_not_queue_name(monkeypatch) -> None:
+def test_workloads_offer_only_hosted_capabilities(monkeypatch) -> None:
+    """WORKLOADS carries typed WorkloadOffers for what this engine HOSTS (referee); `instruct` is
+    forwarded and therefore never offered here (capabilities.md §Operating profiles)."""
+    from zndx.engine.v1 import engine_pb2 as zpb
     from atelier.engine.config import EngineConfig, ModelSpec
     from atelier.engine.s2s import declared_workloads
 
     cfg = EngineConfig()
     cfg.capabilities = {
-        "instruct": ModelSpec(model="Qwen/Qwen3.6-35B-A3B-FP8", tensor_parallel_size=4, pipeline_parallel_size=1),
         "referee": ModelSpec(model="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16", tensor_parallel_size=4),
     }
     monkeypatch.setattr("atelier.engine.config.load_engine_config", lambda: cfg)
-    rows = declared_workloads()
-    by_wrk = {w.wrk: w for w in rows}
-    assert by_wrk["instruct"].model == "Qwen/Qwen3.6-35B-A3B-FP8"
-    assert by_wrk["instruct"].tensor_parallel == 4
-    assert by_wrk["instruct"].pipeline_parallel == 1
-    assert by_wrk["instruct"].gpu_tokens == 4
-    assert "heavy" not in by_wrk["instruct"].wrk
-    assert list(by_wrk["instruct"].capabilities) == ["instruct"]
-    q = local_response(zpb.SERVER_QUERY_KIND_WORKLOADS)
-    assert {w.wrk for w in q.workloads} == {"instruct", "referee"}
+    offers = declared_workloads()
+    by_cap = {c: o for o in offers for c in o.capabilities}
+    assert set(by_cap) == {"referee"}
+    ref = by_cap["referee"]
+    assert ref.peer == "atelier"
+    assert ref.model == "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+    assert ref.requirements.parallelism.tensor_parallel == 4
+    assert ref.requirements.parallelism.pipeline_parallel == 1
+    assert ref.requirements.footprint.gpu == 4
+    assert ref.resource_class == zpb.RESOURCE_CLASS_HEAVY
+    assert "heavy" not in "".join(ref.capabilities) and ref.queue == ""
 
 
 def test_module_never_writes_queues_yaml() -> None:

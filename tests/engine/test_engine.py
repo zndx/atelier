@@ -5,6 +5,8 @@ thinking-trace split, and the GPU-lease guard's conflict paths.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 
 import pytest
@@ -71,13 +73,15 @@ def test_engine_config_defaults_without_block(tmp_path):
     assert cfg.capabilities == {}
 
 
-def test_repo_base_conf_defines_both_capabilities():
-    """The shipped config carries the two-stack referee-independence boundary."""
+def test_repo_base_conf_hosts_referee_only():
+    """The shipped config HOSTS only the referee family (2026-09-08): `instruct` is an operating
+    profile of the federation's Qwen3.8-27B, forwarded — never a second local stack here."""
     cfg = load_engine_config()
-    assert set(cfg.capabilities) >= {"instruct", "referee"}
-    # Distinct model families — the architectural-independence invariant.
-    inst, ref = cfg.capabilities["instruct"].model, cfg.capabilities["referee"].model
-    assert inst.split("/")[0] != ref.split("/")[0]
+    assert set(cfg.capabilities) == {"referee"}
+    assert cfg.capabilities["referee"].model.split("/")[0] == "nvidia"
+    assert "instruct" not in cfg.capabilities
+    raw = (Path(__file__).resolve().parents[2] / "config" / "base.conf").read_text()
+    assert "Qwen3.6" not in raw  # retired across the board
 
 
 # ── Proof-of-progress log scanner ────────────────────────────────────
@@ -209,6 +213,8 @@ def test_zndx_service_registered_beside_native(tmp_path):
     native = AtelierEngineServicer.__new__(AtelierEngineServicer)
     native.mgr = _FakeMgr()
     native.cfg = EngineConfig()
+    native.cfg.capabilities = {"referee": ModelSpec(model="fake")}  # HOSTED → the manager answers
+    native.fwd = None  # nothing forwarded in this test
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
     pbg.add_AtelierEngineServicer_to_server(native, server)

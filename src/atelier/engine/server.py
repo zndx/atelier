@@ -1,6 +1,12 @@
-"""Atelier capability/gRPC engine server. Implements ``Complete`` (forwards to
-vLLM *inside* the engine via the manager), plus admin ``EnsureEndpoint`` /
-``EngineStatus``. The vLLM endpoint is never exposed to callers.
+"""Atelier capability/gRPC engine server.
+
+Two faces on one port: the native ``atelier.engine.AtelierEngine`` and the shared federation face
+``zndx.engine.v1.Engine`` (+ reflection). Atelier HOSTS only the capabilities configured under
+``engine.capabilities`` in ``config/base.conf`` (``referee`` — the architecturally-independent judge
+family) through the in-engine vLLM manager; every OTHER capability — ``instruct`` foremost, since
+2026-09-08 an operating profile of the federation's Qwen3.8-27B (thinking on, effort low) — is
+FORWARDED over ``zndx.engine.v1`` to the peer whose Status serves it (``forwarder.py``). No vLLM
+endpoint is ever exposed to callers; no fallback from one capability to another.
 
     just engine-serve            # or: uv run python -m atelier.engine.server
 
@@ -20,6 +26,7 @@ import grpc
 from atelier.engine.config import load_engine_config
 from atelier.engine.proto import atelier_engine_pb2 as pb
 from atelier.engine.proto import atelier_engine_pb2_grpc as pbg
+from atelier.engine.forwarder import DEFAULT_CAPABILITY, CapabilityForwarder, NoPeerServes
 from atelier.engine.vllm_manager import VllmManager
 
 logger = logging.getLogger(__name__)
@@ -46,31 +53,49 @@ def enable_reflection(server) -> None:
 
 
 class AtelierEngineServicer(pbg.AtelierEngineServicer):
-    def __init__(self, cfg=None) -> None:
+    def __init__(self, cfg=None, forwarder=None) -> None:
         self.cfg = cfg or load_engine_config()
-        self.mgr = VllmManager(self.cfg)
+        self.mgr = VllmManager(self.cfg)          # HOSTED capabilities (config/base.conf engine.capabilities)
+        self.fwd = forwarder or CapabilityForwarder()  # everything else → the peer whose Status serves it
+
+    def hosts(self, capability: str) -> bool:
+        return capability in (self.cfg.capabilities or {})
+
+    def _complete(self, cap: str, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
+                  json_schema: str) -> dict:
+        if self.hosts(cap):
+            return self.mgr.complete(cap, prompt, system_prompt, max_tokens, temperature, json_schema=json_schema)
+        return self.fwd.complete(cap, prompt, system_prompt, max_tokens, temperature, json_schema=json_schema)
 
     def Complete(self, request, context):
-        cap = request.capability or "instruct"
+        cap = request.capability or DEFAULT_CAPABILITY
         try:
-            out = self.mgr.complete(
-                cap, request.prompt, request.system_prompt or "",
-                request.max_tokens or 512, request.temperature or 0.7,
-                json_schema=request.json_schema or "",
-            )
-            return pb.CompleteResponse(
-                text=out["text"], model=out["model"],
-                prompt_tokens=out["prompt_tokens"],
-                completion_tokens=out["completion_tokens"],
-                latency_ms=out["latency_ms"],
-                reasoning_content=out["reasoning_content"],
-                finish_reason=out["finish_reason"])
+            out = self._complete(cap, request.prompt, request.system_prompt or "",
+                                 request.max_tokens or 512, request.temperature or 0.7,
+                                 request.json_schema or "")
+        except NoPeerServes as e:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(e))
+        except grpc.RpcError as e:  # the serving peer's answer is the answer — no retry, no fallback
+            context.abort(e.code(), f"complete[{cap}] refused by the serving peer: {e.details()}")
         except Exception as e:  # noqa: BLE001 — surface as gRPC error, keep engine up
             context.abort(grpc.StatusCode.INTERNAL, f"complete[{cap}] failed: {e}")
+        return pb.CompleteResponse(
+            text=out["text"], model=out["model"],
+            prompt_tokens=out["prompt_tokens"],
+            completion_tokens=out["completion_tokens"],
+            latency_ms=out["latency_ms"],
+            reasoning_content=out["reasoning_content"],
+            finish_reason=out["finish_reason"])
 
     def EnsureEndpoint(self, request, context):
+        cap = request.capability or DEFAULT_CAPABILITY
+        if not self.hosts(cap):
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"atelier does not host {cap!r} — it is forwarded to the federation peer whose Status "
+                f"serves it (see EngineStatus for the resolved route); hosted: {list(self.cfg.capabilities)}")
         try:
-            ep = self.mgr.ensure(request.capability or "instruct")
+            ep = self.mgr.ensure(cap)
             return pb.EndpointStatus(
                 capability=ep.capability, model=ep.spec.model, healthy=ep.healthy,
                 port=ep.port, gpu_ids=ep.gpu_ids, detail=str(ep.log_path))
@@ -78,9 +103,13 @@ class AtelierEngineServicer(pbg.AtelierEngineServicer):
             context.abort(grpc.StatusCode.INTERNAL, f"ensure failed: {e}")
 
     def EngineStatus(self, request, context):
+        """Native face: hosted live endpoints + the resolved federation ROUTES for forwarded ones."""
         eps = [pb.EndpointStatus(capability=e.capability, model=e.spec.model,
                                  healthy=e.healthy, port=e.port, gpu_ids=e.gpu_ids)
                for e in self.mgr.status()]
+        eps += [pb.EndpointStatus(capability=r.capability, model=r.model, healthy=True, port=0,
+                                  gpu_ids=list(r.gpu_ids), detail=f"forwarded → {r.label}")
+                for r in self.fwd.routes() if not self.hosts(r.capability)]
         return pb.EngineStatusResponse(endpoints=eps, total_gpus=_gpu_count())
 
 
@@ -96,29 +125,39 @@ class ZndxEngineServicer:
         self._native = native
 
     def Complete(self, request, context):
+        """Hosted capability → the in-engine manager; anything else is forwarded VERBATIM
+        (tools_json / messages_json / capabilities[] ride along) to the peer whose Status serves
+        it, which aligns to the capability's operating profile and reports it (``profile``)."""
         from zndx.engine.v1 import engine_pb2 as zpb
-        cap = request.capability or "instruct"
+        cap = request.capability or DEFAULT_CAPABILITY
         try:
+            if not self._native.hosts(cap):
+                return self._native.fwd.forward(request)
             out = self._native.mgr.complete(
                 cap, request.prompt, request.system_prompt or "",
                 request.max_tokens or 512, request.temperature or 0.7,
                 json_schema=request.json_schema or "",
             )
-            return zpb.CompleteResponse(
-                text=out["text"], model=out["model"],
-                prompt_tokens=out["prompt_tokens"],
-                completion_tokens=out["completion_tokens"],
-                latency_ms=out["latency_ms"],
-                reasoning_content=out["reasoning_content"],
-                finish_reason=out["finish_reason"])
+        except NoPeerServes as e:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(e))
+        except grpc.RpcError as e:
+            context.abort(e.code(), f"complete[{cap}] refused by the serving peer: {e.details()}")
         except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, f"complete[{cap}] failed: {e}")
+        return zpb.CompleteResponse(
+            text=out["text"], model=out["model"],
+            prompt_tokens=out["prompt_tokens"],
+            completion_tokens=out["completion_tokens"],
+            latency_ms=out["latency_ms"],
+            reasoning_content=out["reasoning_content"],
+            finish_reason=out["finish_reason"])
 
     def Status(self, request, context):
-        """Always advertise configured capabilities at gRPC bind.
+        """Advertise the capabilities this engine HOSTS (config engine.capabilities) at gRPC bind.
 
-        Live VllmManager endpoints overlay placeholders. Lattice accept is
-        Status early — not vLLM cold-load (Gaius/Ægir lesson).
+        Live VllmManager endpoints overlay placeholders. Forwarded capabilities (`instruct`) are
+        NOT listed — an engine that forwards must not claim (capabilities.md §Operating profiles).
+        Lattice accept is Status early — not vLLM cold-load (Gaius/Ægir lesson).
         """
         from zndx.engine.v1 import engine_pb2 as zpb
 
@@ -196,6 +235,38 @@ class ZndxEngineServicer:
     def Remediate(self, request, context):
         context.abort(grpc.StatusCode.UNIMPLEMENTED, "atelier Remediate is not on this face")
 
+    def WatchWorkload(self, request, context):
+        """Held-open intended serving set: hosted (configured) capabilities as intents, with the live
+        manager state as `actual`; forwarded capabilities are not intents of THIS engine."""
+        import time as _time
+
+        from zndx.engine.v1 import engine_pb2 as zpb
+
+        generation = 0
+        while context.is_active():
+            live = {e.capability: e for e in self._native.mgr.status()}
+            intents = []
+            for cap, spec in (self._native.cfg.capabilities or {}).items():
+                e = live.get(cap)
+                intents.append(zpb.WorkloadIntent(
+                    capability=cap, alias=cap, model=getattr(spec, "model", ""),
+                    port=int(getattr(e, "port", 0) or 0) if e else 0,
+                    gpu_ids=list(getattr(e, "gpu_ids", []) or []) if e else [],
+                    backend=zpb.SERVING_BACKEND_VLLM_LOCAL,
+                    actual=(zpb.WORKLOAD_STATUS_SERVING if (e and e.healthy) else
+                            zpb.WORKLOAD_STATUS_STARTING if e else zpb.WORKLOAD_STATUS_ABSENT)))
+            yield zpb.WorkloadProfile(
+                phase=zpb.WORKLOAD_PHASE_SETTLED, generation=generation, intents=intents,
+                settled_at_unix_ms=int(_time.time() * 1000),
+                detail="atelier: hosted capabilities load on first Complete (ABSENT until then); "
+                       "instruct is forwarded, not an intent here")
+            _time.sleep(15)
+            generation += 1
+
+    def Announce(self, request, context):
+        context.abort(grpc.StatusCode.UNIMPLEMENTED,
+                      "atelier is not a peer directory (Announce is served by Aegir)")
+
     def RecordLineage(self, request, context):
         # Required on the Engine servicer as of signals-protocol RecordLineage
         # (70fed51) — add_EngineServicer_to_server looks the method up at
@@ -235,7 +306,7 @@ def serve(port: int | None = None) -> None:
          grpc_port=bind_port, capabilities=list(servicer.cfg.capabilities))
     print(
         f"atelier-engine gRPC listening on :{bind_port} "
-        f"(capabilities: {list(servicer.cfg.capabilities)}; "
+        f"(hosted: {list(servicer.cfg.capabilities)}; instruct/thinking forwarded to the federation; "
         f"services: atelier.engine.AtelierEngine + zndx.engine.v1.Engine "
         f"+ reflection)",
         flush=True,
