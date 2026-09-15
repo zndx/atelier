@@ -2963,6 +2963,9 @@ def fsm_start(source_id: str | None = None):
                 NautilusWatcher, nautilus_config_from_cfg, set_active_watcher,
             )
             ncfg = nautilus_config_from_cfg(cfg)
+            # Resident nautilus.rs (atelier.textproto) is the supervisor.
+            # In-process attach is opt-in (ATELIER_NAUTILUS_INPROCESS=1 /
+            # overwatch_nautilus_enabled) for the old thread-as-SRE.
             if ncfg.enabled:
                 def _auto_cancel_on_stall(rec):
                     """Request cooperative cancel when nautilus detects a stall.

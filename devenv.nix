@@ -257,6 +257,34 @@ in
         };
       };
     };
+    # Resident Nautilus (shared binary, this instance). Observer must
+    # outlive the engine — process_started, not healthy. Supervisor is
+    # NOT in the supervised tree (atelier.textproto).
+    nautilus = {
+      exec = ''
+        exec ${config.devenv.root}/scripts/processes/nautilus.sh
+      '';
+      process-compose = {
+        depends_on.postgres.condition = "process_healthy";
+        depends_on.capability-engine.condition = "process_started";
+        availability = {
+          restart = "on_failure";
+          backoff_seconds = 10;
+          max_restarts = 20;
+        };
+        readiness_probe = {
+          exec.command = ''
+            BIN="''${NAUTILUS_BIN:-$HOME/local/src/zndx/gaius/external/nautilus/target/release/nautilus}"
+            "$BIN" status --quiet --target 127.0.0.1:50261
+          '';
+          initial_delay_seconds = 5;
+          period_seconds = 10;
+          timeout_seconds = 5;
+          success_threshold = 1;
+          failure_threshold = 36;
+        };
+      };
+    };
     qdrant = {
       exec = ''
         mkdir -p $DEVENV_STATE/qdrant

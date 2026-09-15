@@ -89,6 +89,14 @@ engine-ping capability="instruct":
 engine-status:
     uv run python -c "from atelier.engine.client import engine_status; print(engine_status())"
 
+# Validate Atelier's Nautilus instance (shared binary, this textproto).
+nautilus-validate:
+    bash scripts/nautilus-validate.sh
+
+# Classify the pinned sdg-corpora sample and score vs SKOS/ontology ground truth.
+sdg-classify-verify:
+    uv run python scripts/verify_sdg_classify.py
+
 # ── Optimize (in-situ domain adaptation) ─────────────────────────
 
 # Unified in-situ domain-adaptation orchestrator.  Initial-steps scaffold;

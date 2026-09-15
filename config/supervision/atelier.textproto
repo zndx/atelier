@@ -1,0 +1,235 @@
+# proto-file: zndx/supervision/v1/supervision.proto
+# proto-message: zndx.supervision.v1.Supervisor
+#
+# Atelier supervision instance — same grammar as Gaius/Hermes, this
+# project's tree only. Classification stall / LLM_SWEEP / batch-failure
+# live HERE, not in gaius.textproto. Every restart strategy is NONE for
+# the read-only adoption phase (nautilus_supervision.md §9): observe,
+# stamp, score, escalate — never actuate — until this instance's Brier
+# record earns promotion. The in-process NautilusWatcher thread is not
+# the supervisor (2026-09-02: supervisor must not live in the supervised
+# process).
+
+project: "atelier"
+spec_version: "2026-09-15.1"
+engine_build: "trunk"
+engine_grpc: "127.0.0.1:50251"
+supervisor_grpc: "127.0.0.1:50261"
+attrs { key: "timezone" value: "UTC" }
+attrs { key: "directives" value: "observe" }
+
+budgets {
+  recycle_k: 3
+  recycle_window_seconds: 3600
+  recycle_cooldown_seconds: 240
+  judge_consults_per_day: 4
+  rubric_judgments_per_day: 4
+}
+
+# ── Host unit ────────────────────────────────────────────────────────────────
+
+processes {
+  id: "atelier.service"
+  kind: PROCESS_KIND_SYSTEMD_UNIT
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_SYSTEMD locator: "atelier.service" poll_seconds: 15 }
+  warmup_seconds: 120
+  attrs { key: "control_plane" value: "systemd oneshot -> devenv up -d (process-compose)" }
+}
+
+# ── Lattice engine (accept gate) ─────────────────────────────────────────────
+
+processes {
+  id: "engine"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  parent: "atelier.service"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_ENGINE_GRPC locator: "127.0.0.1:50251" poll_seconds: 0 }
+  warmup_seconds: 30
+  reports_positions: true
+  depends_on: "atelier.service"
+  attrs { key: "capability" value: "referee" }
+  attrs { key: "note" value: "lattice accept; instruct/thinking forwarded to Gaius" }
+}
+
+# ── Product graph (same devenv, not the lattice accept) ──────────────────────
+
+processes {
+  id: "devenv-postgres"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  parent: "atelier.service"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_HTTP_PROBE locator: "tcp://127.0.0.1:5533" poll_seconds: 30 }
+  attrs { key: "database" value: "atelier" }
+  attrs { key: "note" value: "never Signals :5455; supervisor journal is Signals RustFS" }
+}
+processes {
+  id: "qdrant"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  parent: "atelier.service"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_HTTP_PROBE locator: "http://127.0.0.1:6333/healthz" poll_seconds: 30 }
+}
+processes {
+  id: "grpc-server"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  parent: "atelier.service"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_HTTP_PROBE locator: "tcp://127.0.0.1:50071" poll_seconds: 15 }
+  warmup_seconds: 30
+  depends_on: "devenv-postgres"
+  attrs { key: "note" value: "product servicer; classification runs here, not on :50251" }
+}
+processes {
+  id: "gateway"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  parent: "atelier.service"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_HTTP_PROBE locator: "http://127.0.0.1:8090/api/health" poll_seconds: 30 }
+  depends_on: "grpc-server"
+}
+processes {
+  id: "vite"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  parent: "atelier.service"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_HTTP_PROBE locator: "http://127.0.0.1:3300/" poll_seconds: 30 }
+  attrs { key: "note" value: "primary UI; never Metaflow :3000" }
+}
+
+# Hosted referee (loads on first Complete). instruct is forwarded — not an
+# intent of THIS engine (WatchWorkload already says so).
+processes {
+  id: "endpoint.referee"
+  kind: PROCESS_KIND_SERVING_ENDPOINT
+  parent: "engine"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_ENGINE_GRPC locator: "referee" }
+  warmup_seconds: 180
+  depends_on: "engine"
+  attrs { key: "capability" value: "referee" }
+}
+
+# Classification workload — observed as a daemon of the product servicer.
+# In-process NautilusWatcher is NOT declared (supervisor never in the tree).
+processes {
+  id: "classify.run"
+  kind: PROCESS_KIND_ENGINE_DAEMON
+  parent: "grpc-server"
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_ENGINE_GRPC locator: "classify" }
+  reports_positions: true
+  depends_on: "grpc-server"
+  cadence { expected_period_seconds: 86400 net_seconds: 14400 }
+  expectation {
+    category: EXPECTATION_CATEGORY_DAILY_DEPENDENT
+    horizon_slot: 7
+    channel: CHANNEL_AGENDA_EVENT
+    rationale: "a classification run against the pinned sdg-corpora sample; stall/LLM_SWEEP hang is this process STALLED, not a Gaius miss"
+  }
+}
+
+# Peer face for foreign stores (observe-through-engines).
+processes {
+  id: "peer.signals-engine"
+  kind: PROCESS_KIND_EXTERNAL_SERVICE
+  restart: RESTART_STRATEGY_NONE
+  observation { source: SOURCE_KIND_ENGINE_GRPC locator: "127.0.0.1:50551" poll_seconds: 0 }
+  attrs { key: "note" value: "Signals hosts Metaflow/Airflow; Atelier does not open those ports" }
+}
+
+# ── Machine: classification pipeline (FSM in classify/fsm.py) ────────────────
+# Gates close only the forecasts made inside the phase (phase-gate rule).
+# Stall / slow LLM_SWEEP / failed batches are Nautilus STALLED/MISSING on
+# classify.run — not an in-thread supervisor.
+
+machines {
+  id: "sdg_classify"
+  process: "classify.run"
+  surfaced_result: "evaluation_report.json: columns labeled against the pinned sdg-corpora SKOS vocabulary (ontology ground truth)"
+  default_horizon { window_seconds: 14400 resolve_within_phase_only: true }
+  phases {
+    id: "load" order: 1
+    steps: "LOADING_VOCAB" steps: "PRECONDITIONING" steps: "DISCOVERING" steps: "SAMPLING"
+    gate {
+      name: "sample_loaded"
+      kind: GATE_KIND_FLOW_REACHED_STEP
+      tier: TIER_SILVER
+      params { key: "step" value: "SAMPLING" }
+      rationale: "RI-verified sdg_sample tables and ancestor-closed SKOS vocab are in memory"
+    }
+    horizon { window_seconds: 1800 resolve_within_phase_only: true }
+  }
+  phases {
+    id: "evidence" order: 2
+    steps: "GENERATING_SYNTH" steps: "TRAINING" steps: "CLASSIFYING" steps: "FUSING"
+    gate {
+      name: "columns_labeled"
+      kind: GATE_KIND_FLOW_REACHED_STEP
+      tier: TIER_SILVER
+      params { key: "step" value: "FUSING" }
+      rationale: "DST fusion produced a predicted_code per classifiable column"
+    }
+    horizon { window_seconds: 7200 resolve_within_phase_only: true }
+  }
+  phases {
+    id: "sweep" order: 3
+    steps: "LLM_SWEEP" steps: "VALIDATING"
+    gate {
+      name: "sweep_progressed"
+      kind: GATE_KIND_FLOW_REACHED_STEP
+      tier: TIER_SILVER
+      params { key: "step" value: "VALIDATING" }
+      rationale: "LLM sweep advanced batch_audit; a freeze here is the UAT stall Nautilus must score as STALLED, not auto-cancel from inside the process"
+    }
+    horizon { window_seconds: 7200 resolve_within_phase_only: true }
+  }
+  phases {
+    id: "evaluate" order: 4
+    steps: "EVALUATING" steps: "CONVERGED"
+    gate {
+      name: "ontology_scored"
+      kind: GATE_KIND_SURFACE_WELLFORMED
+      tier: TIER_SILVER
+      params { key: "glob" value: "build/results/*/evaluation_report.json" }
+      params { key: "section" value: "hierarchical_accuracy" }
+      params { key: "min_chars" value: "20" }
+      rationale: "evaluation_report exists and scores predicted_code against SDG SKOS reference_code"
+    }
+    horizon { window_seconds: 14400 resolve_within_phase_only: false }
+  }
+}
+
+# ── Objective: the classification the user asked us to keep honest ───────────
+
+objectives {
+  name: "classification_sdg"
+  surfaced_result: "evaluation_report.json for the pinned sdg-corpora sample: columns_with_reference > 0, hierarchical accuracy vs SKOS/ontology ground truth"
+  machines: "sdg_classify"
+  cadence_cron: "0 8 * * *"
+  gates {
+    name: "report_present"
+    kind: GATE_KIND_SURFACE_WELLFORMED
+    tier: TIER_SILVER
+    params { key: "glob" value: "build/results/*/evaluation_report.json" }
+    params { key: "min_chars" value: "20" }
+    rationale: "a run wrote the evaluation artifact"
+  }
+  gates {
+    name: "ontology_grounded"
+    kind: GATE_KIND_PROBE_PASS
+    tier: TIER_SILVER
+    params { key: "probe" value: "evaluation_report.columns_with_reference > 0" }
+    rationale: "SDG SKOS provided at least one reference_code; a run with zero reference is unscored, not a pass"
+  }
+  horizon { window_seconds: 86400 }
+  resolves: "slot % sdg sample classified against ontology%"
+  expectation {
+    category: EXPECTATION_CATEGORY_DAILY_DEPENDENT
+    horizon_slot: 7
+    channel: CHANNEL_AGENDA_EVENT
+    rationale: "daily research classify; a miss is briefing by the next morning, not a 2 h alarm"
+  }
+}
+
+# Resident Nautilus is NOT a child of this tree.

@@ -81,7 +81,9 @@ def get_state(run_id: str) -> "BootstrapState | None":
 class NautilusConfig:
     """Trigger thresholds for the nautilus watcher."""
 
-    enabled: bool = True
+    # Resident nautilus.rs is the supervisor. In-process watcher is a
+    # sensor/test helper; default off so the thread is not the SRE.
+    enabled: bool = False
     poll_interval_s: float = 10.0
     stall_threshold_s: float = 120.0
     llm_sweep_threshold_s: float = 300.0
@@ -96,7 +98,7 @@ def nautilus_config_from_cfg(cfg) -> NautilusConfig:
     """Build NautilusConfig from an AtelierConfig."""
     autonomy = getattr(cfg, "overwatch_autonomy", "propose")
     return NautilusConfig(
-        enabled=getattr(cfg, "overwatch_nautilus_enabled", True),
+        enabled=getattr(cfg, "overwatch_nautilus_enabled", False),
         poll_interval_s=getattr(cfg, "overwatch_nautilus_poll_interval_s", 10.0),
         stall_threshold_s=getattr(cfg, "overwatch_nautilus_stall_threshold_s", 120.0),
         llm_sweep_threshold_s=getattr(cfg, "overwatch_nautilus_llm_sweep_threshold_s", 300.0),

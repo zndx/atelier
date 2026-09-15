@@ -36,6 +36,7 @@ PROJECT = "atelier"
 LATTICE_SERVICE_NAMES = (
     "atelier.engine.AtelierEngine",
     "zndx.engine.v1.Engine",
+    "zndx.supervision.v1.EngineSupervision",
 )
 
 
@@ -298,6 +299,12 @@ def serve(port: int | None = None) -> None:
     # The shared federation face — one stub, any signals engine.
     from zndx.engine.v1 import engine_pb2_grpc as zpbg
     zpbg.add_EngineServicer_to_server(ZndxEngineServicer(servicer), server)
+    from atelier.engine.supervision_bus import init_bus
+    from atelier.engine.supervision_servicer import EngineSupervisionServicer
+    from zndx.supervision.v1 import supervision_pb2_grpc as svpbg
+
+    init_bus()
+    svpbg.add_EngineSupervisionServicer_to_server(EngineSupervisionServicer(), server)
     enable_reflection(server)
     server.add_insecure_port(f"[::]:{bind_port}")
     server.start()
@@ -308,7 +315,7 @@ def serve(port: int | None = None) -> None:
         f"atelier-engine gRPC listening on :{bind_port} "
         f"(hosted: {list(servicer.cfg.capabilities)}; instruct/thinking forwarded to the federation; "
         f"services: atelier.engine.AtelierEngine + zndx.engine.v1.Engine "
-        f"+ reflection)",
+        f"+ zndx.supervision.v1.EngineSupervision + reflection)",
         flush=True,
     )
 

@@ -1,4 +1,17 @@
-# Nautilus — Mid-Run Pipeline Watcher
+# Nautilus — federated supervisor + in-process sensor
+
+The **supervisor** is the shared `nautilus.rs` binary with Atelier's
+instance `config/supervision/atelier.textproto` (bind `:50261`, engine
+`:50251`). Same crate as Gaius/Hermes; this textproto owns classification
+stall / LLM_SWEEP / SDG scoring. The in-process `NautilusWatcher` thread
+is a **sensor/test helper**, not the SRE — default off
+(`overwatch_nautilus_enabled`). Supervisor never lives in the supervised
+process (signals-protocol `nautilus_supervision.md`).
+
+---
+
+The remainder of this page documents the in-process watcher (Pillar 2)
+kept as a unit-testable trigger library.
 
 Nautilus is the in-process, mid-run watcher for a classification run. A
 daemon thread polls the [FSM](./classification.md) and

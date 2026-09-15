@@ -42,4 +42,22 @@ if [[ -f external/signals-protocol/proto/zndx/scheduler/v1/scheduler.proto ]]; t
     touch src/zndx/scheduler/__init__.py
 fi
 
+if [[ -f external/signals-protocol/proto/zndx/supervision/v1/supervision.proto ]]; then
+    uv run python -m grpc_tools.protoc \
+        -I=external/signals-protocol/proto \
+        --python_out=src \
+        --grpc_python_out=src \
+        --pyi_out=src \
+        zndx/supervision/v1/supervision.proto
+    mkdir -p src/zndx/supervision/v1
+    printf '%s\n' \
+        '"""Generated bindings for zndx.supervision.v1 (signals-protocol)."""' \
+        'from . import supervision_pb2, supervision_pb2_grpc' \
+        '__all__ = ["supervision_pb2", "supervision_pb2_grpc"]' \
+        > src/zndx/supervision/v1/__init__.py
+    printf '%s\n' \
+        '"""zndx.supervision package."""' \
+        > src/zndx/supervision/__init__.py
+fi
+
 echo "Proto stubs generated."

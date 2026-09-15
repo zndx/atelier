@@ -23,7 +23,8 @@ That's it. Visit http://localhost:3300 (Vite; :3000 is Metaflow on lab hosts).
 | FastAPI gateway | 8090 | REST-to-gRPC bridge |
 | Vite dev server | 3300 | React UI with hot reload (`ATELIER_VITE_PORT`; not :3000) |
 | llama.cpp | 8080 | Darwin only (Metal). Linux uses capability-engine / vLLM |
-| capability-engine | 50251 | Lattice `zndx.engine.v1.Engine` (Status at bind; no vLLM wait) |
+| capability-engine | 50251 | Lattice `zndx.engine.v1.Engine` + `EngineSupervision` (Status at bind; no vLLM wait) |
+| nautilus | 50261 | Resident supervisor (`nautilus.rs`, instance `config/supervision/atelier.textproto`) |
 
 `atelier.service` is a Gaius-style wrap: it runs `devenv up -d` so
 process-compose owns the same graph on a laptop or a GPU lab host.

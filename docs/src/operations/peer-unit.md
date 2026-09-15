@@ -29,7 +29,8 @@ when the WRK ends. Atelier never writes queues.yaml.
 | Wrappers | `scripts/systemd_{start,stop,unit}.sh` |
 | Engine process | devenv `capability-engine` → `scripts/processes/capability-engine.sh` |
 | Status probe | `scripts/zndx_status_ok.py` (codegen stubs) |
-| gRPC lattice | `:50251` — `zndx.engine.v1.Engine` (+ native `AtelierEngine`) |
+| gRPC lattice | `:50251` — `zndx.engine.v1.Engine` + `zndx.supervision.v1.EngineSupervision` (+ native `AtelierEngine`) |
+| Nautilus | resident `nautilus.rs` on `:50261`, instance `config/supervision/atelier.textproto` (observe; shared binary with Gaius/Hermes) |
 | Product servicer | `:50071` (same devenv graph; not the accept gate) |
 | Postgres | `:5533` — never Signals `:5455` / RustFS `:9010` |
 | Capability | `referee` (and `instruct` when configured) |
