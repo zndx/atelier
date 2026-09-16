@@ -45,6 +45,16 @@ def test_bare_sample_is_not_a_hard_coverage_gate() -> None:
     assert spec.notes
 
 
+def test_nhsvm_phase_does_not_stop_before_classify() -> None:
+    sid = current_sample_source_id()
+    if not sid:
+        pytest.skip("no sdg sample on disk")
+    spec = resolve_sample_target(sid, "phase:nhsvm")
+    assert spec.phase == "nhsvm"
+    assert not spec.stop_after_precondition
+    assert spec.precondition_stages == ("nhsvm_head",)
+
+
 def test_full_corpus_keeps_hard_gate() -> None:
     spec = resolve_sample_target("sdg-corpora", "")
     assert spec.hard_gate

@@ -79,6 +79,50 @@ def test_load_classification_rows_from_result_dir(tmp_path) -> None:
     assert rows[0]["predicted_code"] == "1.1"
 
 
+def test_run_dst_pipeline_binds_reference_taxonomy(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    class _BE:
+        @classmethod
+        def from_cfg(cls, cfg):
+            return "backend"
+
+    def fake_pipeline(cfg, fsm, **kw):
+        captured["source_id"] = kw.get("source_id")
+        captured["taxonomy_id"] = kw.get("taxonomy_id")
+        captured["category_set"] = kw.get("category_set")
+        captured["cfg_tax"] = getattr(cfg, "classify_taxonomy_id", None)
+        captured["llm"] = kw.get("llm_backend")
+        return {"state": "OK"}
+
+    monkeypatch.setattr(
+        "atelier.classify.pipeline.run_classification_pipeline", fake_pipeline,
+    )
+    monkeypatch.setattr("atelier.classify.get_fsm", lambda dao: object())
+    monkeypatch.setattr("atelier.db.dao.AtelierDao", lambda: object())
+    monkeypatch.setattr(
+        "atelier.flows.resident.load_category_set",
+        lambda cfg, sid: {"vocab": sid},
+    )
+    monkeypatch.setattr(
+        "atelier.classify.complete_backend.CompleteLLMBackend", _BE,
+    )
+    from atelier.config import AtelierConfig
+    from atelier.flows.resident import run_dst_pipeline
+
+    run_dst_pipeline(
+        AtelierConfig(),
+        "sdg-corpora/b24ef9f60660_macbook",
+        skip_precondition=True,
+        taxonomy_id="sdg-corpora/b24ef9f60660_reference",
+    )
+    assert captured["source_id"] == "sdg-corpora/b24ef9f60660_macbook"
+    assert captured["taxonomy_id"] == "sdg-corpora/b24ef9f60660_reference"
+    assert captured["cfg_tax"] == "sdg-corpora/b24ef9f60660_reference"
+    assert captured["category_set"] == {"vocab": "sdg-corpora/b24ef9f60660_reference"}
+    assert captured["llm"] == "backend"
+
+
 def test_start_refuses_local_datastore(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ATELIER_METAFLOW_MODE", "local")
     monkeypatch.setenv("METAFLOW_DEFAULT_DATASTORE", "local")

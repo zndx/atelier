@@ -84,8 +84,16 @@ def load_classification_rows(result: dict) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-def run_dst_pipeline(cfg: Any, source_id: str, *, skip_precondition: bool) -> dict:
-    """DST classify via Engine/Complete. Precondition already handled by the flow."""
+def run_dst_pipeline(
+    cfg: Any, source_id: str, *, skip_precondition: bool,
+    taxonomy_id: str | None = None,
+) -> dict:
+    """DST classify the holdout ``source_id``.
+
+    ``taxonomy_id`` is the artifact key (NHSVM current + Qdrant current).
+    When a reference sample trained the head, pass that id so classify
+    does not look up ``default`` or the holdout id.
+    """
     import dataclasses
 
     from atelier.classify import get_fsm
@@ -93,15 +101,22 @@ def run_dst_pipeline(cfg: Any, source_id: str, *, skip_precondition: bool) -> di
     from atelier.classify.pipeline import run_classification_pipeline
     from atelier.db.dao import AtelierDao
 
+    tax = (taxonomy_id or source_id or "").strip() or None
+    cats = None
+    if tax and source_id and tax != source_id:
+        cats = load_category_set(cfg, tax)
     cfg = dataclasses.replace(
         cfg,
         classify_precondition_enabled=not skip_precondition,
         overwatch_nautilus_enabled=False,
+        classify_taxonomy_id=tax or getattr(cfg, "classify_taxonomy_id", None),
     )
     fsm = get_fsm(AtelierDao())
     return run_classification_pipeline(
         cfg,
         fsm,
         source_id=source_id or None,
+        category_set=cats,
+        taxonomy_id=tax,
         llm_backend=CompleteLLMBackend.from_cfg(cfg),
     )

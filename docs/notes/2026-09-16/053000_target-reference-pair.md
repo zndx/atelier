@@ -17,6 +17,10 @@ just classify-flow --host \
   --target=phase:nhsvm
 ```
 
+`phase:nhsvm` trains the head (and any missing MaxSim collection) under
+the **reference** taxonomy id, then DST-classifies the **holdout**
+source-id with `classify_taxonomy_id` = reference (head + Qdrant current).
+
 DST sweep on the target is gated on NHSVM being able to label the
 holdout (`perfect_possible` when `skos_missing` is empty).
 

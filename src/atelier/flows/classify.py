@@ -99,14 +99,19 @@ class ClassificationFlow(AtelierFlow):
         spec = resolve_sample_target(
             str(self.sample_source_id), str(getattr(self, "target_raw", "") or self.target or ""),
         )
+        stopping = bool(self.only_precondition or spec.stop_after_precondition)
+        # When we will classify the holdout, finalize every missing
+        # reference artifact (MaxSim + NHSVM). Stage filters are for
+        # artifact-only iteration (phase:maxsim / phase:precondition).
+        stages = spec.precondition_stages if stopping else None
         self.precondition_ran = False
-        if self.needs_precondition or spec.precondition_stages:
+        if self.needs_precondition or spec.precondition_stages or not stopping:
             train_id = str(getattr(self, "train_source_id", None) or self.sample_source_id)
             self.precondition_ran = run_precondition_if_needed(
                 load_config(), train_id,
-                stages=spec.precondition_stages,
+                stages=stages,
             )
-        if self.only_precondition or spec.stop_after_precondition:
+        if stopping:
             self.classifications = []
             self.next(self.end)
             return
@@ -126,8 +131,11 @@ class ClassificationFlow(AtelierFlow):
         from atelier.flows.resident import load_classification_rows, run_dst_pipeline
 
         skip = (not self.needs_precondition) or bool(self.precondition_ran)
+        train_id = str(getattr(self, "train_source_id", None) or self.sample_source_id)
         result = run_dst_pipeline(
-            load_config(), str(self.sample_source_id), skip_precondition=skip,
+            load_config(), str(self.sample_source_id),
+            skip_precondition=skip,
+            taxonomy_id=train_id,
         )
         if result.get("state") == "ERROR":
             raise RuntimeError(result.get("error") or "classification pipeline ERROR")

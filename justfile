@@ -101,7 +101,9 @@ sdg-classify-verify:
 # Default --source-id is the current *sample*
 # (sdg-corpora/<pin>_<profile>), not the full corpus id `sdg-corpora`.
 # Optional --target=collection:<slug>[,phase:maxsim|nhsvm|precondition]
-# scopes a phased sample run (MaxSim/NHSVM iterate; sample is not CONVERGED).
+# scopes a phased sample run. phase:maxsim / phase:precondition stop after
+# artifacts. phase:nhsvm trains the head (on --reference-id when set) then
+# classifies the holdout --source-id using that taxonomy's current head.
 # K8s is preferred (`--with kubernetes`). Pass `--host` to run plain @step.
 classify-flow *ARGS:
     #!/usr/bin/env bash

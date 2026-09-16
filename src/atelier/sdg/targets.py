@@ -9,8 +9,8 @@ Target grammar (comma-separated):
 - ``collection:<slug>``  tables in that sample collection
 - ``table:<name>``       one table
 - ``phase:precondition`` enrich + collection + head, then stop
-- ``phase:maxsim``       semantic collection only
-- ``phase:nhsvm``        NHSVM head only
+- ``phase:maxsim``       semantic collection only, then stop
+- ``phase:nhsvm``        NHSVM head (on --reference-id when set), then classify holdout
 
 Empty target on a sample: report coverage, do not fail the flow.
 ``source-id=sdg-corpora`` (full corpus) keeps the hard coverage gate.
@@ -47,7 +47,9 @@ class SampleTarget:
 
     @property
     def stop_after_precondition(self) -> bool:
-        return self.phase in PHASES
+        # maxsim / precondition stay artifact-only. nhsvm trains the head
+        # then classifies the holdout (reference-trained artifacts).
+        return self.phase in ("precondition", "maxsim")
 
     @property
     def precondition_stages(self) -> tuple[str, ...] | None:
