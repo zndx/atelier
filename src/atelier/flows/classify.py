@@ -72,17 +72,37 @@ class ClassificationFlow(AtelierFlow):
     @step
     def load(self):
         """LOADING_VOCAB + DISCOVERING + SAMPLING — pin target entities."""
+        self.sweep_capability = llm_capability_for_sweep(revisit=False)
         self.next(self.sweep)
 
     @step
     def sweep(self):
         """LLM_SWEEP ⇄ VALIDATING via Complete instruct (thinking on revisit)."""
-        self.sweep_capability = llm_capability_for_sweep(revisit=False)
+        from atelier.config import load_config
+        from atelier.flows.classify_phases import entity_key, predicted_code
+        from atelier.flows.resident import load_classification_rows, run_dst_pipeline
+
+        skip = (not self.needs_precondition) or bool(self.precondition_ran)
+        result = run_dst_pipeline(
+            load_config(), str(self.source_id), skip_precondition=skip,
+        )
+        if result.get("state") == "ERROR":
+            raise RuntimeError(result.get("error") or "classification pipeline ERROR")
+        rows = load_classification_rows(result)
+        self.result_path = result.get("result_path") or ""
+        self.classifications = [
+            {
+                "qualified_name": entity_key(r) or str(r.get("column_name") or ""),
+                "predicted_code": predicted_code(r),
+            }
+            for r in rows
+        ]
+        self.target_keys = [c["qualified_name"] for c in self.classifications if c["qualified_name"]]
         self.next(self.fuse)
 
     @step
     def fuse(self):
-        """CLASSIFYING + FUSING. ColBERT-Zero MaxSim fail-closed."""
+        """CLASSIFYING + FUSING. ColBERT-Zero MaxSim is inside the DST pipeline."""
         self.next(self.evaluate)
 
     @step

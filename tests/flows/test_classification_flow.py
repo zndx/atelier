@@ -13,6 +13,7 @@ from atelier.flows.classify_phases import (
     probe_requires_precondition,
     unclassified_targets,
 )
+from atelier.flows.resident import load_classification_rows
 from atelier.flows.lattice import GURU_NOCAP, assert_complete_capability
 from atelier.flows.platform_metaflow import GURU_NOPLATFORM, require_signals_metaflow
 
@@ -67,6 +68,15 @@ def test_evaluate_fails_when_a_target_is_missing() -> None:
     with pytest.raises(RuntimeError, match="coverage incomplete"):
         assert_coverage(rows, ["t.a", "t.b"])
     assert_coverage(rows, ["t.a"])
+
+
+def test_load_classification_rows_from_result_dir(tmp_path) -> None:
+    (tmp_path / "classifications.json").write_text(
+        '[{"qualified_name": "t.a", "predicted_code": "1.1"}]',
+        encoding="utf-8",
+    )
+    rows = load_classification_rows({"result_path": str(tmp_path)})
+    assert rows[0]["predicted_code"] == "1.1"
 
 
 def test_start_refuses_local_datastore(monkeypatch: pytest.MonkeyPatch) -> None:
