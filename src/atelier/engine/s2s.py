@@ -343,12 +343,12 @@ def declared_queues() -> list[zpb.QueueHint]:
         zpb.QueueHint(
             path=EMBEDDING.queue,
             resource_class=EMBEDDING.name,
-            gpu_guarantee=1,
-            gpu_max=2,
+            gpu_guarantee=0,
+            gpu_max=0,
             max_applications=EMBEDDING.max_applications,
             preemption_delay="5s",
             role="embedding",
-            examples="atelier.sdg_classify ColBERT-Zero",
+            examples="gaius.text_embedding; live YK GPU max is 0",
         ),
         zpb.QueueHint(
             path=LIGHT.queue,

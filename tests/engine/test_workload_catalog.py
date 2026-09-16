@@ -5,7 +5,7 @@ from __future__ import annotations
 from zndx.engine.v1 import engine_pb2 as zpb
 
 from atelier.engine.flow_processes import SpawnedFlow, flow_processes
-from atelier.engine.queue_share import EMBEDDING, LIGHT
+from atelier.engine.queue_share import LIGHT
 from atelier.engine.s2s import local_response
 from atelier.engine.sentinel_yield import yield_workload
 from atelier.engine.workload_catalog import (
@@ -17,12 +17,11 @@ from atelier.engine.workload_catalog import (
 )
 
 
-def test_classify_claims_are_embedding_and_light_not_heavy() -> None:
-    claims = classify_yk_claims(include_nhsvm=True)
-    assert (EMBEDDING.queue, 1) in claims
-    assert (LIGHT.queue, 1) in claims
+def test_classify_claims_are_light_not_heavy_or_unbudgeted_embedding() -> None:
+    claims = classify_yk_claims()
+    assert claims == ((LIGHT.queue, 1),)
     assert all(leaf != "root.internal.inference.heavy" for leaf, _ in claims)
-    assert classify_yk_claims(include_nhsvm=False) == ((EMBEDDING.queue, 1),)
+    assert all("embedding" not in leaf for leaf, _ in claims)
 
 
 def test_catalogue_paused_metaflow_dag() -> None:

@@ -1,10 +1,11 @@
 """Atelier WORKLOAD CATALOGUE — sdg_classify, AgentRTC-shaped claims.
 
 One class. enabled=False until a K8s Metaflow run is proven on the
-discovered Signals instance. Airflow materialises paused; claims[] are
-the YK configuration for this workflow (ColBERT-Zero embedding, ModernBERT
-light). thinking/instruct Complete uses standing heavy occupancy — not a
-claim here.
+discovered Signals instance. Live YK: ``root.internal.inference.embedding``
+has GPU max 0 (no resources.max), so ColBERT-Zero and ModernBERT serialize
+on ``light`` (max 2, standing floor 0 — arbiter raises while the Activity
+is in force, same shape as agent-rtc). thinking/instruct Complete uses
+standing heavy occupancy — not a claim here.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from atelier.engine.queue_share import EMBEDDING, LIGHT
+from atelier.engine.queue_share import LIGHT
 
 PEER = "atelier"
 KIND = "sdg_classify"
@@ -22,12 +23,13 @@ CRON = "0 8 * * *"
 HORIZON_S = 14400  # 4h — textproto net_seconds
 
 
-def classify_yk_claims(*, include_nhsvm: bool = True) -> tuple[tuple[str, int], ...]:
-    """YK leaves this workflow expects. Phase RequestQueueShare may zero a floor."""
-    claims: list[tuple[str, int]] = [(EMBEDDING.queue, 1)]
-    if include_nhsvm:
-        claims.append((LIGHT.queue, 1))
-    return tuple(claims)
+def classify_yk_claims() -> tuple[tuple[str, int], ...]:
+    """YK leaves this workflow expects. Phase RequestQueueShare may zero a floor.
+
+    One light GPU: ColBERT-Zero encode and ModernBERT NHSVM fit take turns.
+    Do not claim the embedding leaf — live policy has GPU max 0 there.
+    """
+    return ((LIGHT.queue, 1),)
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ WORKLOAD_CATALOG: tuple[WorkloadEntry, ...] = (
         horizon_s=HORIZON_S,
         enabled=False,
         airflow_dag_id=DAG_ID,
-        claims=classify_yk_claims(include_nhsvm=True),
+        claims=classify_yk_claims(),
     ),
 )
 

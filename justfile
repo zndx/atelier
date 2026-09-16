@@ -97,6 +97,22 @@ nautilus-validate:
 sdg-classify-verify:
     uv run python scripts/verify_sdg_classify.py
 
+# Resident ClassificationFlow on discovered Signals Metaflow.
+# K8s is preferred (`--with kubernetes`). Pass `--host` to run plain @step.
+classify-flow *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    host=0
+    out=()
+    for a in {{ARGS}}; do
+      if [ "$a" = "--host" ]; then host=1; else out+=("$a"); fi
+    done
+    if [ "$host" = "0" ]; then
+      python -m atelier.flows.classify run --with kubernetes "${out[@]}"
+    else
+      python -m atelier.flows.classify run "${out[@]}"
+    fi
+
 # ── Optimize (in-situ domain adaptation) ─────────────────────────
 
 # Unified in-situ domain-adaptation orchestrator.  Initial-steps scaffold;

@@ -115,3 +115,13 @@ class ClassificationFlow(AtelierFlow):
     def publish(self):
         """Embeddings parquet + report on discovered RustFS (wired in a later PR)."""
         pass
+
+
+if __name__ == "__main__":
+    import os
+
+    from atelier.flows.platform_metaflow import metaflow_child_env
+
+    os.environ.update(metaflow_child_env())
+    ClassificationFlow()
+
