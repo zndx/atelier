@@ -284,6 +284,25 @@ def _gpu_count() -> int:
         return 0
 
 
+def _start_workload_sync():
+    """Submit the paused sdg_classify catalogue. Fail-open if Signals is dark."""
+    from atelier.engine.workload_sync import (
+        GURU_SYNCFAIL,
+        init_workload_sync,
+        signals_sync_target,
+    )
+
+    try:
+        target = signals_sync_target()
+    except Exception as e:  # noqa: BLE001 — boot must not wait on Signals
+        logger.warning("%s catalogue target unresolved: %s", GURU_SYNCFAIL, e)
+        return None
+    sync = init_workload_sync(target)
+    sync.start()
+    logger.info("workload-sync started target=%s", target)
+    return sync
+
+
 def serve(port: int | None = None) -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -306,6 +325,7 @@ def serve(port: int | None = None) -> None:
     from atelier.engine.events import emit
     emit(servicer.cfg.log_dir, "engine_start", project="atelier",
          grpc_port=bind_port, capabilities=list(servicer.cfg.capabilities))
+    sync = _start_workload_sync()
     print(
         f"atelier-engine gRPC listening on :{bind_port} "
         f"(hosted: {list(servicer.cfg.capabilities)}; instruct/thinking forwarded to the federation; "
@@ -315,6 +335,8 @@ def serve(port: int | None = None) -> None:
     )
 
     def _stop(*_):
+        if sync is not None:
+            sync.stop()
         servicer.mgr.shutdown()
         server.stop(grace=2)
         sys.exit(0)
