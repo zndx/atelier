@@ -73,7 +73,7 @@ class CompleteLLMBackend(LLMBackend):
         text = result.text if hasattr(result, "text") else str(result)
         try:
             classifications = _parse_structured_response(text, expected_names)
-        except (json.JSONDecodeError, ValueError, TypeError):
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
             classifications = _parse_classifications(text, expected_names)
         partial = len(classifications) < len(expected_names)
         return LLMResponse(

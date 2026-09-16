@@ -440,13 +440,19 @@ def _libpq_libdir() -> Path | None:
 
 def _ensure_libpq(env: dict[str, str]) -> None:
     libdir = _libpq_libdir()
-    if libdir is None:
+    extras: list[str] = []
+    if libdir is not None:
+        extras.append(str(libdir))
+    for cand in (
+        Path("/usr/local/cuda/lib64"),
+        Path("/usr/lib/x86_64-linux-gnu"),
+    ):
+        if (cand / "libcuda.so.1").exists() or (cand / "libcudart.so").exists() or (cand / "libcudart.so.12").exists():
+            extras.append(str(cand))
+    if not extras:
         return
-    cur = (env.get("LD_LIBRARY_PATH") or "").split(":")
-    s = str(libdir)
-    if s in cur:
-        return
-    env["LD_LIBRARY_PATH"] = ":".join([s, *[p for p in cur if p]])
+    cur = [p for p in (env.get("LD_LIBRARY_PATH") or "").split(":") if p]
+    env["LD_LIBRARY_PATH"] = ":".join([*extras, *[p for p in cur if p not in extras]])
 
 
 def _drop_tilt_bindings(env: dict[str, str]) -> None:

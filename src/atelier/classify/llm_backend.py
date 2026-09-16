@@ -877,6 +877,8 @@ def _dicts_to_classifications(
     """Convert parsed dicts to ColumnClassification objects."""
     results = []
     for i, item in enumerate(data):
+        if not isinstance(item, dict):
+            continue
         name = item.get("column_name", "")
         if not name and i < len(expected_names):
             name = expected_names[i]
@@ -900,12 +902,28 @@ def _dicts_to_classifications(
 
 
 def _parse_structured_response(text: str, expected_names: list[str]) -> list[ColumnClassification]:
-    """Parse structured JSON output guaranteed valid by schema.
+    """Parse structured JSON from schema or a bare classifications array.
 
-    Shared by AnthropicStructuredBackend and BedrockStructuredBackend.
+    Engine/Complete often returns ``[{...}, ...]`` instead of
+    ``{"classifications": [...]}``. Both are valid.
     """
     data = json.loads(text)
-    items = data.get("classifications", [])
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = data.get("classifications", data.get("results"))
+        if items is None and ({"column_name", "category_code"} & set(data.keys())):
+            items = [data]
+        elif items is None:
+            items = []
+        elif isinstance(items, dict):
+            items = [items]
+    else:
+        raise ValueError(
+            f"structured classify JSON is {type(data).__name__}, not object or array"
+        )
+    if not isinstance(items, list):
+        raise ValueError("classifications is not a list")
     return _dicts_to_classifications(items, expected_names)
 
 

@@ -98,6 +98,23 @@ def test_classify_batch_uses_instruct_then_thinking_on_revisit() -> None:
     assert calls == ["instruct", "thinking"]
 
 
+def test_parse_structured_response_accepts_bare_array() -> None:
+    from atelier.classify.llm_backend import _parse_structured_response
+
+    text = json.dumps([
+        {"column_name": "id", "category_code": "1.1", "confidence": 0.9,
+         "evidence": "x", "alternatives": []},
+    ])
+    rows = _parse_structured_response(text, ["id"])
+    assert rows[0].category_code == "1.1"
+    wrapped = json.dumps({"classifications": [
+        {"column_name": "id", "category_code": "2.0", "confidence": 0.5,
+         "evidence": "y", "alternatives": []},
+    ]})
+    rows2 = _parse_structured_response(wrapped, ["id"])
+    assert rows2[0].category_code == "2.0"
+
+
 def test_complete_discovers_peer_and_refuses_unhealthy() -> None:
     ok = complete("hi", capability="instruct", forwarder=_Fwd())
     assert ok.model == "Qwen"
