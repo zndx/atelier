@@ -48,7 +48,8 @@ class ClassificationFlow(AtelierFlow):
                 "(do not default to the full corpus source-id "
                 f"{CORPUS_SOURCE_ID!r})"
             )
-        self.source_id = sid
+        # Parameters are immutable; persist the resolved sample id.
+        self.sample_source_id = sid
         self.precondition_ran = False
         self.classifications: list[dict] = []
         self.target_keys: list[str] = []
@@ -60,7 +61,7 @@ class ClassificationFlow(AtelierFlow):
         from atelier.config import load_config
         from atelier.flows.resident import probe_status
 
-        st = probe_status(load_config(), str(self.source_id))
+        st = probe_status(load_config(), str(self.sample_source_id))
         self.needs_precondition = probe_requires_precondition(st)
         self.probe_reasons = list(getattr(st, "reasons", []) or [])
         self.next(self.precondition)
@@ -74,7 +75,7 @@ class ClassificationFlow(AtelierFlow):
         self.precondition_ran = False
         if self.needs_precondition:
             self.precondition_ran = run_precondition_if_needed(
-                load_config(), str(self.source_id),
+                load_config(), str(self.sample_source_id),
             )
         if self.only_precondition:
             self.target_keys = []
@@ -98,7 +99,7 @@ class ClassificationFlow(AtelierFlow):
 
         skip = (not self.needs_precondition) or bool(self.precondition_ran)
         result = run_dst_pipeline(
-            load_config(), str(self.source_id), skip_precondition=skip,
+            load_config(), str(self.sample_source_id), skip_precondition=skip,
         )
         if result.get("state") == "ERROR":
             raise RuntimeError(result.get("error") or "classification pipeline ERROR")
