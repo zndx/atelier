@@ -156,6 +156,9 @@ PROFILES: dict[str, SampleProfile] = {
     # laptop with a local Nemotron-class model, in one sitting.
     "macbook": SampleProfile("macbook", max_collections=3, max_columns=150,
                              max_terms=120, min_roots=4),
+    # Disjoint NHSVM-train substrate covering a holdout target's IRIs.
+    "reference": SampleProfile("reference", max_collections=8, max_columns=400,
+                               max_terms=400, min_roots=1),
     "workstation": SampleProfile("workstation", max_collections=10,
                                  max_columns=500, max_terms=320, min_roots=6),
     # Wide open — multi-GPU hosts; the corpus itself is the cap.
@@ -209,6 +212,7 @@ class Collection:
     path: Path
     manifest: dict
     anchors: set[str] = field(default_factory=set)
+    genera: set[str] = field(default_factory=set)
     column_count: int = 0
     unmapped_genera: list[str] = field(default_factory=list)
 
@@ -244,6 +248,8 @@ def _load_collections(corpora: Path) -> list[Collection]:
             )
         for term in terms:
             genus = term.get("genus", "")
+            if genus:
+                coll.genera.add(genus)
             anchor = _GENUS_TO_ANCHOR.get(genus)
             if anchor is None:
                 coll.unmapped_genera.append(genus)
@@ -524,6 +530,10 @@ def build_sample(
     *,
     artifact_root: Path | None = None,
     corpora: Path | None = None,
+    exclude_slugs: set[str] | None = None,
+    required_iris: set[str] | None = None,
+    pair_target_id: str | None = None,
+    write_current: bool = True,
 ) -> Path:
     """Run the full strategy; returns the sample directory."""
     from atelier.classify.artifact_set import compute_vocab_signature
@@ -537,7 +547,18 @@ def build_sample(
     collections = _load_collections(corpora)
     vocab = _load_vocab(corpora)
 
-    selected = select_collections(collections, profile)
+    if required_iris is not None:
+        from atelier.sdg.pair import select_reference_collections
+
+        selected = select_reference_collections(
+            collections,
+            exclude=exclude_slugs or set(),
+            required_iris=required_iris,
+            profile=profile,
+        )
+    else:
+        pool = [c for c in collections if c.slug not in (exclude_slugs or set())]
+        selected = select_collections(pool, profile)
     tables_by_coll = {c.slug: _read_tables(c) for c in selected}
 
     ri_reports = {c.slug: verify_collection_ri(c, tables_by_coll[c.slug])
@@ -545,7 +566,8 @@ def build_sample(
     codes, support, gaps, matched = select_terms(
         selected, tables_by_coll, vocab, profile)
 
-    out_dir = artifact_root / "sdg_sample" / f"{pin[:12]}_{profile.name}"
+    suffix = "reference" if pair_target_id else profile.name
+    out_dir = artifact_root / "sdg_sample" / f"{pin[:12]}_{suffix}"
     out_tables = out_dir / "tables"
     out_tables.mkdir(parents=True, exist_ok=True)
 
@@ -601,6 +623,7 @@ def build_sample(
              "construct_id": c.manifest.get("construct_id"),
              "entities": c.manifest.get("entities", []),
              "anchors": sorted(c.anchors),
+             "genera": sorted(c.genera),
              "tables": len(tables_by_coll[c.slug]),
              "columns": c.column_count,
              "unmapped_genera": c.unmapped_genera}
@@ -631,18 +654,28 @@ def build_sample(
                 sorted(support.items(), key=lambda kv: -kv[1])[:15]),
         },
         "vocab_sig": compute_vocab_signature(codes),
+        "role": "reference" if pair_target_id else "target",
+        "pair_target_id": pair_target_id,
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
-    # Pointer file (not a symlink — survives object-storage backends).
-    pointer = artifact_root / "sdg_sample" / "current.json"
-    pointer.write_text(json.dumps({
-        "path": str(out_dir),
-        "source_id": SOURCE_ID,
-        "sample_id": sample_source_id(pin, profile.name),
-        "corpus_commit": pin, "profile": profile.name,
-        "vocab_sig": manifest["vocab_sig"],
-    }, indent=2))
+    sid = sample_source_id(pin, suffix)
+    if write_current and not pair_target_id:
+        pointer = artifact_root / "sdg_sample" / "current.json"
+        pointer.write_text(json.dumps({
+            "path": str(out_dir),
+            "source_id": SOURCE_ID,
+            "sample_id": sid,
+            "corpus_commit": pin, "profile": profile.name,
+            "vocab_sig": manifest["vocab_sig"],
+        }, indent=2))
+    if pair_target_id:
+        pair_path = artifact_root / "sdg_sample" / "pair.json"
+        pair_path.write_text(json.dumps({
+            "target_id": pair_target_id,
+            "reference_id": sid,
+            "reference_path": str(out_dir),
+        }, indent=2))
 
     logger.info(
         "SDG sample: %d collections → %d tables / %d columns / %d terms "
@@ -663,10 +696,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-terms", type=int)
     parser.add_argument("--min-roots", type=int)
     parser.add_argument("--artifact-root", help="override cfg.artifact_root")
+    parser.add_argument(
+        "--pair-target",
+        help="build a disjoint reference sample covering this target sample-id's genus IRIs",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    base = PROFILES[args.profile]
+    from atelier.sdg.pair import PairError
+
+    profile_name = "reference" if args.pair_target else args.profile
+    base = PROFILES[profile_name]
     profile = SampleProfile(
         name=base.name,
         max_collections=args.max_collections or base.max_collections,
@@ -674,12 +714,43 @@ def main(argv: list[str] | None = None) -> int:
         max_terms=args.max_terms or base.max_terms,
         min_roots=args.min_roots or base.min_roots,
     )
+    exclude: set[str] = set()
+    required_iris: set[str] | None = None
+    pair_target_id = (args.pair_target or "").strip() or None
+    if pair_target_id:
+        from atelier.sdg.sample import sample_dir_from_source_id as _sdir
+
+        tdir = _sdir(pair_target_id)
+        if tdir is None:
+            print(f"ERROR: pair target {pair_target_id!r} is not on disk", file=sys.stderr)
+            return 1
+        tman = json.loads((tdir / "manifest.json").read_text())
+        exclude = {c["slug"] for c in tman.get("collections") or [] if c.get("slug")}
+        required_iris = set()
+        for c in tman.get("collections") or []:
+            required_iris.update(c.get("genera") or [])
+            required_iris.update(c.get("unmapped_genera") or [])
+        if not required_iris:
+            by_slug = {c.slug: c for c in _load_collections(_CORPORA)}
+            for slug in exclude:
+                if slug in by_slug:
+                    required_iris |= by_slug[slug].genera
+        if not required_iris:
+            print(
+                "ERROR: cannot resolve target genus IRIs for pairing",
+                file=sys.stderr,
+            )
+            return 1
     try:
         out = build_sample(
             profile,
             artifact_root=Path(args.artifact_root) if args.artifact_root else None,
+            exclude_slugs=exclude or None,
+            required_iris=required_iris,
+            pair_target_id=pair_target_id,
+            write_current=not pair_target_id,
         )
-    except SdgSampleError as exc:
+    except (SdgSampleError, PairError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     summary = json.loads((out / "manifest.json").read_text())

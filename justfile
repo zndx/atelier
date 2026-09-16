@@ -246,6 +246,11 @@ sdg-pin:
 sdg-sample profile="macbook":
     uv run python -m atelier.sdg.sample --profile {{profile}}
 
+# Disjoint NHSVM-train sample covering a holdout target's BFO/CCO genus IRIs.
+#   just sdg-sample-reference sdg-corpora/b24ef9f60660_macbook
+sdg-sample-reference target:
+    uv run python -m atelier.sdg.sample --pair-target {{target}}
+
 # Load the SDG corpora relational sample into devenv PostgreSQL
 # (database `sdg` on the devenv instance).  Delegates to the
 # submodule's own load-postgres recipe (schema → data → views, with

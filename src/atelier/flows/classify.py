@@ -27,6 +27,7 @@ class ClassificationFlow(AtelierFlow):
     source_id = Parameter("source-id", default="", type=str)
     # collection:<slug>, table:<name>, phase:precondition|maxsim|nhsvm
     target = Parameter("target", default="", type=str)
+    reference_id = Parameter("reference-id", default="", type=str)
     only_precondition = Parameter("only-precondition", default=False, type=bool)
     kubernetes_preferred = Parameter("kubernetes-preferred", default=True, type=bool)
 
@@ -64,6 +65,15 @@ class ClassificationFlow(AtelierFlow):
         self.target_notes = list(spec.notes)
         self.precondition_ran = False
         self.classifications: list[dict] = []
+        rid = str(self.reference_id or "").strip()
+        self.reference_source_id = rid
+        self.train_source_id = rid or sid
+        if rid:
+            from atelier.sdg.pair import assert_pair
+
+            report = assert_pair(sid, rid)
+            self.pair_perfect_possible = report.perfect_possible
+            self.pair_skos_missing = list(report.skos_missing)
         self.next(self.probe)
 
     @step
@@ -72,7 +82,8 @@ class ClassificationFlow(AtelierFlow):
         from atelier.config import load_config
         from atelier.flows.resident import probe_status
 
-        st = probe_status(load_config(), str(self.sample_source_id))
+        train_id = str(getattr(self, "train_source_id", None) or self.sample_source_id)
+        st = probe_status(load_config(), train_id)
         self.needs_precondition = probe_requires_precondition(st)
         self.probe_reasons = list(getattr(st, "reasons", []) or [])
         self.next(self.precondition)
@@ -90,8 +101,9 @@ class ClassificationFlow(AtelierFlow):
         )
         self.precondition_ran = False
         if self.needs_precondition or spec.precondition_stages:
+            train_id = str(getattr(self, "train_source_id", None) or self.sample_source_id)
             self.precondition_ran = run_precondition_if_needed(
-                load_config(), str(self.sample_source_id),
+                load_config(), train_id,
                 stages=spec.precondition_stages,
             )
         if self.only_precondition or spec.stop_after_precondition:
