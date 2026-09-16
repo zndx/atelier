@@ -1,0 +1,12 @@
+{
+  "METAFLOW_DEFAULT_METADATA": "service",
+  "METAFLOW_DEFAULT_DATASTORE": "s3",
+  "METAFLOW_DATASTORE_SYSROOT_S3": "s3://metaflow/metaflow",
+  "METAFLOW_SERVICE_INTERNAL_URL": "http://metaflow-service.metaflow.svc.cluster.local:8080",
+  "METAFLOW_S3_ENDPOINT_INTERNAL_URL": "http://signals-rustfs.metaflow.svc.cluster.local:9010",
+  "METAFLOW_KUBERNETES_NAMESPACE": "metaflow",
+  "METAFLOW_KUBERNETES_SERVICE_ACCOUNT": "metaflow-task",
+  "METAFLOW_KUBERNETES_SECRETS": "metaflow-s3-credentials",
+  "METAFLOW_AIRFLOW_KUBERNETES_CONN_ID": "kubernetes_default",
+  "_comment": "Signals K8s identity + datastore. Host Metaflow/RustFS URLs are discovered from the Signals peer-contract at runtime — do not pin NodePorts here."
+}
