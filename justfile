@@ -109,18 +109,13 @@ classify-flow *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     host=0
-    have_source=0
     out=()
     for a in {{ARGS}}; do
       if [ "$a" = "--host" ]; then host=1
-      elif [[ "$a" == --source-id* ]] || [[ "$a" == --source_id* ]]; then have_source=1; out+=("$a")
       else out+=("$a"); fi
     done
-    if [ "$have_source" = "0" ]; then
-      sid="$(python -c 'from atelier.sdg.sample import current_sample_source_id; s=current_sample_source_id();
-import sys; sys.exit(1) if not s else print(s)')"
-      out+=(--source-id="$sid")
-    fi
+    # Empty --source-id is resolved in ClassificationFlow.start to the
+    # current sample id (not the full corpus).
     if [ "$host" = "0" ]; then
       devenv shell -- python -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
     else
