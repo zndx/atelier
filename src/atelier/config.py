@@ -109,6 +109,7 @@ _HOCON_MAP: dict[str, tuple[str, type]] = {
     "classify.gpu.enabled": ("classify_gpu_enabled", str),
     "classify.gpu.shard_threshold": ("classify_gpu_shard_threshold", int),
     "classify.gpu.sage_chunk_permutations": ("classify_gpu_sage_chunk", int),
+    "classify.clock": ("classify_clock", str),
     "classify.auto_start": ("classify_auto_start", bool),
     "classify.default_source": ("classify_default_source", str),
     "classify.subagent_model": ("classify_subagent_model", str),
@@ -424,6 +425,7 @@ class AtelierConfig:
     classify_gpu_enabled: str = "auto"
     classify_gpu_shard_threshold: int = 200_000
     classify_gpu_sage_chunk: int = 16
+    classify_clock: str = "airflow"  # airflow | gateway (CAI-era boot dispatch)
     classify_auto_start: bool = False
     classify_default_source: str = ""  # empty = ootb-sample
     classify_subagent_model: str | None = None

@@ -1,26 +1,36 @@
 @gateway @tier-0
 Feature: Classification pipeline auto-start on deploy
-  ATELIER_CLASSIFY_AUTO_START gates the lifespan auto-dispatch. When
-  the deploy sets AUTO_START=true AND a CONNECTION + DATABASE, the
-  gateway calls fsm_start(source_id=classify-{conn}-{db}) during the
-  seed phase so the operator lands on a usable run without any clicks.
+  ATELIER_CLASSIFY_AUTO_START gates the CAI-era lifespan auto-dispatch
+  only when classify.clock=gateway. Federation default clock is Airflow:
+  atelier restart SyncWorkloads (YK claims) and does not execute classify.
+
+  Scenario: Airflow clock — restart does not dispatch even if AUTO_START true
+    Given ATELIER_CLASSIFY_CLOCK is "airflow"
+    And ATELIER_CLASSIFY_AUTO_START is "true"
+    And ATELIER_CLASSIFY_CONNECTION is "hive-poc"
+    And ATELIER_CLASSIFY_DATABASE is "default"
+    When _maybe_auto_start_classify runs
+    Then fsm_start is not called
 
   Scenario: Auto-start disabled — no fsm_start dispatch
-    Given ATELIER_CLASSIFY_AUTO_START is "false"
+    Given ATELIER_CLASSIFY_CLOCK is "gateway"
+    And ATELIER_CLASSIFY_AUTO_START is "false"
     And ATELIER_CLASSIFY_CONNECTION is "hive-poc"
     And ATELIER_CLASSIFY_DATABASE is "default"
     When _maybe_auto_start_classify runs
     Then fsm_start is not called
 
   Scenario: Auto-start enabled with CONNECTION + DATABASE — dispatch fires
-    Given ATELIER_CLASSIFY_AUTO_START is "true"
+    Given ATELIER_CLASSIFY_CLOCK is "gateway"
+    And ATELIER_CLASSIFY_AUTO_START is "true"
     And ATELIER_CLASSIFY_CONNECTION is "hive-poc"
     And ATELIER_CLASSIFY_DATABASE is "default"
     When _maybe_auto_start_classify runs
     Then fsm_start is called with source_id "classify-hive-poc-default"
 
   Scenario: Auto-start enabled but CONNECTION missing — skipped with warning
-    Given ATELIER_CLASSIFY_AUTO_START is "true"
+    Given ATELIER_CLASSIFY_CLOCK is "gateway"
+    And ATELIER_CLASSIFY_AUTO_START is "true"
     And ATELIER_CLASSIFY_CONNECTION is ""
     And ATELIER_CLASSIFY_DATABASE is "default"
     When _maybe_auto_start_classify runs
@@ -33,7 +43,8 @@ Feature: Classification pipeline auto-start on deploy
     # honor the user's last expressed intent — most-recent FSM run's
     # source_id — rather than dredging up the deployment-time
     # ATELIER_CLASSIFY_* env defaults.
-    Given ATELIER_CLASSIFY_AUTO_START is "true"
+    Given ATELIER_CLASSIFY_CLOCK is "gateway"
+    And ATELIER_CLASSIFY_AUTO_START is "true"
     And ATELIER_CLASSIFY_CONNECTION is "hive-poc"
     And ATELIER_CLASSIFY_DATABASE is "default"
     And the most recent FSM run has source_id "reference_corpus/annotations"
@@ -43,7 +54,8 @@ Feature: Classification pipeline auto-start on deploy
   Scenario: Auto-start falls back to env defaults when no prior runs exist
     # Initial deploy: no FSM run history yet, _last_user_selected_source_id
     # returns None, fall through to the env-driven default.
-    Given ATELIER_CLASSIFY_AUTO_START is "true"
+    Given ATELIER_CLASSIFY_CLOCK is "gateway"
+    And ATELIER_CLASSIFY_AUTO_START is "true"
     And ATELIER_CLASSIFY_CONNECTION is "hive-poc"
     And ATELIER_CLASSIFY_DATABASE is "default"
     And there are no prior FSM runs

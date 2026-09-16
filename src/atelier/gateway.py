@@ -796,10 +796,40 @@ def _sync_orphaned_runs() -> None:
             )
 
 
-def _maybe_auto_start_classify() -> None:
-    """Kick off a classification run on boot when configured.
+def _federation_clock(cfg) -> bool:
+    """Airflow/YK is the classify clock (AgentRTC-shaped). Gateway boot is not."""
+    clock = (getattr(cfg, "classify_clock", "") or "airflow").strip().lower()
+    return clock in ("airflow", "metaflow", "federation", "")
 
-    Gated by ``ATELIER_CLASSIFY_AUTO_START`` (HOCON: ``classify.auto_start``).
+
+def _maybe_auto_start_classify() -> None:
+    """CAI-era boot dispatch. Federation: Airflow clocks; restart does not run.
+
+    Gated by ``classify.clock`` (default ``airflow``) then
+    ``ATELIER_CLASSIFY_AUTO_START``. Under Airflow the engine only
+    SyncWorkloads (YK claims for pending Activities). ClassificationFlow
+    starts when Airflow holds the Activity — not on atelier.service restart.
+    """
+    try:
+        from atelier.config import load_config
+    except Exception:
+        return
+    cfg = load_config()
+    if _federation_clock(cfg):
+        _log.info(
+            "Classify auto-start suppressed: clock=%s (Airflow asserts YK "
+            "claims; restart does not execute sdg_classify)",
+            getattr(cfg, "classify_clock", "airflow") or "airflow",
+        )
+        return
+    if not getattr(cfg, "classify_auto_start", False):
+        return
+    _dispatch_legacy_auto_start(cfg)
+
+
+def _dispatch_legacy_auto_start(cfg) -> None:
+    """Kick off a classification run on boot when configured (clock=gateway).
+
     Dispatches unconditionally — if the environment isn't ready the
     pipeline itself will error out and the FSM transitions to ERROR
     with the underlying Bedrock/Anthropic exception in its ``error``
@@ -831,14 +861,6 @@ def _maybe_auto_start_classify() -> None:
     (IDLE/CONVERGED/ERROR) prevents double-launch if the lifespan
     replays on reload.
     """
-    try:
-        from atelier.config import load_config
-    except Exception:
-        return
-    cfg = load_config()
-    if not getattr(cfg, "classify_auto_start", False):
-        return
-
     # Prefer the user's last-selected source over env defaults so a
     # restart honors the operator's current configuration.
     last_source_id = _last_user_selected_source_id()

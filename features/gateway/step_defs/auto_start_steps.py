@@ -34,6 +34,11 @@ def _restore_auto_env(context) -> None:
             os.environ[key] = prior
 
 
+@given('ATELIER_CLASSIFY_CLOCK is "{value}"')
+def step_classify_clock(context, value):
+    _patch_env(context, "ATELIER_CLASSIFY_CLOCK", value)
+
+
 @given('ATELIER_CLASSIFY_AUTO_START is "{value}"')
 def step_autostart_flag(context, value):
     _patch_env(context, "ATELIER_CLASSIFY_AUTO_START", value)

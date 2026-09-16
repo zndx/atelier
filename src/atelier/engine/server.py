@@ -285,7 +285,12 @@ def _gpu_count() -> int:
 
 
 def _start_workload_sync():
-    """Submit the paused sdg_classify catalogue. Fail-open if Signals is dark."""
+    """Submit the paused sdg_classify catalogue (YK claims). Do not run classify.
+
+    AgentRTC pattern: restart re-asserts the workflow's queue configuration
+    via SyncWorkloads. Airflow starts ClassificationFlow when the Activity
+    is in force — not this boot path.
+    """
     from atelier.engine.workload_sync import (
         GURU_SYNCFAIL,
         init_workload_sync,
