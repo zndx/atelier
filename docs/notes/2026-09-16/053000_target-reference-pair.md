@@ -19,3 +19,6 @@ just classify-flow --host \
 
 DST sweep on the target is gated on NHSVM being able to label the
 holdout (`perfect_possible` when `skos_missing` is empty).
+
+Ægir-facing brief (new session starts here):
+`/home/rch/local/src/zndx/aegir/docs/current/src/operations/atelier_holdout_reference.md`
