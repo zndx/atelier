@@ -116,10 +116,15 @@ classify-flow *ARGS:
     done
     # Empty --source-id is resolved in ClassificationFlow.start to the
     # current sample id (not the full corpus).
+    py=".devenv/state/venv/bin/python"
+    if [ ! -x "$py" ]; then
+      echo "error: $py missing — enter devenv and uv sync" >&2
+      exit 1
+    fi
     if [ "$host" = "0" ]; then
-      devenv shell -- python -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
+      devenv shell -- "$py" -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
     else
-      devenv shell -- python -m atelier.flows.run_classify run "${out[@]}"
+      devenv shell -- "$py" -m atelier.flows.run_classify run "${out[@]}"
     fi
 
 # ── Optimize (in-situ domain adaptation) ─────────────────────────
