@@ -121,10 +121,13 @@ classify-flow *ARGS:
       echo "error: $py missing — enter devenv and uv sync" >&2
       exit 1
     fi
+    # Do not wrap in `devenv shell`: its LD_LIBRARY_PATH mixes glibc/OpenSSL
+    # and stack-smashes Metaflow's S3 PUT to Signals RustFS. run_classify
+    # injects libpq + libcuda itself.
     if [ "$host" = "0" ]; then
-      devenv shell -- "$py" -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
+      "$py" -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
     else
-      devenv shell -- "$py" -m atelier.flows.run_classify run "${out[@]}"
+      "$py" -m atelier.flows.run_classify run "${out[@]}"
     fi
 
 # ── Optimize (in-situ domain adaptation) ─────────────────────────
