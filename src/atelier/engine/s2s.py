@@ -328,14 +328,28 @@ def local_response(
         resp.queues.extend(declared_queues())
     if kind == zpb.SERVER_QUERY_KIND_WORKLOADS:
         resp.workloads.extend(declared_workloads())
+    if kind == zpb.SERVER_QUERY_KIND_SCHEDULES:
+        from atelier.engine.workload_catalog import schedule_hints
+
+        resp.schedules.extend(schedule_hints())
     return resp
 
 
 def declared_queues() -> list[zpb.QueueHint]:
     """Declared leaf shape. Occupancy over time is RequestQueueShare."""
-    from atelier.engine.queue_share import HEAVY, LIGHT, MEDIUM
+    from atelier.engine.queue_share import EMBEDDING, HEAVY, LIGHT, MEDIUM
 
     return [
+        zpb.QueueHint(
+            path=EMBEDDING.queue,
+            resource_class=EMBEDDING.name,
+            gpu_guarantee=1,
+            gpu_max=2,
+            max_applications=EMBEDDING.max_applications,
+            preemption_delay="5s",
+            role="embedding",
+            examples="atelier.sdg_classify ColBERT-Zero",
+        ),
         zpb.QueueHint(
             path=LIGHT.queue,
             resource_class=LIGHT.name,

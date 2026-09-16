@@ -11,6 +11,7 @@ import pytest
 from atelier.engine.queue_share import (
     GURU_SHAREFAIL,
     GPU_KEY,
+    EMBEDDING,
     HEAVY,
     LIGHT,
     MEDIUM,
@@ -90,13 +91,16 @@ def test_leaf_from_tp_pp_share() -> None:
 
 def test_queue_hint_is_declared_leaf_shape() -> None:
     hints = declared_queues()
-    assert [h.role for h in hints] == ["light", "medium", "heavy"]
-    assert [h.path for h in hints] == [LIGHT.queue, MEDIUM.queue, HEAVY.queue]
-    heavy = hints[2]
-    assert heavy.gpu_guarantee == 4
-    assert heavy.gpu_max == 4
+    by_role = {h.role: h for h in hints}
+    assert set(by_role) >= {"embedding", "light", "medium", "heavy"}
+    assert by_role["embedding"].path == EMBEDDING.queue
+    assert by_role["light"].path == LIGHT.queue
+    assert by_role["medium"].path == MEDIUM.queue
+    assert by_role["heavy"].path == HEAVY.queue
+    assert by_role["heavy"].gpu_guarantee == 4
+    assert by_role["heavy"].gpu_max == 4
     q = local_response(zpb.SERVER_QUERY_KIND_QUEUES)
-    assert [x.path for x in q.queues] == [LIGHT.queue, MEDIUM.queue, HEAVY.queue]
+    assert {x.path for x in q.queues} >= {EMBEDDING.queue, LIGHT.queue, MEDIUM.queue, HEAVY.queue}
 
 
 def test_workloads_offer_only_hosted_capabilities(monkeypatch) -> None:

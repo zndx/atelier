@@ -219,14 +219,9 @@ class ZndxEngineServicer:
         )
 
     def Yield(self, request, context):
-        from zndx.engine.v1 import engine_pb2 as zpb
+        from atelier.engine.sentinel_yield import yield_workload
 
-        return zpb.YieldResponse(
-            ok=True,
-            process_ended=False,
-            restore_started=False,
-            message="atelier has no sentinel workloads",
-        )
+        return yield_workload(request)
 
     def ServerQuery(self, request, context):
         from atelier.engine.s2s import local_response

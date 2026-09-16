@@ -61,6 +61,12 @@ LIGHT = ResourceClass(
     gpu_tokens=1,
     max_applications=2,
 )
+EMBEDDING = ResourceClass(
+    name="internal.inference.embedding",
+    queue="root.internal.inference.embedding",
+    gpu_tokens=1,
+    max_applications=2,
+)
 
 
 def leaf_for_gpu_tokens(n: int) -> ResourceClass:
