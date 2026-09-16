@@ -34,6 +34,8 @@ GURU_NOCONTRACT = "#MF.00000008.NOCONTRACT"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PROFILE_REL = Path("config") / "metaflow" / "platform.json"
+_TILT_FRAGMENTS = ("metaflow-artifacts", "devenv-rustfs", "minioadmin")
+_PLATFORM_SYSROOT = "s3://metaflow/metaflow"
 
 
 class PlatformMetaflowError(RuntimeError):
@@ -415,13 +417,53 @@ def require_signals_metaflow(environ: Mapping[str, str] | None = None) -> None:
         )
 
 
+def _drop_tilt_bindings(env: dict[str, str]) -> None:
+    """Remove Tilt/MinIO leftovers so ~/.metaflowconfig cannot win."""
+    for key, value in list(env.items()):
+        if any(frag in str(value) for frag in _TILT_FRAGMENTS):
+            env.pop(key, None)
+
+
+def _rustfs_keys(env: Mapping[str, str]) -> tuple[str, str]:
+    """Signals RustFS keys. Never keep ambient minioadmin from ~/.metaflowconfig."""
+    ak = (
+        (env.get("ATELIER_RUSTFS_ACCESS_KEY") or env.get("RUSTFS_ACCESS_KEY") or "")
+        .strip()
+    )
+    sk = (
+        (env.get("ATELIER_RUSTFS_SECRET_KEY") or env.get("RUSTFS_SECRET_KEY") or "")
+        .strip()
+    )
+    return ak or "rustfsadmin", sk or "rustfsadmin"
+
+
+def _write_isolated_home(env: dict[str, str], resolved: PlatformMetaflowDecision) -> Path:
+    """METAFLOW_HOME that does not load ~/.metaflowconfig (Tilt artifacts bucket)."""
+    raw = (env.get("ATELIER_METAFLOW_HOME") or "").strip()
+    home = Path(raw) if raw else _REPO_ROOT / "build" / "metaflow-home"
+    home.mkdir(parents=True, exist_ok=True)
+    cfg = {
+        "METAFLOW_DEFAULT_METADATA": "service",
+        "METAFLOW_SERVICE_URL": resolved.metaflow_service_url,
+        "METAFLOW_DEFAULT_DATASTORE": "s3",
+        "METAFLOW_DATASTORE_SYSROOT_S3": _PLATFORM_SYSROOT,
+        "METAFLOW_S3_ENDPOINT_URL": resolved.rustfs_s3_url,
+    }
+    (home / "config.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    return home
+
+
 def metaflow_child_env(
     base: Mapping[str, str] | None = None,
     *,
     mode: str | None = None,
     decision: PlatformMetaflowDecision | None = None,
 ) -> dict[str, str]:
-    """Subprocess env with discovered platform URLs applied."""
+    """Subprocess env with discovered platform URLs applied.
+
+    Isolates METAFLOW_HOME so a host ``~/.metaflowconfig`` pointing at
+    ``s3://metaflow-artifacts`` (Tilt/MinIO) cannot be the datastore.
+    """
     env = dict(base or os.environ)
     if mode == "local" or (env.get("ATELIER_METAFLOW_MODE") or "").strip().lower() == "local":
         env["ATELIER_METAFLOW_MODE"] = "local"
@@ -443,6 +485,7 @@ def metaflow_child_env(
             GURU_NOPROFILE,
             f"platform profile missing at {_REPO_ROOT / _PROFILE_REL}",
         )
+    _drop_tilt_bindings(env)
     for key, value in profile.items():
         if key.endswith("_INTERNAL_URL") and not in_cluster(env):
             continue
@@ -450,11 +493,20 @@ def metaflow_child_env(
     env["ATELIER_METAFLOW_MODE"] = "platform"
     env["METAFLOW_DEFAULT_METADATA"] = "service"
     env["METAFLOW_DEFAULT_DATASTORE"] = "s3"
+    env["METAFLOW_DATASTORE_SYSROOT_S3"] = _PLATFORM_SYSROOT
     env["METAFLOW_SERVICE_URL"] = resolved.metaflow_service_url
     if resolved.rustfs_s3_url:
         env["METAFLOW_S3_ENDPOINT_URL"] = resolved.rustfs_s3_url
+        env["AWS_ENDPOINT_URL_S3"] = resolved.rustfs_s3_url
+    ak, sk = _rustfs_keys(env)
+    env["AWS_ACCESS_KEY_ID"] = ak
+    env["AWS_SECRET_ACCESS_KEY"] = sk
+    env.pop("METAFLOW_CARD_S3ROOT", None)
+    home = _write_isolated_home(env, resolved)
+    env["METAFLOW_HOME"] = str(home)
     if resolved.signals_engine:
         env.setdefault("SIGNALS_ENGINE_GRPC", resolved.signals_engine)
+    require_signals_metaflow(env)
     return env
 
 

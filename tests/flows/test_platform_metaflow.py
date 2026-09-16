@@ -185,18 +185,31 @@ def test_override_platform_still_requires_ping(tmp_path: Path) -> None:
 
 
 def test_child_env_forces_discovered_platform_datastore(tmp_path: Path) -> None:
+    home = tmp_path / "mfhome"
     env = _env(
         _contract(tmp_path),
         ATELIER_METAFLOW_MODE="platform",
         ATELIER_METAFLOW_SKIP_PING="1",
+        ATELIER_METAFLOW_HOME=str(home),
         METAFLOW_DEFAULT_DATASTORE="local",
+        METAFLOW_DATASTORE_SYSROOT_S3="s3://metaflow-artifacts/metaflow",
+        AWS_ACCESS_KEY_ID="minioadmin",
+        AWS_SECRET_ACCESS_KEY="minioadmin",
+        METAFLOW_CARD_S3ROOT="s3://metaflow-artifacts/metaflow/cards",
     )
     child = metaflow_child_env(env)
     assert child["ATELIER_METAFLOW_MODE"] == "platform"
     assert child["METAFLOW_DEFAULT_DATASTORE"] == "s3"
     assert child["METAFLOW_SERVICE_URL"] == "http://mf.example.test:9"
     assert child["METAFLOW_S3_ENDPOINT_URL"] == "http://s3.example.test:8"
-    assert child["METAFLOW_DATASTORE_SYSROOT_S3"].startswith("s3://metaflow/")
+    assert child["METAFLOW_DATASTORE_SYSROOT_S3"] == "s3://metaflow/metaflow"
+    assert "metaflow-artifacts" not in child["METAFLOW_DATASTORE_SYSROOT_S3"]
+    assert child["AWS_ACCESS_KEY_ID"] != "minioadmin"
+    assert "METAFLOW_CARD_S3ROOT" not in child
+    assert Path(child["METAFLOW_HOME"]).joinpath("config.json").is_file()
+    dumped = (home / "config.json").read_text(encoding="utf-8")
+    assert "metaflow-artifacts" not in dumped
+    assert "s3://metaflow/metaflow" in dumped
 
 
 def test_require_signals_metaflow_refuses_local() -> None:
@@ -225,6 +238,12 @@ def test_require_signals_metaflow_accepts_platform_sysroot() -> None:
             "METAFLOW_S3_ENDPOINT_URL": "http://s3.example.test:8",
         }
     )
+
+
+def test_run_classify_does_not_import_flowspec_at_load() -> None:
+    import atelier.flows.run_classify as runner
+
+    assert "ClassificationFlow" not in vars(runner)
 
 
 def test_complete_capability_is_thinking_or_instruct() -> None:

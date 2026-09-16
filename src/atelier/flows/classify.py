@@ -132,10 +132,9 @@ class ClassificationFlow(AtelierFlow):
 
 
 if __name__ == "__main__":
-    import os
-
-    from atelier.flows.platform_metaflow import metaflow_child_env
-
-    os.environ.update(metaflow_child_env())
-    ClassificationFlow()
+    raise SystemExit(
+        "Importing this module constructs the FlowSpec before platform env "
+        "is applied (Tilt ~/.metaflowconfig would win). "
+        "Run: python -m atelier.flows.run_classify run --source-id=..."
+    )
 
