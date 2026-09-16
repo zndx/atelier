@@ -79,7 +79,7 @@ class ClassificationFlow(AtelierFlow):
         if self.only_precondition:
             self.target_keys = []
             self.classifications = []
-            self.next(self.evaluate)
+            self.next(self.end)
             return
         self.next(self.load)
 
@@ -123,11 +123,11 @@ class ClassificationFlow(AtelierFlow):
     def evaluate(self):
         """Pass iff every target relational entity has a predicted_code."""
         assert_coverage(self.classifications, self.target_keys)
-        self.next(self.publish)
+        self.next(self.end)
 
     @step
-    def publish(self):
-        """Embeddings parquet + report on discovered RustFS (wired in a later PR)."""
+    def end(self):
+        """Publish embeddings/report (RustFS in a later PR). Metaflow terminal step."""
         pass
 
 

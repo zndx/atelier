@@ -19,8 +19,8 @@ STEP_GRAPH: tuple[tuple[str, str | None], ...] = (
     ("load", "sweep"),
     ("sweep", "fuse"),
     ("fuse", "evaluate"),
-    ("evaluate", "publish"),
-    ("publish", None),
+    ("evaluate", "end"),
+    ("end", None),
 )
 
 SWEEP_CAPABILITY = "instruct"
