@@ -13,3 +13,6 @@ After atelier.service recycle (03:41 UTC) and `fs.inotify.max_user_instances=819
   Dag-processor logged `next_dagrun=2026-09-15 08:00` — catch-up risk
   if unpaused; keep paused.
 - Platform Metaflow discovery: scheduler healthy, metadata ping ok.
+
+Proof-run source-id is the **sample** (`sdg-corpora/<pin>_<profile>`), not
+the full corpus id `sdg-corpora`. Live: `sdg-corpora/b24ef9f60660_macbook`.

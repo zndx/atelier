@@ -626,7 +626,32 @@ def run_classification_pipeline(
     # The OOTB sample pairs with the expanded ICE ontology — its
     # reference codes share that vocabulary, so the LLM prompts and
     # fusion frame are aligned.
-    if source_id == "ootb-sample" and samples is None:
+    from atelier.sdg.sample import (
+        is_sample_source_id,
+        sample_dir_from_source_id,
+    )
+
+    if is_sample_source_id(source_id or "") and samples is None:
+        sample_dir = sample_dir_from_source_id(source_id or "")
+        if sample_dir is None:
+            raise RuntimeError(
+                f"sdg-corpora sample {source_id!r} is not on disk under "
+                f"build/sdg_sample/. Run `just sdg-sample`."
+            )
+        from atelier.classify.filesystem_source import load_filesystem_source
+        from atelier.classify.taxonomy import load_annotations_from_filesystem
+
+        samples = load_filesystem_source(
+            str(sample_dir / "tables"),
+            sample_size=sample_size
+            or int(getattr(cfg, "classify_sample_size", 50)),
+            database=source_id,
+        )
+        if category_set is None:
+            category_set = load_annotations_from_filesystem(
+                sample_dir / "annotations.csv", hierarchical=True,
+            )
+    elif source_id == "ootb-sample" and samples is None:
         samples = load_sample_source()
         if category_set is None:
             category_set = load_sample_vocabulary(hierarchical=True)
@@ -647,7 +672,7 @@ def run_classification_pipeline(
         samples = load_meta_tagging_source(mount)
         if category_set is None:
             category_set = load_meta_tagging_vocabulary(mount)
-    elif source_id and source_id != "ootb-sample":
+    elif source_id and source_id != "ootb-sample" and not is_sample_source_id(source_id):
         # Generic Hive/external source — look up the data_sources row in
         # the DAO and unpack source_uri ("{connection}/{database}") +
         # vocab_uri.  Mirrors what the gateway's /api/fsm/start handler

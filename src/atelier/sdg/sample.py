@@ -67,7 +67,65 @@ logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _CORPORA = _REPO_ROOT / "external" / "sdg-corpora"
 
-SOURCE_ID = "sdg-corpora"  # the data-source id every artifact aligns to
+# Full corpus id — the eventual natural classification target.
+CORPUS_SOURCE_ID = "sdg-corpora"
+SOURCE_ID = CORPUS_SOURCE_ID  # DAO / historical pointer field
+
+# First-run / proof runs use a *sample* id: sdg-corpora/<pin12>_<profile>
+# e.g. sdg-corpora/b24ef9f60660_macbook. Never default ClassificationFlow
+# to CORPUS_SOURCE_ID.
+
+
+def sample_source_id(pin: str, profile: str) -> str:
+    short = (pin or "").strip()[:12]
+    prof = (profile or "").strip()
+    if not short or not prof:
+        raise SdgSampleError("sample_source_id requires pin and profile")
+    return f"{CORPUS_SOURCE_ID}/{short}_{prof}"
+
+
+def is_corpus_source_id(source_id: str) -> bool:
+    return (source_id or "").strip() == CORPUS_SOURCE_ID
+
+
+def is_sample_source_id(source_id: str) -> bool:
+    s = (source_id or "").strip()
+    return s.startswith(f"{CORPUS_SOURCE_ID}/") and len(s) > len(CORPUS_SOURCE_ID) + 1
+
+
+def sample_dir_from_source_id(
+    source_id: str, *, artifact_root: Path | None = None,
+) -> Path | None:
+    """``build/sdg_sample/<pin>_<profile>`` for a sample source-id."""
+    if not is_sample_source_id(source_id):
+        return None
+    name = source_id.split("/", 1)[1]
+    root = artifact_root if artifact_root is not None else _REPO_ROOT / "build"
+    d = root / "sdg_sample" / name
+    return d if d.is_dir() else None
+
+
+def current_sample_source_id(*, artifact_root: Path | None = None) -> str:
+    """Sample id from ``sdg_sample/current.json`` — never the bare corpus id."""
+    root = artifact_root if artifact_root is not None else _REPO_ROOT / "build"
+    pointer = root / "sdg_sample" / "current.json"
+    if not pointer.is_file():
+        return ""
+    try:
+        ptr = json.loads(pointer.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    sid = str(ptr.get("sample_id") or "").strip()
+    if is_sample_source_id(sid):
+        return sid
+    path = str(ptr.get("path") or "").strip()
+    if path:
+        return f"{CORPUS_SOURCE_ID}/{Path(path).name}"
+    pin = str(ptr.get("corpus_commit") or "")
+    prof = str(ptr.get("profile") or "")
+    if pin and prof:
+        return sample_source_id(pin, prof)
+    return ""
 
 
 class SdgSampleError(RuntimeError):
@@ -579,7 +637,9 @@ def build_sample(
     # Pointer file (not a symlink — survives object-storage backends).
     pointer = artifact_root / "sdg_sample" / "current.json"
     pointer.write_text(json.dumps({
-        "path": str(out_dir), "source_id": SOURCE_ID,
+        "path": str(out_dir),
+        "source_id": SOURCE_ID,
+        "sample_id": sample_source_id(pin, profile.name),
         "corpus_commit": pin, "profile": profile.name,
         "vocab_sig": manifest["vocab_sig"],
     }, indent=2))

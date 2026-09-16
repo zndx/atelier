@@ -98,15 +98,25 @@ sdg-classify-verify:
     uv run python scripts/verify_sdg_classify.py
 
 # Resident ClassificationFlow on discovered Signals Metaflow.
+# Default --source-id is the current *sample*
+# (sdg-corpora/<pin>_<profile>), not the full corpus id `sdg-corpora`.
 # K8s is preferred (`--with kubernetes`). Pass `--host` to run plain @step.
 classify-flow *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     host=0
+    have_source=0
     out=()
     for a in {{ARGS}}; do
-      if [ "$a" = "--host" ]; then host=1; else out+=("$a"); fi
+      if [ "$a" = "--host" ]; then host=1
+      elif [[ "$a" == --source-id* ]] || [[ "$a" == --source_id* ]]; then have_source=1; out+=("$a")
+      else out+=("$a"); fi
     done
+    if [ "$have_source" = "0" ]; then
+      sid="$(python -c 'from atelier.sdg.sample import current_sample_source_id; s=current_sample_source_id();
+import sys; sys.exit(1) if not s else print(s)')"
+      out+=(--source-id="$sid")
+    fi
     if [ "$host" = "0" ]; then
       python -m atelier.flows.classify run --with kubernetes "${out[@]}"
     else

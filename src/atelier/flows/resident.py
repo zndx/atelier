@@ -12,8 +12,21 @@ from atelier.flows.classify_phases import probe_requires_precondition
 
 
 def load_category_set(cfg: Any, source_id: str):
-    """Vocabulary for this source. SDG sample uses filesystem annotations."""
-    if source_id in ("sdg-corpora", "ootb-sample", ""):
+    """Vocabulary for this source. Sample ids use the sample annotations.csv."""
+    from atelier.sdg.sample import is_sample_source_id, sample_dir_from_source_id
+
+    if is_sample_source_id(source_id):
+        sample_dir = sample_dir_from_source_id(source_id)
+        if sample_dir is None:
+            raise RuntimeError(
+                f"sdg-corpora sample {source_id!r} missing under build/sdg_sample/"
+            )
+        from atelier.classify.taxonomy import load_annotations_from_filesystem
+
+        return load_annotations_from_filesystem(
+            sample_dir / "annotations.csv", hierarchical=True,
+        )
+    if source_id in ("ootb-sample", ""):
         from atelier.classify.sampler import load_sample_vocabulary
 
         return load_sample_vocabulary(hierarchical=True)

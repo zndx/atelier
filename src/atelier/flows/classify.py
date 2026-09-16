@@ -22,7 +22,9 @@ from atelier.flows import register_flow
 class ClassificationFlow(AtelierFlow):
     """Resident classification: probe-gated precondition through coverage evaluate."""
 
-    source_id = Parameter("source-id", default="sdg-corpora", type=str)
+    # Empty → current sample id (sdg-corpora/<pin>_<profile>). Bare
+    # ``sdg-corpora`` is the full corpus (later), never the default.
+    source_id = Parameter("source-id", default="", type=str)
     only_precondition = Parameter("only-precondition", default=False, type=bool)
     kubernetes_preferred = Parameter("kubernetes-preferred", default=True, type=bool)
 
@@ -35,6 +37,18 @@ class ClassificationFlow(AtelierFlow):
 
         apply_metaflow_config()
         require_signals_metaflow()
+        from atelier.sdg.sample import CORPUS_SOURCE_ID, current_sample_source_id
+
+        sid = str(self.source_id or "").strip()
+        if not sid:
+            sid = current_sample_source_id()
+        if not sid:
+            raise RuntimeError(
+                "no sdg-corpora sample id; run `just sdg-sample` "
+                "(do not default to the full corpus source-id "
+                f"{CORPUS_SOURCE_ID!r})"
+            )
+        self.source_id = sid
         self.precondition_ran = False
         self.classifications: list[dict] = []
         self.target_keys: list[str] = []
