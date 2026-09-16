@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -417,6 +418,37 @@ def require_signals_metaflow(environ: Mapping[str, str] | None = None) -> None:
         )
 
 
+def _libpq_libdir() -> Path | None:
+    """libpq for Metaflow step subprocesses (psycopg) when not in devenv shell.
+
+    Follow devenv's postgresql package to the matching ``-lib`` output.
+    Do not call ``nix-store`` (glibc-mixed PATH breaks it on this host).
+    """
+    wr = _REPO_ROOT / ".devenv" / "profile" / "lib" / "libpqwalreceiver.so"
+    if not wr.exists():
+        return None
+    pkg = wr.resolve().parent.parent  # .../<hash>-postgresql-16.13
+    ver = re.search(r"postgresql-[\d.]+", pkg.name)
+    globs = [pkg / "lib"]
+    if ver:
+        globs.extend(pkg.parent.glob(f"*-{ver.group(0)}-lib/lib"))
+    for cand in globs:
+        if (cand / "libpq.so.5").exists() or (cand / "libpq.so").exists():
+            return cand
+    return None
+
+
+def _ensure_libpq(env: dict[str, str]) -> None:
+    libdir = _libpq_libdir()
+    if libdir is None:
+        return
+    cur = (env.get("LD_LIBRARY_PATH") or "").split(":")
+    s = str(libdir)
+    if s in cur:
+        return
+    env["LD_LIBRARY_PATH"] = ":".join([s, *[p for p in cur if p]])
+
+
 def _drop_tilt_bindings(env: dict[str, str]) -> None:
     """Remove Tilt/MinIO leftovers so ~/.metaflowconfig cannot win."""
     for key, value in list(env.items()):
@@ -502,6 +534,7 @@ def metaflow_child_env(
     env["AWS_ACCESS_KEY_ID"] = ak
     env["AWS_SECRET_ACCESS_KEY"] = sk
     env.pop("METAFLOW_CARD_S3ROOT", None)
+    _ensure_libpq(env)
     home = _write_isolated_home(env, resolved)
     env["METAFLOW_HOME"] = str(home)
     if resolved.signals_engine:

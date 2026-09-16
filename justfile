@@ -118,9 +118,9 @@ import sys; sys.exit(1) if not s else print(s)')"
       out+=(--source-id="$sid")
     fi
     if [ "$host" = "0" ]; then
-      python -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
+      devenv shell -- python -m atelier.flows.run_classify run --with kubernetes "${out[@]}"
     else
-      python -m atelier.flows.run_classify run "${out[@]}"
+      devenv shell -- python -m atelier.flows.run_classify run "${out[@]}"
     fi
 
 # ── Optimize (in-situ domain adaptation) ─────────────────────────
