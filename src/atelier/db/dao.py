@@ -311,6 +311,13 @@ class AtelierDao:
         Extend runs set both.
         """
         from atelier.db.model import Dataset
+        if source_id:
+            self.get_or_create_data_source(
+                source_id,
+                source_type="filesystem",
+                display_name=source_id,
+                source_uri=source_id,
+            )
         with self.get_session() as session:
             ds = session.query(Dataset).filter_by(id=dataset_id).first()
             if ds is None:

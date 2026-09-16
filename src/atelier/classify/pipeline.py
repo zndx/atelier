@@ -651,6 +651,10 @@ def run_classification_pipeline(
             category_set = load_annotations_from_filesystem(
                 sample_dir / "annotations.csv", hierarchical=True,
             )
+        if samples and category_set is not None:
+            from atelier.classify.skos_attach import attach_skos_reference
+
+            attach_skos_reference(samples, category_set)
     elif source_id == "ootb-sample" and samples is None:
         samples = load_sample_source()
         if category_set is None:
