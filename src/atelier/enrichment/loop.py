@@ -407,6 +407,8 @@ def _enrich_one_row(
             )
         except Exception as exc:  # noqa: BLE001 — surface any generator error
             logger.warning("Generator failed for %s on attempt %d: %s", code, attempt, exc)
+            if attempt < config.max_attempts_per_row:
+                continue
             return RowOutcome(
                 code=code, status="generator_failed",
                 attempts=attempt, failure_reason=str(exc),

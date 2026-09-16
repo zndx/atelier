@@ -124,23 +124,39 @@ def _generate_complete(
     max_tokens: int,
     temperature: float,
 ) -> str:
-    from atelier.flows.lattice import complete
+    from atelier.flows.lattice import GURU_TRUNCATED, complete
 
     cap = model if model in ("thinking", "instruct") else "thinking"
-    try:
-        result = complete(
-            user_prompt,
-            capability=cap,
-            system_prompt=system_prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    except Exception as exc:
-        raise EnrichmentCallError(
-            f"Engine/Complete enrichment failed capability={cap!r}: {exc}",
-            cause=exc if isinstance(exc, Exception) else None,
-        ) from exc
-    return result.text
+    bumped = min(int(max_tokens) * 2, 32768)
+    tries: list[tuple[str, int]] = [(cap, int(max_tokens))]
+    if bumped != int(max_tokens):
+        tries.append((cap, bumped))
+    if cap == "thinking":
+        tries.append(("instruct", bumped))
+    last: Exception | None = None
+    seen: set[tuple[str, int]] = set()
+    for cap_try, tok in tries:
+        key = (cap_try, tok)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            result = complete(
+                user_prompt,
+                capability=cap_try,
+                system_prompt=system_prompt,
+                max_tokens=tok,
+                temperature=temperature,
+            )
+            return result.text
+        except Exception as exc:
+            last = exc
+            if GURU_TRUNCATED not in str(exc):
+                break
+    raise EnrichmentCallError(
+        f"Engine/Complete enrichment failed capability={cap!r}: {last}",
+        cause=last if isinstance(last, Exception) else None,
+    ) from last
 
 
 # ── Anthropic direct ──────────────────────────────────────────────

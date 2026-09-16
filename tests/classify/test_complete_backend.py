@@ -98,6 +98,31 @@ def test_classify_batch_uses_instruct_then_thinking_on_revisit() -> None:
     assert calls == ["instruct", "thinking"]
 
 
+def test_enrichment_complete_retries_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from atelier.enrichment.backend_client import _generate_complete
+    from atelier.flows import lattice as lat
+
+    calls: list[tuple[str, int]] = []
+
+    def fake_complete(prompt, **kw):
+        cap = kw.get("capability") or "thinking"
+        tok = int(kw.get("max_tokens") or 0)
+        calls.append((cap, tok))
+        if len(calls) == 1:
+            raise RuntimeError(f"{lat.GURU_TRUNCATED} Complete truncated")
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(lat, "complete", fake_complete)
+    assert _generate_complete(
+        model="thinking", system_prompt="", user_prompt="x",
+        max_tokens=100, temperature=0.0,
+    ) == "ok"
+    assert calls[0] == ("thinking", 100)
+    assert calls[1][0] == "thinking" and calls[1][1] > 100
+
+
 def test_parse_structured_response_accepts_bare_array() -> None:
     from atelier.classify.llm_backend import _parse_structured_response
 
