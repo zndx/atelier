@@ -76,6 +76,16 @@ def resolve_enrichment_model(cfg: "AtelierConfig") -> tuple[str, str]:
         )
         return backend, model
 
+    if backend in ("engine_complete", "complete", "lattice"):
+        model = (cfg.enrichment_model_override or "thinking").strip() or "thinking"
+        if model not in ("thinking", "instruct"):
+            model = "thinking"
+        logger.info(
+            "enrichment.model resolved via Engine/Complete: capability=%s",
+            model,
+        )
+        return "engine_complete", model
+
     if backend in _APEX_BY_BACKEND:
         model = _APEX_BY_BACKEND[backend]
         logger.info(

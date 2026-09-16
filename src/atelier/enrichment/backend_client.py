@@ -83,6 +83,12 @@ def generate_text(
     benefits from extended deliberation on structural taxonomy
     judgments.
     """
+    if backend in ("engine_complete", "complete", "lattice"):
+        return _generate_complete(
+            model=model,
+            system_prompt=system_prompt, user_prompt=user_prompt,
+            max_tokens=max_tokens, temperature=temperature,
+        )
     if backend == "anthropic":
         return _generate_anthropic(
             cfg=cfg, model=model,
@@ -106,8 +112,35 @@ def generate_text(
         )
     raise UnsupportedEnrichmentBackend(
         f"Backend {backend!r} is not supported for enrichment.  "
-        "Supported: anthropic, openai_compatible, cerebras."
+        "Supported: engine_complete, anthropic, openai_compatible, cerebras."
     )
+
+
+def _generate_complete(
+    *,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    temperature: float,
+) -> str:
+    from atelier.flows.lattice import complete
+
+    cap = model if model in ("thinking", "instruct") else "thinking"
+    try:
+        result = complete(
+            user_prompt,
+            capability=cap,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    except Exception as exc:
+        raise EnrichmentCallError(
+            f"Engine/Complete enrichment failed capability={cap!r}: {exc}",
+            cause=exc if isinstance(exc, Exception) else None,
+        ) from exc
+    return result.text
 
 
 # ── Anthropic direct ──────────────────────────────────────────────

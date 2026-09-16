@@ -35,6 +35,14 @@ from atelier.enrichment.model_resolver import (
 # ── Model resolver ────────────────────────────────────────────────
 
 
+def test_resolver_engine_complete_uses_thinking() -> None:
+    cfg = AtelierConfig()
+    cfg.classify_llm_backend = "engine_complete"
+    backend, model = resolve_enrichment_model(cfg)
+    assert backend == "engine_complete"
+    assert model == "thinking"
+
+
 def test_resolver_anthropic_apex():
     cfg = AtelierConfig()
     cfg.classify_llm_backend = "anthropic"
