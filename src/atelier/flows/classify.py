@@ -43,16 +43,25 @@ class ClassificationFlow(AtelierFlow):
     @step
     def probe(self):
         """Cheap SKOS/vocab + encoder identity check. No GPU claim."""
-        self.needs_precondition = True
+        from atelier.config import load_config
+        from atelier.flows.resident import probe_status
+
+        st = probe_status(load_config(), str(self.source_id))
+        self.needs_precondition = probe_requires_precondition(st)
+        self.probe_reasons = list(getattr(st, "reasons", []) or [])
         self.next(self.precondition)
 
     @step
     def precondition(self):
         """Enrich + ColBERT-Zero collection + ModernBERT NHSVM only if stale."""
-        if not probe_requires_precondition({"final": not self.needs_precondition}):
-            self.precondition_ran = False
-        else:
-            self.precondition_ran = True
+        from atelier.config import load_config
+        from atelier.flows.resident import run_precondition_if_needed
+
+        self.precondition_ran = False
+        if self.needs_precondition:
+            self.precondition_ran = run_precondition_if_needed(
+                load_config(), str(self.source_id),
+            )
         if self.only_precondition:
             self.target_keys = []
             self.classifications = []

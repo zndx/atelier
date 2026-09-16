@@ -2063,6 +2063,10 @@ def create_backend(config: LLMBackendConfig) -> LLMBackend:
 
     Raises ValueError on unknown backend type.
     """
+    if config.backend in ("engine_complete", "complete", "lattice"):
+        from atelier.classify.complete_backend import CompleteLLMBackend
+
+        return CompleteLLMBackend(config)
     if config.backend == "anthropic_structured":
         return AnthropicStructuredBackend(config)
     if config.backend == "anthropic":
@@ -2090,22 +2094,27 @@ def create_backend(config: LLMBackendConfig) -> LLMBackend:
         return BedrockStructuredBackend(config)
     raise ValueError(
         f"Unknown LLM backend: {config.backend!r}. "
-        f"Use 'anthropic_structured', 'anthropic', 'openai_compatible', "
-        f"'cerebras', 'bedrock', or 'bedrock_structured'."
+        f"Use 'engine_complete', 'anthropic_structured', 'anthropic', "
+        f"'openai_compatible', 'cerebras', 'bedrock', or 'bedrock_structured'."
     )
 
 
 def create_backend_from_cfg(cfg) -> LLMBackend:
     """Create an LLM backend from an AtelierConfig.
 
-    Resolution order:
-    1. Explicit classify LLM config (ATELIER_LLM_API_KEY / ATELIER_LLM_BASE_URL)
-    2. ANTHROPIC_SUBAGENT_MODEL — backend inferred from model format
-    3. Neither → ValueError (fail fast)
+    Production is Engine/Complete (thinking/instruct). Hosted Anthropic /
+    Bedrock paths remain only when ``classify_llm_backend`` is set explicitly
+    to those names (tests / break-glass).
     """
+    from atelier.classify.complete_backend import CompleteLLMBackend
     from atelier.config import is_bedrock_model
 
-    # 1. Explicit classify LLM backend configured
+    backend = (getattr(cfg, "classify_llm_backend", "") or "engine_complete").strip().lower()
+    if backend in ("engine_complete", "complete", "lattice", ""):
+        logger.info("Classification LLM: Engine/Complete instruct|thinking")
+        return CompleteLLMBackend.from_cfg(cfg)
+
+    # Explicit classify LLM backend configured
     if cfg.classify_llm_api_key or cfg.classify_llm_base_url:
         return create_backend(config_from_atelier(cfg))
 

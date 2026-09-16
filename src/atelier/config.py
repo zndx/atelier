@@ -472,7 +472,7 @@ class AtelierConfig:
     classify_svm_nhsvm_svd_components: int = 200
 
     # Classification LLM backend
-    classify_llm_backend: str = "openai_compatible"
+    classify_llm_backend: str = "engine_complete"
     classify_llm_api_key: str | None = None
     classify_llm_model: str = "glm-4.7"
     classify_llm_base_url: str | None = None
@@ -671,12 +671,13 @@ class AtelierConfig:
 
     @property
     def has_classify_llm(self) -> bool:
-        """True when an LLM backend is available for classification.
+        """True when a classification LLM is configured.
 
-        Sources:
-        1. Explicit classify LLM (ATELIER_LLM_API_KEY / ATELIER_LLM_BASE_URL)
-        2. ANTHROPIC_SUBAGENT_MODEL (backend inferred from model format)
+        Production is Engine/Complete (thinking/instruct on the lattice).
         """
+        backend = (self.classify_llm_backend or "").strip().lower()
+        if backend in ("engine_complete", "complete", "lattice", ""):
+            return True
         return bool(
             self.classify_llm_api_key
             or self.classify_llm_base_url
