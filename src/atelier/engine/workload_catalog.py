@@ -49,7 +49,8 @@ class WorkloadEntry:
 
     @property
     def source(self) -> str:
-        return "airflow" if self.enabled else "engine"
+        # Airflow even while paused — source=engine is agent-rtc (no DAG).
+        return "airflow"
 
 
 WORKLOAD_CATALOG: tuple[WorkloadEntry, ...] = (

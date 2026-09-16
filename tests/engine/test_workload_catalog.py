@@ -33,6 +33,7 @@ def test_catalogue_paused_metaflow_dag() -> None:
     assert entry.cron == "0 8 * * *"
     hint = schedule_hints()[0]
     assert hint.enabled is False
+    assert hint.source == "airflow"
     assert hint.airflow_dag_id == DAG_ID
     assert {(c.leaf, c.gpu) for c in hint.claims} == set(entry.claims)
 
