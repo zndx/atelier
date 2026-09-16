@@ -25,6 +25,8 @@ class ClassificationFlow(AtelierFlow):
     # Empty → current sample id (sdg-corpora/<pin>_<profile>). Bare
     # ``sdg-corpora`` is the full corpus (later), never the default.
     source_id = Parameter("source-id", default="", type=str)
+    # collection:<slug>, table:<name>, phase:precondition|maxsim|nhsvm
+    target = Parameter("target", default="", type=str)
     only_precondition = Parameter("only-precondition", default=False, type=bool)
     kubernetes_preferred = Parameter("kubernetes-preferred", default=True, type=bool)
 
@@ -50,9 +52,18 @@ class ClassificationFlow(AtelierFlow):
             )
         # Parameters are immutable; persist the resolved sample id.
         self.sample_source_id = sid
+        from atelier.sdg.targets import resolve_sample_target
+
+        spec = resolve_sample_target(sid, str(self.target or ""))
+        self.target_raw = spec.raw
+        self.target_phase = spec.phase
+        self.target_collection = spec.collection
+        self.target_tables = list(spec.tables)
+        self.target_keys = list(spec.entity_keys)
+        self.target_hard_gate = spec.hard_gate
+        self.target_notes = list(spec.notes)
         self.precondition_ran = False
         self.classifications: list[dict] = []
-        self.target_keys: list[str] = []
         self.next(self.probe)
 
     @step
@@ -72,13 +83,18 @@ class ClassificationFlow(AtelierFlow):
         from atelier.config import load_config
         from atelier.flows.resident import run_precondition_if_needed
 
+        from atelier.sdg.targets import resolve_sample_target
+
+        spec = resolve_sample_target(
+            str(self.sample_source_id), str(getattr(self, "target_raw", "") or self.target or ""),
+        )
         self.precondition_ran = False
-        if self.needs_precondition:
+        if self.needs_precondition or spec.precondition_stages:
             self.precondition_ran = run_precondition_if_needed(
                 load_config(), str(self.sample_source_id),
+                stages=spec.precondition_stages,
             )
-        if self.only_precondition:
-            self.target_keys = []
+        if self.only_precondition or spec.stop_after_precondition:
             self.classifications = []
             self.next(self.end)
             return
@@ -112,7 +128,13 @@ class ClassificationFlow(AtelierFlow):
             }
             for r in rows
         ]
-        self.target_keys = [c["qualified_name"] for c in self.classifications if c["qualified_name"]]
+        declared = list(getattr(self, "target_keys", []) or [])
+        if declared:
+            self.target_keys = declared
+        else:
+            self.target_keys = [
+                c["qualified_name"] for c in self.classifications if c["qualified_name"]
+            ]
         self.next(self.fuse)
 
     @step
@@ -122,8 +144,21 @@ class ClassificationFlow(AtelierFlow):
 
     @step
     def evaluate(self):
-        """Pass iff every target relational entity has a predicted_code."""
-        assert_coverage(self.classifications, self.target_keys)
+        """Hard gate only for a named sub-target or the full corpus."""
+        from atelier.flows.classify_phases import coverage_complete, unclassified_targets
+        from atelier.sdg.sample import is_sample_source_id
+
+        keys = list(self.target_keys or [])
+        self.unclassified = unclassified_targets(self.classifications, keys)
+        self.coverage_ok = coverage_complete(self.classifications, keys)
+        hard = bool(getattr(self, "target_hard_gate", False))
+        if hard:
+            assert_coverage(self.classifications, keys)
+        elif is_sample_source_id(str(self.sample_source_id)):
+            # Sample without a collection/table slice cannot DST-converge.
+            pass
+        else:
+            assert_coverage(self.classifications, keys)
         self.next(self.end)
 
     @step

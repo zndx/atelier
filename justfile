@@ -100,6 +100,8 @@ sdg-classify-verify:
 # Resident ClassificationFlow on discovered Signals Metaflow.
 # Default --source-id is the current *sample*
 # (sdg-corpora/<pin>_<profile>), not the full corpus id `sdg-corpora`.
+# Optional --target=collection:<slug>[,phase:maxsim|nhsvm|precondition]
+# scopes a phased sample run (MaxSim/NHSVM iterate; sample is not CONVERGED).
 # K8s is preferred (`--with kubernetes`). Pass `--host` to run plain @step.
 classify-flow *ARGS:
     #!/usr/bin/env bash

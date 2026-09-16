@@ -481,6 +481,7 @@ def build_nhsvm_head(
 def ensure_preconditioned(
     cfg, category_set, *, taxonomy_id: str,
     heartbeat: Callable[[dict], None] | None = None,
+    stages: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Probe, then execute only the missing stages.  Fail-loud.
 
@@ -503,13 +504,15 @@ def ensure_preconditioned(
     )
     summary["skipped"] = False
 
-    if not status.collection_final:
+    want = set(stages) if stages else {"semantic_collection", "nhsvm_head"}
+
+    if not status.collection_final and "semantic_collection" in want:
         summary["stages"]["semantic_collection"] = build_semantic_collection(
             cfg, category_set, taxonomy_id=taxonomy_id,
             vocab_sig=status.vocab_sig, heartbeat=heartbeat,
         )
 
-    if not status.head_final:
+    if not status.head_final and "nhsvm_head" in want:
         summary["stages"]["nhsvm_head"] = {
             k: v for k, v in build_nhsvm_head(
                 cfg, category_set, taxonomy_id=taxonomy_id,
@@ -518,6 +521,9 @@ def ensure_preconditioned(
         }
 
     post = probe(cfg, category_set, taxonomy_id=taxonomy_id)
+    if stages:
+        summary["post_probe"] = post.to_dict()
+        return summary
     if not post.final:
         raise PreconditionError(
             f"Pre-conditioning completed its stages but the post-probe "

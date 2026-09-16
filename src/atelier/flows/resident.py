@@ -49,16 +49,21 @@ def probe_status(cfg: Any, source_id: str, category_set=None):
     return probe(cfg, cats, taxonomy_id=tax)
 
 
-def run_precondition_if_needed(cfg: Any, source_id: str, category_set=None, *, heartbeat=None) -> bool:
+def run_precondition_if_needed(
+    cfg: Any, source_id: str, category_set=None, *, heartbeat=None,
+    stages: tuple[str, ...] | None = None,
+) -> bool:
     """Return True if expensive precondition ran."""
     from atelier.optimize.precondition import ensure_preconditioned
 
     cats = category_set if category_set is not None else load_category_set(cfg, source_id)
     status = probe_status(cfg, source_id, cats)
-    if not probe_requires_precondition(status):
+    if not probe_requires_precondition(status) and not stages:
         return False
     tax = source_id or getattr(cfg, "classify_taxonomy_id", None) or "default"
-    ensure_preconditioned(cfg, cats, taxonomy_id=tax, heartbeat=heartbeat)
+    ensure_preconditioned(
+        cfg, cats, taxonomy_id=tax, heartbeat=heartbeat, stages=stages,
+    )
     return True
 
 
