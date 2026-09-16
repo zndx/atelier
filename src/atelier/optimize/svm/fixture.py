@@ -167,7 +167,9 @@ def build_fixture_collection(taxonomy_id: str = "test-gittables") -> str:
     cfg = load_config()
     enrich = json.loads((FIXTURE_DIR / "enrichment_payloads.json").read_text())
     source_rows = list(enrich.values())  # each: code/label/mnemonic/description/...
-    aug, model = "fixture", "colbert-ir/colbertv2.0"
+    from atelier.classify.colbert_encoder import DEFAULT_MODEL as COLBERT_ZERO
+
+    aug, model = "fixture", COLBERT_ZERO
     coll = collection_name_for(taxonomy_id, aug)
 
     client = QdrantClient(host=cfg.qdrant_host, port=cfg.qdrant_http_port)

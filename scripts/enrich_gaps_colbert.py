@@ -32,7 +32,7 @@ logger = logging.getLogger("enrich_gaps_colbert")
 COLLECTION = "annotations_default_v2_colbert"
 TAXONOMY_ID = "default"
 AUGMENTATION_VERSION = "v2_colbert"
-EMBEDDING_MODEL = "colbert-ir/colbertv2.0"
+EMBEDDING_MODEL = "lightonai/ColBERT-Zero"
 EMBEDDING_DIM = 128
 SOURCE_JSON = Path("build/enrichment/full_295_source.json")
 

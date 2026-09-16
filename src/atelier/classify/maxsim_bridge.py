@@ -261,7 +261,7 @@ def try_compute_maxsim_mass(
                 parts.append(", ".join(str(s) for s in samples[:10] if s is not None))
             entity_text = " | ".join(parts)
 
-        query_vectors = encoder.encode_single(entity_text)
+        query_vectors = encoder.encode_single(entity_text, is_query=True)
         num_query_tokens = query_vectors.shape[0]
 
         # Qdrant multi-vector MaxSim query — returns points ranked by

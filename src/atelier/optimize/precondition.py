@@ -46,7 +46,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 ENCODER_ID = "answerdotai/ModernBERT-base"
 EMBED_DIM = 768
-COLBERT_MODEL = "colbert-ir/colbertv2.0"
+COLBERT_MODEL = "lightonai/ColBERT-Zero"
 TRAINING_MODE = "precondition"
 
 
@@ -116,6 +116,11 @@ def probe(cfg, category_set, *, taxonomy_id: str) -> PreconditionStatus:
         status.reasons.append(
             f"semantic collection is signature-stale "
             f"({current.get('augmentation_version')!r} != {aug_version!r})"
+        )
+    elif current.get("embedding_model") != COLBERT_MODEL:
+        status.reasons.append(
+            f"semantic collection encoder is not ColBERT-Zero "
+            f"({current.get('embedding_model')!r})"
         )
     else:
         status.collection_final = True

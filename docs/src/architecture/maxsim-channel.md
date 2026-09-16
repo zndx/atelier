@@ -120,7 +120,7 @@ integration for taxonomies Ægir has not been adapted to.
   At classify time:
        ColumnFeatures.to_embedding_text()
                  │
-                 ▼  ColBERT encoder (colbert-ir/colbertv2.0)
+                 ▼  ColBERT-Zero encoder (lightonai/ColBERT-Zero)
           entity token vectors (N × 128)
                  │
                  ▼  Qdrant query_points (using="colbert", MaxSim)
@@ -154,10 +154,9 @@ payload: label, description, prototype values (up to 10), name hints
 excluded — they add noise in the embedding space without improving
 MaxSim discrimination.
 
-The ColBERT encoder (`colbert-ir/colbertv2.0`) produces per-token
-128-dimensional vectors via BERT + a learned linear projection
-(768 → 128).  Special tokens ([CLS], [SEP], [PAD]) are stripped;
-only content tokens contribute to MaxSim.
+The ColBERT-Zero encoder (`lightonai/ColBERT-Zero` via pylate) produces
+per-token 128-dimensional vectors. Query vs document prompts are
+mandatory. ModernBERT is not this channel — it encodes NHSVM heads.
 
 The collection is configured with `MultiVectorConfig(comparator=MAX_SIM)`
 so Qdrant computes token-level late-interaction scoring natively —
@@ -189,7 +188,7 @@ no Python-side scoring loop.
 
   // Provenance + audit
   "augmentation_version":  "v1",                       // prompt template + verifier version
-  "embedding_model":       "colbert-ir/colbertv2.0",
+  "embedding_model":       "lightonai/ColBERT-Zero",
   "embedding_dim":         128,
   "generated_at":          "2026-05-16T20:00:00Z",
   "generated_by":          "agent-sdk:opus-4.7",       // model + harness identifier
@@ -590,10 +589,8 @@ classify {
     enabled = true
     enabled = ${?ATELIER_CLASSIFY_MAXSIM_ENABLED}
 
-    # ColBERT model for token-level late-interaction embeddings.  Both
-    # entity and annotation sides use the same model; Qdrant's native
-    # MaxSim handles the token-level cross-alignment.
-    model = "colbert-ir/colbertv2.0"
+    # ColBERT-Zero for encode/embeddings. ModernBERT is the NHSVM encoder.
+    model = "lightonai/ColBERT-Zero"
     model = ${?ATELIER_COLBERT_MODEL}
 
     # Top-K union focal element — "the answer is in this candidate

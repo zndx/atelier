@@ -1,133 +1,142 @@
-"""ColBERT late-interaction encoder for Qdrant multi-vector scoring.
+"""ColBERT-Zero late-interaction encoder for Qdrant MaxSim.
 
-Loads a ColBERT model (BERT backbone + 768→128 linear projection) and
-produces per-token 128-dim vectors suitable for Qdrant's native MaxSim.
+Federation encode/embeddings are ``lightonai/ColBERT-Zero`` (128-d token
+vectors + mean ``agg``). ``colbert-ir/colbertv2.0`` and the ColPali/ColNomic
+family are retired for this channel.
 
-The entity side feeds ``ColumnFeatures.to_embedding_text()`` — the same
-text SAGE/SHAP ablate over.  The annotation side feeds a composed text
-from the enrichment payload.  Both go through the same encoder; Qdrant
-handles the late-interaction MaxSim at query time.
+ModernBERT (``atelier.optimize.svm.encoder``) is a different model with a
+different job — NHSVM classification — and is not used here.
 
-Parallel to ``embedding.py`` (MiniLM single-vector encoder) which
-remains for CatBoost/SVM feature embedding.  The two models serve
-different purposes and coexist.
+Prompt alignment is mandatory: queries use ``prompt_name="query"``,
+collection documents use ``"document"``.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = "colbert-ir/colbertv2.0"
-_PROJECTION_DIM = 128
+GURU_NOPYLATE = "#EM.00000002.NOPYLATE"
+GURU_RETIRED = "#EM.00000003.RETIRED"
 
-_model_name: str = _DEFAULT_MODEL
-_encoder: _ColBERTEncoder | None = None
+DEFAULT_MODEL = "lightonai/ColBERT-Zero"
+EMBEDDING_DIM = 128
+_RETIRED_NEEDLES = (
+    "colbert-ir/colbertv2",
+    "colbertv2.0",
+    "nomic",
+    "colnomic",
+    "colpali",
+    "colqwen",
+    "vidore",
+)
+
+_model_name: str = DEFAULT_MODEL
+_encoder: _ColBERTZeroEncoder | None = None
 _lock = threading.Lock()
+_infer_lock = threading.Lock()
 
 
-class _ColBERTEncoder:
-    """Thread-safe ColBERT encoder wrapping BERT + linear projection."""
+def refuse_retired_embedding_model(model_name: str | None) -> None:
+    """v2.0 / ColPali / ColNomic names are retired. Empty = ColBERT-Zero."""
+    n = (model_name or "").strip().lower()
+    if not n:
+        return
+    if n in {DEFAULT_MODEL.lower(), "colbert-zero", "colbert"}:
+        return
+    if any(needle in n for needle in _RETIRED_NEEDLES):
+        raise RuntimeError(
+            f"{GURU_RETIRED} {model_name} is retired for encode/embeddings. "
+            f"Use {DEFAULT_MODEL} (ColBERT-Zero via pylate). "
+            "ModernBERT remains the NHSVM encoder, not this channel."
+        )
+
+
+def _ensure_pylate() -> None:
+    try:
+        import pylate  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            f"{GURU_NOPYLATE} pylate is required for ColBERT-Zero.\n"
+            "  Try: uv sync  (pylate>=1.3.4,<3)"
+        ) from e
+
+
+def _as_token_matrix(raw: object) -> np.ndarray:
+    arr = np.asarray(raw, dtype=np.float32)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    if arr.ndim != 2:
+        raise RuntimeError(
+            f"ColBERT-Zero encode returned shape {arr.shape}; expected (tokens, dim)"
+        )
+    return arr
+
+
+class _ColBERTZeroEncoder:
+    """pylate ColBERT-Zero: token vectors for Qdrant MaxSim."""
 
     def __init__(self, model_name: str, device: str = "cpu") -> None:
-        import torch
-        from transformers import AutoModel, AutoTokenizer
-
+        refuse_retired_embedding_model(model_name)
+        _ensure_pylate()
+        self.model_name = model_name
         self._device = device
-        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-        self._bert = AutoModel.from_pretrained(model_name)
-        self._bert.eval()
-        self._bert.to(device)
-
-        checkpoint_dir = Path(
-            self._bert.config._name_or_path
-            if hasattr(self._bert.config, "_name_or_path")
-            else model_name
-        )
-        self._projection = self._load_projection(model_name, device)
-        self._dim = self._projection.shape[0]
-
-    def _load_projection(self, model_name: str, device: str):
-        """Load the linear.weight projection from the model checkpoint."""
-        import torch
-        from huggingface_hub import hf_hub_download
-
-        path = hf_hub_download(model_name, "model.safetensors")
-        from safetensors import safe_open
-
-        with safe_open(path, framework="pt", device=device) as f:
-            weight = f.get_tensor("linear.weight")
-        return weight
+        self._dim = EMBEDDING_DIM
+        self._model: Any = None
 
     @property
     def dim(self) -> int:
         return self._dim
+
+    @property
+    def model(self) -> Any:
+        if self._model is None:
+            from pylate import models
+
+            logger.info("Loading ColBERT-Zero %s on %s", self.model_name, self._device)
+            self._model = models.ColBERT(
+                model_name_or_path=self.model_name,
+                device=self._device,
+            )
+        return self._model
 
     def encode(
         self,
         texts: str | list[str],
         *,
         batch_size: int = 32,
+        is_query: bool = False,
     ) -> list[np.ndarray]:
-        """Encode text(s) into per-token ColBERT vectors.
+        """Encode text(s) into per-token ColBERT-Zero vectors.
 
-        Returns a list of arrays, one per input text.  Each array has
-        shape ``(num_tokens, dim)`` where dim is the projection
-        dimensionality (128 for ColBERTv2).
-
-        Special tokens ([CLS], [SEP], [PAD]) are stripped from the
-        output — only content tokens contribute to MaxSim.
+        Each array has shape ``(num_tokens, 128)``. ``is_query`` selects
+        the pylate query vs document prompt.
         """
-        import torch
-
         if isinstance(texts, str):
             texts = [texts]
-
-        all_results: list[np.ndarray] = []
-
+        prompt_name = "query" if is_query else "document"
+        out: list[np.ndarray] = []
         for batch_start in range(0, len(texts), batch_size):
             batch = texts[batch_start : batch_start + batch_size]
-            encoded = self._tokenizer(
-                batch,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors="pt",
-                return_attention_mask=True,
-                return_special_tokens_mask=True,
-            ).to(self._device)
+            with _infer_lock:
+                raw = self.model.encode(
+                    batch,
+                    batch_size=len(batch),
+                    is_query=is_query,
+                    prompt_name=prompt_name,
+                    show_progress_bar=False,
+                )
+            for item in raw:
+                out.append(_as_token_matrix(item))
+        return out
 
-            with torch.no_grad():
-                outputs = self._bert(**{
-                    k: v for k, v in encoded.items()
-                    if k in ("input_ids", "attention_mask", "token_type_ids")
-                })
-                hidden = outputs.last_hidden_state  # (batch, seq, 768)
-                projected = hidden @ self._projection.T  # (batch, seq, 128)
-                projected = torch.nn.functional.normalize(projected, p=2, dim=-1)
-
-            attention_mask = encoded["attention_mask"]
-            special_mask = encoded["special_tokens_mask"]
-            content_mask = attention_mask & (~special_mask.bool()).long()
-
-            for i in range(projected.shape[0]):
-                mask = content_mask[i].bool()
-                tokens = projected[i][mask].cpu().numpy()
-                if tokens.shape[0] == 0:
-                    tokens = projected[i][:1].cpu().numpy()
-                all_results.append(tokens)
-
-        return all_results
-
-    def encode_single(self, text: str) -> np.ndarray:
-        """Encode a single text, returning shape ``(num_tokens, dim)``."""
-        return self.encode(text)[0]
+    def encode_single(self, text: str, *, is_query: bool = False) -> np.ndarray:
+        return self.encode(text, is_query=is_query)[0]
 
 
 def _get_device() -> str:
@@ -141,50 +150,42 @@ def _get_device() -> str:
     return "cpu"
 
 
-def get_encoder() -> _ColBERTEncoder:
-    """Lazy-load the ColBERT encoder (thread-safe singleton)."""
+def get_encoder() -> _ColBERTZeroEncoder:
+    """Lazy-load the ColBERT-Zero encoder (thread-safe singleton)."""
     global _encoder
     if _encoder is not None:
         return _encoder
     with _lock:
         if _encoder is None:
+            refuse_retired_embedding_model(_model_name)
             device = _get_device()
-            logger.info("Loading ColBERT encoder %s on %s", _model_name, device)
-            _encoder = _ColBERTEncoder(_model_name, device=device)
-            logger.info(
-                "ColBERT encoder ready: dim=%d, device=%s",
-                _encoder.dim,
-                device,
-            )
+            logger.info("Loading ColBERT-Zero %s on %s", _model_name, device)
+            _encoder = _ColBERTZeroEncoder(_model_name, device=device)
     return _encoder
 
 
 def set_model_name(name: str) -> None:
-    """Override the ColBERT model (before first use).
-
-    No-op when the requested name matches the currently-loaded model —
-    avoids invalidating the cached encoder on every call from per-row
-    inference paths (the bridge calls this for each cosine query).
-    """
+    """Override the ColBERT model (before first use). Retired names fail."""
     global _model_name, _encoder
+    refuse_retired_embedding_model(name)
     with _lock:
         if name == _model_name and _encoder is not None:
             return
-        _model_name = name
+        _model_name = name or DEFAULT_MODEL
         _encoder = None
 
 
 def warmup() -> None:
-    """Eagerly load the ColBERT model and validate with a probe encode."""
+    """Eagerly load ColBERT-Zero and validate with a probe encode."""
     encoder = get_encoder()
-    result = encoder.encode_single("probe")
+    result = encoder.encode_single("probe", is_query=False)
     if result.shape[1] != encoder.dim:
         raise RuntimeError(
-            f"ColBERT probe produced dim={result.shape[1]}, "
+            f"ColBERT-Zero probe produced dim={result.shape[1]}, "
             f"expected {encoder.dim}"
         )
     logger.info(
-        "ColBERT warmup OK: probe produced %d tokens × %d dims",
+        "ColBERT-Zero warmup OK: probe produced %d tokens × %d dims",
         result.shape[0],
         result.shape[1],
     )

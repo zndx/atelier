@@ -579,7 +579,7 @@ class AtelierConfig:
     # FSM — no silent degradation.  See
     # docs/src/architecture/maxsim-channel.md.
     classify_maxsim_enabled: bool = True
-    classify_colbert_model: str = "colbert-ir/colbertv2.0"
+    classify_colbert_model: str = "lightonai/ColBERT-Zero"
     classify_discount_svm: float = 0.22
     classify_discount_pattern_theta: float = 0.25
     classify_discount_name_match_exact: float = 0.70
