@@ -443,16 +443,16 @@ def _ensure_libpq(env: dict[str, str]) -> None:
     extras: list[str] = []
     if libdir is not None:
         extras.append(str(libdir))
-    for cand in (
-        Path("/usr/local/cuda/lib64"),
-        Path("/usr/lib/x86_64-linux-gnu"),
-    ):
-        if (cand / "libcuda.so.1").exists() or (cand / "libcudart.so").exists() or (cand / "libcudart.so.12").exists():
-            extras.append(str(cand))
+    cuda = Path("/usr/local/cuda/lib64")
+    if (cuda / "libcudart.so").exists() or (cuda / "libcudart.so.12").exists() or (cuda / "libcuda.so.1").exists():
+        extras.append(str(cuda))
+    # Do not prepend /usr/lib/x86_64-linux-gnu — it reorders libssl and
+    # stack-smashes Metaflow S3 PUT to Signals RustFS.
     if not extras:
         return
-    cur = [p for p in (env.get("LD_LIBRARY_PATH") or "").split(":") if p]
-    env["LD_LIBRARY_PATH"] = ":".join([*extras, *[p for p in cur if p not in extras]])
+    # Replace, do not inherit devenv/gcc LD_LIBRARY_PATH — that mix
+    # stack-smashes Metaflow S3 PUT (libssl) to Signals RustFS.
+    env["LD_LIBRARY_PATH"] = ":".join(extras)
 
 
 def _drop_tilt_bindings(env: dict[str, str]) -> None:
