@@ -17,6 +17,9 @@ engine_grpc: "127.0.0.1:50251"
 supervisor_grpc: "127.0.0.1:50261"
 attrs { key: "timezone" value: "UTC" }
 attrs { key: "directives" value: "observe" }
+# AUDIT 2026-09-20: lattice-wide — Status green ≠ ServerQuery alive. Audit this
+# spec the same way (content ServerQuery, Airflow 3 health path, MISSTICK ≠ hub
+# down). gaius/docs/notes/2026-09-20/142002_nautilus_spec_audit_serverquery.md.
 
 budgets {
   recycle_k: 3
