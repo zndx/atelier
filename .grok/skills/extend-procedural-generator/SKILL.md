@@ -42,6 +42,6 @@ GENERATORS = {
 ```
 
 4. Each entry is one IRI from the `iri` column and a `lambda rng: ...`. No helpers, classes, regexes, or other statements.
-5. Copy the IRI exactly. One entry per requested term. The lambda calls `rng`.
+5. Copy the IRI exactly. One entry per requested term. The lambda calls `rng`. The labeled column's values are drawn with `rng`, so two calls can return different strings.
 6. The return value is one table. `columns` has the labeled column and at least one sibling. Exactly one column sets `iri` to that same IRI. Names are snake_case. Each `values` list holds short strings a database would store. Those strings are not the label and not the description.
 7. Leave `ontology.csv`, `TASK.md`, `installed.py`, and `request.json` unchanged.
