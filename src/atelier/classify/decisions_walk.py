@@ -10,6 +10,9 @@ themselves. A Choice larger than 255 fails closed.
 The probability on the deciding question is the confidence the sweep
 hands to ``llm_to_mass``. It is uncalibrated against the 0.15 LLM
 discount. NHSVM membership is not a gate on this walk.
+
+Column type annotation labels each column with a neighborhood of
+those genera. The opening Choice stays the genera themselves.
 """
 
 from __future__ import annotations
@@ -90,20 +93,100 @@ def genus_term(category_set: Any, code: str) -> str | None:
     return None
 
 
+def genus_neighborhood(category_set: Any, order: int = 1) -> list[str]:
+    """Codes within graph distance ``order`` of a structural genus.
+
+    Edges run to the parent and to each child. The result is closed
+    under ancestors, so a parent pointer inside the frame stays inside
+    it. Order 1 is each genus, its parent, and its children. Order 2
+    adds the siblings of those genera. A taxonomy with no structural
+    genera yields an empty frame.
+    """
+    if order < 1:
+        raise ValueError(f"genus neighborhood order starts at 1, got {order}")
+    children: Mapping[str, list[str]] = category_set.children
+    parent: Mapping[str, str | None] = category_set.parent
+    known = set(parent)
+    seen = {code for code in structural_genera(category_set) if code in known}
+    frontier = list(seen)
+    for _step in range(order):
+        nxt: list[str] = []
+        for code in frontier:
+            up = parent.get(code)
+            if up and up in known and up not in seen:
+                seen.add(up)
+                nxt.append(up)
+            for kid in children.get(code) or ():
+                if kid in known and kid not in seen:
+                    seen.add(kid)
+                    nxt.append(kid)
+        frontier = nxt
+    for code in list(seen):
+        current = parent.get(code)
+        while current and current in known:
+            if current in seen:
+                break
+            seen.add(current)
+            current = parent.get(current)
+    frame = sorted(seen)
+    return frame
+
+
+def neighborhood_term(
+    category_set: Any,
+    code: str,
+    *,
+    order: int = 1,
+) -> str | None:
+    """Label for one code on the genus neighborhood.
+
+    A code inside the frame keeps itself, so the parent, the genus,
+    and the child are three labels. A code outside the frame takes
+    the nearest ancestor that is in the frame. A taxonomy with no
+    structural genera uses ``genus_term``.
+    """
+    return _label_on_frame(
+        category_set, str(code), set(genus_neighborhood(category_set, order)),
+    )
+
+
+def _label_on_frame(
+    category_set: Any,
+    code: str,
+    frame: set[str],
+) -> str | None:
+    if not frame:
+        return genus_term(category_set, code)
+    if code in frame:
+        return code
+    parent: Mapping[str, str | None] = category_set.parent
+    current = parent.get(code)
+    while current:
+        if current in frame:
+            return current
+        current = parent.get(current)
+    return genus_term(category_set, code)
+
+
 def associate_genera(
     assignments: Mapping[tuple[str, str], str],
     category_set: Any,
+    *,
+    order: int = 1,
 ) -> dict[tuple[str, str], str]:
-    """Map each assigned column to its genus-level SKOS term.
+    """Map each assigned column onto the genus neighborhood.
 
-    A column whose code has no genus is omitted. The leaf code is not
-    the label.
+    The default frame is the first-order neighborhood. A column whose
+    code is in that frame keeps the code. A column outside it takes
+    the nearest in-frame ancestor. A taxonomy with no structural
+    genera keeps ``genus_term``. A column with no term is omitted.
     """
+    frame = set(genus_neighborhood(category_set, order))
     associated: dict[tuple[str, str], str] = {}
     for key, code in assignments.items():
-        genus = genus_term(category_set, str(code))
-        if genus:
-            associated[key] = genus
+        term = _label_on_frame(category_set, str(code), frame)
+        if term:
+            associated[key] = term
     return associated
 
 

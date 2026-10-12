@@ -8,7 +8,13 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from atelier.classify.decisions_walk import associate_genera, genus_term
+from atelier.classify.decisions_walk import (
+    associate_genera,
+    genus_neighborhood,
+    genus_term,
+    neighborhood_term,
+    structural_genera,
+)
 from atelier.classify.extension_patterns import code_iri
 from atelier.classify.features import FEATURE_NAMES, extract_features
 from atelier.classify.factorized_nhsvm import NHSVMHeadAdapter
@@ -36,6 +42,7 @@ from atelier.classify.taxonomy import HierarchicalCategorySet
 from atelier.enrichment.verifiers import run_verifier_suite
 from atelier.flows.resident import load_sweep_samples
 from tests.classify.explicit_sdg import (
+    ANNOTATIONS,
     EXPLICIT,
     PARENTING,
     PDF_EXPORT,
@@ -391,6 +398,128 @@ def test_each_column_is_associated_with_its_genus() -> None:
     ))
     assert genus_term(deeper, benefit) == descriptive
     assert genus_term(deeper, descriptive) == descriptive
+    assert structural_genera(deeper) == ["SDG.ICE", descriptive]
+    assert set(genus_neighborhood(deeper, 1)) == {
+        "SDG.GDC", "SDG.ICE", descriptive, benefit,
+    }
+    assert neighborhood_term(deeper, benefit) == benefit
+    assert neighborhood_term(deeper, "SDG.GDC") == "SDG.GDC"
+    assert associate_genera({("plans", "option"): benefit}, deeper) == {
+        ("plans", "option"): benefit,
+    }
+
+
+def test_published_neighborhood_keeps_the_child_and_admits_siblings() -> None:
+    import csv
+
+    codes = [row["code"] for row in csv.DictReader(ANNOTATIONS.open(encoding="utf-8"))]
+    cats = taxonomy(codes)
+    genera = structural_genera(cats)
+    first = genus_neighborhood(cats, 1)
+    second = genus_neighborhood(cats, 2)
+    assert len(genera) == 89
+    assert len(first) == 703
+    assert len(second) == 890
+    assert set(genera) < set(first) < set(second) < set(codes)
+    frame = set(first)
+    for genus in genera:
+        assert cats.parent[genus] in frame
+        for kid in cats.children[genus]:
+            assert kid in frame
+    for code in second:
+        parent = cats.parent.get(code)
+        if parent:
+            assert parent in set(second)
+
+    def depth(code: str) -> int:
+        seen = 0
+        current = cats.parent.get(code)
+        while current:
+            seen += 1
+            current = cats.parent.get(current)
+        return seen
+
+    assert max(depth(code) for code in first) == 4
+    assert max(depth(code) for code in second) == 4
+    benefit = "SDG.ICE.DESCRIPTIVE.RETIREMENT_BENEFIT_OPTION"
+    descriptive = "SDG.ICE.DESCRIPTIVE"
+    condiment = "SDG.INDEPENDENT_CONTINUANT.CONDIMENT_STATION"
+    continuant = "SDG.INDEPENDENT_CONTINUANT"
+    assert neighborhood_term(cats, benefit) == benefit
+    assert genus_term(cats, benefit) == descriptive
+    assert neighborhood_term(cats, descriptive) == descriptive
+    assert neighborhood_term(cats, "SDG.ICE") == "SDG.ICE"
+    assert neighborhood_term(cats, "SDG.GDC") == "SDG.GDC"
+    assert condiment not in frame
+    assert neighborhood_term(cats, condiment) == continuant
+    assert neighborhood_term(cats, condiment, order=2) == condiment
+    assert neighborhood_term(cats, PDF_EXPORT) == PROCESS
+    assert neighborhood_term(cats, PDF_EXPORT, order=2) == PDF_EXPORT
+    try:
+        genus_neighborhood(cats, 0)
+    except ValueError as exc:
+        assert "order" in str(exc)
+    else:
+        raise AssertionError("order 0 must fail")
+
+
+def test_collection_cta_labels_the_genus_neighborhood(tmp_path) -> None:
+    continuant = "SDG.INDEPENDENT_CONTINUANT"
+    artifact = "SDG.ARTIFACT"
+    dataset = "SDG.DOM.DATASET_ENTITY"
+    condiment = "SDG.INDEPENDENT_CONTINUANT.CONDIMENT_STATION"
+    cats = taxonomy((continuant, artifact, dataset, condiment))
+    corpora = tmp_path / "corpora"
+    _write_collection(corpora, "patrol", {
+        "officers": (
+            "badge\nA-14\n",
+            "CREATE TABLE officers (\n  badge VARCHAR(8)\n);\n",
+            "",
+        ),
+    })
+    _write_collection(corpora, "clinic", {
+        "visits": (
+            "reason\ncheckup\n",
+            "CREATE TABLE visits (\n  reason VARCHAR(16)\n);\n",
+            "",
+        ),
+    })
+    child = {
+        ("patrol/officers", "badge"): dataset,
+        ("clinic/visits", "reason"): dataset,
+    }
+    plan = prepare_collection_cta(
+        cats, tmp_path / "child", corpora=corpora,
+        assignments=child, holdout_collections={"clinic"},
+    )
+    real = [row for row in plan.rows if not row.table.startswith("syn_")]
+    assert [row.code for row in real] == [dataset]
+    assert plan.counts == {dataset: 1}
+    assert plan.variants == {}
+    assert plan.holdout_rows == []
+    texts, labels = build_texts_and_labels(real)
+    assert labels == [dataset]
+    assert dataset not in texts[0]
+    assert "A-14" in texts[0]
+    sibling = {
+        ("patrol/officers", "badge"): condiment,
+        ("clinic/visits", "reason"): condiment,
+    }
+    lifted = prepare_collection_cta(
+        cats, tmp_path / "lifted", corpora=corpora,
+        assignments=sibling, holdout_collections={"clinic"},
+    )
+    assert [row.code for row in lifted.rows if not row.table.startswith("syn_")] == [
+        continuant,
+    ]
+    kept = prepare_collection_cta(
+        cats, tmp_path / "kept", corpora=corpora,
+        assignments=sibling, holdout_collections={"clinic"},
+        order=2,
+    )
+    assert [row.code for row in kept.rows if not row.table.startswith("syn_")] == [
+        condiment,
+    ]
 
 
 def test_distribution_deficit_raises_each_side_to_the_pooled_share() -> None:

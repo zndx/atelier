@@ -11,7 +11,9 @@ A column split that keeps one column of a table in training and its
 siblings in the holdout is not this exam.
 
 A caller that already knows each column's published SKOS code passes
-that assignment in. The code is the label and is not a feature.
+that assignment in. Collection CTA then labels the column with its
+term in the neighborhood of the structural genera. The code is not
+a feature.
 Collection directories do not carry that assignment; the answer key is
 a separate CSV of exact codes. Column names are not labels. Holding a
 collection out skews the tag distribution, so each side receives
@@ -268,22 +270,25 @@ def prepare_collection_cta(
     amplified_variants: int = AMPLIFIED_VARIANTS,
     rows_per_column: int = ROWS_PER_COLUMN,
     extra_generators: dict | None = None,
+    order: int = 1,
 ) -> InSituPlan:
     """Hold out whole collection directories and build the CTA plan.
 
     Table ids are ``slug/table``. ``assignments`` is the exact
     ``(table id, column) → SKOS code`` map. Each target column is
-    labeled with its genus-level term, the same structural genus the
-    decisions sweep asks first, or the branching root when the path
-    has no deeper genus. Columns missing from the map stay in the
-    bundle as sibling context and are not targets.
+    labeled with its term in the genus neighborhood. Order 1 keeps a
+    genus, its parent, and its children as distinct labels. Order 2
+    also keeps the siblings of those genera. A taxonomy with no
+    structural genera keeps the genus-level term. Columns missing
+    from the map stay in the bundle as sibling context and are not
+    targets.
     """
     from atelier.classify.decisions_walk import associate_genera
 
     cells, collections = load_collection_cells(corpora, slugs=slugs)
     if not cells:
         raise InSituError("no collection tables to hold out")
-    assignments = associate_genera(assignments or {}, category_set)
+    assignments = associate_genera(assignments or {}, category_set, order=order)
     return prepare_insitu(
         category_set,
         artifact_root,
