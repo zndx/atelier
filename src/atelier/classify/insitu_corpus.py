@@ -8,6 +8,9 @@ a column name that matches one vocabulary abbrev or label counts as
 evidence that the code is already present. Codes below the floor get
 more synthetic columns. The holdout half is the classification target.
 Training rows and prototype text are drawn from Atelier's generator.
+Codes the keyword matcher misses use insitu_extensions.py when that
+map contains the term's exact vocabulary IRI. A term with neither a
+keyword shape nor an exact IRI generator is left unshaped.
 """
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ class InSituPlan:
     exemplars: dict[str, list[str]]
     rows: list[Any] = field(default_factory=list)
     artifact_root: Path | None = None
+    extended: list[str] = field(default_factory=list)
 
     @property
     def under_represented(self) -> list[str]:
@@ -78,6 +82,7 @@ def prepare_insitu(
     base_variants: int = BASE_VARIANTS,
     amplified_variants: int = AMPLIFIED_VARIANTS,
     rows_per_column: int = ROWS_PER_COLUMN,
+    extra_generators: dict | None = None,
 ) -> InSituPlan:
     """Split the projected tables and synthesize the training plan.
 
@@ -92,7 +97,7 @@ def prepare_insitu(
         code: (amplified_variants if counts.get(code, 0) < floor else base_variants)
         for code in _codes(category_set)
     }
-    generators = _generators(category_set)
+    generators, extended = _generators(category_set, extra_generators)
     exemplars = _exemplars(generators, seed=seed)
     plan = InSituPlan(
         support=support,
@@ -101,6 +106,7 @@ def prepare_insitu(
         variants=variants,
         exemplars=exemplars,
         artifact_root=relational_split_root(artifact_root),
+        extended=sorted(extended),
     )
     plan.rows = synthetic_rows(
         category_set, variants, generators,
@@ -178,7 +184,7 @@ def synthetic_rows(
         cat = cats[code]
         gen = generators.get(code)
         if gen is None:
-            raise InSituError(f"No in-situ generator for {code}")
+            continue
         names = _column_names(
             cat, width, rng, seen,
             semantic=_generate_semantic_names,
@@ -313,6 +319,7 @@ def _write_split(plan: InSituPlan, cells: list[dict]) -> None:
         "floor": SUPPORT_FLOOR,
         "under_represented": plan.under_represented,
         "variants": plan.variants,
+        "extension_codes": plan.extended,
     }
     (root / "split.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8",
@@ -332,22 +339,38 @@ def _columns_by_table(cells: list[dict]) -> dict[str, list[str]]:
     return out
 
 
-def _generators(category_set) -> dict[str, Any]:
+def _generators(category_set, extra_generators: dict | None = None) -> tuple[dict[str, Any], set[str]]:
+    from atelier.classify.extension_patterns import code_iri
     from atelier.classify.synth_registry import _infer_generator
 
+    if extra_generators is None:
+        extra_generators = _installed_generators()
     out = {}
+    extended: set[str] = set()
     for cat in _categories(category_set):
         inferred = _infer_generator(cat)
         if inferred is not None:
             out[cat.code] = inferred
             continue
-        label = (getattr(cat, "label", "") or cat.code).strip() or cat.code
+        iri = code_iri(cat.code)
+        generate = extra_generators.get(iri) if iri else None
+        if generate is None:
+            continue
+        out[cat.code] = generate
+        extended.add(cat.code)
+    return out, extended
 
-        def _gen(rng: random.Random, _label: str = label) -> str:
-            return f"{_label} {rng.randint(0, 9999):04d}"
 
-        out[cat.code] = _gen
-    return out
+def _installed_generators() -> dict:
+    from atelier.classify.extension_patterns import ExtensionError, extensions_path, load_generators
+
+    path = extensions_path()
+    if not path.is_file():
+        return {}
+    try:
+        return load_generators(path.read_text(encoding="utf-8"))
+    except ExtensionError as exc:
+        raise InSituError(f"Installed generator extension is unusable: {exc}") from exc
 
 
 def _exemplars(generators: dict[str, Any], *, seed: int) -> dict[str, list[str]]:

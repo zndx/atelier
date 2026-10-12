@@ -150,6 +150,8 @@ def grok_argv(
     *,
     provider: str = DEFAULT_PROVIDER,
     max_turns: int = 8,
+    prompt: str | None = None,
+    agent: Path | None = None,
 ) -> list[str]:
     """Headless grok invocation. The model id comes from ``provider``."""
     if provider not in PROVIDERS:
@@ -159,17 +161,19 @@ def grok_argv(
     if max_turns < 1:
         raise QwenSynthError("max_turns must be positive")
     workdir = Path(workdir)
-    prompt = (
-        "Follow the synthetic-relational-corpus skill. "
-        "Requested codes and the row count are in TASK.md. "
-        "Write the tables and the manifest under out/."
-    )
+    if prompt is None:
+        prompt = (
+            "Follow the synthetic-relational-corpus skill. "
+            "Requested codes and the row count are in TASK.md. "
+            "Write the tables and the manifest under out/."
+        )
+    agent_path = agent or (workdir / _AGENT_REL)
     argv = [
         "grok",
         "-p", prompt,
         "--verbatim",
         "-m", PROVIDERS[provider],
-        "--agent", str(workdir / _AGENT_REL),
+        "--agent", str(agent_path),
         "--cwd", str(workdir),
         "--trust",
         "--sandbox", "strict",
@@ -239,10 +243,14 @@ def run_generator(
     max_turns: int = 8,
     timeout_s: float | None = None,
     runner: Runner | None = None,
+    prompt: str | None = None,
+    agent: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run grok in ``workdir``. A ``runner`` replaces the process in tests."""
     workdir = Path(workdir)
-    argv = grok_argv(workdir, provider=provider, max_turns=max_turns)
+    argv = grok_argv(
+        workdir, provider=provider, max_turns=max_turns, prompt=prompt, agent=agent,
+    )
     env = grok_env()
     call = runner or _subprocess_runner
     started = time.monotonic()
