@@ -1,19 +1,22 @@
 """In-situ NHSVM rows and MaxSim prototypes for an unseen relational corpus.
 
-Projected columns are split by their assigned SKOS code. A caller that
-already knows each column's published SKOS IRI passes that assignment
-in. The assignment is the label. Column names, types, cell values, and
-sibling names are the features. Every code the holdout classifies keeps
-at least one real support column, so the head has seen that IRI on a
-real row. A code with a single column stays in the support census; its
-generator is what teaches the IRI to entities outside this corpus.
-Holdout columns stay out of the training rows.
+Column type annotation holds out whole collections of related tables.
+A collection is one referentially closed bundle: every table in it is
+support, or every table in it is holdout. The label is the published
+SKOS code on each target column. The features are the classification
+pipeline's discrete features, including sibling columns and sampled
+values, so SHAP and SAGE can ablate them. Real support collections and
+caller-supplied synthetic relational rows mix in the training corpus.
+A column split that keeps one column of a table in training and its
+siblings in the holdout is not this exam.
 
-Each assigned IRI needs a relational generator. The generator returns
-a new table whose columns and values connote that IRI, and exactly one
-of those columns carries the IRI. Support columns below the floor get
-more of those tables. A projected column with no assignment is not a
-target. An empty footprint has no targets, so nothing is synthesized.
+A caller that already knows each column's published SKOS code passes
+that assignment in. The code is the label and is not a feature.
+Collection directories do not carry that assignment; the answer key is
+a separate CSV of exact codes. Column names are not labels. Synthetic
+rows are optional extra tables for codes that already have a real
+support column and a caller-supplied generator. An empty footprint has
+no targets.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import csv
 import json
 import random
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +39,14 @@ BASE_VARIANTS = 4
 AMPLIFIED_VARIANTS = 12
 ROWS_PER_COLUMN = 8
 PROTOTYPES_PER_CODE = 6
+_ANSWER_KEY = Path("corpus") / "cta_answer_key.csv"
+_SQL_COLUMN = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z]+)(?:\s*\([^)]*\))?",
+)
+_SQL_SKIP = frozenset({
+    "create", "primary", "foreign", "constraint", "unique",
+    "check", "key", "references", "alter",
+})
 
 
 class InSituError(RuntimeError):
@@ -53,6 +65,7 @@ class InSituPlan:
     rows: list[Any] = field(default_factory=list)
     artifact_root: Path | None = None
     extended: list[str] = field(default_factory=list)
+    holdout_collections: list[str] = field(default_factory=list)
 
     @property
     def under_represented(self) -> list[str]:
@@ -85,30 +98,61 @@ def prepare_insitu(
     rows_per_column: int = ROWS_PER_COLUMN,
     extra_generators: dict | None = None,
     assignments: dict[tuple[str, str], str] | None = None,
+    collections: dict[str, str] | None = None,
+    holdout_collections: set[str] | None = None,
+    cells: list[dict] | None = None,
 ) -> InSituPlan:
     """Split the projected tables and build the augmented training plan.
 
     ``assignments`` maps ``(table, column)`` to a published SDG code.
+    ``collections`` maps each table to its collection slug. When it is
+    set, ``holdout_collections`` names the bundles held out whole.
     Only columns that exist in the footprint, and whose code is in the
     taxonomy, are targets. ``corpora`` defaults to the local sdg-corpora
     checkout. A checkout that is absent yields an empty split and no
-    synthetic rows.
+    synthetic rows. ``cells`` replaces the projected footprint when the
+    caller already loaded collection tables.
     """
-    cells = load_projected_cells(corpora)
+    if cells is None:
+        cells = load_projected_cells(corpora)
     by_table = _columns_by_table(cells)
     present = {(cell["table"], cell["column"]) for cell in cells}
     known = _known_assignments(assignments, present, category_set)
-    support, holdout = split_by_code(by_table, known, floor=floor)
+    held: list[str] = []
+    if collections is not None:
+        support, holdout = split_by_collection(
+            by_table, collections, holdout_collections or set(),
+        )
+        held = sorted(set(holdout_collections or set()))
+    else:
+        support, holdout = split_by_code(by_table, known, floor=floor)
     counts = {code: 0 for code in _target_codes(known)}
     for key in support:
         code = known.get(key)
         if code in counts:
             counts[code] += 1
-    variants = {
-        code: (amplified_variants if counts[code] < floor else base_variants)
-        for code in counts
-    }
-    generators, extended = _generators(list(counts), extra_generators)
+    if collections is not None:
+        # Synthetic tables are a caller-supplied mix. An omitted map
+        # leaves the real support rows alone and does not load the
+        # installed generator module.
+        supplied = extra_generators or {}
+        trainable = [
+            code for code, count in counts.items()
+            if count > 0 and _generator_iri(code) in supplied
+        ]
+        generators, extended = (
+            _generators(trainable, supplied) if trainable else ({}, set())
+        )
+        variants = {
+            code: (amplified_variants if counts[code] < floor else base_variants)
+            for code in generators
+        }
+    else:
+        variants = {
+            code: (amplified_variants if counts[code] < floor else base_variants)
+            for code in counts
+        }
+        generators, extended = _generators(list(counts), extra_generators)
     exemplars = _exemplars(generators, seed=seed, rows_per_column=rows_per_column)
     plan = InSituPlan(
         support=support,
@@ -118,6 +162,7 @@ def prepare_insitu(
         exemplars=exemplars,
         artifact_root=relational_split_root(artifact_root),
         extended=sorted(extended),
+        holdout_collections=held,
     )
     plan.rows = _support_rows(
         cells, support, known, rows_per_column=rows_per_column,
@@ -152,6 +197,225 @@ def split_projected(
         bucket = holdout if index % 2 == 0 else support
         bucket.append(item)
     return support, holdout
+
+
+def split_by_collection(
+    table_columns: dict[str, list[str]],
+    collections: dict[str, str],
+    holdout_collections: set[str],
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Hold out every table that belongs to a named collection.
+
+    Tables in one collection stay together, so a target column's
+    siblings and the related tables those siblings point at are on the
+    same side of the exam. Column order inside a table is preserved.
+    """
+    if not holdout_collections:
+        raise InSituError("hold out at least one collection")
+    missing_tables = sorted(table for table in table_columns if table not in collections)
+    if missing_tables:
+        raise InSituError(
+            f"tables have no collection: {', '.join(missing_tables[:8])}"
+        )
+    known = set(collections.values())
+    unknown = sorted(set(holdout_collections) - known)
+    if unknown:
+        raise InSituError(
+            f"unknown holdout collections: {', '.join(unknown[:8])}"
+        )
+    support: list[tuple[str, str]] = []
+    holdout: list[tuple[str, str]] = []
+    for table in sorted(table_columns):
+        bucket = holdout if collections[table] in holdout_collections else support
+        seen: set[str] = set()
+        for column in table_columns[table]:
+            if not column or column in seen:
+                continue
+            seen.add(column)
+            bucket.append((table, column))
+    if not support:
+        raise InSituError("held-out collections left no training tables")
+    return support, holdout
+
+
+def prepare_collection_cta(
+    category_set,
+    artifact_root: str | Path | None = None,
+    *,
+    corpora: str | Path | None = None,
+    assignments: dict[tuple[str, str], str] | None = None,
+    holdout_collections: set[str] | None = None,
+    slugs: set[str] | None = None,
+    seed: int = 42,
+    floor: int = SUPPORT_FLOOR,
+    base_variants: int = BASE_VARIANTS,
+    amplified_variants: int = AMPLIFIED_VARIANTS,
+    rows_per_column: int = ROWS_PER_COLUMN,
+    extra_generators: dict | None = None,
+) -> InSituPlan:
+    """Hold out whole collection directories and build the CTA plan.
+
+    Table ids are ``slug/table``. ``assignments`` is the exact
+    ``(table id, column) → SKOS code`` map. Columns missing from that
+    map stay in the bundle as sibling context and are not targets.
+    """
+    cells, collections = load_collection_cells(corpora, slugs=slugs)
+    if not cells:
+        raise InSituError("no collection tables to hold out")
+    return prepare_insitu(
+        category_set,
+        artifact_root,
+        corpora=corpora,
+        seed=seed,
+        floor=floor,
+        base_variants=base_variants,
+        amplified_variants=amplified_variants,
+        rows_per_column=rows_per_column,
+        extra_generators=extra_generators,
+        assignments=assignments,
+        collections=collections,
+        holdout_collections=holdout_collections,
+        cells=cells,
+    )
+
+
+def load_collection_cells(
+    corpora: str | Path | None = None,
+    *,
+    slugs: set[str] | None = None,
+) -> tuple[list[dict], dict[str, str]]:
+    """Read ``corpus/collections/<slug>/tables`` into cell records.
+
+    The second map sends each ``slug/table`` id to its collection slug.
+    SQL files supply the column type when present. An absent collections
+    directory yields an empty pair.
+    """
+    root = _corpora_root(corpora)
+    base = root / "corpus" / "collections" if root is not None else None
+    if base is None or not base.is_dir():
+        return [], {}
+    cells: list[dict] = []
+    collections: dict[str, str] = {}
+    for slug_dir in sorted(path for path in base.iterdir() if path.is_dir()):
+        slug = slug_dir.name
+        if slugs is not None and slug not in slugs:
+            continue
+        manifest_path = slug_dir / "manifest.json"
+        if not manifest_path.is_file():
+            continue
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        tables_dir = slug_dir / "tables"
+        names = [
+            str(table.get("name") or "")
+            for table in (manifest.get("tables") or [])
+            if isinstance(table, dict) and table.get("name")
+        ]
+        if not names and tables_dir.is_dir():
+            names = sorted(path.stem for path in tables_dir.glob("*.csv"))
+        for name in names:
+            csv_path = tables_dir / f"{name}.csv"
+            if not csv_path.is_file():
+                continue
+            table_id = f"{slug}/{name}"
+            collections[table_id] = slug
+            column_types = _sql_column_types(tables_dir / f"{name}.sql")
+            with csv_path.open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                columns = list(reader.fieldnames or [])
+                for row_ix, row in enumerate(reader):
+                    for column in columns:
+                        if not column:
+                            continue
+                        cells.append({
+                            "table": table_id,
+                            "column": column,
+                            "value": str((row or {}).get(column) or ""),
+                            "row_ix": row_ix,
+                            "column_type": column_types.get(column, ""),
+                        })
+    return cells, collections
+
+
+def load_collection_answer_key(
+    corpora: str | Path | None = None,
+) -> tuple[dict[tuple[str, str], str], set[str]]:
+    """Exact collection column codes and the collections held out whole.
+
+    The file is ``corpus/cta_answer_key.csv`` with columns
+    ``collection,table,column,code,split``. ``split`` is ``support`` or
+    ``holdout``. One collection is entirely one side. A missing file
+    yields an empty assignment and an empty holdout. Column names in
+    the collection CSVs are not consulted.
+    """
+    root = _corpora_root(corpora)
+    path = root / _ANSWER_KEY if root is not None else None
+    if path is None or not path.is_file():
+        return {}, set()
+    assignments: dict[tuple[str, str], str] = {}
+    sides: dict[str, str] = {}
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fields = set(reader.fieldnames or [])
+        required = {"collection", "table", "column", "code", "split"}
+        missing = sorted(required - fields)
+        if missing:
+            raise InSituError(
+                f"collection answer key is missing columns: {', '.join(missing)}"
+            )
+        for row in reader:
+            slug = str(row.get("collection") or "").strip()
+            table = str(row.get("table") or "").strip()
+            column = str(row.get("column") or "").strip()
+            code = str(row.get("code") or "").strip()
+            side = str(row.get("split") or "").strip()
+            if not slug or not table or not column or not code:
+                continue
+            if side not in {"support", "holdout"}:
+                raise InSituError(
+                    f"collection answer key split for {slug}/{table}.{column} "
+                    f"must be support or holdout"
+                )
+            previous = sides.get(slug)
+            if previous is not None and previous != side:
+                raise InSituError(
+                    f"collection {slug} is on both sides of the answer key"
+                )
+            sides[slug] = side
+            assignments[(f"{slug}/{table}", column)] = code
+    holdout = {slug for slug, side in sides.items() if side == "holdout"}
+    return assignments, holdout
+
+
+def _corpora_root(corpora: str | Path | None) -> Path | None:
+    if corpora is not None and str(corpora).strip():
+        root = Path(corpora)
+    else:
+        root = _REPO_ROOT / "external" / "sdg-corpora"
+    return root if root.is_dir() else None
+
+
+def _sql_column_types(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    types: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip().rstrip(",")
+        if not stripped or stripped.startswith((")", "--")):
+            continue
+        match = _SQL_COLUMN.match(stripped)
+        if match is None:
+            continue
+        name, raw_type = match.group(1), match.group(2)
+        if name.lower() in _SQL_SKIP:
+            continue
+        types[name] = raw_type
+    return types
+
+
+def _generator_iri(code: str) -> str | None:
+    from atelier.classify.extension_patterns import code_iri
+
+    return code_iri(code)
 
 
 def split_by_code(
@@ -360,7 +624,7 @@ def _write_split(plan: InSituPlan, cells: list[dict]) -> None:
         values.setdefault((cell["table"], cell["column"]), []).append(cell["value"])
     for table, columns in by_table.items():
         width = max((len(values.get((table, column), [])) for column in columns), default=0)
-        path = holdout_dir / f"{table}.csv"
+        path = holdout_dir / f"{table.replace('/', '__')}.csv"
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(columns)
@@ -377,6 +641,7 @@ def _write_split(plan: InSituPlan, cells: list[dict]) -> None:
         "under_represented": plan.under_represented,
         "variants": plan.variants,
         "extension_codes": plan.extended,
+        "holdout_collections": plan.holdout_collections,
     }
     (root / "split.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8",
@@ -493,7 +758,11 @@ def _support_rows(
     from atelier.optimize.svm.reflect import Row
 
     grouped: dict[tuple[str, str], list[str]] = {}
+    column_types: dict[tuple[str, str], str] = {}
     for cell in cells:
+        raw_type = str(cell.get("column_type") or "").strip()
+        if raw_type and (cell["table"], cell["column"]) not in column_types:
+            column_types[(cell["table"], cell["column"])] = raw_type
         if not cell["value"]:
             continue
         grouped.setdefault((cell["table"], cell["column"]), []).append(cell["value"])
@@ -509,10 +778,11 @@ def _support_rows(
             continue
         values = [value for value in grouped.get((table, column), []) if value][:rows_per_column]
         siblings = [name for name in by_table.get(table, []) if name != column]
+        stored_type = column_types.get((table, column)) or _infer_column_type(values[:10])
         rows.append(Row(
             table=table,
             column=column,
-            column_type=_infer_column_type(values[:10]) or "object",
+            column_type=stored_type or "object",
             sample_values=values[:8],
             siblings_full=siblings,
             mnemonic="",

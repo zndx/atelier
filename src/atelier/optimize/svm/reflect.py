@@ -150,27 +150,41 @@ def load_rows(refresh_cache: bool, database: str) -> list[Row]:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Feature text — uses build_svm_text shape augmented with centered-window siblings
+# Feature text — pipeline ColumnFeatures, one ablatable field per feature
 # ──────────────────────────────────────────────────────────────────────
 
+# Heads trained under this contract embed ColumnFeatures.to_embedding_text.
+# SAGE and SHAP mask the same FEATURE_NAMES. Older heads omit the key.
+NHSVM_FEATURE_TEXT = "column_features"
+
+
 def build_texts_and_labels(rows: list[Row]) -> tuple[list[str], list[str]]:
-    """Build (text, label) per row using build_svm_text — the canonical
-    NHSVM input shape — augmented with the centered-window sibling list.
+    """Build (text, label) from the pipeline's discrete column features.
+
+    The text is ``ColumnFeatures.to_embedding_text()``. SAGE and SHAP
+    ablate the same feature names, including sampled values and sibling
+    columns. The SKOS code stays the label.
     """
-    from atelier.classify.svm_classifier import build_svm_text
-    from atelier.classify.features import _closest_siblings
+    from atelier.classify.features import extract_features
 
     texts: list[str] = []
     labels: list[str] = []
     for r in rows:
-        # NHSVM training text is build_svm_text shape — we extend it
-        # with the centered-window siblings so the SVM sees the same
-        # local neighborhood the cosine embedding sees.
-        siblings = _closest_siblings(r.column, r.siblings_full, k=4)
-        sibling_part = ", ".join(s.replace("_", " ") for s in siblings)
-        base = build_svm_text(r.column, r.column_type, r.sample_values)
-        text = f"{base} | siblings: {sibling_part}" if sibling_part else base
-        texts.append(text)
+        column_type = (r.column_type or "").strip()
+        if column_type.lower() in {"", "object", "string", "varchar"}:
+            column_type = ""
+        ordered = list(r.siblings_full)
+        if r.column not in ordered:
+            ordered = [r.column, *ordered]
+        features = extract_features(
+            column_name=r.column,
+            column_type=column_type or None,
+            values=list(r.sample_values),
+            siblings=ordered,
+            source_table=r.table,
+            total_count=len(r.sample_values) or None,
+        )
+        texts.append(features.to_embedding_text())
         labels.append(r.code)
     return texts, labels
 

@@ -14,15 +14,14 @@ automated repair pass, executed as the ``PRECONDITIONING`` FSM phase:
    bump that changes the sample vocabulary) automatically invalidates.
 2. **Enrich → collection** — prototype text comes from relational
    generators for the published SKOS IRIs assigned to projected
-   columns (``InSituPrototypeGenerator``). The tables are split by
-   code first. Every code the holdout will classify keeps a real
-   support column. IRIs below the support floor get more synthetic
-   tables. ColBERT-encode, upsert to Qdrant, register + promote the
-   collection.
-3. **Corpus → head** — train on the support columns plus those
-   synthetic tables. ModernBERT-encode, fit the factorized NHSVM, and
-   promote the head to ``current``. The holdout columns are the
-   classification target (``projected-holdout``).
+   columns (``InSituPrototypeGenerator``). That MaxSim stage still
+   splits the projected footprint by code. ColBERT-encode, upsert to
+   Qdrant, register + promote the collection.
+3. **Corpus → head** — column tagging holds out whole collections
+   (``prepare_collection_cta``) and embeds the pipeline's discrete
+   features. The stage fits a head only when
+   ``corpus/cta_answer_key.csv`` publishes exact column codes and
+   names the held-out collections. It does not fit the column split.
 
 Every stage is idempotent by artifact inspection and **fails loudly**:
 any enrichment row failure, any training-label mismatch, any registry
@@ -344,11 +343,27 @@ def build_nhsvm_head(
     cfg, category_set, *, taxonomy_id: str, vocab_sig: str,
     heartbeat: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Train + promote an NHSVM head from in-situ synthetic rows.
+    """Train + promote an NHSVM head from collection CTA rows.
 
-    Returns the registry row dict.  Raises ``PreconditionError`` on
-    empty corpus, label mismatch, or registry inconsistency.
+    Returns the registry row dict.  Raises ``PreconditionError`` when
+    the collection answer key is absent, and on empty corpus, label
+    mismatch, or registry inconsistency. The column split is not fit.
     """
+    from atelier.classify.insitu_corpus import (
+        InSituError,
+        load_collection_answer_key,
+        prepare_collection_cta,
+    )
+
+    assignments, held = load_collection_answer_key()
+    if not assignments or not held:
+        raise PreconditionError(
+            "NHSVM column tagging holds out whole collections "
+            "(prepare_collection_cta). This checkout has no published "
+            "column→SKOS answer key, so no head is fit. "
+            "The column split is not this exam."
+        )
+
     import numpy as np
 
     from atelier.classify.factorized_nhsvm import (
@@ -357,7 +372,10 @@ def build_nhsvm_head(
     )
     from atelier.optimize.svm.encoder import encode_modernbert
     from atelier.optimize.svm.promote import promote_head
-    from atelier.optimize.svm.reflect import build_texts_and_labels
+    from atelier.optimize.svm.reflect import (
+        NHSVM_FEATURE_TEXT,
+        build_texts_and_labels,
+    )
     from atelier.registry.nhsvm_head import (
         compute_head_sig,
         get_by_sig,
@@ -367,16 +385,14 @@ def build_nhsvm_head(
     if heartbeat:
         heartbeat({"sub_phase": "corpus", "current": 0, "total": 1})
 
-    from atelier.classify.insitu_corpus import InSituError, prepare_insitu
-
     corpus_dir = (_REPO_ROOT / cfg.artifact_root / "svm_training"
                   / "precondition" / f"{taxonomy_id}_{vocab_sig[:10]}")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        plan = prepare_insitu(
+        plan = prepare_collection_cta(
             category_set, _REPO_ROOT / cfg.artifact_root,
-            assignments=_assigned_codes(),
+            assignments=assignments, holdout_collections=held,
         )
     except InSituError as exc:
         raise PreconditionError(str(exc)) from exc
@@ -428,6 +444,7 @@ def build_nhsvm_head(
             "training_mode": TRAINING_MODE,
             "taxonomy_id": taxonomy_id,
             "n_rows": len(rows),
+            "feature_text": NHSVM_FEATURE_TEXT,
         },
     )
     row = promote_head(

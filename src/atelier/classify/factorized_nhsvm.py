@@ -310,9 +310,11 @@ class NHSVMHeadAdapter:
       - ``adapter.predict_proba(features)``  — dict[code, prob] for one row
 
     Wraps the trained head + encoder identity + training metadata so the
-    runtime can pick the right encoder + apply the same input pipeline
-    the head was trained against (build_svm_text + sibling enrichment +
-    L2-normalize).
+    runtime can pick the right encoder and apply the same input pipeline
+    the head was trained against. A head whose metadata sets
+    ``feature_text`` to ``column_features`` embeds
+    ``ColumnFeatures.to_embedding_text``, which SAGE and SHAP ablate by
+    feature name. Older heads keep the legacy sibling-suffix string.
 
     Save layout (under ``directory``):
       - ``state_dict.pt``        — head weights + buffers (via head.save)
@@ -341,10 +343,18 @@ class NHSVMHeadAdapter:
     def _build_text(self, features: Any) -> str:
         """Recreate the same text shape the head was trained against.
 
-        Mirrors ``atelier.optimize.svm.reflect.build_texts_and_labels``:
-        build_svm_text base + " | siblings: a, b, c" enrichment over
-        the centered-window k=4 closest siblings.
+        ``feature_text=column_features`` uses
+        ``ColumnFeatures.to_embedding_text``. Masking one feature name
+        changes this string the same way SAGE changes it. Heads trained
+        before that contract keep the legacy sibling-suffix string.
         """
+        from atelier.optimize.svm.reflect import NHSVM_FEATURE_TEXT
+
+        contract = str((self.training_metadata or {}).get("feature_text") or "")
+        render = getattr(features, "to_embedding_text", None)
+        if contract == NHSVM_FEATURE_TEXT and callable(render):
+            return render() or ""
+
         from atelier.classify.svm_classifier import build_svm_text
         from atelier.classify.features import _closest_siblings
 
