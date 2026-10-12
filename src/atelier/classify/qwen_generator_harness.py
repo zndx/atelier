@@ -1,10 +1,10 @@
-"""Ask Qwen, through grok, to extend the procedural value generator.
+"""Ask Qwen, through grok, to write relational generators.
 
-The workpack is an ontology slice of terms the keyword matcher does not
-shape, plus the IRIs already accepted. The model writes
-``out/extend_generators.py``. Accepted entries are installed into
-``insitu_extensions.py`` and ``prepare_insitu`` uses them when the
-entity IRI matches. Upstream column labels are not part of the pack.
+The workpack is an explicit list of target-entity codes whose published
+SKOS IRI has no generator yet. The model writes
+``out/extend_generators.py``. Each entry returns one synthetic table
+for that IRI. Accepted entries are installed into
+``insitu_extensions.py``. Upstream column labels are not part of the pack.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from atelier.classify.extension_patterns import (
     accept_generators,
@@ -30,8 +29,6 @@ from atelier.classify.qwen_synth_harness import (
     grok_argv,
     run_generator,
 )
-from atelier.classify.synth_registry import _infer_generator
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _SKILL_REL = Path(".grok") / "skills" / "extend-procedural-generator" / "SKILL.md"
 _AGENT_REL = Path(".grok") / "agents" / "generator-extender.md"
@@ -45,11 +42,12 @@ _PROMPT = (
 def write_generator_pack(
     dest: Path,
     annotations_csv: Path,
+    codes: list[str] | tuple[str, ...],
     *,
     limit: int = 24,
     installed: Path | None = None,
 ) -> tuple[Path, tuple[str, ...]]:
-    """Write an isolated pack of uncovered codes. Returns the code tuple."""
+    """Write an isolated pack of uncovered target codes. Returns the code tuple."""
     from atelier.classify.qwen_synth_harness import _copy_repo_file
 
     dest = Path(dest)
@@ -57,15 +55,17 @@ def write_generator_pack(
         raise QwenSynthError(f"workpack directory is not empty: {dest}")
     installed = installed or extensions_path()
     installed_source = installed.read_text(encoding="utf-8") if installed.is_file() else ""
-    batch = select_uncovered(annotations_csv, limit=limit, installed_source=installed_source)
+    batch = select_uncovered(
+        annotations_csv, codes, limit=limit, installed_source=installed_source,
+    )
     if not batch:
-        raise QwenSynthError("every ontology code already has a value generator")
+        raise QwenSynthError("every target entity already has a relational generator")
     dest.mkdir(parents=True, exist_ok=True)
     _write_ontology(dest / "ontology.csv", batch)
     codes = tuple(row["code"] for row in batch)
     (dest / "TASK.md").write_text(_task(codes), encoding="utf-8")
     (dest / "installed.py").write_text(
-        installed_source or "PATTERNS = [\n]\n",
+        installed_source or "import random\n\nGENERATORS = {\n}\n",
         encoding="utf-8",
     )
     (dest / "request.json").write_text(
@@ -80,28 +80,32 @@ def write_generator_pack(
 
 def select_uncovered(
     annotations_csv: Path,
+    codes: list[str] | tuple[str, ...],
     *,
     limit: int,
     installed_source: str = "",
 ) -> list[dict[str, str]]:
-    """Ontology rows the keyword matcher and the installed patterns both miss."""
+    """Requested target rows whose published SKOS IRI is not installed yet."""
     if limit < 1:
         raise QwenSynthError("limit must be positive")
+    wanted = tuple(dict.fromkeys(str(code).strip() for code in codes if str(code).strip()))
+    if not wanted:
+        raise QwenSynthError("no target entities")
+    rows = {row["code"]: row for row in _read_rows(annotations_csv)}
+    missing = [code for code in wanted if code not in rows]
+    if missing:
+        raise QwenSynthError(f"ontology has no row for {', '.join(missing)}")
     installed = load_generators(installed_source) if installed_source.strip() else {}
     picked: list[dict[str, str]] = []
-    for row in _read_rows(annotations_csv):
-        cat = SimpleNamespace(
-            label=row["label"],
-            description=row["description"],
-            common_names=row["common_names"],
-        )
-        if _infer_generator(cat) is not None:
-            continue
+    for code in wanted:
+        row = rows[code]
         iri = code_iri(row["code"])
-        if iri and iri in installed:
+        if iri is None:
+            raise QwenSynthError(f"{row['code']} has no published SKOS IRI")
+        if iri in installed:
             continue
         item = {field: row[field] for field in ONTOLOGY_FIELDS}
-        item["iri"] = iri or ""
+        item["iri"] = iri
         picked.append(item)
         if len(picked) >= limit:
             break
@@ -197,32 +201,47 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Extend the procedural generator with Qwen")
     parser.add_argument("--annotations", type=Path, default=_default_annotations())
     parser.add_argument("--provider", choices=tuple(PROVIDERS), default=DEFAULT_PROVIDER)
+    parser.add_argument(
+        "--codes",
+        default="",
+        help="Comma-separated published SDG codes for the target entities",
+    )
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--batches", type=int, default=1)
+    parser.add_argument(
+        "--until-covered",
+        action="store_true",
+        help="Continue until every requested target entity has a relational generator",
+    )
     parser.add_argument("--max-turns", type=int, default=8)
     parser.add_argument("--timeout", type=float, default=480.0)
     parser.add_argument("--workdir", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    codes = [code.strip() for code in args.codes.split(",") if code.strip()]
+    if not codes:
+        print(json.dumps({"error": "no target entities"}), flush=True)
+        return 1
     summaries = []
     failures = 0
-    for index in range(args.batches):
+    index = 0
+    while args.until_covered or index < args.batches:
         workdir = args.workdir
-        if workdir is None or args.batches > 1:
-            workdir = Path(f"/tmp/qwen-extend-{index:02d}")
+        if workdir is None or args.until_covered or args.batches > 1:
+            workdir = Path(f"/tmp/qwen-extend-{index:04d}")
         if workdir.exists():
             import shutil
             shutil.rmtree(workdir)
         try:
-            pack, codes = write_generator_pack(
-                workdir, args.annotations, limit=args.limit,
+            pack, packed = write_generator_pack(
+                workdir, args.annotations, codes, limit=args.limit,
             )
         except QwenSynthError as exc:
             summaries.append({"batch": index, "error": str(exc)})
             break
         command = generator_argv(pack, provider=args.provider, max_turns=args.max_turns)
         if args.dry_run:
-            print(json.dumps({"workdir": str(pack), "codes": list(codes), "argv": command}, indent=2))
+            print(json.dumps({"workdir": str(pack), "codes": list(packed), "argv": command}, indent=2))
             return 0
         completed = run_generator(
             pack,
@@ -239,10 +258,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2), flush=True)
         if completed.returncode != 0 or not report["accepted"]:
             failures += 1
+            index += 1
             if failures >= 2:
                 break
             continue
         failures = 0
+        index += 1
+    if any(
+        "already has a relational generator" in str(item.get("error", ""))
+        for item in summaries
+    ):
+        return 0
     accepted = sum(int(item.get("accepted") or 0) for item in summaries)
     return 0 if accepted else 1
 

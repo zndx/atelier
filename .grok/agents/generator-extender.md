@@ -1,6 +1,6 @@
 ---
 name: generator-extender
-description: Extends the procedural value generator by writing out/extend_generators.py from an ontology slice.
+description: Writes relational generators for published SKOS IRIs in out/extend_generators.py.
 tools: read_file, write, list_dir
 mcpInheritance: none
 ---

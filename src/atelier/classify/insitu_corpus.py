@@ -1,16 +1,16 @@
 """In-situ NHSVM rows and MaxSim prototypes for an unseen relational corpus.
 
-The ontology (the loaded taxonomy) is the only label source. The
-projected relational footprint contributes table and column names and
-cell values, never a published column code. Those tables are split
-into a support half and a holdout half. The support half is a census:
-a column name that matches one vocabulary abbrev or label counts as
-evidence that the code is already present. Codes below the floor get
-more synthetic columns. The holdout half is the classification target.
-Training rows and prototype text are drawn from Atelier's generator.
-Codes the keyword matcher misses use insitu_extensions.py when that
-map contains the term's exact vocabulary IRI. A term with neither a
-keyword shape nor an exact IRI generator is left unshaped.
+Projected columns are split into a support half and a holdout half.
+A caller that already knows each column's published SKOS IRI passes
+that assignment in. The assignment is the label. Column names, types,
+cell values, and sibling names are the features. The holdout columns
+stay out of the training rows.
+
+Each assigned IRI needs a relational generator. The generator returns
+a new table whose columns and values connote that IRI, and exactly one
+of those columns carries the IRI. Support columns below the floor get
+more of those tables. A projected column with no assignment is not a
+target. An empty footprint has no targets, so nothing is synthesized.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from __future__ import annotations
 import csv
 import json
 import random
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,6 @@ from typing import Any
 from atelier.enrichment.llm_generator import EnrichmentGenerator, GenerationResult
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 PROJECTED_HOLDOUT_SOURCE = "projected-holdout"
 SUPPORT_FLOOR = 2
@@ -83,22 +81,32 @@ def prepare_insitu(
     amplified_variants: int = AMPLIFIED_VARIANTS,
     rows_per_column: int = ROWS_PER_COLUMN,
     extra_generators: dict | None = None,
+    assignments: dict[tuple[str, str], str] | None = None,
 ) -> InSituPlan:
-    """Split the projected tables and synthesize the training plan.
+    """Split the projected tables and build the augmented training plan.
 
-    ``corpora`` defaults to the local sdg-corpora checkout. A checkout
-    that is absent yields an empty split, and every code is amplified.
+    ``assignments`` maps ``(table, column)`` to a published SDG code.
+    Only columns that exist in the footprint, and whose code is in the
+    taxonomy, are targets. ``corpora`` defaults to the local sdg-corpora
+    checkout. A checkout that is absent yields an empty split and no
+    synthetic rows.
     """
     cells = load_projected_cells(corpora)
     by_table = _columns_by_table(cells)
     support, holdout = split_projected(by_table)
-    counts = support_counts(support, category_set)
+    present = set(support) | set(holdout)
+    known = _known_assignments(assignments, present, category_set)
+    counts = {code: 0 for code in _target_codes(known)}
+    for key in support:
+        code = known.get(key)
+        if code in counts:
+            counts[code] += 1
     variants = {
-        code: (amplified_variants if counts.get(code, 0) < floor else base_variants)
-        for code in _codes(category_set)
+        code: (amplified_variants if counts[code] < floor else base_variants)
+        for code in counts
     }
-    generators, extended = _generators(category_set, extra_generators)
-    exemplars = _exemplars(generators, seed=seed)
+    generators, extended = _generators(list(counts), extra_generators)
+    exemplars = _exemplars(generators, seed=seed, rows_per_column=rows_per_column)
     plan = InSituPlan(
         support=support,
         holdout=holdout,
@@ -108,9 +116,10 @@ def prepare_insitu(
         artifact_root=relational_split_root(artifact_root),
         extended=sorted(extended),
     )
-    plan.rows = synthetic_rows(
-        category_set, variants, generators,
-        rows_per_column=rows_per_column, seed=seed,
+    plan.rows = _support_rows(
+        cells, support, known, rows_per_column=rows_per_column,
+    ) + synthetic_rows(
+        variants, generators, rows_per_column=rows_per_column, seed=seed,
     )
     _write_split(plan, cells)
     return plan
@@ -142,73 +151,54 @@ def split_projected(
     return support, holdout
 
 
-def support_counts(support: list[tuple[str, str]], category_set) -> dict[str, int]:
-    """How many support columns name each ontology code.
+def support_counts(
+    columns: list[tuple[str, str]],
+    assignments: dict[tuple[str, str], str],
+) -> dict[str, int]:
+    """How many of ``columns`` are assigned each code.
 
-    A column counts only when its name matches exactly one abbrev or
-    label. The holdout is not an argument: those names do not steer
-    amplification.
+    The count is the explicit assignment. A column name does not select
+    a code. Columns outside ``columns`` are not counted, so a holdout
+    assignment does not steer amplification when ``columns`` is the
+    support half.
     """
-    index = _name_index(category_set)
-    counts = {code: 0 for code in _codes(category_set)}
-    for _table, column in support:
-        code = index.get(_scream(column))
-        if code is None or code not in counts:
+    counts: dict[str, int] = {}
+    for key in columns:
+        code = assignments.get(key)
+        if not code:
             continue
-        counts[code] += 1
+        counts[code] = counts.get(code, 0) + 1
     return counts
 
 
 def synthetic_rows(
-    category_set,
     variants: dict[str, int],
     generators: dict[str, Any],
     *,
     rows_per_column: int = ROWS_PER_COLUMN,
     seed: int = 42,
-    table_width: int = 8,
 ) -> list[Any]:
-    """NHSVM rows whose codes are assigned by the generator."""
-    from atelier.classify.ml_train import _infer_column_type
-    from atelier.classify.synth import _generate_opaque_names, _generate_semantic_names
-    from atelier.optimize.svm.reflect import Row
+    """NHSVM rows from relational generators, one table per variant."""
+    from atelier.classify.extension_patterns import code_iri
 
     rng = random.Random(seed)
-    seen: set[str] = set()
-    drafted: list[tuple[str, str, list[str]]] = []
-    cats = {c.code: c for c in _categories(category_set)}
-    for code in _codes(category_set):
+    seen_tables: set[str] = set()
+    rows: list[Any] = []
+    for code in sorted(variants):
         width = int(variants.get(code, 0))
         if width <= 0:
             continue
-        cat = cats[code]
-        gen = generators.get(code)
-        if gen is None:
-            continue
-        names = _column_names(
-            cat, width, rng, seen,
-            semantic=_generate_semantic_names,
-            opaque=_generate_opaque_names,
-        )
-        for name in names:
-            values = [str(gen(rng)) for _ in range(rows_per_column)]
-            drafted.append((code, name, values))
-
-    rows: list[Any] = []
-    for start in range(0, len(drafted), table_width):
-        chunk = drafted[start:start + table_width]
-        table = f"insitu_{start // table_width + 1:03d}"
-        siblings = [name for _code, name, _values in chunk]
-        for code, name, values in chunk:
-            rows.append(Row(
-                table=table,
-                column=name,
-                column_type=_infer_column_type(values[:10]) or "object",
-                sample_values=[v for v in values if v][:8],
-                siblings_full=[s for s in siblings if s != name],
-                mnemonic="",
-                code=code,
-            ))
+        generate = generators.get(code)
+        iri = code_iri(code)
+        if generate is None or iri is None:
+            raise InSituError(f"{code} has no relational generator")
+        for index in range(width):
+            table = _call_table(generate, rng, iri, code)
+            name = str(table["table"])
+            if name in seen_tables:
+                name = f"{name}_{index + 1}"
+            seen_tables.add(name)
+            rows.append(_labeled_row(name, table, iri, code, rows_per_column))
     return rows
 
 
@@ -339,25 +329,49 @@ def _columns_by_table(cells: list[dict]) -> dict[str, list[str]]:
     return out
 
 
-def _generators(category_set, extra_generators: dict | None = None) -> tuple[dict[str, Any], set[str]]:
-    from atelier.classify.extension_patterns import code_iri
-    from atelier.classify.synth_registry import _infer_generator
+def _known_assignments(
+    assignments: dict[tuple[str, str], str] | None,
+    present: set[tuple[str, str]],
+    category_set,
+) -> dict[tuple[str, str], str]:
+    allowed = set(_codes(category_set))
+    known: dict[tuple[str, str], str] = {}
+    for key, code in (assignments or {}).items():
+        code = str(code or "").strip()
+        if key in present and code in allowed:
+            known[key] = code
+    return known
 
+
+def _target_codes(assignments: dict[tuple[str, str], str]) -> list[str]:
+    return sorted(set(assignments.values()))
+
+
+def _generators(
+    codes: list[str], extra_generators: dict | None = None,
+) -> tuple[dict[str, Any], set[str]]:
+    from atelier.classify.extension_patterns import code_iri
+
+    if not codes:
+        return {}, set()
     if extra_generators is None:
         extra_generators = _installed_generators()
     out = {}
     extended: set[str] = set()
-    for cat in _categories(category_set):
-        inferred = _infer_generator(cat)
-        if inferred is not None:
-            out[cat.code] = inferred
-            continue
-        iri = code_iri(cat.code)
+    missing: list[str] = []
+    for code in codes:
+        iri = code_iri(code)
         generate = extra_generators.get(iri) if iri else None
         if generate is None:
+            missing.append(code)
             continue
-        out[cat.code] = generate
-        extended.add(cat.code)
+        out[code] = generate
+        extended.add(code)
+    if missing:
+        sample = ", ".join(missing[:8])
+        raise InSituError(
+            f"{len(missing)} target entities have no relational generator ({sample})."
+        )
     return out, extended
 
 
@@ -373,68 +387,118 @@ def _installed_generators() -> dict:
         raise InSituError(f"Installed generator extension is unusable: {exc}") from exc
 
 
-def _exemplars(generators: dict[str, Any], *, seed: int) -> dict[str, list[str]]:
+def _exemplars(
+    generators: dict[str, Any], *, seed: int, rows_per_column: int,
+) -> dict[str, list[str]]:
+    from atelier.classify.extension_patterns import code_iri
+
     rng = random.Random(seed + 1)
     exemplars: dict[str, list[str]] = {}
-    for code, gen in generators.items():
+    for code, generate in generators.items():
+        iri = code_iri(code)
+        if iri is None:
+            continue
         seen: set[str] = set()
         values: list[str] = []
         for _ in range(PROTOTYPES_PER_CODE * 3):
-            text = str(gen(rng)).strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            values.append(text)
+            table = _call_table(generate, rng, iri, code)
+            for text in _iri_values(table, iri):
+                if text in seen:
+                    continue
+                seen.add(text)
+                values.append(text)
+                if len(values) >= PROTOTYPES_PER_CODE:
+                    break
             if len(values) >= PROTOTYPES_PER_CODE:
                 break
-        exemplars[code] = values
+        exemplars[code] = values[:rows_per_column]
     return exemplars
 
 
-def _column_names(cat, count: int, rng, seen: set[str], *, semantic, opaque) -> list[str]:
-    proposed = semantic(
-        getattr(cat, "label", "") or cat.code,
-        getattr(cat, "abbrev", "") or "",
-        getattr(cat, "common_names", "") or "",
-        rng,
-        count,
-    )
-    proposed = list(proposed) + list(opaque(rng, count))
-    names: list[str] = []
-    for candidate in proposed:
-        name = candidate
-        if name in seen:
-            name = f"{candidate}_{cat.code.replace('.', '_')}"
-        if name in seen or not name:
+def _support_rows(
+    cells: list[dict],
+    support: list[tuple[str, str]],
+    assignments: dict[tuple[str, str], str],
+    *,
+    rows_per_column: int,
+) -> list[Any]:
+    from atelier.classify.ml_train import _infer_column_type
+    from atelier.optimize.svm.reflect import Row
+
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for cell in cells:
+        if not cell["value"]:
             continue
-        seen.add(name)
-        names.append(name)
-        if len(names) >= count:
-            return names
-    while len(names) < count:
-        extra = f"syn_{cat.code.replace('.', '_')}_{len(names)}"
-        if extra not in seen:
-            seen.add(extra)
-            names.append(extra)
-    return names
+        grouped.setdefault((cell["table"], cell["column"]), []).append(cell["value"])
+    by_table: dict[str, list[str]] = {}
+    for table, column in support:
+        columns = by_table.setdefault(table, [])
+        if column not in columns:
+            columns.append(column)
+    rows: list[Any] = []
+    for table, column in support:
+        code = assignments.get((table, column))
+        if not code:
+            continue
+        values = [value for value in grouped.get((table, column), []) if value][:rows_per_column]
+        siblings = [name for name in by_table.get(table, []) if name != column]
+        rows.append(Row(
+            table=table,
+            column=column,
+            column_type=_infer_column_type(values[:10]) or "object",
+            sample_values=values[:8],
+            siblings_full=siblings,
+            mnemonic="",
+            code=code,
+        ))
+    return rows
 
 
-def _name_index(category_set) -> dict[str, str | None]:
-    """Map a screamed name to one code, or None when the name is shared."""
-    buckets: dict[str, set[str]] = {}
-    for cat in _categories(category_set):
-        keys = {_scream(getattr(cat, "abbrev", "") or "")}
-        label = _scream(getattr(cat, "label", "") or "")
-        if label:
-            keys.add(label)
-        for key in keys:
-            if not key:
-                continue
-            buckets.setdefault(key, set()).add(cat.code)
-    return {
-        key: (next(iter(codes)) if len(codes) == 1 else None)
-        for key, codes in buckets.items()
-    }
+def _labeled_row(table: str, generated: dict, iri: str, code: str, limit: int):
+    from atelier.classify.ml_train import _infer_column_type
+    from atelier.optimize.svm.reflect import Row
+
+    labeled = next(
+        column for column in generated["columns"]
+        if str(column.get("iri") or "") == iri
+    )
+    values = [str(value) for value in labeled["values"] if str(value).strip()][:limit]
+    siblings = [
+        str(column["name"]) for column in generated["columns"]
+        if column is not labeled
+    ]
+    return Row(
+        table=table,
+        column=str(labeled["name"]),
+        column_type=_infer_column_type(values[:10]) or "object",
+        sample_values=values[:8],
+        siblings_full=siblings,
+        mnemonic="",
+        code=code,
+    )
+
+
+def _call_table(generate, rng, iri: str, code: str) -> dict:
+    from atelier.classify.extension_patterns import relational_table_problem
+
+    try:
+        value = generate(rng)
+    except Exception as exc:
+        raise InSituError(
+            f"{code} generator raised {type(exc).__name__}: {exc}"
+        ) from exc
+    problem = relational_table_problem(value, iri)
+    if problem:
+        raise InSituError(f"{code} {problem}")
+    return value
+
+
+def _iri_values(table: dict, iri: str) -> list[str]:
+    values: list[str] = []
+    for column in table["columns"]:
+        if str(column.get("iri") or "") == iri:
+            values.extend(str(value).strip() for value in column["values"] if str(value).strip())
+    return values
 
 
 def _footprint_pin(corpora: str | Path | None) -> Path | None:
@@ -470,7 +534,3 @@ def _categories(category_set) -> list[Any]:
 
 def _codes(category_set) -> list[str]:
     return sorted({c.code for c in _categories(category_set) if c.code})
-
-
-def _scream(name: str) -> str:
-    return _CAMEL.sub("_", name).replace("-", "_").replace(" ", "_").upper()

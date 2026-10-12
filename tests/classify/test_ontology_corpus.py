@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pyarrow as pa
@@ -21,24 +20,18 @@ from atelier.classify.ontology_corpus import (
 )
 from atelier.classify.taxonomy import HierarchicalCategorySet, ReferenceCategory
 from atelier.enrichment.verifiers import run_verifier_suite
+from tests.classify.explicit_sdg import (
+    ORGANIZATION,
+    PARENTING,
+    PDF_EXPORT,
+    YOUNG_RESEARCHER,
+    published_rows,
+    taxonomy,
+    write_annotations,
+)
 
-
-def _taxonomy() -> HierarchicalCategorySet:
-    cats = [
-        ReferenceCategory(code="SDG.A.1", label="invoice identifier", embedding_text="invoice", parent_code="SDG.A"),
-        ReferenceCategory(code="SDG.B", label="status", embedding_text="status", parent_code="SDG"),
-        ReferenceCategory(code="SDG.ROLE.PARENTING_ROLE", label="Parenting Role", embedding_text="role", parent_code="SDG.ROLE"),
-    ]
-    return HierarchicalCategorySet(name="sdg", categories=cats)
-
-
-def _write_vocab(root: Path, rows: list[dict]) -> None:
-    path = root / "vocabulary" / "annotations.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["code", "label", "abbrev", "parent_code", "family"])
-        writer.writeheader()
-        writer.writerows(rows)
+_FRAME = (PDF_EXPORT, PARENTING, YOUNG_RESEARCHER)
+_VOCAB = (*_FRAME, ORGANIZATION, "SDG.DOM.ORGANIZATION")
 
 
 def _write_footprint(root: Path, naming: list[dict], cells: list[dict]) -> None:
@@ -49,72 +42,68 @@ def _write_footprint(root: Path, naming: list[dict], cells: list[dict]) -> None:
 
 
 def _fixture(root: Path) -> None:
-    _write_vocab(root, [
-        {"code": "SDG.A.1", "label": "invoice identifier", "abbrev": "INVOICE_ID", "parent_code": "SDG.A", "family": "catalog"},
-        {"code": "SDG.B", "label": "status", "abbrev": "STATUS", "parent_code": "SDG", "family": "catalog"},
-        {"code": "SDG.ROLE.PARENTING_ROLE", "label": "Parenting Role", "abbrev": "PARENTING_ROLE", "parent_code": "SDG.ROLE", "family": "catalog"},
-        {"code": "SDG.DOM.PARENTING_ROLE", "label": "Parenting Role domain", "abbrev": "PARENTING_ROLE", "parent_code": "SDG.DOM", "family": ""},
-        {"code": "SDG.GENERIC.ORGANIZATION", "label": "Organization", "abbrev": "ORGANIZATION", "parent_code": "SDG.GENERIC", "family": "catalog"},
-        {"code": "SDG.DOM.ORGANIZATION", "label": "Organization domain", "abbrev": "ORGANIZATION", "parent_code": "SDG.DOM", "family": ""},
-    ])
+    write_annotations(root / "vocabulary" / "annotations.csv", _VOCAB)
     _write_footprint(root, [
-        {"table_name": "billing", "col_name": "invoice_id", "slot_ref": "InvoiceId", "template_id": "invoice_id", "code": ""},
-        {"table_name": "billing", "col_name": "amount", "slot_ref": "DisabledAdult", "template_id": "invoice_id", "code": ""},
-        {"table_name": "billing", "col_name": "id", "slot_ref": "__pk__", "template_id": "parenting_role", "code": ""},
-        {"table_name": "billing", "col_name": "encoding", "slot_ref": "data:sdg:hasEncoding", "template_id": "invoice_id", "code": ""},
-        {"table_name": "billing", "col_name": "org_id", "slot_ref": "Organization", "template_id": "invoice_id", "code": ""},
-        {"table_name": "billing", "col_name": "stamped", "slot_ref": "NotAClass", "template_id": "invoice_id", "code": "SDG.B"},
+        {"table_name": "billing", "col_name": "doc_ref", "slot_ref": "PdfExportProcess", "template_id": "doc_ref", "code": ""},
+        {"table_name": "billing", "col_name": "amount", "slot_ref": "DisabledAdult", "template_id": "doc_ref", "code": ""},
+        {"table_name": "billing", "col_name": "surrogate", "slot_ref": "__pk__", "template_id": "parenting_role", "code": ""},
+        {"table_name": "billing", "col_name": "encoding", "slot_ref": "data:sdg:hasEncoding", "template_id": "doc_ref", "code": ""},
+        {"table_name": "billing", "col_name": "org_id", "slot_ref": "Organization", "template_id": "doc_ref", "code": ""},
+        {"table_name": "billing", "col_name": "stamped", "slot_ref": "NotAClass", "template_id": "doc_ref", "code": YOUNG_RESEARCHER},
     ], [
-        {"table_name": "billing", "col_name": "invoice_id", "value": "INV-1"},
-        {"table_name": "billing", "col_name": "invoice_id", "value": "INV-2"},
-        {"table_name": "billing", "col_name": "invoice_id", "value": "INV-1"},
+        {"table_name": "billing", "col_name": "doc_ref", "value": "INV-1"},
+        {"table_name": "billing", "col_name": "doc_ref", "value": "INV-2"},
+        {"table_name": "billing", "col_name": "doc_ref", "value": "INV-1"},
         {"table_name": "billing", "col_name": "amount", "value": "10"},
-        {"table_name": "billing", "col_name": "id", "value": "ROLE-0001"},
+        {"table_name": "billing", "col_name": "surrogate", "value": "ROLE-0001"},
         {"table_name": "billing", "col_name": "stamped", "value": "open"},
     ])
 
 
 def test_labeled_rows_keep_codes_in_the_taxonomy() -> None:
     columns = [
-        LabeledColumn("billing", "invoice_id", "SDG.A.1", ["INV-1", "INV-2"], ["invoice_id", "amount", "note"]),
-        LabeledColumn("billing", "amount", "SDG.NOT_IN_TAX", ["10", "20"], ["invoice_id", "amount", "note"]),
-        LabeledColumn("billing", "note", "", [], ["invoice_id", "amount", "note"]),
+        LabeledColumn("billing", "doc_ref", PDF_EXPORT, ["INV-1", "INV-2"], ["doc_ref", "amount", "note"]),
+        LabeledColumn("billing", "org_id", ORGANIZATION, ["10", "20"], ["doc_ref", "org_id", "note"]),
+        LabeledColumn("billing", "note", "", [], ["doc_ref", "amount", "note"]),
     ]
-    rows = rows_from_labeled_columns(columns, _taxonomy())
+    rows = rows_from_labeled_columns(columns, taxonomy(_FRAME))
     assert len(rows) == 1
-    assert rows[0].code == "SDG.A.1"
-    assert rows[0].column == "invoice_id"
+    assert rows[0].code == PDF_EXPORT
+    assert rows[0].column == "doc_ref"
     assert rows[0].sample_values[:2] == ["INV-1", "INV-2"]
     assert rows[0].siblings_full == ["amount", "note"]
 
 
 def test_generator_prototypes_are_column_values() -> None:
     columns = [
-        LabeledColumn("billing", "invoice_id", "SDG.A.1", ["INV-1", "INV-2"], ["invoice_id"]),
+        LabeledColumn("billing", "doc_ref", PDF_EXPORT, ["INV-1", "INV-2"], ["doc_ref"]),
     ]
-    exemplars = exemplars_by_code(columns, _taxonomy())
-    assert exemplars["SDG.A.1"][:2] == ["INV-1", "INV-2"]
+    frame = taxonomy(_FRAME)
+    exemplars = exemplars_by_code(columns, frame)
+    assert exemplars[PDF_EXPORT][:2] == ["INV-1", "INV-2"]
+    label = published_rows([PDF_EXPORT])[0]["label"]
     generated = OntologyLabelGenerator(exemplars).generate(
-        {"code": "SDG.A.1", "label": "invoice identifier", "mnemonic": "inv"},
-        taxonomy_context={"expected_parent_path": ["genus A"]},
+        {"code": PDF_EXPORT, "label": label, "mnemonic": "pdf_export"},
+        taxonomy_context={"expected_parent_path": ["Process"]},
     )
     prototypes = generated.enrichment["prototype_values"]
     assert prototypes[0] == "INV-1"
     assert prototypes[1] == "INV-2"
     assert "stub-prototype" not in " ".join(prototypes)
     report = run_verifier_suite(
-        generated.enrichment, expected_parent_path=["genus A"],
+        generated.enrichment, expected_parent_path=["Process"],
     )
     assert report.passed
     assert OntologyLabelGenerator(exemplars).name == "ontology:sdg-corpora"
 
 
 def test_short_exemplar_list_pads_with_the_ontology_label() -> None:
-    generated = OntologyLabelGenerator({"SDG.B": ["open"]}).generate(
-        {"code": "SDG.B", "label": "status"},
+    row = published_rows([YOUNG_RESEARCHER])[0]
+    generated = OntologyLabelGenerator({YOUNG_RESEARCHER: ["open"]}).generate(
+        {"code": YOUNG_RESEARCHER, "label": row["label"]},
         taxonomy_context={"expected_parent_path": []},
     )
-    assert generated.enrichment["prototype_values"] == ["open", "status", "status"]
+    assert generated.enrichment["prototype_values"] == ["open", row["label"], row["label"]]
     assert generated.enrichment["parent_path"] == []
 
 
@@ -130,25 +119,25 @@ def test_no_taxonomy_overlap_keeps_the_llm_generator_path(tmp_path) -> None:
 def test_missing_checkout_fails_closed(tmp_path) -> None:
     missing = tmp_path / "absent"
     with pytest.raises(OntologyCorpusError):
-        ontology_generator(object(), _taxonomy(), corpora=missing)
+        ontology_generator(object(), taxonomy(_FRAME), corpora=missing)
 
 
 def test_footprint_join_uses_abbrev_catalog_family_and_explicit_code(tmp_path) -> None:
     _fixture(tmp_path)
     rows = labeled_rows_from_corpora(None, corpora=tmp_path)
     by_column = {row.column: row for row in rows}
-    assert by_column["invoice_id"].code == "SDG.A.1"
-    assert by_column["invoice_id"].sample_values == ["INV-1", "INV-2"]
+    assert by_column["doc_ref"].code == PDF_EXPORT
+    assert by_column["doc_ref"].sample_values == ["INV-1", "INV-2"]
     assert "amount" not in by_column
     assert "encoding" not in by_column
-    assert by_column["id"].code == "SDG.ROLE.PARENTING_ROLE"
-    assert by_column["org_id"].code == "SDG.GENERIC.ORGANIZATION"
-    assert by_column["stamped"].code == "SDG.B"
+    assert by_column["surrogate"].code == PARENTING
+    assert by_column["org_id"].code == ORGANIZATION
+    assert by_column["stamped"].code == YOUNG_RESEARCHER
     assert by_column["stamped"].sample_values == ["open"]
-    kept = {row.column for row in labeled_rows_from_corpora(_taxonomy(), corpora=tmp_path)}
+    kept = {row.column for row in labeled_rows_from_corpora(taxonomy(_FRAME), corpora=tmp_path)}
     assert "org_id" not in kept
-    assert "invoice_id" in kept
-    generator = ontology_generator(object(), _taxonomy(), corpora=tmp_path)
+    assert "doc_ref" in kept
+    generator = ontology_generator(object(), taxonomy(_FRAME), corpora=tmp_path)
     assert generator is not None
     assert generator.name == "ontology:sdg-corpora"
     from atelier.classify import ontology_corpus
@@ -173,4 +162,4 @@ def test_two_footprint_pins_fail_closed(tmp_path) -> None:
     for name in ("naming_map.parquet", "base_rows.parquet"):
         (extra / name).write_bytes((tmp_path / "ddl" / "pin1" / name).read_bytes())
     with pytest.raises(OntologyCorpusError):
-        labeled_rows_from_corpora(_taxonomy(), corpora=tmp_path)
+        labeled_rows_from_corpora(taxonomy(_FRAME), corpora=tmp_path)

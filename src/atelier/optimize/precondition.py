@@ -12,15 +12,15 @@ automated repair pass, executed as the ``PRECONDITIONING`` FSM phase:
    the vocabulary signature, and the head registry row stores
    ``vocab_sig`` directly.  A vocabulary change (or an sdg-corpora pin
    bump that changes the sample vocabulary) automatically invalidates.
-2. **Enrich → collection** — prototype text is synthesized in situ
-   from the ontology (``InSituPrototypeGenerator``). The projected
-   relational tables are split first; codes the support half barely
-   names are given more synthetic values. ColBERT-encode, upsert to
-   Qdrant, register + promote the collection.
-3. **Corpus → head** — train on those same in-situ synthetic rows.
-   ModernBERT-encode, fit the factorized NHSVM, and promote the head
-   to ``current``. The holdout half of the projected tables is the
-   classification target (``projected-holdout``).
+2. **Enrich → collection** — prototype text comes from relational
+   generators for the published SKOS IRIs assigned to projected
+   columns (``InSituPrototypeGenerator``). The tables are split first.
+   IRIs the support half barely represents get more synthetic tables.
+   ColBERT-encode, upsert to Qdrant, register + promote the collection.
+3. **Corpus → head** — train on the support columns plus those
+   synthetic tables. ModernBERT-encode, fit the factorized NHSVM, and
+   promote the head to ``current``. The holdout half of the projected
+   tables is the classification target (``projected-holdout``).
 
 Every stage is idempotent by artifact inspection and **fails loudly**:
 any enrichment row failure, any training-label mismatch, any registry
@@ -54,6 +54,17 @@ TRAINING_MODE = "precondition"
 
 class PreconditionError(RuntimeError):
     """A pre-conditioning stage failed; the run must not proceed."""
+
+
+def _assigned_codes() -> dict[tuple[str, str], str]:
+    """Published SKOS code for each projected column, from the local checkout."""
+    from atelier.classify.ontology_corpus import OntologyCorpusError, load_labeled_columns
+
+    try:
+        columns = load_labeled_columns()
+    except OntologyCorpusError as exc:
+        raise PreconditionError(str(exc)) from exc
+    return {(column.table, column.column): column.code for column in columns}
 
 
 # ── Probe ────────────────────────────────────────────────────────
@@ -210,10 +221,13 @@ def build_semantic_collection(
     aug_version = _augmentation_version(vocab_sig)
     rows = _category_rows(category_set)
 
-    # Prototypes are synthetic. The support half of the projected
-    # tables only decides which ontology codes to amplify.
+    # Prototypes are synthetic tables for IRIs assigned to projected
+    # columns. The support half decides which of those IRIs to amplify.
     try:
-        plan = prepare_insitu(category_set, _REPO_ROOT / cfg.artifact_root)
+        plan = prepare_insitu(
+            category_set, _REPO_ROOT / cfg.artifact_root,
+            assignments=_assigned_codes(),
+        )
     except InSituError as exc:
         raise PreconditionError(str(exc)) from exc
     generator = InSituPrototypeGenerator(plan)
@@ -358,7 +372,10 @@ def build_nhsvm_head(
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        plan = prepare_insitu(category_set, _REPO_ROOT / cfg.artifact_root)
+        plan = prepare_insitu(
+            category_set, _REPO_ROOT / cfg.artifact_root,
+            assignments=_assigned_codes(),
+        )
     except InSituError as exc:
         raise PreconditionError(str(exc)) from exc
     rows = plan.rows

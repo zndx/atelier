@@ -21,23 +21,24 @@ from atelier.classify.qwen_synth_harness import (
     score_workdir,
     write_workpack,
 )
+from tests.classify.explicit_sdg import (
+    CLINICAL,
+    PARENTING,
+    PDF_EXPORT,
+    PROCESS,
+    ROLE,
+    YOUNG_RESEARCHER,
+    write_annotations,
+)
 
-
-def _annotations(path: Path) -> None:
-    path.write_text(
-        "code,label,abbrev,parent_code,description,example_values,common_names\n"
-        "SDG.A,Invoice,INVOICE,SDG,A commercial bill.,INV-SECRET,secret name\n"
-        "SDG.A.1,Invoice identifier,INVOICE_ID,SDG.A,Identifier of one invoice.,INV-1,slot_ref\n"
-        "SDG.B,Status,STATUS,,A status flag.,OPEN,naming_map\n",
-        encoding="utf-8",
-    )
+_SLICE = (PROCESS, ROLE, PDF_EXPORT, PARENTING)
 
 
 def _pack(tmp_path: Path, codes: list[str] | None = None) -> Path:
-    _annotations(tmp_path / "annotations.csv")
+    write_annotations(tmp_path / "annotations.csv", _SLICE, sentinel=True)
     (tmp_path / "naming_map.parquet").write_bytes(b"slot_ref INV-1")
     dest = tmp_path / "work"
-    write_workpack(dest, tmp_path / "annotations.csv", codes or ["SDG.A.1"])
+    write_workpack(dest, tmp_path / "annotations.csv", codes or [PDF_EXPORT])
     return dest
 
 
@@ -45,28 +46,28 @@ def test_workpack_is_an_ontology_slice(tmp_path: Path) -> None:
     dest = _pack(tmp_path)
     ontology = (dest / "ontology.csv").read_text(encoding="utf-8")
     assert ontology.splitlines()[0] == "code,label,abbrev,parent_code,description"
-    assert "SDG.A.1" in ontology
-    assert "SDG.A," in ontology or ontology.splitlines()[1].startswith("SDG.A,")
-    assert "SDG.B" not in ontology
+    assert PDF_EXPORT in ontology
+    assert any(line.startswith(f"{PROCESS},") for line in ontology.splitlines())
+    assert PARENTING not in ontology
+    assert f"{ROLE}," not in ontology
     assert "example_values" not in ontology
-    assert "INV-1" not in ontology
     assert "INV-SECRET" not in ontology
     assert "slot_ref" not in ontology
     inputs = "\n".join(path.read_text(encoding="utf-8") for path in pack_inputs(dest))
     assert "naming_map" not in inputs
-    assert "INV-1" not in inputs
+    assert "INV-SECRET" not in inputs
     assert list(dest.rglob("*.parquet")) == []
     request = json.loads((dest / "request.json").read_text(encoding="utf-8"))
-    assert request["codes"] == ["SDG.A.1"]
+    assert request["codes"] == [PDF_EXPORT]
     assert (dest / ".grok" / "skills" / "synthetic-relational-corpus" / "SKILL.md").is_file()
     assert (dest / ".grok" / "agents" / "relational-synth.md").is_file()
 
 
-def test_missing_code_fails_before_a_partial_pack(tmp_path: Path) -> None:
-    _annotations(tmp_path / "annotations.csv")
+def test_code_outside_the_explicit_slice_fails_before_a_partial_pack(tmp_path: Path) -> None:
+    write_annotations(tmp_path / "annotations.csv", _SLICE)
     dest = tmp_path / "work"
-    with pytest.raises(QwenSynthError, match="SDG.MISSING"):
-        write_workpack(dest, tmp_path / "annotations.csv", ["SDG.MISSING"])
+    with pytest.raises(QwenSynthError, match=CLINICAL):
+        write_workpack(dest, tmp_path / "annotations.csv", [CLINICAL])
     assert not dest.exists()
 
 
@@ -113,44 +114,44 @@ def test_run_generator_records_the_local_invocation(tmp_path: Path) -> None:
 
 
 def test_score_jaccard_uses_only_gold_passed_after_generation(tmp_path: Path) -> None:
-    dest = _pack(tmp_path, ["SDG.A.1", "SDG.B"])
+    dest = _pack(tmp_path, [PDF_EXPORT, PARENTING])
     tables = dest / "out" / "tables"
     (tables / "billing.csv").write_text(
-        "invoice_number,note\nINV-19,hello\nINV-37,there\n",
+        "export_number,note\nINV-19,hello\nINV-37,there\n",
         encoding="utf-8",
     )
     (dest / "out" / "manifest.json").write_text(
         json.dumps([
-            {"table": "billing", "column": "invoice_number", "code": "SDG.A.1"},
+            {"table": "billing", "column": "export_number", "code": PDF_EXPORT},
             {"table": "billing", "column": "note", "code": ""},
         ]),
         encoding="utf-8",
     )
     gold = [SimpleNamespace(
-        table="billing", column="invoice_id", code="SDG.A.1",
+        table="billing", column="export_id", code=PDF_EXPORT,
         values=["INV-100", "INV-200"],
     )]
     score = score_workdir(dest, gold)
     assert score.parse_ok
     assert score.coverage == 0.5
-    assert score.emitted_codes == ("SDG.A.1",)
+    assert score.emitted_codes == (PDF_EXPORT,)
     assert score.name_jaccard == pytest.approx(1 / 3)
     assert score.value_jaccard == pytest.approx(1 / 5)
     assert score_workdir(dest, None).name_jaccard is None
     assert score_workdir(dest, None).value_jaccard is None
 
 
-def test_unknown_code_is_not_a_successful_parse(tmp_path: Path) -> None:
+def test_code_outside_the_slice_is_not_a_successful_parse(tmp_path: Path) -> None:
     dest = _pack(tmp_path)
     (dest / "out" / "tables" / "billing.csv").write_text(
-        "invoice_id\nINV-9\n",
+        "doc_ref\nINV-9\n",
         encoding="utf-8",
     )
     (dest / "out" / "manifest.json").write_text(
-        json.dumps([{"table": "billing", "column": "invoice_id", "code": "SDG.NOPE"}]),
+        json.dumps([{"table": "billing", "column": "doc_ref", "code": YOUNG_RESEARCHER}]),
         encoding="utf-8",
     )
     score = score_workdir(dest, None)
     assert not score.parse_ok
     assert score.coverage == 0.0
-    assert any("SDG.NOPE" in problem for problem in score.problems)
+    assert any(YOUNG_RESEARCHER in problem for problem in score.problems)

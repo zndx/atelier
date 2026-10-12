@@ -1,9 +1,10 @@
-"""Load and check exact-IRI value generators.
+"""Load and check relational generators bound to published SKOS IRIs.
 
-The coding harness writes ``GENERATORS``. Each key is one vocabulary
-IRI, ``https://signals.zndx.org/sdg#...``. A generator applies only
-when the entity's IRI is that key. There is no label search and no
-stand-in value for a term that has no generator.
+The coding harness writes ``GENERATORS``. Each key is one concept IRI
+from ``vocabulary/vocabulary.ttl``, ``https://signals.zndx.org/sdg#...``.
+The callable returns one synthetic table. Exactly one column of that
+table carries the same IRI. A generator applies only when a projected
+column is assigned that IRI.
 """
 
 from __future__ import annotations
@@ -26,16 +27,21 @@ _RNG_ATTRS = frozenset({
     "choice", "randint", "randrange", "uniform", "random", "getrandbits",
 })
 _HEADER = '''\
-"""Exact IRI value generators for ontology terms.
+"""Relational generators for published SKOS IRIs.
 
-The coding harness writes GENERATORS. insitu_corpus applies an entry
-only when the entity IRI equals the key.
+The coding harness writes GENERATORS. Each callable returns one table.
+insitu_corpus applies an entry only when a projected column is assigned
+that IRI.
 """
 
 import random
 
 GENERATORS = {
 '''
+_CONCEPT_IRI = re.compile(
+    r"<(https://signals\.zndx\.org/sdg#[A-Za-z0-9_]+)> a skos:Concept\b"
+)
+_concepts: set[str] | None = None
 
 
 class ExtensionError(RuntimeError):
@@ -54,15 +60,40 @@ def extensions_path() -> Path:
     return Path(__file__).resolve().parent / "insitu_extensions.py"
 
 
+def published_concept_iris() -> set[str]:
+    """SKOS concept IRIs entailed in the published vocabulary."""
+    global _concepts
+    if _concepts is None:
+        path = (
+            Path(__file__).resolve().parents[3]
+            / "external" / "sdg-corpora" / "vocabulary" / "vocabulary.ttl"
+        )
+        if not path.is_file():
+            raise ExtensionError(f"published SKOS vocabulary is missing at {path}")
+        found = set(_CONCEPT_IRI.findall(path.read_text(encoding="utf-8")))
+        if not found:
+            raise ExtensionError(f"published SKOS vocabulary at {path} has no concepts")
+        _concepts = found
+    return _concepts
+
+
 def code_iri(code: str) -> str | None:
-    """Vocabulary IRI for an ``SDG.*`` code. Exact; not a search."""
+    """Published SKOS IRI for an ``SDG.*`` code.
+
+    The fragment drops the ``SDG.`` prefix and turns dots into
+    underscores. The IRI must be a ``skos:Concept`` in the published
+    vocabulary. An unpublished string is not a business term.
+    """
     text = (code or "").strip()
     if not text.startswith("SDG."):
         return None
     fragment = text[4:].replace(".", "_")
     if not _FRAGMENT.fullmatch(fragment):
         return None
-    return _IRI_PREFIX + fragment
+    iri = _IRI_PREFIX + fragment
+    if iri not in published_concept_iris():
+        return None
+    return iri
 
 
 def load_generators(source: str) -> dict[str, Callable]:
@@ -112,7 +143,7 @@ def accept_generators(
         if row is None:
             problems.append(f"{iri} is not a requested IRI")
             continue
-        reason = _reject_reason(generate, row)
+        reason = _reject_reason(generate, row, iri)
         if reason:
             problems.append(f"{iri} {reason}")
             continue
@@ -281,19 +312,76 @@ def _iri_key(snippet: str) -> str:
     return match.group(2) if match else snippet
 
 
-def _reject_reason(generate, row: dict) -> str | None:
-    try:
-        values = {str(generate(random.Random(seed))) for seed in range(12)}
-    except Exception as exc:
-        return f"generator raised {type(exc).__name__}"
-    if len(values) < 2:
-        return "generator returned one constant"
-    if any(not value.strip() or len(value) > 80 for value in values):
-        return "generator returned an empty or oversized value"
+def relational_table_problem(
+    value,
+    iri: str,
+    *,
+    label: str = "",
+    description: str = "",
+) -> str | None:
+    """Why ``value`` is not one synthetic table for ``iri``."""
+    if not isinstance(value, dict):
+        return "generator must return a table"
+    table = value.get("table")
+    columns = value.get("columns")
+    if not isinstance(table, str) or not table.strip() or len(table) > 80:
+        return "table name is empty or oversized"
+    if not isinstance(columns, list) or len(columns) < 2:
+        return "table needs the labeled column and a sibling"
+    labeled = 0
+    seen_names: set[str] = set()
+    for column in columns:
+        if not isinstance(column, dict):
+            return "column is not a record"
+        name = column.get("name")
+        cells = column.get("values")
+        if not isinstance(name, str) or not name.strip() or name in seen_names:
+            return "column name is empty or repeated"
+        seen_names.add(name)
+        if not isinstance(cells, list) or not cells:
+            return "column has no values"
+        if any(
+            not isinstance(item, str) or not item.strip() or len(item) > 80
+            for item in cells
+        ):
+            return "column value is empty or oversized"
+        column_iri = str(column.get("iri") or "")
+        if column_iri == iri:
+            labeled += 1
+        elif column_iri:
+            return "a sibling column carries a different IRI"
+        if label and all(item.startswith(label) for item in cells):
+            return "generator repeats the label"
+        if description and any(item in description and len(item) > 24 for item in cells):
+            return "generator copies the description"
+    if labeled != 1:
+        return "exactly one column carries the IRI"
+    return None
+
+
+def _labeled_values(value: dict, iri: str) -> list[str]:
+    values: list[str] = []
+    for column in value["columns"]:
+        if str(column.get("iri") or "") == iri:
+            values.extend(column["values"])
+    return values
+
+
+def _reject_reason(generate, row: dict, iri: str) -> str | None:
     label = str(row.get("label") or "")
     description = str(row.get("description") or "")
-    if label and all(value.startswith(label) for value in values):
-        return "generator repeats the label"
-    if description and any(value in description and len(value) > 24 for value in values):
-        return "generator copies the description"
+    seen: set[str] = set()
+    try:
+        for seed in range(12):
+            value = generate(random.Random(seed))
+            problem = relational_table_problem(
+                value, iri, label=label, description=description,
+            )
+            if problem:
+                return problem
+            seen.update(_labeled_values(value, iri))
+    except Exception as exc:
+        return f"generator raised {type(exc).__name__}"
+    if len(seen) < 2:
+        return "generator returned one constant"
     return None
