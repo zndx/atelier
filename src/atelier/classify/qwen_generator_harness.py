@@ -64,10 +64,8 @@ def write_generator_pack(
     _write_ontology(dest / "ontology.csv", batch)
     codes = tuple(row["code"] for row in batch)
     (dest / "TASK.md").write_text(_task(codes), encoding="utf-8")
-    (dest / "installed.py").write_text(
-        installed_source or "import random\n\nGENERATORS = {\n}\n",
-        encoding="utf-8",
-    )
+    iris = sorted(load_generators(installed_source)) if installed_source.strip() else []
+    (dest / "installed.py").write_text(_installed_listing(iris), encoding="utf-8")
     (dest / "request.json").write_text(
         json.dumps({"codes": list(codes)}, indent=2) + "\n",
         encoding="utf-8",
@@ -179,6 +177,14 @@ def _task(codes: tuple[str, ...]) -> str:
     lines.extend(f"- {code}" for code in codes)
     lines.append("")
     return "\n".join(lines)
+
+
+def _installed_listing(iris: list[str]) -> str:
+    """IRIs already accepted. Generator bodies stay out of the model pack."""
+    lines = ["INSTALLED = ("]
+    lines.extend(f"    {iri!r}," for iri in iris)
+    lines.append(")")
+    return "\n".join(lines) + "\n"
 
 
 def read_code_list(text: str) -> list[str]:

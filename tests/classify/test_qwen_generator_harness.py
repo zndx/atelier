@@ -89,6 +89,9 @@ def test_pack_lists_the_exact_iri(tmp_path: Path) -> None:
     assert "slot_ref" not in ontology
     assert "naming_map" not in ontology
     assert "example_values" not in ontology
+    installed_text = (dest / "installed.py").read_text(encoding="utf-8")
+    assert installed_text.startswith("INSTALLED = (")
+    assert "lambda" not in installed_text
     assert list(dest.rglob("*.parquet")) == []
     argv = generator_argv(dest)
     assert argv[argv.index("-m") + 1] == PROVIDERS["local"]
@@ -217,6 +220,30 @@ def test_incorporate_installs_only_the_requested_iri(tmp_path: Path) -> None:
         PARENTING,
         PDF_EXPORT,
     ]
+
+
+def test_pack_lists_installed_iris_without_generator_bodies(tmp_path: Path) -> None:
+    installed = tmp_path / "have.py"
+    install_generators([
+        f'''"{_IRI}": lambda rng: {{
+        "table": f"care_placement_{{rng.randint(10, 99)}}",
+        "columns": [
+            {{"name": "caregiver_role", "values": [f"primary-{{rng.randint(10, 99)}}"], "iri": "{_IRI}"}},
+            {{"name": "started_on", "values": ["2019-04-01"]}},
+        ],
+    }}''',
+    ], installed)
+    annotations = tmp_path / "annotations.csv"
+    write_annotations(annotations, [PARENTING, PDF_EXPORT])
+    dest, codes = write_generator_pack(
+        tmp_path / "work", annotations, [PARENTING, PDF_EXPORT],
+        limit=5, installed=installed,
+    )
+    text = (dest / "installed.py").read_text(encoding="utf-8")
+    assert codes == (PDF_EXPORT,)
+    assert _IRI in text
+    assert "lambda" not in text
+    assert "care_placement" not in text
 
 
 def test_codes_file_selects_one_target(tmp_path: Path, capsys) -> None:

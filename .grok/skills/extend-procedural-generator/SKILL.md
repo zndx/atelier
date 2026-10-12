@@ -14,7 +14,7 @@ allowed-tools: read_file, write, list_dir
 ## Read
 
 1. Read the extend-procedural-generator skill, then `ontology.csv`, `TASK.md`, and `installed.py`.
-2. `installed.py` holds IRIs that are already accepted. Do not repeat them.
+2. `installed.py` is a tuple named `INSTALLED` of IRIs that are already accepted. Do not repeat them.
 
 ## Write
 
