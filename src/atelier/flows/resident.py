@@ -107,9 +107,26 @@ def load_sweep_samples(cfg: Any, source_id: str):
         from atelier.classify.sampler import load_sample_source
 
         return load_sample_source()
+    if source_id == "projected-holdout":
+        from atelier.classify.filesystem_source import load_filesystem_source
+        from atelier.classify.insitu_corpus import holdout_tables_dir
+
+        holdout = holdout_tables_dir(getattr(cfg, "artifact_root", "build"))
+        if not any(holdout.glob("*.csv")):
+            raise RuntimeError(
+                "projected holdout has no tables under "
+                f"{holdout}. Run precondition so the relational split "
+                "is written."
+            )
+        return load_filesystem_source(
+            str(holdout),
+            sample_size=sample_size,
+            database=source_id,
+        )
     raise RuntimeError(
         "decisions shard has no sdg-corpora sample. "
-        f"source_id={source_id!r}. Run `just sdg-sample`."
+        f"source_id={source_id!r}. Run `just sdg-sample`, or pass "
+        "source-id projected-holdout after precondition."
     )
 
 

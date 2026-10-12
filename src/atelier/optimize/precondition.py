@@ -12,15 +12,15 @@ automated repair pass, executed as the ``PRECONDITIONING`` FSM phase:
    the vocabulary signature, and the head registry row stores
    ``vocab_sig`` directly.  A vocabulary change (or an sdg-corpora pin
    bump that changes the sample vocabulary) automatically invalidates.
-2. **Enrich → collection** — when the local sdg-corpora checkout
-   labels columns in this taxonomy, prototype text is those column
-   values (``OntologyLabelGenerator``). Otherwise LLM-enrich the
-   vocabulary (``ClassifyBackedEnrichmentGenerator``). ColBERT-encode,
-   upsert to Qdrant, register + promote the collection.
-3. **Corpus → head** — when that checkout labels columns in this
-   taxonomy, train on those rows. Otherwise synthesize a corpus from
-   the enrichment payloads. ModernBERT-encode, fit the factorized
-   NHSVM, and promote the head to ``current``.
+2. **Enrich → collection** — prototype text is synthesized in situ
+   from the ontology (``InSituPrototypeGenerator``). The projected
+   relational tables are split first; codes the support half barely
+   names are given more synthetic values. ColBERT-encode, upsert to
+   Qdrant, register + promote the collection.
+3. **Corpus → head** — train on those same in-situ synthetic rows.
+   ModernBERT-encode, fit the factorized NHSVM, and promote the head
+   to ``current``. The holdout half of the projected tables is the
+   classification target (``projected-holdout``).
 
 Every stage is idempotent by artifact inspection and **fails loudly**:
 any enrichment row failure, any training-label mismatch, any registry
@@ -198,29 +198,25 @@ def build_semantic_collection(
     from qdrant_client import QdrantClient
 
     from atelier.classify.colbert_encoder import get_encoder, warmup
-    from atelier.classify.ontology_corpus import (
-        OntologyCorpusError,
-        ontology_generator,
+    from atelier.classify.insitu_corpus import (
+        InSituError,
+        InSituPrototypeGenerator,
+        prepare_insitu,
     )
     from atelier.db.dao import AtelierDao
-    from atelier.enrichment.llm_generator import (
-        ClassifyBackedEnrichmentGenerator,
-    )
     from atelier.enrichment.loop import EnrichmentLoopConfig, run_enrichment
     from atelier.enrichment.qdrant_writer import collection_name_for
 
     aug_version = _augmentation_version(vocab_sig)
     rows = _category_rows(category_set)
 
-    # The local sdg-corpora checkout supplies ontology prototypes when
-    # its column labels intersect this taxonomy. No intersection keeps
-    # the LLM generator. A missing or unreadable checkout fails closed.
+    # Prototypes are synthetic. The support half of the projected
+    # tables only decides which ontology codes to amplify.
     try:
-        generator = ontology_generator(cfg, category_set)
-    except (OntologyCorpusError, FileNotFoundError) as exc:
+        plan = prepare_insitu(category_set, _REPO_ROOT / cfg.artifact_root)
+    except InSituError as exc:
         raise PreconditionError(str(exc)) from exc
-    if generator is None:
-        generator = ClassifyBackedEnrichmentGenerator(cfg)
+    generator = InSituPrototypeGenerator(plan)
     warmup()
     encoder = get_encoder()
 
@@ -328,65 +324,21 @@ def build_semantic_collection(
 
 # ── Stage: corpus → NHSVM head ───────────────────────────────────
 
-def _corpus_rows_from_synth(
-    corpus_dir: Path, table_metadata: list[dict],
-) -> list[Any]:
-    """Adapt generated synth CSVs to NHSVM training Rows.
-
-    Iterates per-CSV (headers become ``siblings_full``) rather than
-    using the flat loader, so sibling context reflects actual table
-    membership.
-    """
-    import csv as csv_mod
-
-    from atelier.classify.ml_train import _infer_column_type
-    from atelier.optimize.svm.reflect import Row
-
-    rows: list[Any] = []
-    for meta in table_metadata:
-        csv_path = corpus_dir / f"{meta['table_name']}.csv"
-        if not csv_path.is_file():
-            raise PreconditionError(
-                f"Corpus table {csv_path} missing — generation reported "
-                f"it but the file is absent."
-            )
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv_mod.DictReader(f)
-            headers = reader.fieldnames or []
-            data = list(reader)
-        for col, code in (meta.get("reference_labels") or {}).items():
-            values = [r.get(col, "") for r in data if r.get(col)]
-            rows.append(Row(
-                table=meta["table_name"],
-                column=col,
-                column_type=_infer_column_type(values[:10]) or "object",
-                sample_values=values[:8],
-                siblings_full=[h for h in headers if h != col],
-                mnemonic="",
-                code=code,
-            ))
-    return rows
-
-
 def build_nhsvm_head(
     cfg, category_set, *, taxonomy_id: str, vocab_sig: str,
     heartbeat: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Train + promote an NHSVM head.
+    """Train + promote an NHSVM head from in-situ synthetic rows.
 
-    A configured Aegir release trains on ``reference_code``. Otherwise
-    the corpus is synthesized from enrichment ``prototype_values``.
     Returns the registry row dict.  Raises ``PreconditionError`` on
     empty corpus, label mismatch, or registry inconsistency.
     """
     import numpy as np
 
-    from atelier.classify.enrichment_loader import load_enrichment_payloads
     from atelier.classify.factorized_nhsvm import (
         NHSVMHeadAdapter,
         fit_factorized_nhsvm,
     )
-    from atelier.classify.synth import generate_user_taxonomy_corpus
     from atelier.optimize.svm.encoder import encode_modernbert
     from atelier.optimize.svm.promote import promote_head
     from atelier.optimize.svm.reflect import build_texts_and_labels
@@ -399,33 +351,22 @@ def build_nhsvm_head(
     if heartbeat:
         heartbeat({"sub_phase": "corpus", "current": 0, "total": 1})
 
-    from atelier.classify.ontology_corpus import (
-        OntologyCorpusError,
-        labeled_rows_from_corpora,
-    )
+    from atelier.classify.insitu_corpus import InSituError, prepare_insitu
 
     corpus_dir = (_REPO_ROOT / cfg.artifact_root / "svm_training"
                   / "precondition" / f"{taxonomy_id}_{vocab_sig[:10]}")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        rows = labeled_rows_from_corpora(category_set)
-    except (OntologyCorpusError, FileNotFoundError) as exc:
+        plan = prepare_insitu(category_set, _REPO_ROOT / cfg.artifact_root)
+    except InSituError as exc:
         raise PreconditionError(str(exc)) from exc
+    rows = plan.rows
     if not rows:
-        payloads = load_enrichment_payloads(cfg=cfg, taxonomy_id=taxonomy_id)
-        table_metadata, coverage = generate_user_taxonomy_corpus(
-            category_set, payloads, corpus_dir, seed=42,
+        raise PreconditionError(
+            f"In-situ synthesis produced zero NHSVM rows for "
+            f"taxonomy {taxonomy_id!r}."
         )
-        rows = _corpus_rows_from_synth(corpus_dir, table_metadata)
-        if not rows:
-            missing = [c for c, src in coverage.items() if src == "missing"]
-            raise PreconditionError(
-                f"Corpus generation produced zero training rows for "
-                f"taxonomy {taxonomy_id!r} ({len(missing)} of "
-                f"{len(coverage)} codes had no generator).  Enrichment "
-                f"payloads lack prototype_values — inspect the collection."
-            )
 
     corpus_file = corpus_dir / "training_rows.jsonl"
     corpus_file.write_text("\n".join(
