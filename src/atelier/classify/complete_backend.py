@@ -1,7 +1,9 @@
-"""Classification LLM via Engine/Complete (thinking / instruct).
+"""Thinking revisit via Engine/Complete.
 
 No Anthropic, Bedrock, or Agent SDK. Structured JSON through Complete
-json_schema. Revisit passes use thinking; first sweep uses instruct.
+json_schema. Revisit passes use thinking. A call without revisit
+context stays on instruct, which is an operating profile of the same
+Qwen process. The decisions sweep does not use this backend.
 """
 
 from __future__ import annotations
@@ -19,8 +21,7 @@ from atelier.classify.llm_backend import (
     _parse_classifications,
     _parse_structured_response,
 )
-from atelier.flows.classify_phases import llm_capability_for_sweep
-from atelier.flows.lattice import complete as lattice_complete
+from atelier.flows.lattice import assert_complete_capability, complete as lattice_complete
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class CompleteLLMBackend(LLMBackend):
     ) -> LLMResponse:
         user_prompt = build_batch_user_prompt(samples, revisit_context, table_name)
         expected_names = [s.name for s in samples]
-        cap = llm_capability_for_sweep(revisit=bool(revisit_context))
+        cap = assert_complete_capability("thinking" if revisit_context else "instruct")
         fn = self._complete_fn or lattice_complete
         result = fn(
             user_prompt,

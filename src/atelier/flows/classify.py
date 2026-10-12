@@ -2,7 +2,8 @@
 
 K8s (@kubernetes) is preferred on the discovered Signals Metaflow
 instance. Plain @step is the same graph and is the fallback while K8s
-is unavailable. LLM is Engine/Complete thinking|instruct only.
+is unavailable. The sweep is Engine/Decide capability decisions. The
+revisit is Engine/Complete capability thinking.
 """
 
 from __future__ import annotations
@@ -125,7 +126,7 @@ class ClassificationFlow(AtelierFlow):
 
     @step
     def sweep(self):
-        """LLM_SWEEP ⇄ VALIDATING via Complete instruct (thinking on revisit)."""
+        """Decisions sweep. The thinking revisit is the next step."""
         from atelier.config import load_config
         from atelier.flows.classify_phases import entity_key, predicted_code
         from atelier.flows.resident import load_classification_rows, run_dst_pipeline
@@ -136,6 +137,7 @@ class ClassificationFlow(AtelierFlow):
             load_config(), str(self.sample_source_id),
             skip_precondition=skip,
             taxonomy_id=train_id,
+            include_revisit=False,
         )
         if result.get("state") == "ERROR":
             raise RuntimeError(result.get("error") or "classification pipeline ERROR")
@@ -155,6 +157,30 @@ class ClassificationFlow(AtelierFlow):
             self.target_keys = [
                 c["qualified_name"] for c in self.classifications if c["qualified_name"]
             ]
+        self.next(self.revisit)
+
+    @step
+    def revisit(self):
+        """Thinking revisit via Engine/Complete over the decisions labels."""
+        from atelier.config import load_config
+        from atelier.flows.resident import run_dst_revisit
+
+        path = str(getattr(self, "result_path", "") or "")
+        if path:
+            revisited = run_dst_revisit(load_config(), path)
+            by_bare = {
+                row["column_name"]: row["predicted_code"]
+                for row in revisited["classifications"]
+                if row.get("predicted_code")
+            }
+            updated = []
+            for row in self.classifications:
+                bare = str(row.get("qualified_name") or "").split(".")[-1]
+                code = by_bare.get(bare)
+                if code:
+                    row = {**row, "predicted_code": code}
+                updated.append(row)
+            self.classifications = updated
         self.next(self.fuse)
 
     @step

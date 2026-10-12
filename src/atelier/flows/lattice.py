@@ -1,7 +1,8 @@
 """Signals lattice helpers for Metaflow steps.
 
-LLM is Engine/Complete thinking|instruct (OIP). No Anthropic, no Bedrock,
-no referee. The peer is discovered from Status (CapabilityForwarder).
+The sweep is Engine/Decide capability ``decisions``. The revisit is
+Engine/Complete capability ``thinking``. No Anthropic, no Bedrock, no
+referee. The peer is discovered from Status (CapabilityForwarder).
 """
 
 from __future__ import annotations
@@ -137,6 +138,102 @@ def complete(
     )
 
 
+@dataclass(frozen=True)
+class LatticeDecision:
+    id: str
+    model: str
+    answers: dict[str, Any]
+    diagnostics: dict[str, Any]
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+    fulfilled_by: str
+
+
+def decide(
+    state: Any,
+    questions: dict[str, dict[str, Any]],
+    *,
+    instructions: str = "",
+    cache_salt: str = "",
+    timeout_s: float = 180.0,
+    forwarder: Any | None = None,
+) -> LatticeDecision:
+    """Blocking Engine/Decide. Does not call Complete and does not fall back to thinking.
+
+    ``state`` is JSON-encoded. A string state is a JSON string. Each
+    question carries ``type``, ``instructions``, and ``criteria``.
+    ``cache_salt`` stays empty: d3_server rejects it.
+    """
+    from zndx.engine.v1 import engine_pb2 as zpb
+
+    from atelier.engine.forwarder import CapabilityForwarder
+
+    if (cache_salt or "").strip():
+        raise RuntimeError(
+            f"{GURU_NOCAP} Decide does not send cache_salt "
+            "(#EP.00000024.BADDECISION)."
+        )
+    req = zpb.DecideRequest(
+        capability="decisions",
+        state_json=json.dumps(state),
+        instructions=instructions or "",
+        cache_salt="",
+    )
+    for qid, spec in questions.items():
+        if not isinstance(spec, dict):
+            raise RuntimeError(
+                f"{GURU_NOCAP} question {qid!r} must be an object with "
+                "type, instructions, and criteria"
+            )
+        criteria = spec.get("criteria", None)
+        req.questions.add(
+            id=str(qid),
+            type=str(spec.get("type") or ""),
+            instructions=str(spec.get("instructions") or ""),
+            criteria_json="null" if criteria is None else json.dumps(criteria),
+        )
+    fwd = forwarder if forwarder is not None else CapabilityForwarder()
+    try:
+        route = fwd.resolve("decisions")
+    except NoPeerServes as e:
+        raise RuntimeError(
+            f"{GURU_NOCAP} no peer advertises healthy capability='decisions'.\n"
+            f"  {e}\n"
+            "  Begin a workload that requires the decisions capability. "
+            "Decide does not start the replicas."
+        ) from e
+    try:
+        resp = fwd.decide(req, timeout=timeout_s)
+    except Exception as e:
+        raise RuntimeError(
+            f"{GURU_NOLATTICE} Engine/Decide failed capability='decisions' "
+            f"via {route.label}: {e}\n"
+            "  decisions keeps thinking resident and serves vllm-sr/d3-flash."
+        ) from e
+    try:
+        answers = json.loads(resp.answers_json or "{}")
+        diagnostics = json.loads(resp.diagnostics_json or "{}")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"{GURU_NOCAP} Decide returned answers that are not JSON: {e}"
+        ) from e
+    if not isinstance(answers, dict) or not answers:
+        raise RuntimeError(
+            f"{GURU_NOCAP} Decide returned no answers for model={resp.model!r}."
+        )
+    return LatticeDecision(
+        id=resp.id or "",
+        model=(resp.model or "").strip(),
+        answers=answers,
+        diagnostics=diagnostics if isinstance(diagnostics, dict) else {},
+        input_tokens=int(resp.input_tokens or 0),
+        output_tokens=int(resp.output_tokens or 0),
+        latency_ms=float(resp.latency_ms or 0.0),
+        fulfilled_by=resp.fulfilled_by or route.label,
+    )
+
+
 __all__ = (
     "COMPLETE_CAPABILITIES",
     "GURU_NOLATTICE",
@@ -146,8 +243,10 @@ __all__ = (
     "GURU_UNHEALTHY",
     "GURU_WRONGMODEL",
     "LatticeComplete",
+    "LatticeDecision",
     "PlatformMetaflowError",
     "assert_complete_capability",
     "complete",
+    "decide",
     "require_signals_metaflow",
 )

@@ -10,8 +10,11 @@ from atelier.engine.s2s import local_response
 from atelier.engine.sentinel_yield import yield_workload
 from atelier.engine.workload_catalog import (
     DAG_ID,
+    DECISIONS_MODEL,
     KIND,
+    THINKING_MODEL,
     classify_yk_claims,
+    decisions_sweep_record,
     entries,
     schedule_hints,
 )
@@ -22,6 +25,19 @@ def test_classify_claims_are_light_not_heavy_or_unbudgeted_embedding() -> None:
     assert claims == ((LIGHT.queue, 1),)
     assert all(leaf != "root.internal.inference.heavy" for leaf, _ in claims)
     assert all("embedding" not in leaf for leaf, _ in claims)
+
+
+def test_decisions_sweep_record_keeps_thinking_and_two_light_replicas() -> None:
+    record = decisions_sweep_record()
+    assert record["sweep"]["capability"] == "decisions"
+    assert record["sweep"]["model"] == DECISIONS_MODEL == "vllm-sr/d3-flash"
+    assert record["sweep"]["replicas"] == ["d3-flash-0", "d3-flash-1"]
+    claims = {leaf: gpu for leaf, gpu in record["sweep"]["claims"]}
+    assert claims["root.internal.inference.heavy"] == 4
+    assert claims["root.internal.inference.light"] == 2
+    assert "root.internal.inference.heavy" not in record["sweep"]["precludes"]
+    assert record["revisit"] == {"capability": "thinking", "model": THINKING_MODEL}
+    assert entries()[0].enabled is False
 
 
 def test_catalogue_paused_metaflow_dag() -> None:

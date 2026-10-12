@@ -3015,7 +3015,13 @@ def fsm_start(source_id: str | None = None):
         except Exception:
             logger.exception("nautilus attach failed (non-fatal)")
 
-        return {"started": True, "source_id": source_id}
+        from atelier.engine.workload_catalog import decisions_sweep_record
+
+        return {
+            "started": True,
+            "source_id": source_id,
+            "decisions_workload": decisions_sweep_record(),
+        }
     except Exception as exc:
         return _error_envelope(f"FSM start failed: {exc}")
 

@@ -29,7 +29,7 @@ log = logging.getLogger("atelier.engine.forwarder")
 
 GURU_NOPEER = "#AT.00000001.NOPEER"
 DEFAULT_CAPABILITY = "instruct"
-ROUTE_CAPABILITIES: tuple[str, ...] = ("instruct", "thinking")
+ROUTE_CAPABILITIES: tuple[str, ...] = ("instruct", "thinking", "decisions")
 
 
 class NoPeerServes(RuntimeError):
@@ -80,11 +80,12 @@ class CapabilityForwarder:
     """Test seams: ``peers`` (→ [(project, target)]), ``status_fn`` (target → StatusResponse),
     ``forward_fn`` (target, request, timeout → CompleteResponse)."""
 
-    def __init__(self, *, peers=None, status_fn=None, forward_fn=None, ttl_s: float = 30.0,
+    def __init__(self, *, peers=None, status_fn=None, forward_fn=None, decide_fn=None, ttl_s: float = 30.0,
                  status_timeout_s: float = 5.0, timeout_s: float = 1200.0, clock=time.monotonic) -> None:
         self._peers = peers or _default_peers
         self._status_fn = status_fn or self._status_over_grpc
         self._forward_fn = forward_fn or self._forward_over_grpc
+        self._decide_fn = decide_fn or self._decide_over_grpc
         self._ttl, self._status_timeout, self._timeout, self._clock = ttl_s, status_timeout_s, timeout_s, clock
         self._cache: dict[str, _Cached] = {}
         self._channels: dict[str, grpc.Channel] = {}
@@ -103,6 +104,9 @@ class CapabilityForwarder:
 
     def _forward_over_grpc(self, target: str, request: zpb.CompleteRequest, timeout: float) -> zpb.CompleteResponse:
         return zpbg.EngineStub(self._channel(target)).Complete(request, timeout=timeout)
+
+    def _decide_over_grpc(self, target: str, request: zpb.DecideRequest, timeout: float) -> zpb.DecideResponse:
+        return zpbg.EngineStub(self._channel(target)).Decide(request, timeout=timeout)
 
     def _status(self, target: str) -> "zpb.StatusResponse | None":
         now = self._clock()
@@ -168,6 +172,15 @@ class CapabilityForwarder:
         if not resp.fulfilled_by:
             resp.fulfilled_by = f"forwarded@{route.label}"
         return resp
+
+    def decide(self, request: zpb.DecideRequest, *, timeout: "float | None" = None) -> zpb.DecideResponse:
+        """Forward Engine/Decide. The capability on the request is ``decisions``."""
+        route = self.resolve("decisions")
+        try:
+            return self._decide_fn(route.target, request, timeout or self._timeout)
+        except grpc.RpcError:
+            self.invalidate(route.target)
+            raise
 
     def complete(self, capability: str, prompt: str, system_prompt: str = "", max_tokens: int = 512,
                  temperature: float = 0.7, json_schema: str = "") -> dict:

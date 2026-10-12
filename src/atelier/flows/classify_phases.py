@@ -17,13 +17,14 @@ STEP_GRAPH: tuple[tuple[str, str | None], ...] = (
     ("probe", "precondition"),
     ("precondition", "load"),
     ("load", "sweep"),
-    ("sweep", "fuse"),
+    ("sweep", "revisit"),
+    ("revisit", "fuse"),
     ("fuse", "evaluate"),
     ("evaluate", "end"),
     ("end", None),
 )
 
-SWEEP_CAPABILITY = "instruct"
+SWEEP_CAPABILITY = "decisions"
 REVISIT_CAPABILITY = "thinking"
 
 
@@ -86,6 +87,9 @@ def probe_requires_precondition(status: Mapping[str, Any] | Any) -> bool:
 
 
 def llm_capability_for_sweep(*, revisit: bool) -> str:
-    cap = REVISIT_CAPABILITY if revisit else SWEEP_CAPABILITY
-    assert cap in COMPLETE_CAPABILITIES
-    return cap
+    """Sweep is ``decisions``. Revisit stays on Complete ``thinking``."""
+    if revisit:
+        cap = REVISIT_CAPABILITY
+        assert cap in COMPLETE_CAPABILITIES
+        return cap
+    return SWEEP_CAPABILITY

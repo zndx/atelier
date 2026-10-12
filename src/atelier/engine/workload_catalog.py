@@ -23,6 +23,39 @@ CRON = "0 8 * * *"
 HORIZON_S = 14400  # 4h — textproto net_seconds
 
 
+DECISIONS_MODEL = "vllm-sr/d3-flash"
+THINKING_MODEL = "Qwen/Qwen3.8-27B"
+HEAVY_QUEUE = "root.internal.inference.heavy"
+
+
+def decisions_sweep_record() -> dict[str, Any]:
+    """Workload the decisions sweep requires. Catalogue data, not a live claim.
+
+    Thinking stays on heavy. Two ``vllm-sr/d3-flash`` replicas take light.
+    ``task.sdg_classify`` stays paused; this record is what a run names.
+    """
+    return {
+        "sweep": {
+            "capability": "decisions",
+            "model": DECISIONS_MODEL,
+            "replicas": ["d3-flash-0", "d3-flash-1"],
+            "claims": [
+                [HEAVY_QUEUE, 4],
+                [LIGHT.queue, 2],
+            ],
+            "precludes": [
+                "root.internal.inference.agent-rtc",
+                "root.internal.inference.medium",
+                "root.internal.inference.extract",
+            ],
+        },
+        "revisit": {
+            "capability": "thinking",
+            "model": THINKING_MODEL,
+        },
+    }
+
+
 def classify_yk_claims() -> tuple[tuple[str, int], ...]:
     """YK leaves this workflow expects. Phase RequestQueueShare may zero a floor.
 
@@ -58,8 +91,8 @@ WORKLOAD_CATALOG: tuple[WorkloadEntry, ...] = (
         kind=KIND,
         cron=CRON,
         description=(
-            "SDG classification: probe-gated ColBERT-Zero MaxSim + ModernBERT "
-            "NHSVM + DST; Complete instruct/thinking"
+            "SDG classification: decisions sweep (vllm-sr/d3-flash) then "
+            "thinking revisit; DST fusion. Catalogue stays paused."
         ),
         runner=RUNNER_METAFLOW,
         horizon_s=HORIZON_S,

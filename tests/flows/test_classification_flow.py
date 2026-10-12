@@ -54,11 +54,13 @@ def test_probe_skips_expensive_precondition_when_final() -> None:
     assert probe_requires_precondition({"final": False})
 
 
-def test_sweep_uses_instruct_revisit_uses_thinking() -> None:
-    assert llm_capability_for_sweep(revisit=False) == "instruct"
+def test_sweep_uses_decisions_revisit_uses_thinking() -> None:
+    assert llm_capability_for_sweep(revisit=False) == "decisions"
     assert llm_capability_for_sweep(revisit=True) == "thinking"
     assert_complete_capability("instruct")
     assert_complete_capability("thinking")
+    with pytest.raises(RuntimeError, match=GURU_NOCAP):
+        assert_complete_capability("decisions")
     with pytest.raises(RuntimeError, match=GURU_NOCAP):
         assert_complete_capability("referee")
 
@@ -93,6 +95,7 @@ def test_run_dst_pipeline_binds_reference_taxonomy(monkeypatch: pytest.MonkeyPat
         captured["category_set"] = kw.get("category_set")
         captured["cfg_tax"] = getattr(cfg, "classify_taxonomy_id", None)
         captured["llm"] = kw.get("llm_backend")
+        captured["include_revisit"] = kw.get("include_revisit")
         return {"state": "OK"}
 
     monkeypatch.setattr(
@@ -120,7 +123,17 @@ def test_run_dst_pipeline_binds_reference_taxonomy(monkeypatch: pytest.MonkeyPat
     assert captured["taxonomy_id"] == "sdg-corpora/b24ef9f60660_reference"
     assert captured["cfg_tax"] == "sdg-corpora/b24ef9f60660_reference"
     assert captured["category_set"] == {"vocab": "sdg-corpora/b24ef9f60660_reference"}
-    assert captured["llm"] == "backend"
+    assert captured["llm"] is None
+    assert captured["include_revisit"] is True
+
+    run_dst_pipeline(
+        AtelierConfig(),
+        "sdg-corpora/b24ef9f60660_macbook",
+        skip_precondition=True,
+        taxonomy_id="sdg-corpora/b24ef9f60660_reference",
+        include_revisit=False,
+    )
+    assert captured["include_revisit"] is False
 
 
 def test_start_refuses_local_datastore(monkeypatch: pytest.MonkeyPatch) -> None:

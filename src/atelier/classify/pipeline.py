@@ -508,6 +508,7 @@ def run_classification_pipeline(
     llm_backend=None,
     vocab_uri: str | None = None,
     taxonomy_id: str | None = None,
+    include_revisit: bool = True,
 ) -> dict[str, Any]:
     """Run the classification pipeline with LLM-driven convergence.
 
@@ -731,10 +732,24 @@ def run_classification_pipeline(
     # ── LLM backend resolution ────────────────────────────────
     # The pipeline cannot function without an LLM.  Resolve early
     # so callers get a clear error before any FSM state is created.
-    if llm_backend is None:
-        from atelier.classify.llm_backend import create_backend_from_cfg
-        # create_backend_from_cfg raises ValueError when no creds
-        llm_backend = create_backend_from_cfg(cfg)
+    injected_backend = llm_backend is not None
+    if injected_backend:
+        sweep_backend = llm_backend
+        revisit_backend = llm_backend
+    else:
+        from atelier.classify.complete_backend import CompleteLLMBackend
+        from atelier.classify.decisions_backend import DecisionsBackend
+        from atelier.flows.lattice import GURU_NOCAP
+
+        sweep_backend = DecisionsBackend.from_cfg(cfg)
+        revisit_backend = CompleteLLMBackend.from_cfg(cfg)
+        if not sweep_backend.health_check():
+            raise RuntimeError(
+                f"{GURU_NOCAP} decisions is not healthy. "
+                "Begin a Gaius workload that requires the decisions capability. "
+                "The sweep does not fall back to instruct, and Decide does not start the replicas."
+            )
+        llm_backend = sweep_backend
 
     # ── Embedding acceleration ────────────────────────────────
     # Multi-GPU sharding kicks in automatically when preflight_gpu()
@@ -754,6 +769,8 @@ def run_classification_pipeline(
         shard_threshold=cfg.classify_gpu_shard_threshold,
     )
 
+    from atelier.engine.workload_catalog import decisions_sweep_record
+
     run = fsm.start_run(
         config={
             "connection_name": connection_name,
@@ -761,6 +778,8 @@ def run_classification_pipeline(
             "sample_size": sample_size,
             "tables_limit": tables_limit,
             "source_id": source_id,
+            "decisions_workload": decisions_sweep_record(),
+            "sweep_capability": "decisions" if not injected_backend else "injected",
         },
         source_id=source_id,
     )
@@ -1417,9 +1436,14 @@ def run_classification_pipeline(
             else column_names
         )
 
+        bind_taxonomy = getattr(sweep_backend, "bind_taxonomy", None)
+        if callable(bind_taxonomy):
+            bind_taxonomy(category_set)
+
         fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
             "columns_total": total_columns,
             "phase": "llm_sweep",
+            "sweep_capability": "decisions" if not injected_backend else "injected",
             "mc_sampled": len(sweep_columns),
         })
 
@@ -1471,7 +1495,7 @@ def run_classification_pipeline(
                 pass  # never let progress reporting abort the sweep
 
         _llm_sweep(
-            state, boot_cfg, llm_backend, system_prompt,
+            state, boot_cfg, sweep_backend, system_prompt,
             sweep_columns, samples_by_name, column_table,
             category_count=len(category_set.categories),
             progress_callback=_sweep_progress,
@@ -1605,8 +1629,14 @@ def run_classification_pipeline(
         # the structured tag.  None on programmatic-loop runs.
         convergence_reason_detail: str | None = None
 
-        # Agent-driven convergence (when configured and credentials available)
-        if cfg.classify_agent_enabled and (cfg.has_anthropic or cfg.has_bedrock):
+        # Agent-driven convergence (when configured and credentials available).
+        # include_revisit is false on the decisions sweep step; the
+        # thinking revisit is a later step and uses revisit_backend.
+        if (
+            include_revisit
+            and cfg.classify_agent_enabled
+            and (cfg.has_anthropic or cfg.has_bedrock)
+        ):
             from atelier.classify.agent_loop import run_agent_loop
             logger.info("Using agent-driven convergence loop")
             fsm.advance(run_id, FSMState.LLM_SWEEP, progress={
@@ -1617,7 +1647,7 @@ def run_classification_pipeline(
                 ),
             })
             run_agent_loop(
-                state, cfg, boot_cfg, llm_backend, system_prompt,
+                state, cfg, boot_cfg, revisit_backend, system_prompt,
                 column_names, samples_by_name, column_table,
                 category_set, frame, has_embeddings, discounts,
             )
@@ -1651,7 +1681,7 @@ def run_classification_pipeline(
                     state.iteration += 1
                     try:
                         _llm_revisit(
-                            state, boot_cfg, llm_backend, system_prompt,
+                            state, boot_cfg, revisit_backend, system_prompt,
                             fallback_candidates, samples_by_name,
                             column_table, category_set,
                         )
@@ -1675,7 +1705,7 @@ def run_classification_pipeline(
                 or ("agent_convergence" if state.agent_converged_reason else None)
             )
             convergence_reason_detail = state.agent_converged_reason
-        else:
+        elif include_revisit:
             # Programmatic convergence loop (default).
             #
             # The revisit candidate set is the UNION of two criteria:
@@ -1782,7 +1812,7 @@ def run_classification_pipeline(
                 revisited_this_iter: set[str] = set(disagreements)
 
                 _llm_revisit(
-                    state, boot_cfg, llm_backend, system_prompt,
+                    state, boot_cfg, revisit_backend, system_prompt,
                     disagreements, samples_by_name, column_table, category_set,
                 )
 
@@ -1911,6 +1941,8 @@ def run_classification_pipeline(
             # convergence we didn't actually achieve.
             if convergence_reason is None:
                 convergence_reason = "max_iterations_reached"
+        else:
+            convergence_reason = "sweep_only"
 
         # ── FINAL CLASSIFICATION PASS ────────────────────────────
         coverage = _coverage(state, column_names)

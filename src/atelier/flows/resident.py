@@ -87,17 +87,20 @@ def load_classification_rows(result: dict) -> list[dict]:
 def run_dst_pipeline(
     cfg: Any, source_id: str, *, skip_precondition: bool,
     taxonomy_id: str | None = None,
+    include_revisit: bool = True,
 ) -> dict:
     """DST classify the holdout ``source_id``.
 
     ``taxonomy_id`` is the artifact key (NHSVM current + Qdrant current).
     When a reference sample trained the head, pass that id so classify
     does not look up ``default`` or the holdout id.
+
+    The sweep asks capability ``decisions``. ``include_revisit`` false
+    stops before the thinking revisit so that pass can run as its own step.
     """
     import dataclasses
 
     from atelier.classify import get_fsm
-    from atelier.classify.complete_backend import CompleteLLMBackend
     from atelier.classify.pipeline import run_classification_pipeline
     from atelier.db.dao import AtelierDao
 
@@ -118,5 +121,45 @@ def run_dst_pipeline(
         source_id=source_id or None,
         category_set=cats,
         taxonomy_id=tax,
-        llm_backend=CompleteLLMBackend.from_cfg(cfg),
+        include_revisit=include_revisit,
     )
+
+
+def run_dst_revisit(cfg: Any, result_path: str) -> dict:
+    """Thinking revisit over rows the decisions sweep already wrote."""
+    from atelier.classify.complete_backend import CompleteLLMBackend
+    from atelier.classify.sampler import ColumnSample
+
+    rows = load_classification_rows({"result_path": result_path})
+    samples = []
+    context: dict[str, dict] = {}
+    for row in rows:
+        name = str(row.get("qualified_name") or row.get("column_name") or "")
+        code = str(row.get("predicted_code") or "")
+        if not name:
+            continue
+        bare = name.split(".")[-1]
+        samples.append(ColumnSample(name=bare, values=[]))
+        context[bare] = {"llm_code": code, "source": "decisions"}
+    if not samples:
+        raise RuntimeError(
+            "decisions sweep wrote no classifications to revisit "
+            f"at {result_path!r}"
+        )
+    response = CompleteLLMBackend.from_cfg(cfg).classify_batch(
+        samples,
+        "Revisit the decisions sweep labels.",
+        revisit_context=context,
+    )
+    return {
+        "state": "OK",
+        "capability": "thinking",
+        "classifications": [
+            {
+                "column_name": c.column_name,
+                "predicted_code": c.category_code or "",
+                "confidence": c.confidence,
+            }
+            for c in response.classifications
+        ],
+    }
