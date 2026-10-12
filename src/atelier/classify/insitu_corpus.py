@@ -272,12 +272,18 @@ def prepare_collection_cta(
     """Hold out whole collection directories and build the CTA plan.
 
     Table ids are ``slug/table``. ``assignments`` is the exact
-    ``(table id, column) → SKOS code`` map. Columns missing from that
-    map stay in the bundle as sibling context and are not targets.
+    ``(table id, column) → SKOS code`` map. Each target column is
+    labeled with its genus-level term, the same structural genus the
+    decisions sweep asks first, or the branching root when the path
+    has no deeper genus. Columns missing from the map stay in the
+    bundle as sibling context and are not targets.
     """
+    from atelier.classify.decisions_walk import associate_genera
+
     cells, collections = load_collection_cells(corpora, slugs=slugs)
     if not cells:
         raise InSituError("no collection tables to hold out")
+    assignments = associate_genera(assignments or {}, category_set)
     return prepare_insitu(
         category_set,
         artifact_root,

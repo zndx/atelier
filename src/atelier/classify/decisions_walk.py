@@ -67,6 +67,46 @@ def structural_genera(category_set: Any) -> list[str]:
     return genera
 
 
+def genus_term(category_set: Any, code: str) -> str | None:
+    """Genus-level SKOS term for one code.
+
+    The nearest structural genus on the path, including ``code`` when
+    it has a parent and children. A branch whose nodes have children
+    but no parent — Process, Role — is that column's genus.
+    """
+    children: Mapping[str, list[str]] = category_set.children
+    parent: Mapping[str, str | None] = category_set.parent
+    chain = [code]
+    current = parent.get(code)
+    while current:
+        chain.append(current)
+        current = parent.get(current)
+    for node in chain:
+        if children.get(node) and parent.get(node):
+            return node
+    for node in chain:
+        if children.get(node):
+            return node
+    return None
+
+
+def associate_genera(
+    assignments: Mapping[tuple[str, str], str],
+    category_set: Any,
+) -> dict[tuple[str, str], str]:
+    """Map each assigned column to its genus-level SKOS term.
+
+    A column whose code has no genus is omitted. The leaf code is not
+    the label.
+    """
+    associated: dict[tuple[str, str], str] = {}
+    for key, code in assignments.items():
+        genus = genus_term(category_set, str(code))
+        if genus:
+            associated[key] = genus
+    return associated
+
+
 def opening_codes(category_set: Any) -> list[str]:
     """The first Choice. Structural genera when the taxonomy has them."""
     genera = structural_genera(category_set)

@@ -8,6 +8,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from atelier.classify.decisions_walk import associate_genera, genus_term
 from atelier.classify.extension_patterns import code_iri
 from atelier.classify.features import FEATURE_NAMES, extract_features
 from atelier.classify.factorized_nhsvm import NHSVMHeadAdapter
@@ -71,6 +72,17 @@ def _generators() -> dict:
             code_iri(YOUNG_RESEARCHER), "study_role", "cohort",
         ),
     }
+
+
+def _genus_generators() -> dict:
+    gens = _generators()
+    gens[code_iri(PROCESS)] = relational_procedure(
+        code_iri(PROCESS), "activity", "proc",
+    )
+    gens[code_iri(ROLE)] = relational_procedure(
+        code_iri(ROLE), "bearer", "role",
+    )
+    return gens
 
 
 def _footprint(root: Path) -> None:
@@ -286,10 +298,11 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
         ("clinic/visits", "reason"): YOUNG_RESEARCHER,
         ("clinic/patients", "species"): PDF_EXPORT,
     }
+    genera = _genus_generators()
     plan = prepare_collection_cta(
         taxonomy(_FRAME), tmp_path / "build", corpora=corpora,
         assignments=assignments, holdout_collections={"clinic"},
-        extra_generators=_generators(),
+        extra_generators=genera,
         base_variants=1, amplified_variants=2, rows_per_column=2, floor=2,
     )
     assert {table for table, _column in plan.support} == {
@@ -306,10 +319,10 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
     }
     assert any(row.table.startswith("syn_") for row in plan.rows)
     synthetic = [row for row in plan.rows if row.table.startswith("syn_")]
-    assert {row.code for row in synthetic} == {PDF_EXPORT, YOUNG_RESEARCHER}
-    assert [row.code for row in synthetic].count(PDF_EXPORT) == 1
-    assert [row.code for row in synthetic].count(YOUNG_RESEARCHER) == 1
-    assert [row.code for row in plan.holdout_rows] == [PARENTING]
+    assert {row.code for row in real} == {PROCESS, ROLE}
+    assert {row.code for row in synthetic} == {PROCESS}
+    assert [row.code for row in synthetic].count(PROCESS) == 1
+    assert [row.code for row in plan.holdout_rows] == [ROLE]
     assert plan.holdout_rows[0].table.startswith("holdout_")
     assert all(row.table.startswith("syn_") for row in synthetic)
     augmented = list(
@@ -317,7 +330,7 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
     )
     assert len(augmented) == 1
     augmented_text = augmented[0].read_text(encoding="utf-8")
-    assert PARENTING not in augmented_text
+    assert ROLE not in augmented_text
     assert plan.holdout_rows[0].sample_values[0] in augmented_text
     assert "recorded_on" in augmented_text.splitlines()[0]
     years = next(row for row in real if row.column == "years")
@@ -325,7 +338,8 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
     assert "unit" in years.siblings_full
     assert set(years.siblings_full).isdisjoint({"reason", "clinic_ref", "species", "visit_ref"})
     texts, labels = build_texts_and_labels([years])
-    assert labels == [PARENTING]
+    assert labels == [ROLE]
+    assert years.code == ROLE
     assert "integer" in texts[0]
     assert "3" in texts[0]
     assert "unit" in texts[0]
@@ -342,8 +356,8 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
     )
     assert bare.rows == []
     assert bare.holdout_collections == ["clinic"]
-    partial = _generators()
-    partial.pop(code_iri(PARENTING))
+    partial = _genus_generators()
+    partial.pop(code_iri(ROLE))
     try:
         prepare_collection_cta(
             taxonomy(_FRAME), tmp_path / "partial", corpora=corpora,
@@ -351,9 +365,32 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
             extra_generators=partial, rows_per_column=1,
         )
     except InSituError as exc:
-        assert PARENTING in str(exc)
+        assert ROLE in str(exc)
     else:
         raise AssertionError("skew without a generator must fail")
+
+
+def test_each_column_is_associated_with_its_genus() -> None:
+    cats = taxonomy(_FRAME)
+    assigned = {
+        ("officers", "badge"): PDF_EXPORT,
+        ("officers", "years"): PARENTING,
+        ("officers", "duty"): YOUNG_RESEARCHER,
+    }
+    assert associate_genera(assigned, cats) == {
+        ("officers", "badge"): PROCESS,
+        ("officers", "years"): ROLE,
+        ("officers", "duty"): ROLE,
+    }
+    assert genus_term(cats, PROCESS) == PROCESS
+    assert genus_term(cats, ROLE) == ROLE
+    descriptive = "SDG.ICE.DESCRIPTIVE"
+    benefit = "SDG.ICE.DESCRIPTIVE.RETIREMENT_BENEFIT_OPTION"
+    deeper = taxonomy((
+        "SDG.GDC", "SDG.ICE", descriptive, benefit,
+    ))
+    assert genus_term(deeper, benefit) == descriptive
+    assert genus_term(deeper, descriptive) == descriptive
 
 
 def test_distribution_deficit_raises_each_side_to_the_pooled_share() -> None:
