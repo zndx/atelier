@@ -11,13 +11,17 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from atelier.flows.lattice import COMPLETE_CAPABILITIES
 
-# Graph the FlowSpec must realize (step → next). publish is terminal.
+# Graph the FlowSpec must realize (step → next). ``sweep`` is a foreach
+# onto ``sweep_shard`` (one shard per d3-flash replica). ``sweep_join``
+# is the join. publish is terminal.
 STEP_GRAPH: tuple[tuple[str, str | None], ...] = (
     ("start", "probe"),
     ("probe", "precondition"),
     ("precondition", "load"),
     ("load", "sweep"),
-    ("sweep", "revisit"),
+    ("sweep", "sweep_shard"),
+    ("sweep_shard", "sweep_join"),
+    ("sweep_join", "revisit"),
     ("revisit", "fuse"),
     ("fuse", "evaluate"),
     ("evaluate", "end"),
@@ -84,6 +88,20 @@ def probe_requires_precondition(status: Mapping[str, Any] | Any) -> bool:
     if hasattr(status, "final"):
         return not bool(status.final)
     return not bool(status.get("final")) if isinstance(status, Mapping) else True
+
+
+def merge_shard_labels(groups: Iterable[Sequence[Mapping[str, Any]]]) -> list[dict]:
+    """Join foreach shard labels. Overlap on a qualified name fails closed."""
+    merged: dict[str, dict] = {}
+    for group in groups:
+        for row in group:
+            key = str(row.get("qualified_name") or "")
+            if not key:
+                raise RuntimeError("decisions shard label is missing qualified_name")
+            if key in merged:
+                raise RuntimeError(f"decisions shards overlapped on {key}")
+            merged[key] = dict(row)
+    return [merged[key] for key in sorted(merged)]
 
 
 def llm_capability_for_sweep(*, revisit: bool) -> str:

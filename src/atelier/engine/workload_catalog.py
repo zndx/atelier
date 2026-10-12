@@ -91,8 +91,9 @@ WORKLOAD_CATALOG: tuple[WorkloadEntry, ...] = (
         kind=KIND,
         cron=CRON,
         description=(
-            "SDG classification: decisions sweep (vllm-sr/d3-flash) then "
-            "thinking revisit; DST fusion. Catalogue stays paused."
+            "SDG classification: decisions sweep fans out one Metaflow "
+            "shard per d3-flash replica, then a thinking revisit and one "
+            "DST fuse. Catalogue stays paused."
         ),
         runner=RUNNER_METAFLOW,
         horizon_s=HORIZON_S,

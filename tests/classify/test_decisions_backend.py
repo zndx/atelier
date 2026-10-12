@@ -10,8 +10,11 @@ import pytest
 from atelier.classify.belief import FrameOfDiscernment
 from atelier.classify.decisions_backend import (
     DecisionsBackend,
+    REPLICA_COUNT,
+    ReplayDecisionsBackend,
     choice_distribution,
     entity_state,
+    select_shard_columns,
 )
 from atelier.classify.decisions_walk import (
     WalkError,
@@ -257,3 +260,74 @@ def test_decide_request_is_one_choice_and_fail_closes_without_a_peer() -> None:
 
     with pytest.raises(RuntimeError, match=GURU_NOCAP):
         decide("x", {"choice": {"type": "choice", "criteria": {"A": None}}}, forwarder=_Missing())
+
+
+def test_five_entities_split_three_and_two() -> None:
+    from atelier.classify.sampler import TableSample
+
+    billing = TableSample(name="billing", columns=[
+        ColumnSample(name="invoice_id", table_name="billing"),
+        ColumnSample(name="amount", table_name="billing"),
+        ColumnSample(name="note", table_name="billing"),
+    ])
+    other = TableSample(name="other", columns=[
+        ColumnSample(name="row_id", table_name="other"),
+        ColumnSample(name="status", table_name="other"),
+    ])
+    shard0 = select_shard_columns([billing, other], 0, REPLICA_COUNT)
+    shard1 = select_shard_columns([billing, other], 1, REPLICA_COUNT)
+    assert [col.name for _table, col in shard0] == ["invoice_id", "note", "status"]
+    assert [col.name for _table, col in shard1] == ["amount", "row_id"]
+
+
+def test_parallel_walks_preserve_input_order() -> None:
+    def decide(state, questions, **_kwargs):
+        return SimpleNamespace(
+            answers={"choice": {"SDG.A": 0.9, "SDG.B": 0.1}},
+            model="vllm-sr/d3-flash",
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    backend = DecisionsBackend(
+        decide_fn=decide,
+        category_set=_taxonomy(),
+        descend_floor=0.99,
+        parallel=2,
+    )
+    response = backend.classify_batch([
+        ColumnSample(name="invoice_id", values=["INV"]),
+        ColumnSample(name="amount", values=["10"]),
+    ], "")
+    assert [item.column_name for item in response.classifications] == ["invoice_id", "amount"]
+    assert backend._parallel == 2
+
+
+def test_from_cfg_parallel_defaults_to_one_shard() -> None:
+    cfg = SimpleNamespace(
+        classify_decisions_descend_floor=0.05,
+        classify_decisions_max_calls=64,
+    )
+    assert DecisionsBackend.from_cfg(cfg)._parallel == 1
+    assert DecisionsBackend.from_cfg(cfg, parallel=REPLICA_COUNT)._parallel == 2
+
+
+def test_replay_returns_the_stored_code_without_decide() -> None:
+    backend = ReplayDecisionsBackend([{
+        "qualified_name": "billing.invoice_id",
+        "column_name": "invoice_id",
+        "predicted_code": "SDG.A.1",
+        "confidence": 0.91,
+        "alternatives": [{"code": "SDG.A", "confidence": 0.04}],
+    }])
+    sample = ColumnSample(name="invoice_id", table_name="billing", values=["INV-1"])
+    response = backend.classify_batch([sample], "", table_name="billing")
+    got = response.classifications[0]
+    assert got.category_code == "SDG.A.1"
+    assert got.column_name == "invoice_id"
+    assert got.confidence == pytest.approx(0.91)
+    with pytest.raises(RuntimeError, match=GURU_NOCAP):
+        backend.classify_batch([sample], "", revisit_context={"invoice_id": {}})
+    missing = ColumnSample(name="other", table_name="billing")
+    with pytest.raises(RuntimeError, match="no decisions label"):
+        backend.classify_batch([missing], "", table_name="billing")

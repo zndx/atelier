@@ -391,6 +391,23 @@ def resolve_metaflow_mode(
     )
 
 
+def argv_with_kubernetes(argv: list[str]) -> list[str]:
+    """Insert ``--with kubernetes`` ahead of the Metaflow subcommand.
+
+    ``airflow create`` turns ``@kubernetes`` steps into KubernetesPodOperator
+    tasks. The FlowSpec body stays ``@step``; this flag is what decorates
+    every step, including the decisions foreach. A caller that already
+    passed ``--with`` keeps that choice.
+    """
+    if not argv:
+        return ["--with", "kubernetes"]
+    if any(a == "--with" or a.startswith("--with=") for a in argv[1:]):
+        return list(argv)
+    if any(a in {"-h", "--help"} for a in argv[1:]):
+        return list(argv)
+    return [argv[0], "--with", "kubernetes", *argv[1:]]
+
+
 def require_signals_metaflow(environ: Mapping[str, str] | None = None) -> None:
     """Fail if this process is about to use a local / Tilt datastore."""
     env = environ if environ is not None else os.environ

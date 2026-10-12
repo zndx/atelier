@@ -10,8 +10,15 @@ import os
 
 
 def main() -> None:
-    from atelier.flows.platform_metaflow import metaflow_child_env, require_signals_metaflow
+    import sys
 
+    from atelier.flows.platform_metaflow import (
+        argv_with_kubernetes,
+        metaflow_child_env,
+        require_signals_metaflow,
+    )
+
+    sys.argv = argv_with_kubernetes(sys.argv)
     env = metaflow_child_env()
     os.environ.update(env)
     require_signals_metaflow(os.environ)

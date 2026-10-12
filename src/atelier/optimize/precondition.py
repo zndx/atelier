@@ -12,13 +12,15 @@ automated repair pass, executed as the ``PRECONDITIONING`` FSM phase:
    the vocabulary signature, and the head registry row stores
    ``vocab_sig`` directly.  A vocabulary change (or an sdg-corpora pin
    bump that changes the sample vocabulary) automatically invalidates.
-2. **Enrich → collection** — LLM-enrich the run vocabulary via the
-   classify backend (``ClassifyBackedEnrichmentGenerator``), ColBERT-
-   encode, upsert to Qdrant, register + promote the collection.
-3. **Corpus → head** — synthesize a training corpus from the
-   enrichment payloads (real ``prototype_values`` first), adapt to
-   training rows, ModernBERT-encode, fit the factorized NHSVM, and
-   promote the head to ``current``.
+2. **Enrich → collection** — when ``cfg.aegir_release_dir`` is set,
+   prototype text is the projected column's ontology-labeled values
+   (``OntologyLabelGenerator``). Otherwise LLM-enrich the vocabulary
+   (``ClassifyBackedEnrichmentGenerator``). ColBERT-encode, upsert to
+   Qdrant, register + promote the collection.
+3. **Corpus → head** — when the same release is set, train on those
+   ``reference_code`` rows. Otherwise synthesize a corpus from the
+   enrichment payloads. ModernBERT-encode, fit the factorized NHSVM,
+   and promote the head to ``current``.
 
 Every stage is idempotent by artifact inspection and **fails loudly**:
 any enrichment row failure, any training-label mismatch, any registry
@@ -196,6 +198,10 @@ def build_semantic_collection(
     from qdrant_client import QdrantClient
 
     from atelier.classify.colbert_encoder import get_encoder, warmup
+    from atelier.classify.ontology_corpus import (
+        OntologyCorpusError,
+        ontology_generator,
+    )
     from atelier.db.dao import AtelierDao
     from atelier.enrichment.llm_generator import (
         ClassifyBackedEnrichmentGenerator,
@@ -206,10 +212,15 @@ def build_semantic_collection(
     aug_version = _augmentation_version(vocab_sig)
     rows = _category_rows(category_set)
 
-    # Fail-fast constructions: generator raises EnrichmentModelError
-    # on backend misconfiguration before any loop work; warmup pays
-    # the ColBERT load before the first row rather than mid-loop.
-    generator = ClassifyBackedEnrichmentGenerator(cfg)
+    # A configured release supplies the ontology prototypes. An empty
+    # release dir keeps the LLM generator. A set dir that does not load
+    # fails closed before ColBERT warmup.
+    try:
+        generator = ontology_generator(cfg, category_set)
+    except (OntologyCorpusError, FileNotFoundError) as exc:
+        raise PreconditionError(str(exc)) from exc
+    if generator is None:
+        generator = ClassifyBackedEnrichmentGenerator(cfg)
     warmup()
     encoder = get_encoder()
 
@@ -361,8 +372,10 @@ def build_nhsvm_head(
     cfg, category_set, *, taxonomy_id: str, vocab_sig: str,
     heartbeat: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Train + promote an NHSVM head from enrichment-payload corpus.
+    """Train + promote an NHSVM head.
 
+    A configured Aegir release trains on ``reference_code``. Otherwise
+    the corpus is synthesized from enrichment ``prototype_values``.
     Returns the registry row dict.  Raises ``PreconditionError`` on
     empty corpus, label mismatch, or registry inconsistency.
     """
@@ -386,23 +399,41 @@ def build_nhsvm_head(
     if heartbeat:
         heartbeat({"sub_phase": "corpus", "current": 0, "total": 1})
 
-    payloads = load_enrichment_payloads(cfg=cfg, taxonomy_id=taxonomy_id)
+    from atelier.classify.ontology_corpus import (
+        OntologyCorpusError,
+        labeled_rows_from_release,
+        release_dir,
+    )
+
     corpus_dir = (_REPO_ROOT / cfg.artifact_root / "svm_training"
                   / "precondition" / f"{taxonomy_id}_{vocab_sig[:10]}")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
-    table_metadata, coverage = generate_user_taxonomy_corpus(
-        category_set, payloads, corpus_dir, seed=42,
-    )
-    rows = _corpus_rows_from_synth(corpus_dir, table_metadata)
-    if not rows:
-        missing = [c for c, src in coverage.items() if src == "missing"]
-        raise PreconditionError(
-            f"Corpus generation produced zero training rows for "
-            f"taxonomy {taxonomy_id!r} ({len(missing)} of "
-            f"{len(coverage)} codes had no generator).  Enrichment "
-            f"payloads lack prototype_values — inspect the collection."
+    configured_release = release_dir(cfg)
+    if configured_release:
+        try:
+            rows = labeled_rows_from_release(configured_release, category_set)
+        except (OntologyCorpusError, FileNotFoundError) as exc:
+            raise PreconditionError(str(exc)) from exc
+        if not rows:
+            raise PreconditionError(
+                f"Aegir release {configured_release!r} produced zero NHSVM "
+                f"rows whose reference_code is in taxonomy {taxonomy_id!r}."
+            )
+    else:
+        payloads = load_enrichment_payloads(cfg=cfg, taxonomy_id=taxonomy_id)
+        table_metadata, coverage = generate_user_taxonomy_corpus(
+            category_set, payloads, corpus_dir, seed=42,
         )
+        rows = _corpus_rows_from_synth(corpus_dir, table_metadata)
+        if not rows:
+            missing = [c for c, src in coverage.items() if src == "missing"]
+            raise PreconditionError(
+                f"Corpus generation produced zero training rows for "
+                f"taxonomy {taxonomy_id!r} ({len(missing)} of "
+                f"{len(coverage)} codes had no generator).  Enrichment "
+                f"payloads lack prototype_values — inspect the collection."
+            )
 
     corpus_file = corpus_dir / "training_rows.jsonl"
     corpus_file.write_text("\n".join(

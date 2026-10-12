@@ -1,9 +1,11 @@
 """ClassificationFlow — one Metaflow sequence for optimize + classify.
 
-K8s (@kubernetes) is preferred on the discovered Signals Metaflow
-instance. Plain @step is the same graph and is the fallback while K8s
-is unavailable. The sweep is Engine/Decide capability decisions. The
-revisit is Engine/Complete capability thinking.
+The class body stays ``@step``. ``python -m atelier.flows.run_classify``
+inserts ``--with kubernetes`` so ``airflow create`` emits a
+KubernetesPodOperator per step. The decisions sweep is a foreach of
+width 2, one shard per d3-flash replica, so the parallel System One
+calls are two Metaflow tasks. The revisit is Engine/Complete
+capability thinking. Fusion replays the joined labels once.
 """
 
 from __future__ import annotations
@@ -121,39 +123,54 @@ class ClassificationFlow(AtelierFlow):
     @step
     def load(self):
         """LOADING_VOCAB + DISCOVERING + SAMPLING — pin target entities."""
+        from atelier.classify.decisions_backend import REPLICA_COUNT
+
         self.sweep_capability = llm_capability_for_sweep(revisit=False)
+        self.sweep_width = REPLICA_COUNT
         self.next(self.sweep)
 
     @step
     def sweep(self):
-        """Decisions sweep. The thinking revisit is the next step."""
-        from atelier.config import load_config
-        from atelier.flows.classify_phases import entity_key, predicted_code
-        from atelier.flows.resident import load_classification_rows, run_dst_pipeline
+        """Fan out one shard per d3-flash replica. Each shard calls System One."""
+        width = int(getattr(self, "sweep_width", None) or 2)
+        self.sweep_shards = list(range(width))
+        self.next(self.sweep_shard, foreach="sweep_shards")
 
-        skip = (not self.needs_precondition) or bool(self.precondition_ran)
+    @step
+    def sweep_shard(self):
+        """Walk this replica's columns. The other shard is the other replica."""
+        from atelier.config import load_config
+        from atelier.flows.resident import run_decisions_shard
+
+        shard = int(self.input)
+        self.shard_index = shard
         train_id = str(getattr(self, "train_source_id", None) or self.sample_source_id)
-        result = run_dst_pipeline(
-            load_config(), str(self.sample_source_id),
-            skip_precondition=skip,
+        self.shard_labels = run_decisions_shard(
+            load_config(),
+            str(self.sample_source_id),
+            shard,
+            width=int(getattr(self, "sweep_width", None) or 2),
             taxonomy_id=train_id,
-            include_revisit=False,
         )
-        if result.get("state") == "ERROR":
-            raise RuntimeError(result.get("error") or "classification pipeline ERROR")
-        rows = load_classification_rows(result)
-        self.result_path = result.get("result_path") or ""
+        self.next(self.sweep_join)
+
+    @step
+    def sweep_join(self, inputs):
+        """Merge the two System One shards. Overlap fails closed."""
+        from atelier.flows.classify_phases import merge_shard_labels
+
+        self.decision_labels = merge_shard_labels(
+            list(getattr(item, "shard_labels", []) or []) for item in inputs
+        )
         self.classifications = [
             {
-                "qualified_name": entity_key(r) or str(r.get("column_name") or ""),
-                "predicted_code": predicted_code(r),
+                "qualified_name": row["qualified_name"],
+                "predicted_code": row.get("predicted_code") or "",
             }
-            for r in rows
+            for row in self.decision_labels
         ]
         declared = list(getattr(self, "target_keys", []) or [])
-        if declared:
-            self.target_keys = declared
-        else:
+        if not declared:
             self.target_keys = [
                 c["qualified_name"] for c in self.classifications if c["qualified_name"]
             ]
@@ -165,27 +182,50 @@ class ClassificationFlow(AtelierFlow):
         from atelier.config import load_config
         from atelier.flows.resident import run_dst_revisit
 
-        path = str(getattr(self, "result_path", "") or "")
-        if path:
-            revisited = run_dst_revisit(load_config(), path)
-            by_bare = {
-                row["column_name"]: row["predicted_code"]
-                for row in revisited["classifications"]
-                if row.get("predicted_code")
-            }
-            updated = []
-            for row in self.classifications:
-                bare = str(row.get("qualified_name") or "").split(".")[-1]
-                code = by_bare.get(bare)
-                if code:
-                    row = {**row, "predicted_code": code}
-                updated.append(row)
-            self.classifications = updated
+        rows = []
+        for row in self.classifications:
+            qualified = str(row.get("qualified_name") or "")
+            if not qualified:
+                continue
+            rows.append({
+                "qualified_name": qualified,
+                "column_name": qualified.split(".")[-1],
+                "predicted_code": row.get("predicted_code") or "",
+            })
+        revisited = run_dst_revisit(load_config(), rows=rows)
+        by_qualified = {
+            row["qualified_name"]: row["predicted_code"]
+            for row in revisited["classifications"]
+            if row.get("qualified_name") and row.get("predicted_code")
+        }
+        updated = []
+        for row in self.classifications:
+            code = by_qualified.get(str(row.get("qualified_name") or ""))
+            if code:
+                row = {**row, "predicted_code": code}
+            updated.append(row)
+        self.classifications = updated
         self.next(self.fuse)
 
     @step
     def fuse(self):
-        """CLASSIFYING + FUSING. ColBERT-Zero MaxSim is inside the DST pipeline."""
+        """One DST pass. MaxSim and NHSVM see the decision labels via replay."""
+        from atelier.classify.decisions_backend import ReplayDecisionsBackend
+        from atelier.config import load_config
+        from atelier.flows.resident import run_dst_pipeline
+
+        skip = (not self.needs_precondition) or bool(self.precondition_ran)
+        train_id = str(getattr(self, "train_source_id", None) or self.sample_source_id)
+        result = run_dst_pipeline(
+            load_config(), str(self.sample_source_id),
+            skip_precondition=skip,
+            taxonomy_id=train_id,
+            include_revisit=False,
+            llm_backend=ReplayDecisionsBackend(list(self.decision_labels)),
+        )
+        if result.get("state") == "ERROR":
+            raise RuntimeError(result.get("error") or "classification pipeline ERROR")
+        self.result_path = result.get("result_path") or ""
         self.next(self.evaluate)
 
     @step

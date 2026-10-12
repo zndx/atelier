@@ -738,10 +738,12 @@ def run_classification_pipeline(
         revisit_backend = llm_backend
     else:
         from atelier.classify.complete_backend import CompleteLLMBackend
-        from atelier.classify.decisions_backend import DecisionsBackend
+        from atelier.classify.decisions_backend import REPLICA_COUNT, DecisionsBackend
         from atelier.flows.lattice import GURU_NOCAP
 
-        sweep_backend = DecisionsBackend.from_cfg(cfg)
+        # Two walks in flight, one per d3-flash replica. A Metaflow shard
+        # uses from_cfg's default parallel=1, one replica per pod.
+        sweep_backend = DecisionsBackend.from_cfg(cfg, parallel=REPLICA_COUNT)
         revisit_backend = CompleteLLMBackend.from_cfg(cfg)
         if not sweep_backend.health_check():
             raise RuntimeError(
