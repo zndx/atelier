@@ -15,6 +15,7 @@ from atelier.classify.insitu_corpus import (
     InSituError,
     InSituPrototypeGenerator,
     conflicting_known_entities,
+    distribution_deficit,
     load_collection_answer_key,
     load_collection_cells,
     prepare_collection_cta,
@@ -304,6 +305,21 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
         ("patrol/incidents", "severity"),
     }
     assert any(row.table.startswith("syn_") for row in plan.rows)
+    synthetic = [row for row in plan.rows if row.table.startswith("syn_")]
+    assert {row.code for row in synthetic} == {PDF_EXPORT, YOUNG_RESEARCHER}
+    assert [row.code for row in synthetic].count(PDF_EXPORT) == 1
+    assert [row.code for row in synthetic].count(YOUNG_RESEARCHER) == 1
+    assert [row.code for row in plan.holdout_rows] == [PARENTING]
+    assert plan.holdout_rows[0].table.startswith("holdout_")
+    assert all(row.table.startswith("syn_") for row in synthetic)
+    augmented = list(
+        (tmp_path / "build" / "relational_split" / "holdout" / "tables").glob("holdout_*.csv")
+    )
+    assert len(augmented) == 1
+    augmented_text = augmented[0].read_text(encoding="utf-8")
+    assert PARENTING not in augmented_text
+    assert plan.holdout_rows[0].sample_values[0] in augmented_text
+    assert "recorded_on" in augmented_text.splitlines()[0]
     years = next(row for row in real if row.column == "years")
     assert years.column_type == "INTEGER"
     assert "unit" in years.siblings_full
@@ -326,6 +342,33 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
     )
     assert bare.rows == []
     assert bare.holdout_collections == ["clinic"]
+    partial = _generators()
+    partial.pop(code_iri(PARENTING))
+    try:
+        prepare_collection_cta(
+            taxonomy(_FRAME), tmp_path / "partial", corpora=corpora,
+            assignments=assignments, holdout_collections={"clinic"},
+            extra_generators=partial, rows_per_column=1,
+        )
+    except InSituError as exc:
+        assert PARENTING in str(exc)
+    else:
+        raise AssertionError("skew without a generator must fail")
+
+
+def test_distribution_deficit_raises_each_side_to_the_pooled_share() -> None:
+    support = {PDF_EXPORT: 8, PARENTING: 2}
+    holdout = {PDF_EXPORT: 1, PARENTING: 9}
+    assert distribution_deficit(support, holdout) == {PARENTING: 4}
+    assert distribution_deficit(holdout, support) == {PDF_EXPORT: 4}
+    assert distribution_deficit({}, {PDF_EXPORT: 3, PARENTING: 1}) == {
+        PARENTING: 1,
+        PDF_EXPORT: 3,
+    }
+    assert distribution_deficit(
+        {PDF_EXPORT: 2, PARENTING: 2},
+        {PDF_EXPORT: 2, PARENTING: 2},
+    ) == {}
 
 
 def test_published_collections_are_unlabeled_until_the_answer_key(tmp_path) -> None:

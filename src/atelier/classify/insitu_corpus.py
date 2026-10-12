@@ -13,10 +13,10 @@ siblings in the holdout is not this exam.
 A caller that already knows each column's published SKOS code passes
 that assignment in. The code is the label and is not a feature.
 Collection directories do not carry that assignment; the answer key is
-a separate CSV of exact codes. Column names are not labels. Synthetic
-rows are optional extra tables for codes that already have a real
-support column and a caller-supplied generator. An empty footprint has
-no targets.
+a separate CSV of exact codes. Column names are not labels. Holding a
+collection out skews the tag distribution, so each side receives
+synthetic relational tables for the codes whose real share is below
+the pooled share. An empty footprint has no targets.
 """
 
 from __future__ import annotations
@@ -66,6 +66,9 @@ class InSituPlan:
     artifact_root: Path | None = None
     extended: list[str] = field(default_factory=list)
     holdout_collections: list[str] = field(default_factory=list)
+    holdout_counts: dict[str, int] = field(default_factory=dict)
+    holdout_variants: dict[str, int] = field(default_factory=dict)
+    holdout_rows: list[Any] = field(default_factory=list)
 
     @property
     def under_represented(self) -> list[str]:
@@ -131,22 +134,28 @@ def prepare_insitu(
         code = known.get(key)
         if code in counts:
             counts[code] += 1
+    holdout_counts: dict[str, int] = {}
+    holdout_variants: dict[str, int] = {}
     if collections is not None:
-        # Synthetic tables are a caller-supplied mix. An omitted map
-        # leaves the real support rows alone and does not load the
-        # installed generator module.
+        # Real collection membership fixes the tag histogram. Synthetic
+        # tables close the gap to the pooled share on each side. An
+        # omitted generator map does not load the installed module; a
+        # skewed code with no supplied generator fails closed.
+        holdout_counts = support_counts(holdout, known)
+        variants = distribution_deficit(counts, holdout_counts)
+        holdout_variants = distribution_deficit(holdout_counts, counts)
         supplied = extra_generators or {}
-        trainable = [
-            code for code, count in counts.items()
-            if count > 0 and _generator_iri(code) in supplied
-        ]
+        needed = sorted(set(variants) | set(holdout_variants))
+        missing = [code for code in needed if _generator_iri(code) not in supplied]
+        if missing:
+            sample = ", ".join(missing[:8])
+            raise InSituError(
+                f"collection tag skew has no relational generator for "
+                f"{len(missing)} codes ({sample})."
+            )
         generators, extended = (
-            _generators(trainable, supplied) if trainable else ({}, set())
+            _generators(needed, supplied) if needed else ({}, set())
         )
-        variants = {
-            code: (amplified_variants if counts[code] < floor else base_variants)
-            for code in generators
-        }
     else:
         variants = {
             code: (amplified_variants if counts[code] < floor else base_variants)
@@ -163,13 +172,20 @@ def prepare_insitu(
         artifact_root=relational_split_root(artifact_root),
         extended=sorted(extended),
         holdout_collections=held,
+        holdout_counts=holdout_counts,
+        holdout_variants=holdout_variants,
     )
     plan.rows = _support_rows(
         cells, support, known, rows_per_column=rows_per_column,
     ) + synthetic_rows(
         variants, generators, rows_per_column=rows_per_column, seed=seed,
     )
+    plan.holdout_rows, holdout_tables = _synthetic_batch(
+        holdout_variants, generators, rows_per_column=rows_per_column,
+        seed=seed + 7919, prefix="holdout_",
+    )
     _write_split(plan, cells)
+    _write_augmented_tables(plan.artifact_root, holdout_tables)
     return plan
 
 
@@ -502,19 +518,68 @@ def support_counts(
     return counts
 
 
+def distribution_deficit(
+    side: dict[str, int],
+    other: dict[str, int],
+) -> dict[str, int]:
+    """Synthetic columns that bring ``side`` up to the pooled tag share.
+
+    ``side`` and ``other`` map a SKOS code to its real column count on
+    that split. The pooled share of a code is its count on both sides
+    divided by the number of assigned columns. The target on ``side``
+    is that share times the side's real size, rounded up. A side with
+    no real columns takes the other side's counts, so the empty split
+    still carries every tag. Codes already at the target are omitted.
+    """
+    side_n = sum(side.values())
+    other_n = sum(other.values())
+    pooled = side_n + other_n
+    if pooled == 0:
+        return {}
+    deficit: dict[str, int] = {}
+    for code in set(side) | set(other):
+        if side_n == 0:
+            target = other.get(code, 0)
+        else:
+            numer = (side.get(code, 0) + other.get(code, 0)) * side_n
+            target = (numer + pooled - 1) // pooled
+        gap = target - side.get(code, 0)
+        if gap > 0:
+            deficit[code] = gap
+    return dict(sorted(deficit.items()))
+
+
 def synthetic_rows(
     variants: dict[str, int],
     generators: dict[str, Any],
     *,
     rows_per_column: int = ROWS_PER_COLUMN,
     seed: int = 42,
+    prefix: str = "",
 ) -> list[Any]:
     """NHSVM rows from relational generators, one table per variant."""
+    rows, _tables = _synthetic_batch(
+        variants, generators, rows_per_column=rows_per_column,
+        seed=seed, prefix=prefix,
+    )
+    return rows
+
+
+def _synthetic_batch(
+    variants: dict[str, int],
+    generators: dict[str, Any],
+    *,
+    rows_per_column: int = ROWS_PER_COLUMN,
+    seed: int = 42,
+    prefix: str = "",
+) -> tuple[list[Any], list[dict]]:
+    """Rows plus the generated tables, with ``prefix`` on each table name."""
     from atelier.classify.extension_patterns import code_iri
 
     rng = random.Random(seed)
     seen_tables: set[str] = set()
     rows: list[Any] = []
+    tables: list[dict] = []
     for code in sorted(variants):
         width = int(variants.get(code, 0))
         if width <= 0:
@@ -529,8 +594,14 @@ def synthetic_rows(
             if name in seen_tables:
                 name = f"{name}_{index + 1}"
             seen_tables.add(name)
-            rows.append(_labeled_row(name, table, iri, code, rows_per_column))
-    return rows
+            stored = dict(table)
+            stored["table"] = f"{prefix}{name}"
+            stored["code"] = code
+            tables.append(stored)
+            rows.append(_labeled_row(
+                stored["table"], stored, iri, code, rows_per_column,
+            ))
+    return rows, tables
 
 
 class InSituPrototypeGenerator(EnrichmentGenerator):
@@ -642,10 +713,38 @@ def _write_split(plan: InSituPlan, cells: list[dict]) -> None:
         "variants": plan.variants,
         "extension_codes": plan.extended,
         "holdout_collections": plan.holdout_collections,
+        "holdout_tag_counts": plan.holdout_counts,
+        "holdout_augmentation": plan.holdout_variants,
     }
     (root / "split.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8",
     )
+
+
+def _write_augmented_tables(root: Path | None, tables: list[dict]) -> None:
+    """Write synthetic holdout tables beside the real holdout CSVs.
+
+    The file carries column names and stored values. The SKOS code stays
+    on the row and out of the table.
+    """
+    if root is None or not tables:
+        return
+    dest = root / "holdout" / "tables"
+    dest.mkdir(parents=True, exist_ok=True)
+    for table in tables:
+        columns = [column for column in (table.get("columns") or []) if column.get("name")]
+        headers = [str(column["name"]) for column in columns]
+        width = max((len(column.get("values") or []) for column in columns), default=0)
+        safe = str(table.get("table") or "augmented").replace("/", "__")
+        path = dest / f"{safe}.csv"
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(headers)
+            for index in range(width):
+                writer.writerow([
+                    _at([str(value) for value in (column.get("values") or [])], index)
+                    for column in columns
+                ])
 
 
 def _at(values: list[str], index: int) -> str:
