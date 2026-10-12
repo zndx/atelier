@@ -18,8 +18,11 @@ from atelier.classify.extension_patterns import (
 )
 from atelier.classify.insitu_corpus import InSituError, prepare_insitu
 from atelier.classify.qwen_generator_harness import (
+    eligible_codes,
     generator_argv,
     incorporate,
+    main,
+    read_code_list,
     write_generator_pack,
 )
 from atelier.classify.qwen_synth_harness import PROVIDERS, QwenSynthError
@@ -157,10 +160,18 @@ def test_installed_iri_becomes_a_relational_table(tmp_path: Path) -> None:
         for value in row.sample_values
     ]
     young = [
-        value for row in plan.rows if row.code == YOUNG_RESEARCHER for value in row.sample_values
+        value for row in plan.rows
+        if row.code == YOUNG_RESEARCHER and row.table.startswith("syn_")
+        for value in row.sample_values
+    ]
+    real = [
+        value for row in plan.rows
+        if row.code == YOUNG_RESEARCHER and row.table == "household"
+        for value in row.sample_values
     ]
     assert parenting and all(value.startswith("primary-") for value in parenting)
     assert young and all(value.startswith("cohort-") for value in young)
+    assert real == ["kin-real"]
     assert plan.extended == [PARENTING, YOUNG_RESEARCHER]
     assert ROLE not in plan.extended
 
@@ -206,6 +217,33 @@ def test_incorporate_installs_only_the_requested_iri(tmp_path: Path) -> None:
         PARENTING,
         PDF_EXPORT,
     ]
+
+
+def test_codes_file_selects_one_target(tmp_path: Path, capsys) -> None:
+    annotations = tmp_path / "annotations.csv"
+    write_annotations(annotations, [PARENTING, PDF_EXPORT])
+    codes = tmp_path / "codes.txt"
+    codes.write_text(f"# keep\n{PARENTING}\n")
+    rc = main([
+        "--annotations", str(annotations),
+        "--codes-file", str(codes),
+        "--dry-run",
+        "--workdir", str(tmp_path / "work"),
+    ])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["codes"] == [PARENTING]
+
+
+def test_attempt_budget_drops_a_code() -> None:
+    assert read_code_list(f"# note\n{PARENTING}, {PDF_EXPORT}\n\n{PARENTING}\n") == [
+        PARENTING, PDF_EXPORT,
+    ]
+    assert eligible_codes(
+        [PARENTING, PDF_EXPORT],
+        attempts={PARENTING: 3},
+        max_attempts=3,
+    ) == [PDF_EXPORT]
 
 
 def test_code_outside_the_explicit_slice_is_not_packed(tmp_path: Path) -> None:

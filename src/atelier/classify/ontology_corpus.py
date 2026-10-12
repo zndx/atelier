@@ -38,6 +38,11 @@ class LabeledColumn:
     siblings: list[str]
 
 
+def published_annotations_csv(corpora: str | Path | None = None) -> Path:
+    """Published SDG vocabulary the in-situ head and the holdout run share."""
+    return corpora_root(corpora) / "vocabulary" / "annotations.csv"
+
+
 def corpora_root(corpora: str | Path | None = None) -> Path:
     """Local sdg-corpora checkout. An explicit path is for tests."""
     if corpora is not None and str(corpora).strip():

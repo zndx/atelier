@@ -11,10 +11,13 @@ import pyarrow.parquet as pq
 from atelier.classify.extension_patterns import code_iri
 from atelier.classify.insitu_corpus import (
     InSituPrototypeGenerator,
+    conflicting_known_entities,
     prepare_insitu,
+    split_by_code,
     split_projected,
     support_counts,
 )
+from atelier.classify.taxonomy import HierarchicalCategorySet
 from atelier.enrichment.verifiers import run_verifier_suite
 from atelier.flows.resident import load_sweep_samples
 from tests.classify.explicit_sdg import (
@@ -107,7 +110,42 @@ def test_support_census_uses_the_assignment() -> None:
     assert recount[PARENTING] == 1
 
 
-def test_prepare_amplifies_unseen_codes_and_writes_a_blind_holdout(tmp_path) -> None:
+def test_a_miss_on_a_known_entity_is_a_conflict() -> None:
+    assigned = {("billing", "doc_ref"): PDF_EXPORT, ("billing", "note"): PARENTING}
+    assert conflicting_known_entities(
+        assigned,
+        {("billing", "doc_ref"): PDF_EXPORT, ("billing", "note"): PARENTING},
+    ) == []
+    misses = conflicting_known_entities(
+        assigned, {("billing", "doc_ref"): PARENTING},
+    )
+    assert [row["column"] for row in misses] == ["doc_ref", "note"]
+    assert misses[0]["predicted"] == PARENTING
+    assert misses[1]["predicted"] == ""
+
+
+def test_split_by_code_keeps_a_support_row_for_every_holdout_code() -> None:
+    support, holdout = split_by_code(
+        {"t": ["a", "b", "c", "d"], "s": ["x"]},
+        {
+            ("t", "a"): PDF_EXPORT,
+            ("t", "b"): PDF_EXPORT,
+            ("t", "c"): PDF_EXPORT,
+            ("t", "d"): PARENTING,
+        },
+        floor=2,
+    )
+    assert set(support).isdisjoint(holdout)
+    assert ("t", "a") in support and ("t", "b") in support
+    assert ("t", "c") in holdout
+    assert ("t", "d") in support and ("t", "d") not in holdout
+    assert ("s", "x") in support
+    holdout_codes = {PDF_EXPORT}
+    support_codes = {PDF_EXPORT, PARENTING}
+    assert holdout_codes <= support_codes
+
+
+def test_prepare_amplifies_thin_codes_and_writes_a_blind_holdout(tmp_path) -> None:
     corpora = tmp_path / "corpora"
     artifacts = tmp_path / "build"
     _footprint(corpora)
@@ -119,31 +157,36 @@ def test_prepare_amplifies_unseen_codes_and_writes_a_blind_holdout(tmp_path) -> 
     assert set(plan.variants) == set(_LEAVES)
     assert PROCESS not in plan.variants
     assert ROLE not in plan.variants
-    assert plan.variants[PDF_EXPORT] == 2
-    assert plan.variants[PARENTING] == 5
-    assert plan.variants[YOUNG_RESEARCHER] == 5
+    assert plan.counts[PDF_EXPORT] == 1
+    assert plan.counts[PARENTING] == 1
+    assert plan.counts[YOUNG_RESEARCHER] == 1
+    assert plan.variants == {PDF_EXPORT: 5, PARENTING: 5, YOUNG_RESEARCHER: 5}
     synthetic = [row for row in plan.rows if row.table.startswith("syn_")]
     support_rows = [row for row in plan.rows if not row.table.startswith("syn_")]
-    assert {row.code for row in support_rows} == {PDF_EXPORT}
+    assert {row.code for row in support_rows} == set(_LEAVES)
     assert {(row.table, row.column) for row in support_rows} == {
-        ("billing", "doc_ref"), ("other", "doc_ref"),
+        ("billing", "doc_ref"), ("billing", "note"), ("lone", "id"),
     }
-    assert all(row.siblings_full == [] for row in support_rows)
+    holdout_keys = set(plan.holdout)
+    assert holdout_keys == {("other", "doc_ref")}
+    for row in support_rows:
+        assert (row.table, row.column) not in holdout_keys
+        assert all((row.table, name) not in holdout_keys for name in row.siblings_full)
     by_code: dict[str, int] = {}
     for row in synthetic:
         by_code[row.code] = by_code.get(row.code, 0) + 1
         assert "https://" not in " ".join(row.sample_values)
         assert row.column not in {"amount", "note", "b", "id", "doc_ref"}
         assert set(row.siblings_full).isdisjoint({"amount", "note", "b", "id", "doc_ref"})
-    assert by_code == {PDF_EXPORT: 2, PARENTING: 5, YOUNG_RESEARCHER: 5}
+    assert by_code == {PDF_EXPORT: 5, PARENTING: 5, YOUNG_RESEARCHER: 5}
     split = json.loads((artifacts / "relational_split" / "split.json").read_text())
-    assert PARENTING in split["under_represented"]
-    assert YOUNG_RESEARCHER in split["under_represented"]
-    assert PDF_EXPORT not in split["under_represented"]
+    assert set(split["under_represented"]) == set(_LEAVES)
     assert "slot_ref" not in json.dumps(split)
-    holdout_csv = (artifacts / "relational_split" / "holdout" / "tables" / "billing.csv")
-    text = holdout_csv.read_text()
-    assert "doc_ref" not in text.splitlines()[0]
+    tables = artifacts / "relational_split" / "holdout" / "tables"
+    assert not (tables / "billing.csv").exists()
+    text = (tables / "other.csv").read_text()
+    assert text.splitlines()[0] == "doc_ref"
+    assert "INV-9" in text
     assert "INV-1" not in text
     source = Path(prepare_insitu.__code__.co_filename).read_text().lower()
     assert "naming_map" not in source
@@ -200,6 +243,19 @@ def test_projected_holdout_source_loads_only_the_holdout(tmp_path) -> None:
         "projected-holdout",
     )
     names = {(table.name, col.name) for table in samples for col in table.columns}
-    assert ("billing", "doc_ref") not in names
-    assert names
+    assert names == {("other", "doc_ref")}
     assert all(col.reference_code in (None, "") for table in samples for col in table.columns)
+
+
+def test_projected_holdout_loads_the_published_vocabulary() -> None:
+    from types import SimpleNamespace
+
+    from atelier.flows.resident import load_category_set
+
+    cats = load_category_set(SimpleNamespace(), "projected-holdout")
+    assert isinstance(cats, HierarchicalCategorySet)
+    codes = {cat.code for cat in cats.all_categories}
+    assert PDF_EXPORT in codes
+    assert PARENTING in codes
+    assert "SDG.A.1" not in codes
+    assert len(codes) > 1000

@@ -1,10 +1,13 @@
 """In-situ NHSVM rows and MaxSim prototypes for an unseen relational corpus.
 
-Projected columns are split into a support half and a holdout half.
-A caller that already knows each column's published SKOS IRI passes
-that assignment in. The assignment is the label. Column names, types,
-cell values, and sibling names are the features. The holdout columns
-stay out of the training rows.
+Projected columns are split by their assigned SKOS code. A caller that
+already knows each column's published SKOS IRI passes that assignment
+in. The assignment is the label. Column names, types, cell values, and
+sibling names are the features. Every code the holdout classifies keeps
+at least one real support column, so the head has seen that IRI on a
+real row. A code with a single column stays in the support census; its
+generator is what teaches the IRI to entities outside this corpus.
+Holdout columns stay out of the training rows.
 
 Each assigned IRI needs a relational generator. The generator returns
 a new table whose columns and values connote that IRI, and exactly one
@@ -93,9 +96,9 @@ def prepare_insitu(
     """
     cells = load_projected_cells(corpora)
     by_table = _columns_by_table(cells)
-    support, holdout = split_projected(by_table)
-    present = set(support) | set(holdout)
+    present = {(cell["table"], cell["column"]) for cell in cells}
     known = _known_assignments(assignments, present, category_set)
+    support, holdout = split_by_code(by_table, known, floor=floor)
     counts = {code: 0 for code in _target_codes(known)}
     for key in support:
         code = known.get(key)
@@ -149,6 +152,70 @@ def split_projected(
         bucket = holdout if index % 2 == 0 else support
         bucket.append(item)
     return support, holdout
+
+
+def split_by_code(
+    table_columns: dict[str, list[str]],
+    assignments: dict[tuple[str, str], str],
+    *,
+    floor: int = SUPPORT_FLOOR,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Stratify projected columns by their assigned SKOS code.
+
+    A code with two or more columns keeps a support column and a
+    holdout column. Support grows up to ``floor`` before further
+    columns are held out, so every classified column has a real
+    training row of the same code. A code with one column stays in
+    the support census. Columns with no assignment stay on the
+    support side as sibling context and are not classification targets.
+    """
+    if floor < 1:
+        raise InSituError("support floor must be positive")
+    by_code: dict[str, list[tuple[str, str]]] = {}
+    unassigned: list[tuple[str, str]] = []
+    for table in sorted(table_columns):
+        for column in sorted({c for c in table_columns[table] if c}):
+            key = (table, column)
+            code = str(assignments.get(key) or "").strip()
+            if code:
+                by_code.setdefault(code, []).append(key)
+            else:
+                unassigned.append(key)
+    support: list[tuple[str, str]] = []
+    holdout: list[tuple[str, str]] = []
+    for code in sorted(by_code):
+        columns = by_code[code]
+        if len(columns) == 1:
+            support.extend(columns)
+            continue
+        support_n = min(floor, len(columns) - 1)
+        support.extend(columns[:support_n])
+        holdout.extend(columns[support_n:])
+    support.extend(unassigned)
+    return support, holdout
+
+
+def conflicting_known_entities(
+    assigned: dict[tuple[str, str], str],
+    predicted: dict[tuple[str, str], str],
+) -> list[dict[str, str]]:
+    """Known entities whose predicted code differs from the assigned code.
+
+    The pipeline classifies these entities. A miss is a singleton the
+    NHSVM would commit beside the other evidence sources.
+    """
+    misses: list[dict[str, str]] = []
+    for table, column in sorted(assigned):
+        code = assigned[(table, column)]
+        got = str(predicted.get((table, column)) or "")
+        if got != code:
+            misses.append({
+                "table": table,
+                "column": column,
+                "assigned": code,
+                "predicted": got,
+            })
+    return misses
 
 
 def support_counts(

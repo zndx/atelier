@@ -181,6 +181,29 @@ def _task(codes: tuple[str, ...]) -> str:
     return "\n".join(lines)
 
 
+def read_code_list(text: str) -> list[str]:
+    """Codes from a file. Blank lines and ``#`` comments are skipped."""
+    codes: list[str] = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        codes.extend(part.strip() for part in line.split(",") if part.strip())
+    return list(dict.fromkeys(codes))
+
+
+def eligible_codes(
+    codes: list[str] | tuple[str, ...],
+    *,
+    attempts: dict[str, int],
+    max_attempts: int,
+) -> list[str]:
+    """Requested codes that still have an attempt left."""
+    if max_attempts < 1:
+        raise QwenSynthError("max_attempts must be positive")
+    return [code for code in codes if attempts.get(code, 0) < max_attempts]
+
+
 def _python_source(text: str) -> str:
     stripped = text.strip()
     if not stripped.startswith("```"):
@@ -207,25 +230,41 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated published SDG codes for the target entities",
     )
     parser.add_argument("--limit", type=int, default=8)
+    parser.add_argument("--codes-file", type=Path, default=None)
     parser.add_argument("--batches", type=int, default=1)
     parser.add_argument(
         "--until-covered",
         action="store_true",
         help="Continue until every requested target entity has a relational generator",
     )
+    parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--max-turns", type=int, default=8)
     parser.add_argument("--timeout", type=float, default=480.0)
     parser.add_argument("--workdir", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     codes = [code.strip() for code in args.codes.split(",") if code.strip()]
+    if args.codes_file is not None:
+        codes.extend(read_code_list(args.codes_file.read_text(encoding="utf-8")))
+        codes = list(dict.fromkeys(codes))
     if not codes:
         print(json.dumps({"error": "no target entities"}), flush=True)
         return 1
     summaries = []
-    failures = 0
+    attempts: dict[str, int] = {}
+    consecutive_empty = 0
     index = 0
     while args.until_covered or index < args.batches:
+        eligible = eligible_codes(
+            codes, attempts=attempts, max_attempts=args.max_attempts,
+        )
+        if not eligible:
+            summaries.append({
+                "batch": index,
+                "error": "attempts exhausted",
+                "exhausted": [code for code, n in attempts.items() if n >= args.max_attempts],
+            })
+            break
         workdir = args.workdir
         if workdir is None or args.until_covered or args.batches > 1:
             workdir = Path(f"/tmp/qwen-extend-{index:04d}")
@@ -234,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(workdir)
         try:
             pack, packed = write_generator_pack(
-                workdir, args.annotations, codes, limit=args.limit,
+                workdir, args.annotations, eligible, limit=args.limit,
             )
         except QwenSynthError as exc:
             summaries.append({"batch": index, "error": str(exc)})
@@ -252,23 +291,40 @@ def main(argv: list[str] | None = None) -> int:
             agent=pack / _AGENT_REL,
         )
         report = incorporate(pack, args.annotations)
+        accepted_codes = set(report["codes"])
+        for code in packed:
+            if code not in accepted_codes:
+                attempts[code] = attempts.get(code, 0) + 1
+        if accepted_codes:
+            consecutive_empty = 0
+        else:
+            consecutive_empty += 1
         report["batch"] = index
         report["returncode"] = completed.returncode
+        report["remaining_attempts"] = {
+            code: args.max_attempts - attempts.get(code, 0)
+            for code in packed
+            if code not in accepted_codes
+        }
         summaries.append(report)
         print(json.dumps(report, indent=2), flush=True)
-        if completed.returncode != 0 or not report["accepted"]:
-            failures += 1
-            index += 1
-            if failures >= 2:
-                break
-            continue
-        failures = 0
+        if args.until_covered and consecutive_empty >= 5:
+            report["stopped"] = "five batches accepted nothing"
+            break
         index += 1
-    if any(
+    covered = any(
         "already has a relational generator" in str(item.get("error", ""))
         for item in summaries
-    ):
+    )
+    exhausted = [code for code, n in attempts.items() if n >= args.max_attempts]
+    if covered and not exhausted:
         return 0
+    if args.until_covered:
+        print(json.dumps({
+            "exhausted": exhausted,
+            "accepted": sum(int(item.get("accepted") or 0) for item in summaries),
+        }, indent=2), flush=True)
+        return 1
     accepted = sum(int(item.get("accepted") or 0) for item in summaries)
     return 0 if accepted else 1
 

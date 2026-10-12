@@ -627,6 +627,7 @@ def run_classification_pipeline(
     # The OOTB sample pairs with the expanded ICE ontology — its
     # reference codes share that vocabulary, so the LLM prompts and
     # fusion frame are aligned.
+    from atelier.classify.insitu_corpus import PROJECTED_HOLDOUT_SOURCE
     from atelier.sdg.sample import (
         is_sample_source_id,
         sample_dir_from_source_id,
@@ -656,6 +657,15 @@ def run_classification_pipeline(
             from atelier.classify.skos_attach import attach_skos_reference
 
             attach_skos_reference(samples, category_set)
+    elif source_id == PROJECTED_HOLDOUT_SOURCE and samples is None:
+        from atelier.flows.resident import (
+            load_category_set,
+            load_projected_holdout_samples,
+        )
+
+        samples = load_projected_holdout_samples(cfg)
+        if category_set is None:
+            category_set = load_category_set(cfg, source_id)
     elif source_id == "ootb-sample" and samples is None:
         samples = load_sample_source()
         if category_set is None:

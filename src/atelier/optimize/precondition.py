@@ -14,13 +14,15 @@ automated repair pass, executed as the ``PRECONDITIONING`` FSM phase:
    bump that changes the sample vocabulary) automatically invalidates.
 2. **Enrich → collection** — prototype text comes from relational
    generators for the published SKOS IRIs assigned to projected
-   columns (``InSituPrototypeGenerator``). The tables are split first.
-   IRIs the support half barely represents get more synthetic tables.
-   ColBERT-encode, upsert to Qdrant, register + promote the collection.
+   columns (``InSituPrototypeGenerator``). The tables are split by
+   code first. Every code the holdout will classify keeps a real
+   support column. IRIs below the support floor get more synthetic
+   tables. ColBERT-encode, upsert to Qdrant, register + promote the
+   collection.
 3. **Corpus → head** — train on the support columns plus those
    synthetic tables. ModernBERT-encode, fit the factorized NHSVM, and
-   promote the head to ``current``. The holdout half of the projected
-   tables is the classification target (``projected-holdout``).
+   promote the head to ``current``. The holdout columns are the
+   classification target (``projected-holdout``).
 
 Every stage is idempotent by artifact inspection and **fails loudly**:
 any enrichment row failure, any training-label mismatch, any registry

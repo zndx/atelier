@@ -13,8 +13,16 @@ from atelier.flows.classify_phases import probe_requires_precondition
 
 def load_category_set(cfg: Any, source_id: str):
     """Vocabulary for this source. Sample ids use the sample annotations.csv."""
+    from atelier.classify.insitu_corpus import PROJECTED_HOLDOUT_SOURCE
     from atelier.sdg.sample import is_sample_source_id, sample_dir_from_source_id
 
+    if source_id == PROJECTED_HOLDOUT_SOURCE:
+        from atelier.classify.ontology_corpus import published_annotations_csv
+        from atelier.classify.taxonomy import load_annotations_from_filesystem
+
+        return load_annotations_from_filesystem(
+            published_annotations_csv(), hierarchical=True, taxonomy="sdg",
+        )
     if is_sample_source_id(source_id):
         sample_dir = sample_dir_from_source_id(source_id)
         if sample_dir is None:
@@ -84,10 +92,33 @@ def load_classification_rows(result: dict) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+def load_projected_holdout_samples(cfg: Any):
+    """Holdout tables written by precondition. Column files carry no codes."""
+    from atelier.classify.filesystem_source import load_filesystem_source
+    from atelier.classify.insitu_corpus import PROJECTED_HOLDOUT_SOURCE, holdout_tables_dir
+
+    sample_size = int(getattr(cfg, "classify_sample_size", 50) or 50)
+    holdout = holdout_tables_dir(getattr(cfg, "artifact_root", "build"))
+    if not any(holdout.glob("*.csv")):
+        raise RuntimeError(
+            "projected holdout has no tables under "
+            f"{holdout}. Run precondition so the relational split "
+            "is written."
+        )
+    return load_filesystem_source(
+        str(holdout),
+        sample_size=sample_size,
+        database=PROJECTED_HOLDOUT_SOURCE,
+    )
+
+
 def load_sweep_samples(cfg: Any, source_id: str):
     """Entities the decisions shards walk. Blind: no reference key."""
+    from atelier.classify.insitu_corpus import PROJECTED_HOLDOUT_SOURCE
     from atelier.sdg.sample import is_sample_source_id, sample_dir_from_source_id
 
+    if source_id == PROJECTED_HOLDOUT_SOURCE:
+        return load_projected_holdout_samples(cfg)
     sample_size = int(getattr(cfg, "classify_sample_size", 50) or 50)
     if is_sample_source_id(source_id or ""):
         sample_dir = sample_dir_from_source_id(source_id)
@@ -107,22 +138,6 @@ def load_sweep_samples(cfg: Any, source_id: str):
         from atelier.classify.sampler import load_sample_source
 
         return load_sample_source()
-    if source_id == "projected-holdout":
-        from atelier.classify.filesystem_source import load_filesystem_source
-        from atelier.classify.insitu_corpus import holdout_tables_dir
-
-        holdout = holdout_tables_dir(getattr(cfg, "artifact_root", "build"))
-        if not any(holdout.glob("*.csv")):
-            raise RuntimeError(
-                "projected holdout has no tables under "
-                f"{holdout}. Run precondition so the relational split "
-                "is written."
-            )
-        return load_filesystem_source(
-            str(holdout),
-            sample_size=sample_size,
-            database=source_id,
-        )
     raise RuntimeError(
         "decisions shard has no sdg-corpora sample. "
         f"source_id={source_id!r}. Run `just sdg-sample`, or pass "
