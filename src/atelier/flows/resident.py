@@ -107,16 +107,9 @@ def load_sweep_samples(cfg: Any, source_id: str):
         from atelier.classify.sampler import load_sample_source
 
         return load_sample_source()
-    release = str(getattr(cfg, "aegir_release_dir", "") or "").strip()
-    if release:
-        from atelier.classify.aegir_release import load_aegir_release_samples
-
-        return load_aegir_release_samples(
-            release, sample_size=sample_size, with_reference=False,
-        )
     raise RuntimeError(
-        "decisions shard has no classification sample and no Aegir release. "
-        f"source_id={source_id!r}."
+        "decisions shard has no sdg-corpora sample. "
+        f"source_id={source_id!r}. Run `just sdg-sample`."
     )
 
 

@@ -12,15 +12,15 @@ automated repair pass, executed as the ``PRECONDITIONING`` FSM phase:
    the vocabulary signature, and the head registry row stores
    ``vocab_sig`` directly.  A vocabulary change (or an sdg-corpora pin
    bump that changes the sample vocabulary) automatically invalidates.
-2. **Enrich → collection** — when ``cfg.aegir_release_dir`` is set,
-   prototype text is the projected column's ontology-labeled values
-   (``OntologyLabelGenerator``). Otherwise LLM-enrich the vocabulary
-   (``ClassifyBackedEnrichmentGenerator``). ColBERT-encode, upsert to
-   Qdrant, register + promote the collection.
-3. **Corpus → head** — when the same release is set, train on those
-   ``reference_code`` rows. Otherwise synthesize a corpus from the
-   enrichment payloads. ModernBERT-encode, fit the factorized NHSVM,
-   and promote the head to ``current``.
+2. **Enrich → collection** — when the local sdg-corpora checkout
+   labels columns in this taxonomy, prototype text is those column
+   values (``OntologyLabelGenerator``). Otherwise LLM-enrich the
+   vocabulary (``ClassifyBackedEnrichmentGenerator``). ColBERT-encode,
+   upsert to Qdrant, register + promote the collection.
+3. **Corpus → head** — when that checkout labels columns in this
+   taxonomy, train on those rows. Otherwise synthesize a corpus from
+   the enrichment payloads. ModernBERT-encode, fit the factorized
+   NHSVM, and promote the head to ``current``.
 
 Every stage is idempotent by artifact inspection and **fails loudly**:
 any enrichment row failure, any training-label mismatch, any registry
@@ -212,9 +212,9 @@ def build_semantic_collection(
     aug_version = _augmentation_version(vocab_sig)
     rows = _category_rows(category_set)
 
-    # A configured release supplies the ontology prototypes. An empty
-    # release dir keeps the LLM generator. A set dir that does not load
-    # fails closed before ColBERT warmup.
+    # The local sdg-corpora checkout supplies ontology prototypes when
+    # its column labels intersect this taxonomy. No intersection keeps
+    # the LLM generator. A missing or unreadable checkout fails closed.
     try:
         generator = ontology_generator(cfg, category_set)
     except (OntologyCorpusError, FileNotFoundError) as exc:
@@ -401,26 +401,18 @@ def build_nhsvm_head(
 
     from atelier.classify.ontology_corpus import (
         OntologyCorpusError,
-        labeled_rows_from_release,
-        release_dir,
+        labeled_rows_from_corpora,
     )
 
     corpus_dir = (_REPO_ROOT / cfg.artifact_root / "svm_training"
                   / "precondition" / f"{taxonomy_id}_{vocab_sig[:10]}")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
-    configured_release = release_dir(cfg)
-    if configured_release:
-        try:
-            rows = labeled_rows_from_release(configured_release, category_set)
-        except (OntologyCorpusError, FileNotFoundError) as exc:
-            raise PreconditionError(str(exc)) from exc
-        if not rows:
-            raise PreconditionError(
-                f"Aegir release {configured_release!r} produced zero NHSVM "
-                f"rows whose reference_code is in taxonomy {taxonomy_id!r}."
-            )
-    else:
+    try:
+        rows = labeled_rows_from_corpora(category_set)
+    except (OntologyCorpusError, FileNotFoundError) as exc:
+        raise PreconditionError(str(exc)) from exc
+    if not rows:
         payloads = load_enrichment_payloads(cfg=cfg, taxonomy_id=taxonomy_id)
         table_metadata, coverage = generate_user_taxonomy_corpus(
             category_set, payloads, corpus_dir, seed=42,
