@@ -144,8 +144,8 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
         (row["collection"], row["table"], row["column"]) for row in key_rows
     }
     labeled = split.labeled_columns()
-    assert len(labeled) == 26239
-    assert len(split.columns) - len(labeled) == 207
+    assert len(labeled) == 26446
+    assert len(split.columns) - len(labeled) == 0
     assert "SDG.GENERIC" not in split.genus_codes()
     assert all(column.reference_code != "SDG.GENERIC" for column in split.columns)
     for column in split.columns:
@@ -189,9 +189,9 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
         and column.column == "topic_id"
     )
     assert topic.genus_iri == "bfo:0000003"
-    assert topic.reference_code == ""
-    assert topic.ref_basis == "genus-unmapped"
-    assert topic.genus_code == ""
+    assert topic.reference_code == "SDG.ICE.DESCRIPTIVE.DECISION_SUBJECT"
+    assert topic.ref_basis == "kind-authored"
+    assert topic.genus_code == "SDG.ICE.DESCRIPTIVE.DECISION_SUBJECT"
     operator = next(
         column for column in split.columns
         if column.collection == "bus-route-e738d90a"
@@ -199,8 +199,9 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
         and column.column == "bus_operator_license_number"
     )
     assert operator.genus_iri == "bfo:00000995"
-    assert operator.reference_code == ""
-    assert operator.ref_basis == "genus-unmapped"
+    assert operator.reference_code == "SDG.MATERIAL_ENTITY.AGENT_ORGANIZATION"
+    assert operator.ref_basis == "kind-authored"
+    assert operator.genus_code == "SDG.MATERIAL_ENTITY.AGENT_ORGANIZATION"
     rate = next(
         column for column in split.columns
         if column.collection == "drug-application-0614fd04"

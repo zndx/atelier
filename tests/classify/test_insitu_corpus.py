@@ -417,9 +417,9 @@ def test_published_neighborhood_keeps_the_child_and_admits_siblings() -> None:
     genera = structural_genera(cats)
     first = genus_neighborhood(cats, 1)
     second = genus_neighborhood(cats, 2)
-    assert len(genera) == 89
-    assert len(first) == 703
-    assert len(second) == 890
+    assert len(genera) == 109
+    assert len(first) == 748
+    assert len(second) == 1005
     assert set(genera) < set(first) < set(second) < set(codes)
     frame = set(first)
     for genus in genera:
