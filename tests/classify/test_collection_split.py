@@ -144,8 +144,10 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
         (row["collection"], row["table"], row["column"]) for row in key_rows
     }
     labeled = split.labeled_columns()
-    assert len(labeled) == 26446
-    assert len(split.columns) - len(labeled) == 0
+    assert len(labeled) == 26239
+    assert len(split.columns) - len(labeled) == 207
+    assert "SDG.GENERIC" not in split.genus_codes()
+    assert all(column.reference_code != "SDG.GENERIC" for column in split.columns)
     for column in split.columns:
         assert column.class_iri
         if column.reference_code:
@@ -180,6 +182,33 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
     assert material.reference_code == "SDG.ARTIFACT"
     assert material.ref_basis == "genus-walk"
     assert material.genus_code == genus_term(cats, "SDG.ARTIFACT")
+    topic = next(
+        column for column in split.columns
+        if column.collection == "decision-assessment-36edfccb"
+        and column.table == "best_interest_determinations"
+        and column.column == "topic_id"
+    )
+    assert topic.genus_iri == "bfo:0000003"
+    assert topic.reference_code == ""
+    assert topic.ref_basis == "genus-unmapped"
+    assert topic.genus_code == ""
+    operator = next(
+        column for column in split.columns
+        if column.collection == "bus-route-e738d90a"
+        and column.table == "bus_routes"
+        and column.column == "bus_operator_license_number"
+    )
+    assert operator.genus_iri == "bfo:00000995"
+    assert operator.reference_code == ""
+    assert operator.ref_basis == "genus-unmapped"
+    rate = next(
+        column for column in split.columns
+        if column.collection == "drug-application-0614fd04"
+        and column.table == "geographic_regions"
+        and column.column == "prevalence_rate"
+    )
+    assert rate.reference_code == "SDG.GENERIC.PREVALENCE_RATE"
+    assert rate.genus_code == "SDG.GENERIC.PREVALENCE_RATE"
     engagement = next(
         column for column in split.columns
         if column.table == "clie_client_engagements" and column.column == "engagement_id"

@@ -70,12 +70,20 @@ def structural_genera(category_set: Any) -> list[str]:
     return genera
 
 
+# Anchorless catalog bucket. Its children do not share a BFO/CCO kind, so
+# gathering them into this parent makes one class out of unrelated columns.
+_RESIDUAL_BUCKET = "SDG.GENERIC"
+
+
 def genus_term(category_set: Any, code: str) -> str | None:
     """Genus-level SKOS term for one code.
 
     The nearest structural genus on the path, including ``code`` when
     it has a parent and children. A branch whose nodes have children
     but no parent — Process, Role — is that column's genus.
+
+    ``SDG.GENERIC`` is not such a genus. A child of that bucket stays
+    itself. The bucket code is not a column label.
     """
     children: Mapping[str, list[str]] = category_set.children
     parent: Mapping[str, str | None] = category_set.parent
@@ -85,11 +93,17 @@ def genus_term(category_set: Any, code: str) -> str | None:
         chain.append(current)
         current = parent.get(current)
     for node in chain:
+        if node == _RESIDUAL_BUCKET:
+            continue
         if children.get(node) and parent.get(node):
             return node
     for node in chain:
+        if node == _RESIDUAL_BUCKET:
+            continue
         if children.get(node):
             return node
+    if code != _RESIDUAL_BUCKET and _RESIDUAL_BUCKET in chain:
+        return code
     return None
 
 

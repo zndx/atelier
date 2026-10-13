@@ -447,6 +447,9 @@ def test_published_neighborhood_keeps_the_child_and_admits_siblings() -> None:
     continuant = "SDG.INDEPENDENT_CONTINUANT"
     assert neighborhood_term(cats, benefit) == benefit
     assert genus_term(cats, benefit) == descriptive
+    rate = "SDG.GENERIC.PREVALENCE_RATE"
+    assert genus_term(cats, rate) == rate
+    assert genus_term(cats, "SDG.GENERIC") is None
     assert neighborhood_term(cats, descriptive) == descriptive
     assert neighborhood_term(cats, "SDG.ICE") == "SDG.ICE"
     assert neighborhood_term(cats, "SDG.GDC") == "SDG.GDC"

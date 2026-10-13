@@ -5,7 +5,9 @@ published relational table is one row of that key, and every key row is
 one published column. ``class_iri`` is the column's OWL class. The SKOS
 label is ``reference_code`` when the key publishes one, gathered to its
 genus parent in ``vocabulary/annotations.csv``. A leaf becomes that
-genus. A code that is already a genus stays itself.
+genus. A code that is already a genus stays itself. A child of
+``SDG.GENERIC`` stays itself: that parent is an anchorless bucket, not
+a structural kind.
 
 A column whose ``reference_code`` is empty keeps its IRI and is not a
 labeled target. No other term is written in its place. A code that is
