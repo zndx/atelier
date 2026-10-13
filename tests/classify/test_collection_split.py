@@ -144,8 +144,8 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
         (row["collection"], row["table"], row["column"]) for row in key_rows
     }
     labeled = split.labeled_columns()
-    assert len(labeled) == 19836
-    assert len(split.columns) - len(labeled) == 6610
+    assert len(labeled) == 26446
+    assert len(split.columns) - len(labeled) == 0
     for column in split.columns:
         assert column.class_iri
         if column.reference_code:
@@ -170,6 +170,16 @@ def test_published_collections_match_the_answer_key_at_genus_level() -> None:
     assert status.range_iri == "xsd:string"
     assert status.reference_code == "SDG.ARTIFACT"
     assert status.genus_code == genus_term(cats, "SDG.ARTIFACT")
+    material = next(
+        column for column in split.columns
+        if column.collection == "computational-material-record-044e3d9a"
+        and column.table == "computational_material_records"
+        and column.column == "material_system_id"
+    )
+    assert material.genus_iri == "sdg:System"
+    assert material.reference_code == "SDG.ARTIFACT"
+    assert material.ref_basis == "genus-walk"
+    assert material.genus_code == genus_term(cats, "SDG.ARTIFACT")
     engagement = next(
         column for column in split.columns
         if column.table == "clie_client_engagements" and column.column == "engagement_id"
