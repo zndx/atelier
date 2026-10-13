@@ -29,6 +29,7 @@ from atelier.classify.neighborhood_baseline import (
     label_kind,
     placement,
     prepare_neighborhood_baseline,
+    values_are_stub,
 )
 from atelier.classify.taxonomy import load_annotations_from_filesystem
 from atelier.classify.features import FEATURE_NAMES
@@ -143,7 +144,18 @@ def main(prepare_only: bool = False) -> int:
     plan = prepare_neighborhood_baseline(
         vocabulary, generators=generators, variants_per_code=_VARIANTS,
     )
-    frame = ancestor_frame(vocabulary, plan.labels)
+    # Placeholder values ("Title Words 01") are not the exam. A label
+    # with two rich tables already held out a rich table.
+    support_stub = sum(values_are_stub(row.sample_values) for row in plan.support_rows)
+    holdout_stub = sum(values_are_stub(row.sample_values) for row in plan.holdout_rows)
+    plan.support_rows = [
+        row for row in plan.support_rows if not values_are_stub(row.sample_values)
+    ]
+    plan.holdout_rows = [
+        row for row in plan.holdout_rows if not values_are_stub(row.sample_values)
+    ]
+    kept = {row.code for row in plan.support_rows + plan.holdout_rows + plan.synthetic_rows}
+    frame = ancestor_frame(vocabulary, kept)
     report = {
         "support_rows": len(plan.support_rows),
         "holdout_rows": len(plan.holdout_rows),
@@ -154,6 +166,8 @@ def main(prepare_only: bool = False) -> int:
         "generatable": len(plan.generatable),
         "unfilled": plan.unfilled,
         "frame_nodes": len(frame.all_categories),
+        "support_stub_rows": support_stub,
+        "holdout_stub_rows": holdout_stub,
         "variants_per_code": _VARIANTS,
         "epochs": _EPOCHS,
         "conditions": {},

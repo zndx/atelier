@@ -54,6 +54,20 @@ def test_one_table_per_label_is_held_out_whole() -> None:
     assert "only" not in holdout
 
 
+def test_a_label_with_two_rich_tables_holds_out_a_rich_one() -> None:
+    benefit = "SDG.ICE.DESCRIPTIVE.RETIREMENT_BENEFIT_OPTION"
+    labels = {
+        "stub_table": {benefit},
+        "rich_a": {benefit},
+        "rich_b": {benefit},
+    }
+    support, holdout = split_whole_tables(
+        labels, rich={("rich_a", benefit), ("rich_b", benefit)},
+    )
+    assert holdout == ["rich_a"]
+    assert support == ["rich_b", "stub_table"]
+
+
 def test_child_stays_itself_and_a_root_leaf_is_included() -> None:
     cats = taxonomy(_CHAIN)
     benefit_iri = code_iri(_BENEFIT)

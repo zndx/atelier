@@ -15,9 +15,12 @@ The seven roots have no such generator.
 
 from __future__ import annotations
 
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Mapping
+
+_STUB_VALUE = re.compile(r"^[A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+){0,6} \d{2}$")
 
 from atelier.classify.decisions_walk import associate_genera, genus_term
 from atelier.classify.extension_patterns import code_iri
@@ -67,13 +70,27 @@ def ancestor_frame(
     return HierarchicalCategorySet(name="neighborhood-baseline", categories=chosen)
 
 
+def values_are_stub(values: list[str]) -> bool:
+    """True when most stored values are ``Title Words NN`` placeholders."""
+    kept = [str(value).strip() for value in values if str(value).strip()]
+    if not kept:
+        return False
+    stubs = sum(1 for value in kept if _STUB_VALUE.match(value))
+    return stubs * 2 >= len(kept)
+
+
 def split_whole_tables(
     table_labels: Mapping[str, set[str]],
+    *,
+    rich: set[tuple[str, str]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Hold out one whole table per label that has another table.
 
     A candidate table is eligible when every label on it still has a
-    different table outside the holdout. A label that lives on one
+    different table outside the holdout, and when that label still has
+    a rich table outside the holdout. ``rich`` holds ``(table, label)``
+    pairs whose stored values are not placeholders. A label with two
+    rich tables holds out a rich table. A label that lives on one
     table stays in support. Tables are never split.
     """
     members: dict[str, list[str]] = {}
@@ -82,7 +99,11 @@ def split_whole_tables(
             members.setdefault(label, []).append(table)
     for label in members:
         members[label] = sorted(set(members[label]))
+    rich_pairs = rich or set()
     holdout: set[str] = set()
+
+    def rich_members(label: str) -> list[str]:
+        return [table for table in members[label] if (table, label) in rich_pairs]
 
     def eligible(table: str) -> bool:
         if table in holdout:
@@ -94,15 +115,27 @@ def split_whole_tables(
             ]
             if not remaining:
                 return False
+            if rich is not None and rich_members(label):
+                remaining_rich = [
+                    other for other in rich_members(label)
+                    if other != table and other not in holdout
+                ]
+                if not remaining_rich:
+                    return False
         return True
 
     order = sorted(members, key=lambda code: (len(members[code]), code))
     for label in order:
         if len(members[label]) < 2:
             continue
-        if any(table in holdout for table in members[label]):
+        pool = members[label]
+        if len(rich_members(label)) >= 2:
+            if any(table in holdout for table in rich_members(label)):
+                continue
+            pool = rich_members(label)
+        elif any(table in holdout for table in members[label]):
             continue
-        candidates = [table for table in members[label] if eligible(table)]
+        candidates = [table for table in pool if eligible(table)]
         if not candidates:
             continue
         candidates.sort(key=lambda table: (len(table_labels[table]), table))
@@ -180,7 +213,19 @@ def prepare_neighborhood_baseline(
     table_labels: dict[str, set[str]] = {}
     for (table, _column), label in lifted.items():
         table_labels.setdefault(table, set()).add(label)
-    support_tables, holdout_tables = split_whole_tables(table_labels)
+    column_values: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for cell in cells:
+        text = str(cell.get("value") or "").strip()
+        if text:
+            column_values[(str(cell["table"]), str(cell["column"]))].append(text)
+    rich_pairs = {
+        (table, label)
+        for (table, column), label in lifted.items()
+        if not values_are_stub(column_values.get((table, column), []))
+    }
+    support_tables, holdout_tables = split_whole_tables(
+        table_labels, rich=rich_pairs,
+    )
     support_keys = [
         (table, column)
         for table in support_tables
