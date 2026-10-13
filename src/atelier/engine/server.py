@@ -288,8 +288,8 @@ def _start_workload_sync():
     """Submit the paused sdg_classify catalogue (YK claims). Do not run classify.
 
     AgentRTC pattern: restart re-asserts the workflow's queue configuration
-    via SyncWorkloads. Airflow starts ClassificationFlow when the Activity
-    is in force — not this boot path.
+    via SyncWorkloads. The activity owner starts ClassificationFlow when
+    the activity is RUNNING. This boot path does not.
     """
     from atelier.engine.workload_sync import (
         GURU_SYNCFAIL,
@@ -306,6 +306,23 @@ def _start_workload_sync():
     sync.start()
     logger.info("workload-sync started target=%s", target)
     return sync
+
+
+def _start_activity_owner():
+    """Watch sdg_classify. Start Metaflow when that activity is RUNNING.
+
+    Boot does not declare and does not run the flow. A dark Signals
+    leaves the owner unstarted; the engine still serves.
+    """
+    from atelier.engine.activity_owner import init_activity_owner
+    from atelier.engine.workload_sync import GURU_SYNCFAIL, signals_sync_target
+
+    try:
+        target = signals_sync_target()
+    except Exception as e:  # noqa: BLE001 — boot must not wait on Signals
+        logger.warning("%s activity owner target unresolved: %s", GURU_SYNCFAIL, e)
+        return None
+    return init_activity_owner(target)
 
 
 def serve(port: int | None = None) -> None:
@@ -331,6 +348,7 @@ def serve(port: int | None = None) -> None:
     emit(servicer.cfg.log_dir, "engine_start", project="atelier",
          grpc_port=bind_port, capabilities=list(servicer.cfg.capabilities))
     sync = _start_workload_sync()
+    owner = _start_activity_owner()
     print(
         f"atelier-engine gRPC listening on :{bind_port} "
         f"(hosted: {list(servicer.cfg.capabilities)}; instruct/thinking forwarded to the federation; "
@@ -340,6 +358,8 @@ def serve(port: int | None = None) -> None:
     )
 
     def _stop(*_):
+        if owner is not None:
+            owner.stop()
         if sync is not None:
             sync.stop()
         servicer.mgr.shutdown()

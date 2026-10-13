@@ -33,6 +33,8 @@ class ClassificationFlow(AtelierFlow):
     reference_id = Parameter("reference-id", default="", type=str)
     only_precondition = Parameter("only-precondition", default=False, type=bool)
     kubernetes_preferred = Parameter("kubernetes-preferred", default=True, type=bool)
+    # Frozen activity reason. Empty when a person runs the flow by hand.
+    run_configuration_json = Parameter("run-configuration", default="", type=str)
 
     @step
     def start(self):
@@ -71,6 +73,26 @@ class ClassificationFlow(AtelierFlow):
         rid = str(self.reference_id or "").strip()
         self.reference_source_id = rid
         self.train_source_id = rid or sid
+        from atelier.flows.execution_topology import (
+            classify_topology,
+            configuration,
+            configuration_from_reason,
+        )
+
+        # The activity reason is the run. A hand-started flow with no
+        # reason builds the same document from the catalogue plus these
+        # parameters. Steps do not open Airflow.
+        declared = str(getattr(self, "run_configuration_json", "") or "").strip()
+        if declared:
+            self.run_configuration = configuration_from_reason(declared)
+        else:
+            self.run_configuration = configuration(classify_topology(
+                source_id=sid,
+                target=str(self.target or ""),
+                reference_id=rid,
+                only_precondition=bool(self.only_precondition),
+                trigger="imperative",
+            ))
         if rid:
             from atelier.sdg.pair import assert_pair
 
@@ -125,8 +147,11 @@ class ClassificationFlow(AtelierFlow):
         """LOADING_VOCAB + DISCOVERING + SAMPLING — pin target entities."""
         from atelier.classify.decisions_backend import REPLICA_COUNT
 
-        self.sweep_capability = llm_capability_for_sweep(revisit=False)
-        self.sweep_width = REPLICA_COUNT
+        conf = getattr(self, "run_configuration", None) or {}
+        self.sweep_capability = str(
+            conf.get("sweep_capability") or llm_capability_for_sweep(revisit=False)
+        )
+        self.sweep_width = int(conf.get("sweep_width") or REPLICA_COUNT)
         self.next(self.sweep)
 
     @step

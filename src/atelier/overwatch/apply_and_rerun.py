@@ -7,8 +7,9 @@ Usage::
 
 Reads ``build/results/<run_id>/proposed_overlay.json`` (written by
 ``write_proposal``), revalidates it against the Bedrock invariant and
-SETTINGS_METADATA, applies it to the live config overlay, and invokes
-``gateway._fsm_start_inline`` to spawn a new pipeline run.
+SETTINGS_METADATA, applies it to the live config overlay, and calls
+``fsm_start``. The federation clock declares one Airflow activity.
+``clock=gateway`` starts the in-process pipeline thread.
 
 This CLI is the **only** allowed side-effecting channel for the
 autonomous tier.  The ``propose`` tier must never invoke it — the
@@ -117,17 +118,27 @@ def main(argv: list[str] | None = None) -> int:
                 build_root=_project_root() / "build",
             )
 
-    # Kick off the rerun via the gateway's FSM start path — this keeps
-    # nautilus attachment consistent with operator-initiated runs.
+    # Same door as the operator's Start button. A declaration is not
+    # an in-process pipeline, and a refusal is not success.
     try:
+        from atelier.engine.activity_declare import interpret_dispatch
         from atelier.gateway import fsm_start
+
         result = fsm_start(source_id=args.source_id)
+        if not isinstance(result, dict):
+            raise RuntimeError("fsm_start did not return a classification dispatch")
+        dispatch = interpret_dispatch(result)
     except Exception as exc:
         print(f"error: fsm_start failed: {exc}", file=sys.stderr)
         return 5
 
+    status = (
+        "applied_and_scheduled"
+        if dispatch["status"] == "scheduled"
+        else "applied_and_started"
+    )
     print(json.dumps({
-        "status": "applied_and_started",
+        "status": status,
         "applied_overlay": proposal.overlay,
         "fsm_start_result": result,
     }, indent=2))

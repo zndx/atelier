@@ -271,7 +271,15 @@ def _handle_pipeline(params: dict) -> TaskResult:
             "No source_id available — pass via params or seed via prior FSM runs"
         )
     result = fsm_start(source_id=source_id)
+    if not isinstance(result, dict):
+        raise RuntimeError("fsm_start did not return a classification dispatch")
+    from atelier.engine.activity_declare import interpret_dispatch
+
+    dispatch = interpret_dispatch(result)
     return TaskResult(skipped=False, outcome={
         "source_id": source_id,
-        "fsm_start_result": str(result),
+        "scheduled": dispatch["scheduled"],
+        "started": dispatch["started"],
+        "activity_id": dispatch["activity_id"],
+        "fsm_start_result": result,
     })

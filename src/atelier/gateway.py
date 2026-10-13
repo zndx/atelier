@@ -2800,9 +2800,61 @@ def fsm_status():
         return _error_envelope(f"FSM status failed: {exc}")
 
 
+def _queue_refusal() -> dict | None:
+    """None when the task queue is clean. A dirty queue refuses the run."""
+    try:
+        from atelier import task_handlers  # noqa: F401 — registers handlers
+        from atelier.task_queue import drain_then_check
+        is_clean, queue_err, queue_state = drain_then_check()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Task queue gate failed to evaluate (%s) — proceeding; "
+            "investigate task_queue logs", exc,
+        )
+        return None
+    if not is_clean:
+        return {
+            "started": False,
+            "scheduled": False,
+            "error": f"Task queue not clean: {queue_err}",
+            "queue_state": queue_state,
+        }
+    if queue_state.get("drain", {}).get("ran"):
+        logger.info(
+            "Pre-pipeline drain ran %d task(s); queue now clean.",
+            queue_state["drain"]["ran"],
+        )
+    return None
+
+
 @app.post("/api/fsm/start")
 def fsm_start(source_id: str | None = None):
-    """Start a classification pipeline run.
+    """Schedule a classification run, or start the CAI in-process thread.
+
+    The federation clock (default ``airflow``) declares one activity.
+    Signals triggers the Metaflow flow. This process does not open
+    Airflow and does not start the pipeline thread. ``clock=gateway``
+    keeps the CAI in-process path.
+    """
+    try:
+        from atelier.config import load_config
+
+        cfg = load_config()
+    except Exception as exc:
+        return {"started": False, "scheduled": False, "error": f"config: {exc}"}
+    if _federation_clock(cfg):
+        refusal = _queue_refusal()
+        if refusal:
+            return refusal
+        from atelier.engine.activity_declare import schedule_classify
+
+        return schedule_classify(source_id)
+
+    return _fsm_start_in_process(source_id, cfg)
+
+
+def _fsm_start_in_process(source_id: str | None, cfg):
+    """CAI clock: pipeline thread. Federation does not call this.
 
     The pipeline requires an LLM backend.  When ANTHROPIC_API_KEY is
     available (always true with Claude Code), the pipeline auto-defaults
@@ -2820,10 +2872,8 @@ def fsm_start(source_id: str | None = None):
     try:
         from atelier.classify import get_fsm
         from atelier.classify.pipeline import run_classification_pipeline
-        from atelier.config import load_config
         from atelier.db.dao import AtelierDao
 
-        cfg = load_config()
         fsm = get_fsm(dao=AtelierDao())
 
         # Check if already running
@@ -2837,33 +2887,9 @@ def fsm_start(source_id: str | None = None):
                     "error": "No classification LLM configured. "
                     "Set ANTHROPIC_SUBAGENT_MODEL or ATELIER_LLM_API_KEY."}
 
-        # Gate: serialize on the task queue before dispatching the pipeline.
-        # Tasks enqueued from the Session pod or via the Web Terminal Agent
-        # (apply forward transforms, verify, render change-management guide,
-        # etc.) must complete before a classification run so the pipeline
-        # reads the post-apply Qdrant collection rather than racing it.
-        # Refuses the start when any task fails — the operator must resolve
-        # via `python -m atelier.task_queue {retry|cancel}` before retrying.
-        try:
-            from atelier import task_handlers  # noqa: F401 — registers handlers
-            from atelier.task_queue import drain_then_check
-            is_clean, queue_err, queue_state = drain_then_check()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Task queue gate failed to evaluate (%s) — proceeding with "
-                "pipeline start; investigate task_queue logs", exc,
-            )
-        else:
-            if not is_clean:
-                return {"started": False,
-                        "error": f"Task queue not clean: {queue_err}",
-                        "queue_state": queue_state}
-            if queue_state.get("drain", {}).get("ran"):
-                logger.info(
-                    "Pre-pipeline drain ran %d task(s); queue now clean, "
-                    "proceeding with pipeline start.",
-                    queue_state["drain"]["ran"],
-                )
+        refusal = _queue_refusal()
+        if refusal:
+            return refusal
 
         # Resolve source metadata: connection, database, vocab_uri.
         # Precedence ladder (lowest → highest):

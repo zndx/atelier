@@ -4,10 +4,11 @@ Feature: Classify source layering — env vars, UI-saved rows, per-run overrides
     base.conf < .env.cai.enc < ATELIER_CLASSIFY_* env < data_sources row
     < fsm_start source_id.  Setting connection + database at deploy
   time seeds a data_source row so the env-driven default is visible +
-  editable in the UI; the pipeline FSM start path uses cfg defaults
-  when no source_id is passed.
+  editable in the UI. The federation clock declares an activity from
+  the source id. The CAI clock (clock=gateway) still reads cfg defaults
+  inside the in-process start when no source row is selected.
 
-  Scenario: fsm_start without source_id falls back to cfg classify defaults
+  Scenario: the CAI clock reads cfg classify defaults in the in-process start
     Given ATELIER_CLASSIFY_CONNECTION is "prod-hive" in config
     And ATELIER_CLASSIFY_DATABASE is "default" in config
     When I inspect the fsm_start resolution source

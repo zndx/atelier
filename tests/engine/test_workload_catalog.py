@@ -46,10 +46,15 @@ def test_catalogue_paused_metaflow_dag() -> None:
     assert entry.enabled is False
     assert entry.airflow_dag_id == DAG_ID
     assert entry.runner == "metaflow"
-    assert entry.cron == "0 8 * * *"
+    assert entry.cron == ""
+    assert list(entry.precludes) == list(
+        decisions_sweep_record()["sweep"]["precludes"]
+    )
     hint = schedule_hints()[0]
     assert hint.enabled is False
     assert hint.source == "airflow"
+    assert hint.cron == ""
+    assert list(hint.precludes) == list(entry.precludes)
     assert hint.airflow_dag_id == DAG_ID
     assert {(c.leaf, c.gpu) for c in hint.claims} == set(entry.claims)
 

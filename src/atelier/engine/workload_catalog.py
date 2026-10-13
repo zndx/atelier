@@ -19,7 +19,8 @@ PEER = "atelier"
 KIND = "sdg_classify"
 DAG_ID = "atelier_sdg_classify"
 RUNNER_METAFLOW = "metaflow"
-CRON = "0 8 * * *"
+# Imperative: Airflow triggers the activity. An empty cron is not a clock.
+CRON = ""
 HORIZON_S = 14400  # 4h — textproto net_seconds
 
 
@@ -75,6 +76,7 @@ class WorkloadEntry:
     enabled: bool = False
     airflow_dag_id: str = ""
     claims: tuple[tuple[str, int], ...] = field(default_factory=tuple)
+    precludes: tuple[str, ...] = ()
 
     @property
     def id(self) -> str:
@@ -91,15 +93,17 @@ WORKLOAD_CATALOG: tuple[WorkloadEntry, ...] = (
         kind=KIND,
         cron=CRON,
         description=(
-            "SDG classification: decisions sweep fans out one Metaflow "
-            "shard per d3-flash replica, then a thinking revisit and one "
-            "DST fuse. Catalogue stays paused."
+            "Imperative SDG classification. Airflow triggers the Metaflow "
+            "flow when the activity is declared. Run configuration is that "
+            "activity: decisions sweep, thinking revisit, one DST fuse. "
+            "Catalogue stays paused until a platform run is proven."
         ),
         runner=RUNNER_METAFLOW,
         horizon_s=HORIZON_S,
         enabled=False,
         airflow_dag_id=DAG_ID,
         claims=classify_yk_claims(),
+        precludes=tuple(decisions_sweep_record()["sweep"]["precludes"]),
     ),
 )
 
@@ -124,6 +128,8 @@ def to_hint(entry: WorkloadEntry) -> Any:
     )
     for leaf, gpu in entry.claims:
         hint.claims.add(leaf=str(leaf), gpu=int(gpu))
+    for leaf in entry.precludes:
+        hint.precludes.append(str(leaf))
     return hint
 
 

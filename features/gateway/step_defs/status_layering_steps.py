@@ -54,8 +54,10 @@ def step_set_db(context, value):
 
 @when("I inspect the fsm_start resolution source")
 def step_inspect_fsm_start(context):
-    from atelier.gateway import fsm_start
-    context.src = inspect.getsource(fsm_start)
+    # The federation clock declares an activity. Connection and database
+    # defaults stay on the CAI clock, in the in-process start.
+    from atelier.gateway import _fsm_start_in_process
+    context.src = inspect.getsource(_fsm_start_in_process)
 
 
 @then("the resolution reads cfg.classify_connection_name as default")
