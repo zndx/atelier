@@ -158,12 +158,16 @@ def load_rows(refresh_cache: bool, database: str) -> list[Row]:
 NHSVM_FEATURE_TEXT = "column_features"
 
 
-def build_texts_and_labels(rows: list[Row]) -> tuple[list[str], list[str]]:
+def build_texts_and_labels(
+    rows: list[Row],
+    mask: dict[str, bool] | None = None,
+) -> tuple[list[str], list[str]]:
     """Build (text, label) from the pipeline's discrete column features.
 
     The text is ``ColumnFeatures.to_embedding_text()``. SAGE and SHAP
     ablate the same feature names, including sampled values and sibling
-    columns. The SKOS code stays the label.
+    columns. ``mask`` drops features the same way. The SKOS code stays
+    the label.
     """
     from atelier.classify.features import extract_features
 
@@ -184,7 +188,7 @@ def build_texts_and_labels(rows: list[Row]) -> tuple[list[str], list[str]]:
             source_table=r.table,
             total_count=len(r.sample_values) or None,
         )
-        texts.append(features.to_embedding_text())
+        texts.append(features.to_embedding_text(mask))
         labels.append(r.code)
     return texts, labels
 
