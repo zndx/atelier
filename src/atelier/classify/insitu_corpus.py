@@ -5,8 +5,8 @@ A collection is one referentially closed bundle: every table in it is
 support, or every table in it is holdout. The label is the published
 SKOS code on each target column. The features are the classification
 pipeline's discrete features, including sibling columns and sampled
-values, so SHAP and SAGE can ablate them. Real support collections and
-caller-supplied synthetic relational rows mix in the training corpus.
+values, so SHAP and SAGE can ablate them. Training rows are the real
+support columns. Stub synthetic tables are not added.
 A column split that keeps one column of a table in training and its
 siblings in the holdout is not this exam.
 
@@ -16,16 +16,14 @@ term in the neighborhood of the structural genera. The code is not
 a feature.
 Collection directories do not carry that assignment; the answer key is
 a separate CSV of exact codes. Column names are not labels. Holding a
-collection out skews the tag distribution, so each side receives
-synthetic relational tables for the codes whose real share is below
-the pooled share. An empty footprint has no targets.
+collection out skews the tag distribution. That deficit is recorded
+on the plan and is not filled here. An empty footprint has no targets.
 """
 
 from __future__ import annotations
 
 import csv
 import json
-import random
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,7 +55,11 @@ class InSituError(RuntimeError):
 
 @dataclass
 class InSituPlan:
-    """Synthetic training plan for one taxonomy and one relational split."""
+    """Training plan for one taxonomy and one relational split.
+
+    ``rows`` are the real support columns. ``variants`` records the
+    distribution deficit and is not filled with stub tables.
+    """
 
     support: list[tuple[str, str]]
     holdout: list[tuple[str, str]]
@@ -114,9 +116,10 @@ def prepare_insitu(
     set, ``holdout_collections`` names the bundles held out whole.
     Only columns that exist in the footprint, and whose code is in the
     taxonomy, are targets. ``corpora`` defaults to the local sdg-corpora
-    checkout. A checkout that is absent yields an empty split and no
-    synthetic rows. ``cells`` replaces the projected footprint when the
-    caller already loaded collection tables.
+    checkout. A checkout that is absent yields an empty split.
+    ``cells`` replaces the projected footprint when the caller already
+    loaded collection tables. ``extra_generators`` is accepted and
+    ignored: stub tables are not emitted.
     """
     if cells is None:
         cells = load_projected_cells(corpora)
@@ -138,56 +141,35 @@ def prepare_insitu(
             counts[code] += 1
     holdout_counts: dict[str, int] = {}
     holdout_variants: dict[str, int] = {}
+    del extra_generators, seed
     if collections is not None:
-        # Real collection membership fixes the tag histogram. Synthetic
-        # tables close the gap to the pooled share on each side. An
-        # omitted generator map does not load the installed module; a
-        # skewed code with no supplied generator fails closed.
+        # Real collection membership fixes the tag histogram. The
+        # deficit is the count of columns that would bring each side
+        # up to the pooled share. It is not filled with stub tables.
         holdout_counts = support_counts(holdout, known)
         variants = distribution_deficit(counts, holdout_counts)
         holdout_variants = distribution_deficit(holdout_counts, counts)
-        supplied = extra_generators or {}
-        needed = sorted(set(variants) | set(holdout_variants))
-        missing = [code for code in needed if _generator_iri(code) not in supplied]
-        if missing:
-            sample = ", ".join(missing[:8])
-            raise InSituError(
-                f"collection tag skew has no relational generator for "
-                f"{len(missing)} codes ({sample})."
-            )
-        generators, extended = (
-            _generators(needed, supplied) if needed else ({}, set())
-        )
     else:
         variants = {
             code: (amplified_variants if counts[code] < floor else base_variants)
             for code in counts
         }
-        generators, extended = _generators(list(counts), extra_generators)
-    exemplars = _exemplars(generators, seed=seed, rows_per_column=rows_per_column)
     plan = InSituPlan(
         support=support,
         holdout=holdout,
         counts=counts,
         variants=variants,
-        exemplars=exemplars,
+        exemplars={},
         artifact_root=relational_split_root(artifact_root),
-        extended=sorted(extended),
+        extended=[],
         holdout_collections=held,
         holdout_counts=holdout_counts,
         holdout_variants=holdout_variants,
     )
     plan.rows = _support_rows(
         cells, support, known, rows_per_column=rows_per_column,
-    ) + synthetic_rows(
-        variants, generators, rows_per_column=rows_per_column, seed=seed,
-    )
-    plan.holdout_rows, holdout_tables = _synthetic_batch(
-        holdout_variants, generators, rows_per_column=rows_per_column,
-        seed=seed + 7919, prefix="holdout_",
     )
     _write_split(plan, cells)
-    _write_augmented_tables(plan.artifact_root, holdout_tables)
     return plan
 
 
@@ -439,12 +421,6 @@ def _sql_column_types(path: Path) -> dict[str, str]:
     return types
 
 
-def _generator_iri(code: str) -> str | None:
-    from atelier.classify.extension_patterns import code_iri
-
-    return code_iri(code)
-
-
 def split_by_code(
     table_columns: dict[str, list[str]],
     assignments: dict[tuple[str, str], str],
@@ -533,7 +509,9 @@ def distribution_deficit(
     side: dict[str, int],
     other: dict[str, int],
 ) -> dict[str, int]:
-    """Synthetic columns that bring ``side`` up to the pooled tag share.
+    """Columns that would bring ``side`` up to the pooled tag share.
+
+    The count is recorded on the plan. It is not filled with stub tables.
 
     ``side`` and ``other`` map a SKOS code to its real column count on
     that split. The pooled share of a code is its count on both sides
@@ -560,63 +538,8 @@ def distribution_deficit(
     return dict(sorted(deficit.items()))
 
 
-def synthetic_rows(
-    variants: dict[str, int],
-    generators: dict[str, Any],
-    *,
-    rows_per_column: int = ROWS_PER_COLUMN,
-    seed: int = 42,
-    prefix: str = "",
-) -> list[Any]:
-    """NHSVM rows from relational generators, one table per variant."""
-    rows, _tables = _synthetic_batch(
-        variants, generators, rows_per_column=rows_per_column,
-        seed=seed, prefix=prefix,
-    )
-    return rows
-
-
-def _synthetic_batch(
-    variants: dict[str, int],
-    generators: dict[str, Any],
-    *,
-    rows_per_column: int = ROWS_PER_COLUMN,
-    seed: int = 42,
-    prefix: str = "",
-) -> tuple[list[Any], list[dict]]:
-    """Rows plus the generated tables, with ``prefix`` on each table name."""
-    from atelier.classify.extension_patterns import code_iri
-
-    rng = random.Random(seed)
-    seen_tables: set[str] = set()
-    rows: list[Any] = []
-    tables: list[dict] = []
-    for code in sorted(variants):
-        width = int(variants.get(code, 0))
-        if width <= 0:
-            continue
-        generate = generators.get(code)
-        iri = code_iri(code)
-        if generate is None or iri is None:
-            raise InSituError(f"{code} has no relational generator")
-        for index in range(width):
-            table = _call_table(generate, rng, iri, code)
-            name = str(table["table"])
-            if name in seen_tables:
-                name = f"{name}_{index + 1}"
-            seen_tables.add(name)
-            stored = dict(table)
-            stored["table"] = f"{prefix}{name}"
-            stored["code"] = code
-            tables.append(stored)
-            rows.append(_labeled_row(
-                stored["table"], stored, iri, code, rows_per_column,
-            ))
-    return rows, tables
-
-
 class InSituPrototypeGenerator(EnrichmentGenerator):
-    """MaxSim prototypes are synthetic values for the ontology code."""
+    """MaxSim prototypes from the plan. The plan no longer carries stub values."""
 
     def __init__(self, plan: InSituPlan) -> None:
         self._plan = plan
@@ -655,7 +578,7 @@ class InSituPrototypeGenerator(EnrichmentGenerator):
         return GenerationResult(
             enrichment=enrichment,
             attempts=1,
-            notes="in-situ synthetic prototype",
+            notes="label-padded in-situ prototype",
         )
 
 
@@ -732,32 +655,6 @@ def _write_split(plan: InSituPlan, cells: list[dict]) -> None:
     )
 
 
-def _write_augmented_tables(root: Path | None, tables: list[dict]) -> None:
-    """Write synthetic holdout tables beside the real holdout CSVs.
-
-    The file carries column names and stored values. The SKOS code stays
-    on the row and out of the table.
-    """
-    if root is None or not tables:
-        return
-    dest = root / "holdout" / "tables"
-    dest.mkdir(parents=True, exist_ok=True)
-    for table in tables:
-        columns = [column for column in (table.get("columns") or []) if column.get("name")]
-        headers = [str(column["name"]) for column in columns]
-        width = max((len(column.get("values") or []) for column in columns), default=0)
-        safe = str(table.get("table") or "augmented").replace("/", "__")
-        path = dest / f"{safe}.csv"
-        with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(headers)
-            for index in range(width):
-                writer.writerow([
-                    _at([str(value) for value in (column.get("values") or [])], index)
-                    for column in columns
-                ])
-
-
 def _at(values: list[str], index: int) -> str:
     return values[index] if index < len(values) else ""
 
@@ -787,74 +684,6 @@ def _known_assignments(
 
 def _target_codes(assignments: dict[tuple[str, str], str]) -> list[str]:
     return sorted(set(assignments.values()))
-
-
-def _generators(
-    codes: list[str], extra_generators: dict | None = None,
-) -> tuple[dict[str, Any], set[str]]:
-    from atelier.classify.extension_patterns import code_iri
-
-    if not codes:
-        return {}, set()
-    if extra_generators is None:
-        extra_generators = _installed_generators()
-    out = {}
-    extended: set[str] = set()
-    missing: list[str] = []
-    for code in codes:
-        iri = code_iri(code)
-        generate = extra_generators.get(iri) if iri else None
-        if generate is None:
-            missing.append(code)
-            continue
-        out[code] = generate
-        extended.add(code)
-    if missing:
-        sample = ", ".join(missing[:8])
-        raise InSituError(
-            f"{len(missing)} target entities have no relational generator ({sample})."
-        )
-    return out, extended
-
-
-def _installed_generators() -> dict:
-    from atelier.classify.extension_patterns import ExtensionError, extensions_path, load_generators
-
-    path = extensions_path()
-    if not path.is_file():
-        return {}
-    try:
-        return load_generators(path.read_text(encoding="utf-8"))
-    except ExtensionError as exc:
-        raise InSituError(f"Installed generator extension is unusable: {exc}") from exc
-
-
-def _exemplars(
-    generators: dict[str, Any], *, seed: int, rows_per_column: int,
-) -> dict[str, list[str]]:
-    from atelier.classify.extension_patterns import code_iri
-
-    rng = random.Random(seed + 1)
-    exemplars: dict[str, list[str]] = {}
-    for code, generate in generators.items():
-        iri = code_iri(code)
-        if iri is None:
-            continue
-        seen: set[str] = set()
-        values: list[str] = []
-        for _ in range(PROTOTYPES_PER_CODE * 3):
-            table = _call_table(generate, rng, iri, code)
-            for text in _iri_values(table, iri):
-                if text in seen:
-                    continue
-                seen.add(text)
-                values.append(text)
-                if len(values) >= PROTOTYPES_PER_CODE:
-                    break
-            if len(values) >= PROTOTYPES_PER_CODE:
-                break
-        exemplars[code] = values[:rows_per_column]
-    return exemplars
 
 
 def _support_rows(
@@ -899,53 +728,6 @@ def _support_rows(
             code=code,
         ))
     return rows
-
-
-def _labeled_row(table: str, generated: dict, iri: str, code: str, limit: int):
-    from atelier.classify.ml_train import _infer_column_type
-    from atelier.optimize.svm.reflect import Row
-
-    labeled = next(
-        column for column in generated["columns"]
-        if str(column.get("iri") or "") == iri
-    )
-    values = [str(value) for value in labeled["values"] if str(value).strip()][:limit]
-    siblings = [
-        str(column["name"]) for column in generated["columns"]
-        if column is not labeled
-    ]
-    return Row(
-        table=table,
-        column=str(labeled["name"]),
-        column_type=_infer_column_type(values[:10]) or "object",
-        sample_values=values[:8],
-        siblings_full=siblings,
-        mnemonic="",
-        code=code,
-    )
-
-
-def _call_table(generate, rng, iri: str, code: str) -> dict:
-    from atelier.classify.extension_patterns import relational_table_problem
-
-    try:
-        value = generate(rng)
-    except Exception as exc:
-        raise InSituError(
-            f"{code} generator raised {type(exc).__name__}: {exc}"
-        ) from exc
-    problem = relational_table_problem(value, iri)
-    if problem:
-        raise InSituError(f"{code} {problem}")
-    return value
-
-
-def _iri_values(table: dict, iri: str) -> list[str]:
-    values: list[str] = []
-    for column in table["columns"]:
-        if str(column.get("iri") or "") == iri:
-            values.extend(str(value).strip() for value in column["values"] if str(value).strip())
-    return values
 
 
 def _footprint_pin(corpora: str | Path | None) -> Path | None:

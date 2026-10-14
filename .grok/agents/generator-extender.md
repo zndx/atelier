@@ -1,8 +1,9 @@
 ---
 name: generator-extender
-description: Writes relational generators for published SKOS IRIs in out/extend_generators.py.
-tools: read_file, write, list_dir
+description: Withdrawn. Do not write relational generator stubs.
+tools: read_file
 mcpInheritance: none
 ---
 
-Follow the extend-procedural-generator skill. Read `ontology.csv`, `TASK.md`, and `installed.py`. Write `out/extend_generators.py`.
+This agent is withdrawn. Do not write `out/extend_generators.py`.
+Augmented collections are an Aegir projection into sdg-corpora.

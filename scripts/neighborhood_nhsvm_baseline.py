@@ -1,9 +1,8 @@
 """Score the genus-neighborhood NHSVM baseline on the labeled DDL footprint.
 
 The fit stays on CPU. It does not promote a head and it does not read
-``corpus/cta_answer_key.csv``. Three conditions share one whole-table
-holdout: real support rows, synthetic tables alone, and real support
-plus the synthetic supplement.
+``corpus/cta_answer_key.csv``. The scored conditions are the real
+support rows. Stub synthetic tables are not loaded.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from pathlib import Path
 
 import numpy as np
 
-from atelier.classify.extension_patterns import extensions_path, load_generators
 from atelier.classify.neighborhood_baseline import (
     ancestor_frame,
     label_kind,
@@ -37,7 +35,6 @@ from atelier.optimize.svm.reflect import build_texts_and_labels
 
 _ROOT = Path(__file__).resolve().parents[1]
 _OUT = _ROOT / "build" / "results" / "neighborhood-baseline"
-_VARIANTS = 4
 _EPOCHS = int(os.environ.get("NEIGHBORHOOD_EPOCHS", "300"))
 
 
@@ -140,10 +137,7 @@ def main(prepare_only: bool = False) -> int:
     vocabulary = load_annotations_from_filesystem(
         _ROOT / "external" / "sdg-corpora" / "vocabulary" / "annotations.csv",
     )
-    generators = load_generators(extensions_path().read_text(encoding="utf-8"))
-    plan = prepare_neighborhood_baseline(
-        vocabulary, generators=generators, variants_per_code=_VARIANTS,
-    )
+    plan = prepare_neighborhood_baseline(vocabulary, variants_per_code=0)
     # Placeholder values ("Title Words 01") are not the exam. A label
     # with two rich tables already held out a rich table.
     support_stub = sum(values_are_stub(row.sample_values) for row in plan.support_rows)
@@ -168,7 +162,7 @@ def main(prepare_only: bool = False) -> int:
         "frame_nodes": len(frame.all_categories),
         "support_stub_rows": support_stub,
         "holdout_stub_rows": holdout_stub,
-        "variants_per_code": _VARIANTS,
+        "variants_per_code": 0,
         "epochs": _EPOCHS,
         "conditions": {},
     }
@@ -183,7 +177,10 @@ def main(prepare_only: bool = False) -> int:
 
     support_text, support_y = build_texts_and_labels(plan.support_rows)
     holdout_text, _holdout_y = build_texts_and_labels(plan.holdout_rows)
-    synth_text, synth_y = build_texts_and_labels(plan.synthetic_rows)
+    synth_text: list[str] = []
+    synth_y: list[str] = []
+    if plan.synthetic_rows:
+        synth_text, synth_y = build_texts_and_labels(plan.synthetic_rows)
     child_holdout = [
         row for row in plan.holdout_rows if label_kind(vocabulary, row.code) == "child"
     ]
@@ -206,30 +203,32 @@ def main(prepare_only: bool = False) -> int:
         vocabulary, plan.holdout_rows,
         _lexical(support_text, support_y, holdout_text),
     )
-    report["conditions"]["lexical_synthetic"] = _rates(
-        vocabulary, child_holdout,
-        _lexical(synth_text, synth_y, build_texts_and_labels(child_holdout)[0]),
-    )
-    report["conditions"]["lexical_augmented"] = _rates(
-        vocabulary, plan.holdout_rows,
-        _lexical(support_text + synth_text, support_y + synth_y, holdout_text),
-    )
     value_mask = {name: name == "sample_values" for name in FEATURE_NAMES}
-    no_name_mask = {
-        name: name not in {"column_name", "source_table"} for name in FEATURE_NAMES
-    }
-    synth_values, _ = build_texts_and_labels(plan.synthetic_rows, value_mask)
-    child_values, _ = build_texts_and_labels(child_holdout, value_mask)
-    report["conditions"]["lexical_synthetic_values"] = _rates(
-        vocabulary, child_holdout,
-        _lexical(synth_values, synth_y, child_values),
-    )
-    synth_noname, _ = build_texts_and_labels(plan.synthetic_rows, no_name_mask)
-    child_noname, _ = build_texts_and_labels(child_holdout, no_name_mask)
-    report["conditions"]["lexical_synthetic_no_name"] = _rates(
-        vocabulary, child_holdout,
-        _lexical(synth_noname, synth_y, child_noname),
-    )
+    synth_values: list[str] = []
+    if plan.synthetic_rows:
+        no_name_mask = {
+            name: name not in {"column_name", "source_table"} for name in FEATURE_NAMES
+        }
+        report["conditions"]["lexical_synthetic"] = _rates(
+            vocabulary, child_holdout,
+            _lexical(synth_text, synth_y, build_texts_and_labels(child_holdout)[0]),
+        )
+        report["conditions"]["lexical_augmented"] = _rates(
+            vocabulary, plan.holdout_rows,
+            _lexical(support_text + synth_text, support_y + synth_y, holdout_text),
+        )
+        synth_values, _ = build_texts_and_labels(plan.synthetic_rows, value_mask)
+        child_values, _ = build_texts_and_labels(child_holdout, value_mask)
+        report["conditions"]["lexical_synthetic_values"] = _rates(
+            vocabulary, child_holdout,
+            _lexical(synth_values, synth_y, child_values),
+        )
+        synth_noname, _ = build_texts_and_labels(plan.synthetic_rows, no_name_mask)
+        child_noname, _ = build_texts_and_labels(child_holdout, no_name_mask)
+        report["conditions"]["lexical_synthetic_no_name"] = _rates(
+            vocabulary, child_holdout,
+            _lexical(synth_noname, synth_y, child_noname),
+        )
     support_values, _ = build_texts_and_labels(plan.support_rows, value_mask)
     holdout_values, _ = build_texts_and_labels(plan.holdout_rows, value_mask)
     report["conditions"]["lexical_real_values"] = _rates(
@@ -271,22 +270,24 @@ def main(prepare_only: bool = False) -> int:
         logging.info("SCORED %s %s", name, json.dumps(report["conditions"][name]))
 
     nhsvm("nhsvm_real", X_support, support_y, plan.holdout_rows, X_holdout)
-    nhsvm("nhsvm_synthetic", X_synth, synth_y, child_holdout, X_child)
-    nhsvm(
-        "nhsvm_augmented",
-        np.vstack([X_support, X_synth]),
-        support_y + synth_y,
-        plan.holdout_rows,
-        X_holdout,
-    )
+    if synth_text:
+        nhsvm("nhsvm_synthetic", X_synth, synth_y, child_holdout, X_child)
+        nhsvm(
+            "nhsvm_augmented",
+            np.vstack([X_support, X_synth]),
+            support_y + synth_y,
+            plan.holdout_rows,
+            X_holdout,
+        )
     value_packed = support_values + synth_values + holdout_values
     value_vectors = _encode(value_packed, _OUT)
     Xv_support = value_vectors[:n_support]
-    Xv_synth = value_vectors[n_support:n_support + n_synth]
     Xv_holdout = value_vectors[n_support + n_synth:]
-    Xv_child = Xv_holdout[child_index]
     nhsvm("nhsvm_real_values", Xv_support, support_y, plan.holdout_rows, Xv_holdout)
-    nhsvm("nhsvm_synthetic_values", Xv_synth, synth_y, child_holdout, Xv_child)
+    if synth_text:
+        Xv_synth = value_vectors[n_support:n_support + n_synth]
+        Xv_child = Xv_holdout[child_index]
+        nhsvm("nhsvm_synthetic_values", Xv_synth, synth_y, child_holdout, Xv_child)
     _write(report)
     logging.info("DONE %s", json.dumps(report["conditions"]))
     return 0

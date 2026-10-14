@@ -8,9 +8,7 @@ column answer key, so they are not this baseline.
 
 Order 1 of ``associate_genera`` is the label. A child of a structural
 genus keeps that child. A leaf on a root takes the root, and those
-roots stay in the baseline. Synthetic tables are emitted only for a
-label whose published IRI has a caller-supplied relational generator.
-The seven roots have no such generator.
+roots stay in the baseline. Stub synthetic tables are not added.
 """
 
 from __future__ import annotations
@@ -23,12 +21,10 @@ from typing import Any, Mapping
 _STUB_VALUE = re.compile(r"^[A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+){0,6} \d{2}$")
 
 from atelier.classify.decisions_walk import associate_genera, genus_term
-from atelier.classify.extension_patterns import code_iri
 from atelier.classify.insitu_corpus import (
     ROWS_PER_COLUMN,
     _support_rows,
     load_projected_cells,
-    synthetic_rows,
 )
 from atelier.classify.ontology_corpus import load_labeled_columns
 from atelier.classify.taxonomy import HierarchicalCategorySet
@@ -36,7 +32,7 @@ from atelier.classify.taxonomy import HierarchicalCategorySet
 
 @dataclass
 class NeighborhoodBaseline:
-    """Real support rows, real holdout rows, and the synthetic supplement."""
+    """Real support rows and real holdout rows. Synthetic rows stay empty."""
 
     support_rows: list[Any]
     holdout_rows: list[Any]
@@ -189,10 +185,8 @@ def prepare_neighborhood_baseline(
     """Lift footprint columns onto the genus neighborhood and split tables.
 
     ``assignments`` and ``cells`` override the published footprint.
-    ``generators`` maps a published SKOS IRI to a relational table
-    callable. ``variants_per_code`` synthetic tables are added for each
-    label that has one. Labels without one are listed on ``unfilled``
-    and stay real rows only.
+    ``generators`` and ``variants_per_code`` are accepted and ignored.
+    Stub tables are not added. Every label is listed on ``unfilled``.
     """
     if assignments is None:
         loaded = load_labeled_columns(corpora)
@@ -243,28 +237,17 @@ def prepare_neighborhood_baseline(
         cells, holdout_keys, lifted, rows_per_column=rows_per_column,
     )
     labels = sorted({row.code for row in support_rows + holdout_rows})
-    supplied = generators or {}
-    generatable = [
-        code for code in labels if (code_iri(code) or "") in supplied
-    ]
-    unfilled = [code for code in labels if code not in generatable]
-    synthetic: list[Any] = []
-    if variants_per_code > 0 and generatable:
-        variants = {code: variants_per_code for code in generatable}
-        gen_map = {code: supplied[code_iri(code)] for code in generatable}
-        synthetic = synthetic_rows(
-            variants, gen_map, rows_per_column=rows_per_column, seed=seed,
-        )
+    del generators, seed
     return NeighborhoodBaseline(
         support_rows=support_rows,
         holdout_rows=holdout_rows,
-        synthetic_rows=synthetic,
+        synthetic_rows=[],
         support_tables=support_tables,
         holdout_tables=holdout_tables,
         support_counts=dict(Counter(row.code for row in support_rows)),
         holdout_counts=dict(Counter(row.code for row in holdout_rows)),
-        generatable=generatable,
-        unfilled=unfilled,
+        generatable=[],
+        unfilled=labels,
         variants_per_code=variants_per_code,
         labels=labels,
     )

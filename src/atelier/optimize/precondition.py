@@ -222,8 +222,8 @@ def build_semantic_collection(
     aug_version = _augmentation_version(vocab_sig)
     rows = _category_rows(category_set)
 
-    # Prototypes are synthetic tables for IRIs assigned to projected
-    # columns. The support half decides which of those IRIs to amplify.
+    # Prototypes come from the real support columns. Stub tables are
+    # not emitted. An empty exemplar list repeats the term label.
     try:
         plan = prepare_insitu(
             category_set, _REPO_ROOT / cfg.artifact_root,

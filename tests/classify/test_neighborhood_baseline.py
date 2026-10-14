@@ -96,10 +96,10 @@ def test_child_stays_itself_and_a_root_leaf_is_included() -> None:
     assert _BENEFIT in codes
     assert PROCESS in codes
     assert PDF_EXPORT not in codes
-    assert plan.generatable == [_BENEFIT]
+    assert plan.generatable == []
+    assert plan.synthetic_rows == []
+    assert _BENEFIT in plan.unfilled
     assert PROCESS in plan.unfilled
-    assert {row.code for row in plan.synthetic_rows} == {_BENEFIT}
-    assert len(plan.synthetic_rows) == 2
     benefit = next(row for row in plan.support_rows if row.code == _BENEFIT)
     assert _BENEFIT not in " ".join(benefit.sample_values)
     frame = ancestor_frame(cats, plan.labels)
@@ -125,8 +125,10 @@ def test_published_footprint_holds_out_whole_tables() -> None:
     assert {row.table for row in plan.holdout_rows}.isdisjoint(plan.support_tables)
     assert {row.table for row in plan.support_rows}.isdisjoint(plan.holdout_tables)
     codes = {row.code for row in plan.support_rows + plan.holdout_rows}
-    for root in (PROCESS, "SDG.ROLE", "SDG.GENERIC", "SDG.GDC"):
+    for root in (PROCESS, "SDG.ROLE", "SDG.GDC"):
         assert root in codes
+    assert "SDG.GENERIC" not in codes
+    assert any(code.startswith("SDG.GENERIC.") for code in codes)
     assert plan.synthetic_rows == []
     assert "SDG.PROCESS" in plan.unfilled
     child_rows = [

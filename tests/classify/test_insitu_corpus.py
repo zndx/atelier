@@ -324,22 +324,14 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
         ("patrol/officers", "years"),
         ("patrol/incidents", "severity"),
     }
-    assert any(row.table.startswith("syn_") for row in plan.rows)
-    synthetic = [row for row in plan.rows if row.table.startswith("syn_")]
     assert {row.code for row in real} == {PROCESS, ROLE}
-    assert {row.code for row in synthetic} == {PROCESS}
-    assert [row.code for row in synthetic].count(PROCESS) == 1
-    assert [row.code for row in plan.holdout_rows] == [ROLE]
-    assert plan.holdout_rows[0].table.startswith("holdout_")
-    assert all(row.table.startswith("syn_") for row in synthetic)
+    assert plan.rows == real
+    assert plan.holdout_rows == []
+    assert plan.exemplars == {}
     augmented = list(
         (tmp_path / "build" / "relational_split" / "holdout" / "tables").glob("holdout_*.csv")
     )
-    assert len(augmented) == 1
-    augmented_text = augmented[0].read_text(encoding="utf-8")
-    assert ROLE not in augmented_text
-    assert plan.holdout_rows[0].sample_values[0] in augmented_text
-    assert "recorded_on" in augmented_text.splitlines()[0]
+    assert augmented == []
     years = next(row for row in real if row.column == "years")
     assert years.column_type == "INTEGER"
     assert "unit" in years.siblings_full
@@ -365,16 +357,14 @@ def test_collection_directories_hold_out_whole_bundles(tmp_path) -> None:
     assert bare.holdout_collections == ["clinic"]
     partial = _genus_generators()
     partial.pop(code_iri(ROLE))
-    try:
-        prepare_collection_cta(
-            taxonomy(_FRAME), tmp_path / "partial", corpora=corpora,
-            assignments=assignments, holdout_collections={"clinic"},
-            extra_generators=partial, rows_per_column=1,
-        )
-    except InSituError as exc:
-        assert ROLE in str(exc)
-    else:
-        raise AssertionError("skew without a generator must fail")
+    withheld = prepare_collection_cta(
+        taxonomy(_FRAME), tmp_path / "partial", corpora=corpora,
+        assignments=assignments, holdout_collections={"clinic"},
+        extra_generators=partial, rows_per_column=1,
+    )
+    assert withheld.rows
+    assert withheld.holdout_rows == []
+    assert withheld.exemplars == {}
 
 
 def test_each_column_is_associated_with_its_genus() -> None:
@@ -676,8 +666,9 @@ def test_prepare_amplifies_thin_codes_and_writes_a_blind_holdout(tmp_path) -> No
     assert plan.counts[PARENTING] == 1
     assert plan.counts[YOUNG_RESEARCHER] == 1
     assert plan.variants == {PDF_EXPORT: 5, PARENTING: 5, YOUNG_RESEARCHER: 5}
-    synthetic = [row for row in plan.rows if row.table.startswith("syn_")]
-    support_rows = [row for row in plan.rows if not row.table.startswith("syn_")]
+    support_rows = list(plan.rows)
+    assert plan.holdout_rows == []
+    assert plan.exemplars == {}
     assert {row.code for row in support_rows} == set(_LEAVES)
     assert {(row.table, row.column) for row in support_rows} == {
         ("billing", "doc_ref"), ("billing", "note"), ("lone", "id"),
@@ -687,13 +678,6 @@ def test_prepare_amplifies_thin_codes_and_writes_a_blind_holdout(tmp_path) -> No
     for row in support_rows:
         assert (row.table, row.column) not in holdout_keys
         assert all((row.table, name) not in holdout_keys for name in row.siblings_full)
-    by_code: dict[str, int] = {}
-    for row in synthetic:
-        by_code[row.code] = by_code.get(row.code, 0) + 1
-        assert "https://" not in " ".join(row.sample_values)
-        assert row.column not in {"amount", "note", "b", "id", "doc_ref"}
-        assert set(row.siblings_full).isdisjoint({"amount", "note", "b", "id", "doc_ref"})
-    assert by_code == {PDF_EXPORT: 5, PARENTING: 5, YOUNG_RESEARCHER: 5}
     split = json.loads((artifacts / "relational_split" / "split.json").read_text())
     assert set(split["under_represented"]) == set(_LEAVES)
     assert "slot_ref" not in json.dumps(split)
@@ -722,8 +706,8 @@ def test_prototypes_are_synthetic_and_pass_the_verifier(tmp_path) -> None:
         taxonomy_context={"expected_parent_path": ["Role"]},
     )
     prototypes = generated.enrichment["prototype_values"]
-    assert prototypes
-    assert any(value.startswith("kin-") for value in prototypes)
+    assert prototypes == [label, label, label]
+    assert not any(str(value).startswith("kin-") for value in prototypes)
     assert "INV-1" not in prototypes
     assert "INV-9" not in prototypes
     report = run_verifier_suite(generated.enrichment, expected_parent_path=["Role"])

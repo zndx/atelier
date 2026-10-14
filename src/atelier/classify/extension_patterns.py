@@ -1,10 +1,9 @@
-"""Load and check relational generators bound to published SKOS IRIs.
+"""IRI checks for the withdrawn stub-generator module.
 
-The coding harness writes ``GENERATORS``. Each key is one concept IRI
-from ``vocabulary/vocabulary.ttl``, ``https://signals.zndx.org/sdg#...``.
-The callable returns one synthetic table. Exactly one column of that
-table carries the same IRI. A generator applies only when a projected
-column is assigned that IRI.
+``install_generators`` refuses every pack. Augmented tables are an
+sdg-corpora projection. ``code_iri`` still resolves a published
+``skos:Concept``. The AST audit remains so a leftover pack can be
+rejected without being installed.
 """
 
 from __future__ import annotations
@@ -164,24 +163,16 @@ def render_module(snippets: list[str]) -> str:
 
 
 def install_generators(snippets: list[str], path: Path | None = None) -> int:
-    """Rewrite the installed module with ``snippets`` plus what is already there."""
-    path = path or extensions_path()
-    existing: list[str] = []
-    if path.is_file():
-        text = path.read_text(encoding="utf-8")
-        if text.strip():
-            existing = _entry_sources(text, _parse(text))
-    seen: set[str] = set()
-    kept: list[str] = []
-    for snippet in existing + list(snippets):
-        key = _iri_key(snippet)
-        if key in seen:
-            continue
-        seen.add(key)
-        kept.append(snippet.strip())
-    path.write_text(render_module(kept), encoding="utf-8")
-    load_generators(path.read_text(encoding="utf-8"))
-    return len(kept)
+    """Refuse to install stub relational generators.
+
+    The installed module is withdrawn. Augmented tables are an
+    sdg-corpora projection, not another lambda in this file.
+    """
+    del snippets, path
+    raise ExtensionError(
+        "stub relational generators are withdrawn; "
+        "augmented tables are an sdg-corpora projection"
+    )
 
 
 def _parse(source: str) -> ast.AST:
